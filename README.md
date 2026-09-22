@@ -15,7 +15,7 @@
 [![Code style: Ruff](https://img.shields.io/badge/code%20formatting-ruff-f5a623.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Logging: Loguru](https://img.shields.io/badge/logging-loguru-4ecdc4.svg?style=for-the-badge)](https://github.com/Delgan/loguru)
 
-[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
+[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Studio](#studio) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
 
 </div>
 
@@ -29,6 +29,7 @@
 - **10 coding agents. One model catalog.** Run [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://github.com/openai/codex), [Pi](https://github.com/earendil-works/pi), [OpenCode](https://github.com/anomalyco/opencode), [Cline](https://github.com/cline/cline), [Hermes](https://github.com/NousResearch/hermes-agent), [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), [Grok Build](https://github.com/xai-org/grok-build), [Muse Code](https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2/), or [Aider](https://aider.chat/) with your FCC models.
 - **Keep coding through provider outages.** After retries are exhausted, FCC automatically tries your next configured model without making you restart the turn—across every client.
 - **Up to 90% fewer terminal-output tokens.** Optional [RTK](https://github.com/rtk-ai/rtk) filters common command output, while five FCC optimizations handle quota probes, command-prefix detection, titles, suggestions, and filepaths without calling a provider.
+- **Studio: your own agents, on your own models.** A phone-first app at `/studio` that runs agents which search the web and build real websites, downloads local models to this device, runs very light on-device tuning, gives every agent its own memory, mirrors work into Obsidian, and lets a teacher AI teach and then test a student AI in a classroom you can watch.
 - **Native Code sessions in your browser.** Choose a folder and run Codex in the browser with real-time and background support. Freely switch providers/models in the same session. Support for switching harnesses in the same session coming soon!
 - **Terminal, desktop, IDE, or phone.** Work through native launchers, [VS Code](https://code.visualstudio.com/), [Codex App](https://learn.chatgpt.com/docs/app), [JetBrains](https://www.jetbrains.com/), [Discord](https://discord.com/), or [Telegram](https://telegram.org/).
 - **Voice notes in. Code out.** Talk to your agent using local [Whisper](https://github.com/openai/whisper) or [NVIDIA NIM](https://docs.nvidia.com/nim/speech/latest/asr/deploy-asr-models/whisper.html) transcription.
@@ -348,6 +349,135 @@ Open **Admin UI → Model Config → Reasoning** and select the behavior you wan
 | **Inherit** (Fable, Opus, Sonnet, and Haiku only) | Use the root Reasoning selection. |
 
 Providers that do not support a selected control retain their own behavior.
+
+</details>
+
+<a id="studio"></a>
+
+## Studio
+
+Studio is an app served by the same local server: open
+`http://<server-host>:8082/studio` in a browser. It is built phone-first — on
+iOS, open it in Safari, tap **Share → Add to Home Screen**, and it runs full
+screen with its own icon, safe-area padding, and touch-sized controls. Turn the
+whole app off with `STUDIO_ENABLED=false`.
+
+Everything Studio stores lives under `~/.fcc/studio/`: `studio.db` for agents,
+chats, memory, tuning, and classes; `models/` for downloaded model files; and
+`sites/` for websites agents build.
+
+<details>
+<summary><strong>Agents that search the web and build sites</strong></summary>
+
+An agent is a name, a model, a set of tools, its own memory, and optionally its
+own tune pack. Agents call `web_search`, `web_fetch`, `write_file`,
+`read_file`, `list_files`, `remember`, `recall`, and `finish`; web tools reuse
+FCC's existing local `web_search`/`web_fetch` implementation and its SSRF
+guard.
+
+Give an agent a goal on the **Agents** tab and it runs a bounded tool loop —
+`STUDIO_AGENT_MAX_STEPS` caps it — writing into a website workspace you can
+preview live and download as a zip. Site writes are sandboxed: no path
+traversal, a file-type allowlist, a 512 KB per-file cap, and a file-count cap.
+
+The first run creates four starter agents: **Guide**, **Builder**, **Teacher**,
+and **Student**.
+
+</details>
+
+<details>
+<summary><strong>Local models you download and own</strong></summary>
+
+The **Models** tab lists curated small models (0.36B to 7B GGUF builds) and
+accepts any direct `http(s)` URL. Downloads resume from a partial file, report
+live progress, verify an optional SHA-256, and unpack `.zip`/`.tar*` archives —
+refusing archive members that escape the destination. **Scan folder** adopts
+model files you copied in by hand.
+
+Point `STUDIO_LOCAL_BASE_URL` at whatever serves those files (LM Studio,
+`llama-server`, Ollama's OpenAI endpoint), then write an agent's model as
+`local/<model id>`. Every other model reference goes through the FCC proxy, so
+Studio agents can use all of FCC's providers and its fallback chain. Small
+local models that cannot call tools natively are driven through a text tool
+protocol instead.
+
+</details>
+
+<details>
+<summary><strong>The built-in guide</strong></summary>
+
+The **?** button opens the guide: a small preloaded model instructed on how
+this app works. It answers from a knowledge base of what Studio actually does
+and points at the right tab. Before you have downloaded anything it still
+answers, from that same knowledge base, so the app explains itself on a fresh
+install. `STUDIO_GUIDE_MODEL` selects the model and
+`STUDIO_GUIDE_CATALOG_ID` the file fetched when it is missing.
+
+</details>
+
+<details>
+<summary><strong>Very light tuning</strong></summary>
+
+On-device tuning is deliberately small: it searches for the shortest
+instruction pack — a preamble, up to five rules, and the clearest few
+exemplars — and scores each candidate with token-F1 against held-out pairs your
+examples are split into. That is a handful of short calls per run
+(`STUDIO_TUNING_ROUNDS`, default 3), so it finishes on a phone, and the run
+reports its baseline score, its tuned score, and live progress. It changes no
+weights.
+
+Switch `STUDIO_TUNING_BACKEND` to `cloud` and set
+`STUDIO_CLOUD_TUNING_BASE_URL`/`STUDIO_CLOUD_TUNING_API_KEY` to send the same
+dataset to an OpenAI-compatible fine-tuning API for real weight training
+instead.
+
+Tuning is off until `STUDIO_LIGHT_TUNING_ENABLED` is on, or until you turn it
+on for one chat: a chat's settings sheet has a **Very light tuning** toggle,
+and switching it on opens a fresh chat bound to that agent's tune pack.
+
+</details>
+
+<details>
+<summary><strong>AI teacher and AI student</strong></summary>
+
+Open a class on any topic and the teacher agent plans the lessons, teaches them
+one at a time, and hears the student agent back — all in one classroom chat you
+can read as it happens. After the last lesson the teacher writes a test, the
+student answers each question without the lesson transcript, and the teacher
+grades every answer against its own rubric. Pass or fail is decided by
+`STUDIO_CLASS_PASS_MARK`.
+
+What the teacher marks as worth remembering goes into the student's long-term
+memory, and a pass with light tuning enabled queues a tune built from the
+class. `STUDIO_TEACHER_MODEL` and `STUDIO_STUDENT_MODEL` pick the two models;
+the student is meant to be a small local one.
+
+</details>
+
+<details>
+<summary><strong>Memory and Obsidian</strong></summary>
+
+Every agent keeps working notes for the thread it is in and long-term memories
+it recalls by keyword, ranked by overlap, recall count, and recency. Agents
+write memories themselves with the `remember` tool; you can read, add, promote,
+or delete any of them.
+
+Set `STUDIO_OBSIDIAN_VAULT` to your vault folder and Studio writes chats,
+classes, and agent memories as markdown notes with YAML frontmatter under
+`STUDIO_OBSIDIAN_FOLDER`. On iOS that vault usually lives in iCloud Drive
+under `iCloud~md~obsidian`; Studio lists the vaults it can see on the device.
+Notes you drop in the vault's `Inbox` folder import into an agent's memory, and
+`STUDIO_OBSIDIAN_AUTO_SYNC` writes a note after every chat turn.
+
+</details>
+
+<details>
+<summary><strong>Access from other devices</strong></summary>
+
+Studio is served wherever the proxy is bound, so a phone on the same network
+can reach it. With `PROXY_AUTH_ENABLED` on, Studio requires the same token as
+the proxy: open it once as `/studio?token=<token>` and the app keeps the token
+on that device.
 
 </details>
 

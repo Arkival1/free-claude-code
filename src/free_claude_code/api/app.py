@@ -25,6 +25,12 @@ from free_claude_code.core.trace import (
     trace_event,
 )
 from free_claude_code.core.version import package_version
+from free_claude_code.studio import StudioError, StudioStoreError
+from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.obsidian import ObsidianError
+from free_claude_code.studio.school import SchoolError
+from free_claude_code.studio.sites import SiteError
+from free_claude_code.studio.tuning import TuningError
 
 from .admin_cache import AdminNoStoreMiddleware, attach_admin_no_store
 from .admin_routes import router as admin_router
@@ -38,6 +44,8 @@ from .request_ids import (
 )
 from .request_lifetime import ClientRequestLifetimeMiddleware
 from .routes import router
+from .studio_routes import router as studio_router
+from .studio_routes import studio_error_status
 from .validation_log import summarize_request_validation_body
 
 
@@ -51,6 +59,7 @@ def create_app(services: ApiServices) -> FastAPI:
 
     app.include_router(admin_router)
     app.include_router(code_router)
+    app.include_router(studio_router)
     app.include_router(router)
 
     @app.exception_handler(CodeError)
@@ -67,6 +76,22 @@ def create_app(services: ApiServices) -> FastAPI:
             status_code = 500
         response = JSONResponse(
             status_code=status_code,
+            content={"detail": str(exc), "code": type(exc).__name__},
+        )
+        attach_admin_no_store(response, path=request.url.path)
+        return response
+
+    @app.exception_handler(StudioStoreError)
+    @app.exception_handler(StudioError)
+    @app.exception_handler(SiteError)
+    @app.exception_handler(DownloadError)
+    @app.exception_handler(TuningError)
+    @app.exception_handler(SchoolError)
+    @app.exception_handler(ObsidianError)
+    async def studio_error_handler(request: Request, exc: Exception):
+        """Report Studio failures as plain, actionable JSON."""
+        response = JSONResponse(
+            status_code=studio_error_status(exc),
             content={"detail": str(exc), "code": type(exc).__name__},
         )
         attach_admin_no_store(response, path=request.url.path)

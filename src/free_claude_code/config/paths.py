@@ -19,6 +19,10 @@ LAUNCHER_TEMP_DIRNAME = "launchers"
 CODE_STATE_DIRNAME = "code"
 CODE_DATABASE_FILENAME = "code.db"
 CODE_LOCK_FILENAME = "code.lock"
+STUDIO_STATE_DIRNAME = "studio"
+STUDIO_DATABASE_FILENAME = "studio.db"
+STUDIO_MODELS_DIRNAME = "models"
+STUDIO_SITES_DIRNAME = "sites"
 
 
 def config_dir_path() -> Path:
@@ -53,6 +57,26 @@ def code_database_path() -> Path:
 def code_lock_path() -> Path:
     """Return the exclusive Code sessions process-lock path."""
     return config_dir_path() / CODE_STATE_DIRNAME / CODE_LOCK_FILENAME
+
+
+def studio_dir_path() -> Path:
+    """Return the managed Studio state directory."""
+    return config_dir_path() / STUDIO_STATE_DIRNAME
+
+
+def studio_database_path() -> Path:
+    """Return the Studio agents, chats, memory, and tuning database path."""
+    return studio_dir_path() / STUDIO_DATABASE_FILENAME
+
+
+def studio_models_dir_path() -> Path:
+    """Return the directory holding downloaded local model files."""
+    return studio_dir_path() / STUDIO_MODELS_DIRNAME
+
+
+def studio_sites_dir_path() -> Path:
+    """Return the directory holding agent-built website workspaces."""
+    return studio_dir_path() / STUDIO_SITES_DIRNAME
 
 
 def legacy_env_paths() -> tuple[Path, ...]:

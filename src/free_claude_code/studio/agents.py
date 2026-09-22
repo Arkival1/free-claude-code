@@ -1,0 +1,277 @@
+"""The bounded tool loop every Studio agent runs."""
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from loguru import logger
+
+from .llm import ChatMessage, LLMReply, StudioLLMError, StudioModelRouter, ToolCall
+from .memory import MemoryService
+from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
+from .store import StudioStore
+from .tools import FINISH_TOOL, AgentToolbox, ToolContext, tool_specs
+from .tuning import pack_exemplars, pack_system_text
+
+AGENT_BASE_PROMPT = (
+    "You are a Studio agent running inside Free Claude Code on the user's own "
+    "machine. Work in small, verifiable steps. Prefer calling a tool over "
+    "guessing. When you have finished the task, call the finish tool with a "
+    "short report of what you did."
+)
+SITE_PROMPT = (
+    "You have a website workspace. Build real, complete pages: write index.html "
+    "with semantic HTML, styles.css for layout and type, and app.js only when "
+    "behavior is needed. Keep every asset inside the workspace and check your "
+    "work with read_file before finishing."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TurnResult:
+    """What one agent turn produced."""
+
+    text: str
+    steps: int
+    tool_calls: tuple[str, ...] = ()
+    failed: bool = False
+    error: str | None = None
+
+
+class AgentRunner:
+    """Drive one agent turn or one autonomous task to completion."""
+
+    def __init__(
+        self,
+        *,
+        store: StudioStore,
+        router: StudioModelRouter,
+        toolbox: AgentToolbox,
+        memory: MemoryService,
+        default_model: str,
+        max_steps: int = 12,
+    ) -> None:
+        self._store = store
+        self._router = router
+        self._toolbox = toolbox
+        self._memory = memory
+        self._default_model = default_model
+        self._max_steps = max(1, max_steps)
+
+    async def system_prompt(
+        self, agent: Agent, *, query: str, site_id: str | None
+    ) -> str:
+        """Compose the agent's identity, tuning, memory, and site guidance."""
+        parts = [AGENT_BASE_PROMPT, agent.system_prompt.strip()]
+        if agent.tune_pack_id:
+            pack = await self._store.get(TunePack, agent.tune_pack_id)
+            if pack is not None and pack.active:
+                parts.append(pack_system_text(pack))
+        if agent.memory_enabled:
+            parts.append(await self._memory.context_block(agent.id, query))
+        if site_id:
+            parts.append(SITE_PROMPT)
+        return "\n\n".join(part for part in parts if part.strip())
+
+    async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:
+        transcript = await self._store.transcript(chat.id, limit=40)
+        history: list[ChatMessage] = []
+        if agent.tune_pack_id:
+            pack = await self._store.get(TunePack, agent.tune_pack_id)
+            if pack is not None and pack.active:
+                history.extend(pack_exemplars(pack))
+        for message in transcript:
+            if message.role == "user":
+                history.append(ChatMessage.user(message.text))
+            elif message.role == "assistant" and message.text:
+                history.append(ChatMessage.assistant(message.text))
+        return history
+
+    async def reply(self, agent: Agent, chat: Chat, user_text: str) -> TurnResult:
+        """Answer one user message, using tools when the agent asks for them."""
+        await self._store.append_message(
+            chat_id=chat.id, role="user", text=user_text, author="user"
+        )
+        history = await self._history(agent, chat)
+        if not history or history[-1].content != user_text:
+            history.append(ChatMessage.user(user_text))
+        context = ToolContext(agent_id=agent.id, chat_id=chat.id, site_id=chat.site_id)
+        result = await self._loop(
+            agent,
+            chat,
+            history=history,
+            context=context,
+            query=user_text,
+            max_steps=self._max_steps,
+        )
+        if agent.memory_enabled and not result.failed and result.text:
+            await self._memory.remember(
+                agent.id,
+                f"User asked: {user_text.strip()[:160]}",
+                scope="working",
+                source="chat",
+                chat_id=chat.id,
+            )
+        return result
+
+    async def run_task(self, agent: Agent, chat: Chat, run: AgentRun) -> AgentRun:
+        """Run one autonomous goal to completion and persist its outcome."""
+        started = run.model_copy(update={"status": "running", "updated_at": now_ms()})
+        await self._store.put(started)
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="event",
+            text=f"Agent task started: {run.goal}",
+            author=agent.name,
+            data={"kind": "run_started", "run_id": run.id},
+        )
+        context = ToolContext(
+            agent_id=agent.id, chat_id=chat.id, site_id=run.site_id or chat.site_id
+        )
+        history = [ChatMessage.user(run.goal)]
+        result = await self._loop(
+            agent,
+            chat,
+            history=history,
+            context=context,
+            query=run.goal,
+            max_steps=run.max_steps or self._max_steps,
+        )
+        finished = started.model_copy(
+            update={
+                "status": "failed" if result.failed else "succeeded",
+                "step": result.steps,
+                "result": result.text,
+                "error": result.error,
+                "updated_at": now_ms(),
+            }
+        )
+        await self._store.put(finished)
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="event",
+            text=f"Agent task {finished.status}.",
+            author=agent.name,
+            data={"kind": "run_finished", "run_id": run.id, "status": finished.status},
+        )
+        if agent.memory_enabled and not result.failed:
+            await self._memory.remember(
+                agent.id,
+                f"Completed task: {run.goal.strip()[:200]}",
+                tags=("task",),
+                source="agent_run",
+                chat_id=chat.id,
+            )
+        return finished
+
+    async def _loop(
+        self,
+        agent: Agent,
+        chat: Chat,
+        *,
+        history: list[ChatMessage],
+        context: ToolContext,
+        query: str,
+        max_steps: int,
+    ) -> TurnResult:
+        specs = tool_specs(agent.tools)
+        system = await self.system_prompt(agent, query=query, site_id=context.site_id)
+        model = agent.model or self._default_model
+        used: list[str] = []
+        for step in range(1, max_steps + 1):
+            try:
+                reply = await self._router.complete(
+                    history,
+                    model=model,
+                    system=system,
+                    tools=specs if agent.tools else (),
+                    max_tokens=2048,
+                )
+            except StudioLLMError as error:
+                logger.warning("Studio agent call failed: {}", error)
+                await self._store.append_message(
+                    chat_id=chat.id,
+                    role="event",
+                    text=f"Model call failed: {error}",
+                    author=agent.name,
+                    data={"kind": "error"},
+                )
+                return TurnResult(
+                    text="",
+                    steps=step - 1,
+                    tool_calls=tuple(used),
+                    failed=True,
+                    error=str(error),
+                )
+            if not reply.tool_calls:
+                text = reply.text or "(no reply)"
+                await self._record_assistant(chat, agent, text, reply)
+                return TurnResult(text=text, steps=step, tool_calls=tuple(used))
+            finish = self._finish_call(reply.tool_calls)
+            if finish is not None:
+                summary = str(finish.arguments.get("summary", "")) or reply.text
+                await self._record_assistant(chat, agent, summary, reply)
+                used.append(FINISH_TOOL)
+                return TurnResult(text=summary, steps=step, tool_calls=tuple(used))
+            history.append(
+                ChatMessage(
+                    role="assistant", content=reply.text, tool_calls=reply.tool_calls
+                )
+            )
+            if reply.text:
+                await self._store.append_message(
+                    chat_id=chat.id,
+                    role="assistant",
+                    text=reply.text,
+                    author=agent.name,
+                    data={"partial": True},
+                )
+            for call in reply.tool_calls:
+                used.append(call.name)
+                outcome = await self._toolbox.run(call, context)
+                await self._store.append_message(
+                    chat_id=chat.id,
+                    role="tool",
+                    text=outcome.text[:4_000],
+                    author=call.name,
+                    data={**outcome.data, "failed": outcome.failed},
+                )
+                history.append(
+                    ChatMessage(
+                        role="tool",
+                        content=outcome.text[:8_000],
+                        tool_call_id=call.id,
+                    )
+                )
+        message = (
+            f"Stopped after {max_steps} steps without finishing. "
+            "Ask again with a narrower goal."
+        )
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="event",
+            text=message,
+            author=agent.name,
+            data={"kind": "step_limit"},
+        )
+        return TurnResult(
+            text=message,
+            steps=max_steps,
+            tool_calls=tuple(used),
+            failed=True,
+            error="step_limit",
+        )
+
+    async def _record_assistant(
+        self, chat: Chat, agent: Agent, text: str, reply: LLMReply
+    ) -> Message:
+        return await self._store.append_message(
+            chat_id=chat.id,
+            role="assistant",
+            text=text,
+            author=agent.name,
+            data={"model": reply.model or agent.model, "usage": dict(reply.usage)},
+        )
+
+    @staticmethod
+    def _finish_call(calls: Sequence[ToolCall]) -> ToolCall | None:
+        return next((call for call in calls if call.name == FINISH_TOOL), None)

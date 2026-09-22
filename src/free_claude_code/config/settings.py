@@ -628,6 +628,73 @@ class Settings(BaseModel):
         default=False, validation_alias="WEB_FETCH_ALLOW_PRIVATE_NETWORKS"
     )
 
+    # ==================== Studio (agents, local models, tuning, school) ====================
+    studio_enabled: bool = Field(default=True, validation_alias="STUDIO_ENABLED")
+    studio_default_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_DEFAULT_MODEL"
+    )
+    studio_local_base_url: NonEmptyString = Field(
+        default="http://localhost:1234/v1",
+        validation_alias="STUDIO_LOCAL_BASE_URL",
+    )
+    studio_local_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LOCAL_API_KEY"
+    )
+    studio_guide_model: NonEmptyString = Field(
+        default="local/qwen3-0.6b", validation_alias="STUDIO_GUIDE_MODEL"
+    )
+    studio_guide_catalog_id: NonEmptyString = Field(
+        default="qwen3-0.6b-q4", validation_alias="STUDIO_GUIDE_CATALOG_ID"
+    )
+    studio_models_dir: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_MODELS_DIR"
+    )
+    studio_agent_max_steps: int = Field(
+        default=12, ge=1, le=64, validation_alias="STUDIO_AGENT_MAX_STEPS"
+    )
+    studio_memory_working_limit: int = Field(
+        default=20, ge=1, le=200, validation_alias="STUDIO_MEMORY_WORKING_LIMIT"
+    )
+    studio_memory_recall_limit: int = Field(
+        default=6, ge=1, le=50, validation_alias="STUDIO_MEMORY_RECALL_LIMIT"
+    )
+    studio_light_tuning_enabled: bool = Field(
+        default=False, validation_alias="STUDIO_LIGHT_TUNING_ENABLED"
+    )
+    studio_tuning_backend: NonEmptyString = Field(
+        default="local_light", validation_alias="STUDIO_TUNING_BACKEND"
+    )
+    studio_tuning_rounds: int = Field(
+        default=3, ge=1, le=8, validation_alias="STUDIO_TUNING_ROUNDS"
+    )
+    studio_cloud_tuning_base_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_CLOUD_TUNING_BASE_URL"
+    )
+    studio_cloud_tuning_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_CLOUD_TUNING_API_KEY"
+    )
+    studio_teacher_enabled: bool = Field(
+        default=False, validation_alias="STUDIO_TEACHER_ENABLED"
+    )
+    studio_teacher_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_TEACHER_MODEL"
+    )
+    studio_student_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_STUDENT_MODEL"
+    )
+    studio_class_pass_mark: float = Field(
+        default=0.7, ge=0.0, le=1.0, validation_alias="STUDIO_CLASS_PASS_MARK"
+    )
+    studio_obsidian_vault: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_OBSIDIAN_VAULT"
+    )
+    studio_obsidian_folder: NonEmptyString = Field(
+        default="FCC Studio", validation_alias="STUDIO_OBSIDIAN_FOLDER"
+    )
+    studio_obsidian_auto_sync: bool = Field(
+        default=False, validation_alias="STUDIO_OBSIDIAN_AUTO_SYNC"
+    )
+
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
     # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).
     log_level: NonEmptyString = Field(default="INFO", validation_alias="LOG_LEVEL")
@@ -725,6 +792,15 @@ class Settings(BaseModel):
         if v == "" or v is None:
             return None
         return v
+
+    @field_validator("studio_tuning_backend")
+    @classmethod
+    def validate_studio_tuning_backend(cls, value: str) -> str:
+        if value not in ("local_light", "cloud"):
+            raise ValueError(
+                f"STUDIO_TUNING_BACKEND must be 'local_light' or 'cloud', got {value!r}"
+            )
+        return value
 
     @field_validator("log_level")
     @classmethod

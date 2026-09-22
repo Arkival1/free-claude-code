@@ -14,6 +14,9 @@ from free_claude_code.config.paths import (
     code_database_path,
     code_lock_path,
     server_log_path,
+    studio_database_path,
+    studio_models_dir_path,
+    studio_sites_dir_path,
 )
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.async_tasks import run_sync_owned
@@ -22,6 +25,7 @@ from free_claude_code.providers.base import BaseProvider, ProviderConfig
 from free_claude_code.providers.github_copilot.auth import CopilotAuthManager
 from free_claude_code.providers.openai_codex.auth import OpenAIAuthManager
 from free_claude_code.providers.runtime.runtime import ProviderRuntime, create_provider
+from free_claude_code.studio import StudioService, StudioStore
 
 if TYPE_CHECKING:
     from free_claude_code.providers.admission import ProviderAdmissionController
@@ -76,10 +80,13 @@ def build_asgi_app(
         SQLiteCodeStore(code_database_path(), code_lock_path()),
         CodexHarnessFactory(provider_manager),
     )
+    web_tools = HTTPWebToolsClient()
+    studio_service = _build_studio(settings, provider_manager, web_tools)
     runtime = ApplicationRuntime(
         provider_manager,
         configuration=ConfigurationService(ManagedConfigStore()),
         code_service=code_service,
+        studio_service=studio_service,
         transcriber=None,
         transcriber_factory=_create_transcriber,
         restart_callback=restart_callback,
@@ -89,10 +96,33 @@ def build_asgi_app(
         requests=provider_manager,
         admin=runtime,
         tasks=runtime,
-        web_tools=HTTPWebToolsClient(),
+        web_tools=web_tools,
         code=code_service,
+        studio=studio_service,
     )
     return RuntimeASGIApp(create_app(services), runtime)
+
+
+def _build_studio(
+    settings: Settings,
+    provider_manager: ProviderRuntimeManager,
+    web_tools: HTTPWebToolsClient,
+) -> StudioService | None:
+    """Construct the Studio service when it is switched on."""
+    if not settings.studio_enabled:
+        return None
+    models_dir = (
+        Path(settings.studio_models_dir).expanduser()
+        if settings.studio_models_dir
+        else studio_models_dir_path()
+    )
+    return StudioService(
+        store=StudioStore(studio_database_path()),
+        web_tools=web_tools,
+        settings_provider=provider_manager.current_settings,
+        models_dir=models_dir,
+        sites_dir=studio_sites_dir_path(),
+    )
 
 
 def _load_openai_provider(*, auth: OpenAIAuthManager) -> ProviderFactory:
