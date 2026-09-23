@@ -1,6 +1,7 @@
 """HTTP adapter for the Studio app: agents, models, tuning, and classes."""
 
 import secrets
+import socket
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -23,7 +24,16 @@ router = APIRouter()
 
 STATIC_DIR = Path(__file__).resolve().parent / "studio_static"
 _ASSET_VERSION_PLACEHOLDER = "__FCC_VERSION__"
-_ASSET_FILENAMES = frozenset({"studio.css", "studio.js", "icon.svg"})
+_ASSET_FILENAMES = frozenset(
+    {
+        "studio.css",
+        "studio.js",
+        "icon.svg",
+        "icon-180.png",
+        "icon-192.png",
+        "icon-512.png",
+    }
+)
 
 
 class ChatPayload(BaseModel):
@@ -179,16 +189,40 @@ def studio_manifest() -> JSONResponse:
             "background_color": "#0b0d12",
             "theme_color": "#0b0d12",
             "orientation": "portrait",
+            "id": "/studio",
             "icons": [
+                {
+                    "src": f"/studio/assets/{package_version()}/icon-192.png",
+                    "sizes": "192x192",
+                    "type": "image/png",
+                    "purpose": "any",
+                },
+                {
+                    "src": f"/studio/assets/{package_version()}/icon-512.png",
+                    "sizes": "512x512",
+                    "type": "image/png",
+                    "purpose": "any maskable",
+                },
                 {
                     "src": f"/studio/assets/{package_version()}/icon.svg",
                     "sizes": "any",
                     "type": "image/svg+xml",
-                    "purpose": "any maskable",
-                }
+                    "purpose": "any",
+                },
             ],
         },
         media_type="application/manifest+json",
+    )
+
+
+@router.get("/studio/sw.js", include_in_schema=False)
+def studio_service_worker() -> Response:
+    """Serve the service worker with the scope the app shell needs."""
+    body = _asset_path("sw.js").read_text(encoding="utf-8")
+    return Response(
+        content=body.replace(_ASSET_VERSION_PLACEHOLDER, package_version()),
+        media_type="text/javascript",
+        headers={"service-worker-allowed": "/studio", "cache-control": "no-cache"},
     )
 
 
@@ -198,6 +232,64 @@ def studio_asset(version: str, filename: str) -> FileResponse:
     if version != package_version() or filename not in _ASSET_FILENAMES:
         raise HTTPException(status_code=404, detail="Studio asset not found")
     return FileResponse(_asset_path(filename))
+
+
+@router.get("/studio/api/connect")
+def studio_connect(
+    request: Request, settings: Settings = Depends(get_settings), _: None = Access
+) -> JsonObject:
+    """Tell the user every address this device can open Studio on."""
+    token = settings.proxy_auth_token if settings.proxy_auth_enabled else ""
+    suffix = f"?token={token}" if token else ""
+    addresses = _reachable_hosts(settings.host)
+    # Prefer the port this request actually arrived on over the configured one.
+    port = request.url.port or settings.port
+    return {
+        "urls": [f"http://{host}:{port}/studio{suffix}" for host in addresses],
+        "port": port,
+        "bound_host": settings.host,
+        "loopback_only": _is_loopback_bind(settings.host),
+        "auth_required": settings.proxy_auth_enabled,
+        "viewing_from": request.client.host if request.client else "",
+    }
+
+
+def _is_loopback_bind(host: str) -> bool:
+    """Return whether the server is only listening to this machine."""
+    return host.strip() in {"127.0.0.1", "::1", "localhost"}
+
+
+def _reachable_hosts(bound_host: str) -> tuple[str, ...]:
+    """Return loopback, LAN, and Bonjour names this server answers on."""
+    hosts: list[str] = ["localhost"]
+    if _is_loopback_bind(bound_host):
+        return tuple(hosts)
+    hostname = socket.gethostname()
+    if hostname and "." not in hostname:
+        hosts.append(f"{hostname}.local")
+    for address in _local_addresses():
+        if address not in hosts:
+            hosts.append(address)
+    return tuple(hosts)
+
+
+def _local_addresses() -> tuple[str, ...]:
+    """Return this machine's IPv4 addresses without sending any traffic."""
+    found: list[str] = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 53))  # TEST-NET-1: routed nowhere
+            found.append(probe.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = str(info[4][0])
+            if address not in found and not address.startswith("127."):
+                found.append(address)
+    except OSError:
+        pass
+    return tuple(found)
 
 
 @router.get("/studio/api/overview")

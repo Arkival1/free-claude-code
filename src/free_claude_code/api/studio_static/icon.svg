@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FCC Studio">
-  <rect width="512" height="512" rx="112" fill="#0b0d12" />
+  <rect width="512" height="512" fill="#0b0d12" />
   <circle cx="256" cy="200" r="70" fill="none" stroke="#6ea8ff" stroke-width="24" />
-  <path d="M136 372c24-64 68-96 120-96s96 32 120 96" fill="none" stroke="#6ea8ff"
+  <path d="M136 358 A218 218 0 0 1 376 358" fill="none" stroke="#6ea8ff"
         stroke-width="24" stroke-linecap="round" />
   <circle cx="256" cy="200" r="16" fill="#57d9a3" />
 </svg>

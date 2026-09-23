@@ -244,6 +244,7 @@ label {
 .list-item strong {
   display: block;
   font-size: 15px;
+  overflow-wrap: anywhere;
 }
 
 .list-item span {

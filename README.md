@@ -472,12 +472,26 @@ Notes you drop in the vault's `Inbox` folder import into an agent's memory, and
 </details>
 
 <details>
-<summary><strong>Access from other devices</strong></summary>
+<summary><strong>Installing it on an iPhone</strong></summary>
 
 Studio is served wherever the proxy is bound, so a phone on the same network
-can reach it. With `PROXY_AUTH_ENABLED` on, Studio requires the same token as
-the proxy: open it once as `/studio?token=<token>` and the app keeps the token
-on that device.
+can reach it. Open **More → Install on your iPhone** on the computer running
+the server: it lists every address the server answers on — loopback, the
+Bonjour `<hostname>.local` name, and each LAN address — with the live port and,
+when proxy auth is on, the token already attached. Copy one, open it in Safari
+on the phone, then **Share → Add to Home Screen**.
+
+Installed, Studio runs standalone with a 180×180 touch icon, safe-area padding,
+and 44pt targets. If the server is asleep or off the network, the app says so
+plainly instead of failing blank, and nothing is lost — all state lives on the
+computer. A service worker precaches the shell for instant launches, but
+browsers only register one on a secure origin, so over plain HTTP on a LAN it
+is skipped; put the server behind HTTPS or a tunnel to get it.
+
+With `PROXY_AUTH_ENABLED` on, Studio requires the same token as the proxy.
+Without it, anyone on the network who reaches the port can use Studio and your
+models. Note that `/admin` stays local-only either way, so settings are changed
+from the computer, not the phone.
 
 </details>
 

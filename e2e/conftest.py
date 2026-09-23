@@ -39,6 +39,7 @@ from free_claude_code.runtime.asgi import RuntimeASGIApp
 from free_claude_code.runtime.configuration import ConfigurationService
 from free_claude_code.runtime.folder_picker import NativeFolderPicker
 from free_claude_code.runtime.provider_manager import ProviderRuntimeManager
+from free_claude_code.studio import StudioService, StudioStore
 from tests.web_tools_support import StubWebToolsClient
 
 
@@ -240,14 +241,23 @@ def admin_base_url(
         "_select",
         lambda _picker, initial, stop: code_control.folder_picker.select(initial, stop),
     )
+    web_tools = StubWebToolsClient()
+    studio = StudioService(
+        store=StudioStore(tmp_path / "studio" / "studio.db"),
+        web_tools=web_tools,
+        settings_provider=manager.current_settings,
+        models_dir=tmp_path / "studio" / "models",
+        sites_dir=tmp_path / "studio" / "sites",
+    )
     app = RuntimeASGIApp(
         create_app(
             ApiServices(
                 requests=manager,
                 admin=runtime,
                 tasks=runtime,
-                web_tools=StubWebToolsClient(),
+                web_tools=web_tools,
                 code=code_control.service,
+                studio=studio,
             )
         ),
         runtime,

@@ -52,6 +52,44 @@ async def test_app_shell_is_installable(studio_api):
 
 
 @pytest.mark.asyncio
+async def test_the_iphone_install_pieces_are_served(studio_api):
+    client, *_ = studio_api
+    version = package_version()
+
+    manifest = (await client.get("/studio/manifest.webmanifest")).json()
+    png_icons = [icon for icon in manifest["icons"] if icon["type"] == "image/png"]
+    assert {icon["sizes"] for icon in png_icons} == {"192x192", "512x512"}
+    assert any("maskable" in icon["purpose"] for icon in manifest["icons"])
+
+    page = (await client.get("/studio")).text
+    assert 'rel="apple-touch-icon"' in page
+    assert "icon-180.png" in page
+    assert "apple-mobile-web-app-capable" in page
+
+    icon = await client.get(f"/studio/assets/{version}/icon-180.png")
+    assert icon.status_code == 200
+    assert icon.content.startswith(b"\x89PNG")
+
+    worker = await client.get("/studio/sw.js")
+    assert worker.status_code == 200
+    assert worker.headers["service-worker-allowed"] == "/studio"
+    assert "__FCC_VERSION__" not in worker.text
+    assert version in worker.text
+
+
+@pytest.mark.asyncio
+async def test_connect_lists_addresses_for_the_phone(studio_api):
+    client, *_ = studio_api
+
+    body = (await client.get("/studio/api/connect")).json()
+
+    assert body["port"] == 8082  # the port this request arrived on
+    assert any(url.startswith("http://localhost:8082/studio") for url in body["urls"])
+    assert body["auth_required"] is False
+    assert body["loopback_only"] is False
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_creates_the_starter_agents(studio_api):
     client, *_ = studio_api
 

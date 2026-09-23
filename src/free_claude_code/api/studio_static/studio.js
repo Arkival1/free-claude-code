@@ -57,11 +57,18 @@
     }, 3200);
   };
 
+  class OfflineError extends Error {}
+
   async function api(path, options = {}) {
     const headers = { "content-type": "application/json", ...(options.headers || {}) };
     const key = token();
     if (key) headers["x-api-key"] = key;
-    const response = await fetch(path, { ...options, headers });
+    let response;
+    try {
+      response = await fetch(path, { ...options, headers });
+    } catch {
+      throw new OfflineError("Can't reach your Studio server.");
+    }
     if (response.status === 401) {
       askForToken();
       throw new Error("Studio needs the proxy token.");
@@ -1314,10 +1321,11 @@
   }
 
   async function renderMore() {
-    const [overview, vault, { agents }] = await Promise.all([
+    const [overview, vault, { agents }, connect] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
+      api("/studio/api/connect"),
     ]);
     const picker = el(
       "select",
@@ -1325,6 +1333,7 @@
       agents.map((agent) => el("option", { value: agent.id, text: agent.name }))
     );
     view.replaceChildren(
+      connectCard(connect),
       card("Tuning", [
         el("p", { class: "muted", text: "Very light tuning, on device or in the cloud." }),
         el("button", {
@@ -1380,12 +1389,6 @@
           },
         }),
       ]),
-      card("Install on iPhone", [
-        el("p", {
-          class: "muted",
-          text: "Open this page in Safari, tap Share, then Add to Home Screen. Studio then runs full screen with its own icon.",
-        }),
-      ]),
       card("Settings", [
         el("p", {
           class: "muted",
@@ -1422,12 +1425,91 @@
       }
     } catch (error) {
       view.replaceChildren(
-        card("Something went wrong", [
-          el("p", { class: "muted", text: error.message }),
-          el("button", { class: "primary", text: "Retry", onclick: render }),
-        ])
+        error instanceof OfflineError ? offlineCard() : errorCard(error)
       );
     }
+  }
+
+  function connectCard(connect) {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true;
+    const rows = connect.urls.map((url) =>
+      el("div", { class: "list-item" }, [
+        el("span", { class: "grow" }, [
+          el("strong", { text: url }),
+          el("span", {
+            text: url.includes("localhost")
+              ? "this computer only"
+              : "use this one from your phone",
+          }),
+        ]),
+        el("button", {
+          class: "secondary",
+          text: "Copy",
+          onclick: async () => {
+            try {
+              await navigator.clipboard.writeText(url);
+              notify("Address copied.");
+            } catch {
+              notify(url);
+            }
+          },
+        }),
+      ])
+    );
+    return card("Install on your iPhone", [
+      el("p", {
+        class: "muted",
+        text: standalone
+          ? "Studio is installed on this device. These are the addresses it answers on."
+          : "On the iPhone, open one of these in Safari, tap Share, then Add to Home Screen. Studio then runs full screen with its own icon.",
+      }),
+      ...rows,
+      connect.loopback_only
+        ? el("p", {
+            class: "muted",
+            text: "The server is bound to localhost, so no other device can reach it. Set HOST to 0.0.0.0 in admin settings and restart to allow your phone in.",
+          })
+        : null,
+      connect.auth_required
+        ? el("p", {
+            class: "muted",
+            text: "Proxy authentication is on, so these addresses carry the token. Open one once on the phone and it is remembered there.",
+          })
+        : el("p", {
+            class: "muted",
+            text: "Anyone on this network can open Studio. On a shared network, turn on proxy authentication in admin settings.",
+          }),
+    ]);
+  }
+
+  function errorCard(error) {
+    return card("Something went wrong", [
+      el("p", { class: "muted", text: error.message }),
+      el("button", { class: "primary", text: "Retry", onclick: render }),
+    ]);
+  }
+
+  function offlineCard() {
+    return card("Can't reach your Studio server", [
+      el("p", {
+        class: "muted",
+        text: `This app talks to the server at ${location.host}. Check that the computer running it is awake, on the same network, and still serving.`,
+      }),
+      el("button", { class: "primary", text: "Try again", onclick: render }),
+      el("p", {
+        class: "muted",
+        text: "Everything you have made is stored on that computer, so nothing is lost while it is offline.",
+      }),
+    ]);
+  }
+
+  function registerWorker() {
+    if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+    navigator.serviceWorker
+      .register("/studio/sw.js", { scope: "/studio" })
+      .catch(() => {});
   }
 
   function headingFor(name) {
@@ -1450,5 +1532,6 @@
     );
   }
 
+  registerWorker();
   render();
 })();
