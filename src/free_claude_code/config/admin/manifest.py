@@ -776,6 +776,70 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_AGENT_COMMANDS",
+        "Agents Can Run Commands",
+        "studio",
+        "select",
+        settings_attr="studio_agent_commands",
+        options=(
+            ConfigOptionSpec("off", "Off"),
+            ConfigOptionSpec("ask", "Ask me each time"),
+            ConfigOptionSpec("auto", "Run without asking"),
+        ),
+        description=(
+            "Lets agents run shell commands (npm, python, builds, tests) inside a "
+            "project folder. Commands run on this computer with your permissions, "
+            "minus credentials; Ask shows each one for approval first."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_COMMAND_TIMEOUT",
+        "Command Time Limit",
+        "studio",
+        "number",
+        settings_attr="studio_command_timeout",
+        description="Seconds before an agent's command and everything it started is stopped.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LORA_PYTHON",
+        "LoRA Trainer Python",
+        "studio",
+        "text",
+        settings_attr="studio_lora_python",
+        description=(
+            "Python with torch, transformers, and peft for training on this "
+            "computer. Leave empty to use Studio's own (install the lora extra)."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LORA_LLAMA_CPP",
+        "llama.cpp Folder",
+        "studio",
+        "text",
+        settings_attr="studio_lora_llama_cpp",
+        description="A llama.cpp checkout; lets training also produce a GGUF adapter Ollama can load.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LORA_OLLAMA",
+        "Ollama Program",
+        "studio",
+        "text",
+        settings_attr="studio_lora_ollama",
+        advanced=True,
+        description="Path to ollama when it is not on PATH.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LORA_PUBLIC_URL",
+        "Address For Remote Trainers",
+        "studio",
+        "text",
+        settings_attr="studio_lora_public_url",
+        description=(
+            "How a rented GPU or VPS reaches this Studio, e.g. a Tailscale address "
+            "like http://my-pc:8082. Defaults to this computer's LAN address."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_MEMORY_WORKING_LIMIT",
         "Working Memory Size",
         "studio",

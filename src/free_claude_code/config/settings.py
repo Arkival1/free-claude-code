@@ -679,6 +679,24 @@ class Settings(BaseModel):
     studio_obsidian_memory_sync: bool = Field(
         default=False, validation_alias="STUDIO_OBSIDIAN_MEMORY_SYNC"
     )
+    studio_lora_python: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LORA_PYTHON"
+    )
+    studio_lora_llama_cpp: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LORA_LLAMA_CPP"
+    )
+    studio_lora_ollama: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LORA_OLLAMA"
+    )
+    studio_lora_public_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LORA_PUBLIC_URL"
+    )
+    studio_agent_commands: NonEmptyString = Field(
+        default="off", validation_alias="STUDIO_AGENT_COMMANDS"
+    )
+    studio_command_timeout: int = Field(
+        default=120, ge=5, le=3600, validation_alias="STUDIO_COMMAND_TIMEOUT"
+    )
     studio_teacher_enabled: bool = Field(
         default=False, validation_alias="STUDIO_TEACHER_ENABLED"
     )
@@ -798,6 +816,15 @@ class Settings(BaseModel):
         if v == "" or v is None:
             return None
         return v
+
+    @field_validator("studio_agent_commands")
+    @classmethod
+    def validate_studio_agent_commands(cls, value: str) -> str:
+        if value not in ("off", "ask", "auto"):
+            raise ValueError(
+                f"STUDIO_AGENT_COMMANDS must be 'off', 'ask', or 'auto', got {value!r}"
+            )
+        return value
 
     @field_validator("studio_tuning_backend")
     @classmethod

@@ -1,7 +1,10 @@
 """Sandboxed website workspaces that agents build and users preview."""
 
 import io
+import os
 import re
+import shutil
+import stat
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,21 +12,138 @@ from pathlib import Path
 import anyio.to_thread
 
 MAX_FILE_BYTES = 512_000
-MAX_SITE_FILES = 400
+MAX_SITE_FILES = 1_500
+MAX_DEPTH = 12
 ALLOWED_SUFFIXES = frozenset(
     {
+        # web
         ".html",
         ".htm",
         ".css",
+        ".scss",
+        ".sass",
+        ".less",
         ".js",
         ".mjs",
-        ".json",
+        ".cjs",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".vue",
+        ".svelte",
+        ".astro",
         ".svg",
-        ".txt",
-        ".md",
         ".webmanifest",
+        # data and config
+        ".json",
+        ".jsonc",
         ".xml",
         ".csv",
+        ".yml",
+        ".yaml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".conf",
+        ".lock",
+        ".txt",
+        ".md",
+        ".mdx",
+        ".rst",
+        ".sql",
+        ".graphql",
+        ".prisma",
+        ".proto",
+        # languages
+        ".py",
+        ".pyi",
+        ".rb",
+        ".php",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".kts",
+        ".swift",
+        ".c",
+        ".h",
+        ".cc",
+        ".cpp",
+        ".hpp",
+        ".cs",
+        ".dart",
+        ".lua",
+        ".r",
+        ".scala",
+        ".ex",
+        ".exs",
+        ".zig",
+        # scripts
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".ps1",
+        ".bat",
+        ".cmd",
+    }
+)
+ALLOWED_NAMES = frozenset(
+    {
+        "Dockerfile",
+        "Makefile",
+        "Procfile",
+        "LICENSE",
+        "README",
+        "Gemfile",
+        ".gitignore",
+        ".dockerignore",
+        ".editorconfig",
+        ".prettierrc",
+        ".eslintrc",
+        ".npmrc",
+        ".nvmrc",
+        ".python-version",
+        ".env.example",
+    }
+)
+# Files agents may not write but the preview may serve, e.g. build output.
+PREVIEW_ONLY_SUFFIXES = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".avif",
+        ".ico",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".otf",
+        ".wasm",
+        ".map",
+        ".mp3",
+        ".mp4",
+        ".webm",
+    }
+)
+# Dependency and cache folders: huge, regenerated, never listed or zipped.
+SKIP_DIRS = frozenset(
+    {
+        "node_modules",
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".next",
+        ".nuxt",
+        ".cache",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".turbo",
+        ".parcel-cache",
+        "target",
     }
 )
 _CONTENT_TYPES = {
@@ -32,6 +152,7 @@ _CONTENT_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
     ".mjs": "text/javascript; charset=utf-8",
+    ".cjs": "text/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".svg": "image/svg+xml",
     ".txt": "text/plain; charset=utf-8",
@@ -39,6 +160,22 @@ _CONTENT_TYPES = {
     ".webmanifest": "application/manifest+json",
     ".xml": "application/xml; charset=utf-8",
     ".csv": "text/csv; charset=utf-8",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".avif": "image/avif",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
+    ".wasm": "application/wasm",
+    ".map": "application/json; charset=utf-8",
+    ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
 }
 _SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 # Windows refuses these names in any folder, with or without an extension.
@@ -106,7 +243,16 @@ def slugify(name: str) -> str:
 
 def content_type_for(path: str) -> str:
     """Return the served content type for one site file path."""
-    return _CONTENT_TYPES.get(Path(path).suffix.lower(), "application/octet-stream")
+    suffix = Path(path).suffix.lower()
+    if suffix in _CONTENT_TYPES:
+        return _CONTENT_TYPES[suffix]
+    if suffix in ALLOWED_SUFFIXES or Path(path).name in ALLOWED_NAMES:
+        return "text/plain; charset=utf-8"
+    return "application/octet-stream"
+
+
+def _skipped(relative: Path) -> bool:
+    return any(part in SKIP_DIRS for part in relative.parts)
 
 
 class SiteWorkspace:
@@ -125,23 +271,28 @@ class SiteWorkspace:
             raise SiteError("Invalid site identifier.")
         return self._root / site_id
 
-    def resolve(self, site_id: str, relative_path: str) -> Path:
+    def resolve(
+        self, site_id: str, relative_path: str, *, for_preview: bool = False
+    ) -> Path:
         """Return an absolute path inside the site, or raise ``SiteError``."""
         candidate = (relative_path or "").strip().replace("\\", "/").lstrip("/")
         if not candidate:
             raise SiteError("A file path is required.")
         segments = [part for part in candidate.split("/") if part not in {"", "."}]
-        if not segments or len(segments) > 6:
+        if not segments or len(segments) > MAX_DEPTH:
             raise SiteError("That file path is not allowed.")
         for segment in segments:
             if segment == ".." or not _SEGMENT_PATTERN.match(segment):
                 raise SiteError(f"Unsafe path segment: {segment!r}")
             if is_windows_reserved(segment):
                 raise SiteError(f"{segment!r} is a reserved name on Windows.")
-        suffix = Path(segments[-1]).suffix.lower()
-        if suffix not in ALLOWED_SUFFIXES:
-            allowed = ", ".join(sorted(ALLOWED_SUFFIXES))
-            raise SiteError(f"Only these file types are allowed: {allowed}")
+        name = segments[-1]
+        suffix = Path(name).suffix.lower()
+        allowed = suffix in ALLOWED_SUFFIXES or name in ALLOWED_NAMES
+        if for_preview:
+            allowed = allowed or suffix in PREVIEW_ONLY_SUFFIXES
+        if not allowed:
+            raise SiteError(f"{name!r} is not a text file type agents can write here.")
         target = self.directory(site_id).joinpath(*segments)
         base = self.directory(site_id).resolve()
         if not target.resolve().is_relative_to(base):
@@ -190,7 +341,7 @@ class SiteWorkspace:
 
     async def read_bytes(self, site_id: str, relative_path: str) -> bytes:
         """Return one site file's raw bytes for preview responses."""
-        target = self.resolve(site_id, relative_path)
+        target = self.resolve(site_id, relative_path, for_preview=True)
 
         def work() -> bytes:
             if not target.is_file():
@@ -225,7 +376,7 @@ class SiteWorkspace:
                     content_type=content_type_for(path.name),
                 )
                 for path in sorted(directory.rglob("*"))
-                if path.is_file()
+                if path.is_file() and not _skipped(path.relative_to(directory))
             ]
             return tuple(found)
 
@@ -239,7 +390,7 @@ class SiteWorkspace:
             buffer = io.BytesIO()
             with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as bundle:
                 for path in sorted(directory.rglob("*")):
-                    if path.is_file():
+                    if path.is_file() and not _skipped(path.relative_to(directory)):
                         bundle.write(path, self._relative(site_id, path))
             return buffer.getvalue()
 
@@ -250,11 +401,8 @@ class SiteWorkspace:
         directory = self.directory(site_id)
 
         def work() -> None:
-            if not directory.is_dir():
-                return
-            for path in sorted(directory.rglob("*"), reverse=True):
-                path.unlink() if path.is_file() else path.rmdir()
-            directory.rmdir()
+            if directory.is_dir():
+                shutil.rmtree(directory, onexc=_retry_writable)
 
         await anyio.to_thread.run_sync(work)
 
@@ -264,4 +412,14 @@ class SiteWorkspace:
     def _count(self, directory: Path) -> int:
         if not directory.is_dir():
             return 0
-        return sum(1 for path in directory.rglob("*") if path.is_file())
+        return sum(
+            1
+            for path in directory.rglob("*")
+            if path.is_file() and not _skipped(path.relative_to(directory))
+        )
+
+
+def _retry_writable(function, path, _error) -> None:
+    """Windows marks some files (e.g. in .git) read-only; clear it and retry."""
+    os.chmod(path, stat.S_IWRITE)
+    function(path)

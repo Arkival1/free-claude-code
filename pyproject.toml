@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.5.0"
+version = "6.6.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -61,6 +61,15 @@ voice_local = [
     "transformers>=5.17.0",
     "accelerate>=1.15.0",
     "librosa>=1.0.0",
+]
+# LoRA weight training on this computer (Studio). A GPU is strongly advised.
+lora = [
+    "torch>=2.14.0",
+    "transformers>=5.17.0",
+    "accelerate>=1.15.0",
+    "peft>=0.21.0",
+    "safetensors>=0.4.0",
+    "sentencepiece>=0.2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -159,4 +168,7 @@ allowed-unresolved-imports = [
     "riva.client",
     "pystray",
     "PIL",
+    # Optional LoRA trainer, run with whatever Python has these installed.
+    "peft",
+    "huggingface_hub",
 ]

@@ -12,9 +12,11 @@ from .models import (
     Agent,
     AgentRun,
     Chat,
+    CommandRequest,
     Course,
     ExamQuestion,
     Lesson,
+    LoraJob,
     MemoryEntry,
     Message,
     ModelAsset,
@@ -36,6 +38,8 @@ _JSON_FIELDS = frozenset(
         "style_rules",
         "metrics",
         "member_ids",
+        "sources",
+        "topics",
     }
 )
 
@@ -53,6 +57,8 @@ TABLES: Mapping[type[Record], str] = {
     Course: "studio_courses",
     Lesson: "studio_lessons",
     ExamQuestion: "studio_exam_questions",
+    LoraJob: "studio_lora_jobs",
+    CommandRequest: "studio_commands",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (

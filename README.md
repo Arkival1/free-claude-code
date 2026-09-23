@@ -386,8 +386,10 @@ chats, memory, tuning, and classes; `models/` for downloaded model files; and
    iPhone**.
 
 From PowerShell you can pass options instead:
-`.\scripts\windows\start-studio.ps1 -Port 9000 -NoBrowser`. Add `-DryRun` to
-see every step without running it. If PowerShell refuses to run scripts,
+`.\scripts\windows\start-studio.ps1 -Port 9000 -NoBrowser`. Add
+`-WithTraining` to also install PyTorch, transformers, and PEFT so this PC can
+train LoRA adapters (a few GB; an NVIDIA GPU is strongly advised). Add
+`-DryRun` to see every step without running it. If PowerShell refuses to run scripts,
 the `.cmd` file above already bypasses that for this one script.
 
 </details>
@@ -402,9 +404,20 @@ FCC's existing local `web_search`/`web_fetch` implementation and its SSRF
 guard.
 
 Give an agent a goal on the **Agents** tab and it runs a bounded tool loop —
-`STUDIO_AGENT_MAX_STEPS` caps it — writing into a website workspace you can
-preview live and download as a zip. Site writes are sandboxed: no path
-traversal, a file-type allowlist, a 512 KB per-file cap, and a file-count cap.
+`STUDIO_AGENT_MAX_STEPS` caps it — inside a **project**: a folder that can hold
+a whole website or app (HTML, CSS, JavaScript/TypeScript, Python, configs, and
+more), previewed live and downloadable as a zip. Writes are sandboxed: no path
+traversal, text source files only, a 512 KB per-file cap, and a file-count cap;
+`node_modules`, `.git`, virtualenvs, and caches are never listed or zipped.
+
+**Commands.** With `STUDIO_AGENT_COMMANDS` set to `ask` or `auto`, agents also
+get `run_command` to install packages, build, and run tests or scripts inside
+the project folder. In `ask` mode every command appears in the chat (and on
+Home) with **Run it** and **Deny**, and the agent waits for your answer. Commands
+run on this computer with your permissions, but with any environment variable
+that looks like a credential removed, a time limit (`STUDIO_COMMAND_TIMEOUT`),
+and the whole process tree stopped when it expires. It is off by default.
+Rooms can be given a project too, so a team of agents builds in one folder.
 
 The first run creates four starter agents: **Guide**, **Builder**, **Teacher**,
 and **Student**.
@@ -484,6 +497,41 @@ Local tuning is off until `STUDIO_LIGHT_TUNING_ENABLED` is on, or until you
 turn it on for one agent: a chat's settings sheet has a **Very light tuning**
 toggle, and switching it on opens a fresh chat bound to that agent's tune pack
 and allows that pack to run.
+
+</details>
+
+<details>
+<summary><strong>LoRA: training the weights</strong></summary>
+
+**LoRA training** on the Tuning tab changes a student model's real weights.
+Pick the student, a Hugging Face model to train (curated choices, from Qwen2.5
+Coder 7B down to a 0.5B model that trains on a plain CPU, each paired with the
+Ollama build of the same weights), and what to learn from:
+
+- **Topics** — a server teacher writes realistic requests on each topic and
+  the ideal answer to each, so the student learns from the teacher's output.
+- **Tool-use lessons** — the teacher writes requests and the exact tool call
+  for each, in the format Studio's local models use.
+- **Classes** and **tune-pack examples** the student already has.
+
+Then choose where to train:
+
+- **This computer** runs the trainer as a child process: with a GPU it's fast,
+  with 4-bit loading when `bitsandbytes` is installed. Install the libraries
+  with the `lora` extra (`uv sync --extra lora`, or `-WithTraining` on Windows),
+  or point `STUDIO_LORA_PYTHON` at any Python that has them.
+- **Rented GPU or VPS**: the job page shows a few commands to paste on that
+  machine. They download a single standalone script from Studio, which pulls the
+  training set with a per-job token, reports every step, and uploads the result.
+  The GPU machine must reach Studio — Tailscale on both is easiest, or set
+  `STUDIO_LORA_PUBLIC_URL`. You can train on a rented GPU while Studio and the
+  model you chat with stay on your own PC.
+
+The job page shows live progress, the loss per step as a chart, and held-out
+loss before and after. With `STUDIO_LORA_LLAMA_CPP` pointing at a llama.cpp
+checkout, the adapter is also converted to GGUF; if Ollama is installed, Studio
+creates a model from it (`ollama create`), switches the student to it, and
+remembers the old model so you can switch back.
 
 </details>
 

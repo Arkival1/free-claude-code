@@ -255,6 +255,7 @@
   async function renderHome() {
     const generation = renderGeneration;
     let data = await api("/studio/api/overview");
+    const waiting = (await refreshPending()).pending;
     if (!data.agents.length) {
       await post("/studio/api/bootstrap");
       data = await api("/studio/api/overview");
@@ -309,6 +310,23 @@
             },
           }),
         ])
+      );
+    }
+
+    if (waiting.length) {
+      nodes.push(
+        card(
+          `${waiting.length} command${waiting.length === 1 ? "" : "s"} waiting for you`,
+          waiting.map((item) => {
+            const actions = el("div", { class: "row" });
+            actions.append(...approvalButtons(item.id, actions));
+            return el("div", { class: "card" }, [
+              el("code", { class: "command", text: item.command }),
+              actions,
+            ]);
+          }),
+          "An agent paused until you decide."
+        )
       );
     }
 
@@ -386,9 +404,10 @@
 
   async function renderChats() {
     const generation = renderGeneration;
-    const [{ chats }, { agents }] = await Promise.all([
+    const [{ chats }, { agents }, { sites }] = await Promise.all([
       api("/studio/api/chats"),
       api("/studio/api/agents"),
+      api("/studio/api/sites"),
     ]);
     const picker = el(
       "select",
@@ -398,7 +417,7 @@
       )
     );
     const nodes = [
-      roomCreator(agents),
+      roomCreator(agents, sites),
       card("New chat", [
         agents.length
           ? picker
@@ -445,9 +464,14 @@
       text: String(model).startsWith("local/") ? "local" : "server",
     });
 
-  function roomCreator(agents) {
+  function roomCreator(agents, sites = []) {
     const members = agents.filter((agent) => agent.role !== "guide");
     const title = el("input", { type: "text", placeholder: "Room name (optional)" });
+    const project = el("select", {}, [
+      el("option", { value: "", text: "No project (just talk)" }),
+      el("option", { value: "__new__", text: "New project for this room" }),
+      ...sites.map((site) => el("option", { value: site.id, text: site.name })),
+    ]);
     const boxes = members.map((agent) => {
       const box = el("input", { type: "checkbox", value: agent.id });
       box.checked = true;
@@ -464,6 +488,7 @@
           text: "Talk to several agents at once. They answer each other, hand work off with @Name, and finish tasks together. Mix local and server models.",
         }),
         title,
+        el("label", {}, ["Project the agents build in", project]),
         ...(members.length ? boxes : [empty("Create an agent first.")]),
         el("button", {
           class: "primary",
@@ -474,9 +499,17 @@
               .filter((box) => box.checked)
               .map((box) => box.value);
             if (!memberIds.length) return notify("Pick at least one agent.");
+            let siteId = project.value || null;
+            if (siteId === "__new__") {
+              const site = await post("/studio/api/sites", {
+                name: title.value.trim() || "Team project",
+              });
+              siteId = site.id;
+            }
             const room = await post("/studio/api/rooms", {
               title: title.value.trim(),
               member_ids: memberIds,
+              site_id: siteId,
             });
             go(`room/${room.id}`);
           },
@@ -487,7 +520,7 @@
 
   async function renderRoom(roomId) {
     const generation = renderGeneration;
-    const data = await api(`/studio/api/rooms/${roomId}`);
+    const [data] = await Promise.all([api(`/studio/api/rooms/${roomId}`), refreshPending()]);
     setChrome("room", data.room.title);
     const status = el("div", { class: "row-between" });
     const log = el("div", { class: "transcript" });
@@ -516,6 +549,7 @@
     };
 
     const refresh = async () => {
+      await refreshPending();
       const detail = await api(`/studio/api/rooms/${roomId}?after=${lastSequence}`);
       paint(detail);
       if (!detail.running) stopPolling();
@@ -529,6 +563,13 @@
 
     if (generation !== renderGeneration) return;
     view.replaceChildren(
+      data.room.site_id
+        ? el("button", {
+            class: "secondary",
+            text: "Open the room's project",
+            onclick: () => go(`site/${data.room.site_id}`),
+          })
+        : null,
       card("Members", [
         el(
           "div",
@@ -595,7 +636,7 @@
 
   async function renderChat(chatId) {
     const generation = renderGeneration;
-    const data = await api(`/studio/api/chats/${chatId}`);
+    const [data] = await Promise.all([api(`/studio/api/chats/${chatId}`), refreshPending()]);
     const chat = data.chat;
     setChrome("chat", chat.title);
     const log = el(
@@ -612,13 +653,35 @@
       log.append(el("div", { class: "bubble user", text }));
       send.disabled = true;
       send.textContent = "…";
+      // Show tool steps and approval requests while the agent is still working.
+      let seen = data.messages.length ? data.messages[data.messages.length - 1].sequence : 0;
+      let sentShown = false;
+      const live = setInterval(async () => {
+        try {
+          await refreshPending();
+          const fresh = await api(`/studio/api/chats/${chatId}?after=${seen}`);
+          for (const message of fresh.messages) {
+            seen = message.sequence;
+            if (message.role === "user" && !sentShown) {
+              sentShown = true;
+              continue;
+            }
+            log.append(messageBubble(message));
+            log.lastElementChild?.scrollIntoView({ block: "end" });
+          }
+        } catch {
+          /* the final reply below repaints everything */
+        }
+      }, 1500);
       try {
         const reply = await post(`/studio/api/chats/${chatId}/messages`, { text });
+        await refreshPending();
         log.replaceChildren(...reply.messages.map(messageBubble));
         log.lastElementChild?.scrollIntoView({ block: "end" });
       } catch (error) {
         notify(error.message);
       } finally {
+        clearInterval(live);
         send.disabled = false;
         send.textContent = "Send";
       }
@@ -643,10 +706,54 @@
     log.lastElementChild?.scrollIntoView({ block: "end" });
   }
 
+  let pendingCommands = new Set();
+
+  async function refreshPending() {
+    try {
+      const data = await api("/studio/api/commands/pending");
+      pendingCommands = new Set(data.pending.map((item) => item.id));
+      return data;
+    } catch {
+      return { pending: [], policy: "off" };
+    }
+  }
+
+  function approvalButtons(requestId, holder) {
+    const decide = (approve) => async () => {
+      try {
+        await post(`/studio/api/commands/${requestId}/${approve ? "approve" : "deny"}`);
+        pendingCommands.delete(requestId);
+        holder.replaceChildren(
+          el("span", { class: `pill ${approve ? "good" : "bad"}`, text: approve ? "approved, running" : "denied" })
+        );
+      } catch (error) {
+        notify(error.message);
+      }
+    };
+    return [
+      el("button", { class: "primary", text: "Run it", onclick: decide(true) }),
+      el("button", { class: "danger", text: "Deny", onclick: decide(false) }),
+    ];
+  }
+
   function messageBubble(message) {
     const role = ["user", "assistant", "tool", "event"].includes(message.role)
       ? message.role
       : "event";
+    if (message.data && message.data.kind === "approval") {
+      const requestId = message.data.request_id;
+      const actions = el("div", { class: "row" });
+      if (pendingCommands.has(requestId)) {
+        actions.append(...approvalButtons(requestId, actions));
+      } else {
+        actions.append(el("span", { class: "pill", text: "decided" }));
+      }
+      return el("div", { class: "bubble event approval" }, [
+        el("span", { class: "who", text: "Command approval" }),
+        el("code", { class: "command", text: message.data.command || message.text }),
+        actions,
+      ]);
+    }
     return el("div", { class: `bubble ${role}` }, [
       message.author && role !== "user"
         ? el("span", { class: "who", text: message.author })
@@ -728,7 +835,7 @@
       card("Run an agent task", [
         el("p", {
           class: "muted",
-          text: "The agent searches the web, reads pages, writes files into a site, checks its work, then reports back.",
+          text: "The agent searches the web, writes a whole website or app into a project, runs commands if you allow it, checks its work, then reports back.",
         }),
         ...taskForm(agents, sites),
       ]),
@@ -770,7 +877,7 @@
           : empty("No agent tasks yet.")
       ),
       card(
-        "Sites",
+        "Projects",
         sites.length
           ? sites.map((site) =>
               el("button", { class: "list-item", onclick: () => go(`site/${site.id}`) }, [
@@ -781,7 +888,7 @@
                 el("span", { class: "pill", text: "open" }),
               ])
             )
-          : empty("No sites yet. Create one when you start a build task.")
+          : empty("No projects yet. Create one when you start a build task.")
       ),
     ];
     if (generation !== renderGeneration) return;
@@ -797,16 +904,16 @@
         .map((agent) => el("option", { value: agent.id, text: agent.name }))
     );
     const sitePicker = el("select", {}, [
-      el("option", { value: "", text: "No site" }),
-      el("option", { value: "__new__", text: "Create a new site" }),
+      el("option", { value: "", text: "No project" }),
+      el("option", { value: "__new__", text: "Create a new project" }),
       ...sites.map((site) => el("option", { value: site.id, text: site.name })),
     ]);
     const goal = el("textarea", {
-      placeholder: "Build a one-page site about local tide times, with sources.",
+      placeholder: "Build a to-do app with a Python backend and a clean web UI.",
     });
     return [
       el("label", {}, ["Agent", agentPicker]),
-      el("label", {}, ["Website workspace", sitePicker]),
+      el("label", {}, ["Project", sitePicker]),
       goal,
       el("button", {
         class: "primary",
@@ -954,7 +1061,7 @@
 
   async function renderTask(runId) {
     const generation = renderGeneration;
-    const data = await api(`/studio/api/tasks/${runId}`);
+    const [data] = await Promise.all([api(`/studio/api/tasks/${runId}`), refreshPending()]);
     setChrome("task", "Agent task");
     if (generation !== renderGeneration) return;
     view.replaceChildren(
@@ -1390,9 +1497,10 @@
   async function renderTuning(agentId) {
     const generation = renderGeneration;
     const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
-    const [data, { agents }] = await Promise.all([
+    const [data, { agents }, lora] = await Promise.all([
       api(`/studio/api/tuning${query}`),
       api("/studio/api/agents"),
+      api("/studio/api/lora"),
     ]);
     setChrome("tune", "Tuning");
     const coach = el("input", { type: "text", list: "model-list", placeholder: "none" });
@@ -1410,6 +1518,7 @@
     );
     if (generation !== renderGeneration) return;
     view.replaceChildren(
+      loraCard(agents, lora),
       card("Two ways to tune", [
         el("div", { class: "list-item" }, [
           el("span", { class: "grow" }, [
@@ -1500,6 +1609,362 @@
           : empty("No tuning runs yet.")
       )
     );
+  }
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const svg = (tag, attrs = {}, children = []) => {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    for (const child of children) node.append(child);
+    return node;
+  };
+
+  const niceCeil = (value) => {
+    if (value <= 0) return 1;
+    const magnitude = 10 ** Math.floor(Math.log10(value));
+    const step = [1, 2, 2.5, 5, 10].find((n) => n * magnitude >= value) || 10;
+    return step * magnitude;
+  };
+
+  // Training loss per step: one series, so no legend; the card title names it.
+  function lossChart(curve) {
+    if (!curve || curve.length < 2) {
+      return el("p", { class: "muted", text: "The loss curve appears after the first training steps." });
+    }
+    const width = 340, height = 170;
+    const pad = { left: 34, right: 46, top: 12, bottom: 26 };
+    const steps = curve.map((point) => point[0]);
+    const losses = curve.map((point) => point[1]);
+    const top = niceCeil(Math.max(...losses));
+    const x0 = steps[0], x1 = steps[steps.length - 1] || x0 + 1;
+    const x = (step) => pad.left + ((step - x0) / Math.max(1, x1 - x0)) * (width - pad.left - pad.right);
+    const y = (loss) => pad.top + (1 - loss / top) * (height - pad.top - pad.bottom);
+    const grid = [0, top / 2, top].map((tick) =>
+      svg("g", {}, [
+        svg("line", { x1: pad.left, x2: width - pad.right, y1: y(tick), y2: y(tick), class: "chart-grid" }),
+        svg("text", { x: pad.left - 6, y: y(tick) + 4, "text-anchor": "end", class: "chart-tick" }, [
+          document.createTextNode(String(Number(tick.toPrecision(3)))),
+        ]),
+      ])
+    );
+    const path = curve
+      .map((point, index) => `${index ? "L" : "M"}${x(point[0]).toFixed(1)},${y(point[1]).toFixed(1)}`)
+      .join(" ");
+    const last = curve[curve.length - 1];
+    const crosshair = svg("line", { y1: pad.top, y2: height - pad.bottom, class: "chart-crosshair", visibility: "hidden" });
+    const focus = svg("circle", { r: 4, class: "chart-dot", visibility: "hidden" });
+    const plot = svg("svg", {
+      viewBox: `0 0 ${width} ${height}`,
+      class: "chart",
+      role: "img",
+      "aria-label": `Training loss fell from ${losses[0]} to ${last[1]} over ${last[0]} steps`,
+    }, [
+      ...grid,
+      svg("text", { x: pad.left, y: height - 6, class: "chart-tick" }, [document.createTextNode(`step ${x0}`)]),
+      svg("text", { x: width - pad.right, y: height - 6, "text-anchor": "end", class: "chart-tick" }, [
+        document.createTextNode(`step ${x1}`),
+      ]),
+      svg("path", { d: path, class: "chart-line" }),
+      svg("circle", { cx: x(last[0]), cy: y(last[1]), r: 4, class: "chart-dot" }),
+      svg("text", { x: x(last[0]) + 8, y: y(last[1]) + 4, class: "chart-label" }, [
+        document.createTextNode(String(last[1])),
+      ]),
+      crosshair,
+      focus,
+    ]);
+    const tip = el("div", { class: "chart-tip", hidden: true });
+    const wrap = el("div", { class: "chart-wrap" }, [plot, tip]);
+    const hide = () => {
+      crosshair.setAttribute("visibility", "hidden");
+      focus.setAttribute("visibility", "hidden");
+      tip.hidden = true;
+    };
+    plot.addEventListener("pointermove", (event) => {
+      const box = plot.getBoundingClientRect();
+      const px = ((event.clientX - box.left) / box.width) * width;
+      let nearest = curve[0];
+      for (const point of curve) {
+        if (Math.abs(x(point[0]) - px) < Math.abs(x(nearest[0]) - px)) nearest = point;
+      }
+      const cx = x(nearest[0]);
+      crosshair.setAttribute("x1", cx);
+      crosshair.setAttribute("x2", cx);
+      crosshair.setAttribute("visibility", "visible");
+      focus.setAttribute("cx", cx);
+      focus.setAttribute("cy", y(nearest[1]));
+      focus.setAttribute("visibility", "visible");
+      tip.replaceChildren(el("strong", { text: String(nearest[1]) }), ` loss · step ${nearest[0]}`);
+      tip.style.left = `${(cx / width) * 100}%`;
+      tip.hidden = false;
+    });
+    plot.addEventListener("pointerleave", hide);
+    const table = el("details", { class: "chart-table" }, [
+      el("summary", { text: "Show as table" }),
+      el("table", {}, [
+        el("thead", {}, [el("tr", {}, [el("th", { text: "Step" }), el("th", { text: "Loss" })])]),
+        el("tbody", {}, curve.map((point) =>
+          el("tr", {}, [el("td", { text: String(point[0]) }), el("td", { text: String(point[1]) })])
+        )),
+      ]),
+    ]);
+    return el("div", {}, [wrap, table]);
+  }
+
+  function figure(label, value) {
+    return el("div", { class: "figure" }, [
+      el("span", { class: "figure-label", text: label }),
+      el("strong", { class: "figure-value", text: value == null ? "—" : Number(value).toFixed(3) }),
+    ]);
+  }
+
+  function loraCard(agents, lora) {
+    const students = agents.filter((agent) => agent.role !== "guide");
+    const student = el(
+      "select",
+      {},
+      students.map((agent) =>
+        el("option", {
+          value: agent.id,
+          text: `${agent.name} · ${agent.model}`,
+          selected: agent.role === "student",
+        })
+      )
+    );
+    const base = el("select", {}, [
+      ...lora.bases.map((item) =>
+        el("option", { value: item.repo, text: `${item.size} · ${item.repo} → ${item.ollama}` })
+      ),
+      el("option", { value: "__other__", text: "Another Hugging Face model…" }),
+    ]);
+    const note = el("p", { class: "muted", text: lora.bases[0] ? lora.bases[0].note : "" });
+    const otherRepo = el("input", { type: "text", placeholder: "org/model on Hugging Face", hidden: true });
+    const otherOllama = el("input", { type: "text", placeholder: "matching Ollama tag, e.g. mistral:7b", hidden: true });
+    base.addEventListener("change", () => {
+      const other = base.value === "__other__";
+      otherRepo.hidden = !other;
+      otherOllama.hidden = !other;
+      const known = lora.bases.find((item) => item.repo === base.value);
+      note.textContent = known ? known.note : "Pick the Ollama build of the same weights so the result can run locally.";
+    });
+    const where = el("select", {}, [
+      el("option", { value: "local", text: "This computer" }),
+      el("option", { value: "remote", text: "Rented GPU or VPS (run a worker there)" }),
+    ]);
+    const env = el("p", { class: "muted", text: "Checking what this computer can train with…" });
+    api("/studio/api/lora/environment")
+      .then((info) => {
+        const trains = info.ready
+          ? `This computer can train: ${info.accelerator}.`
+          : "This computer can't train yet (no torch/transformers/peft). Install the training extra, or use a rented GPU.";
+        const serves = info.ollama ? "Ollama found: results install automatically." : "Ollama not found: install it to run results locally.";
+        const gguf = info.llama_cpp_ready ? "" : " Set the llama.cpp folder in settings to make Ollama-ready files.";
+        env.textContent = `${trains} ${serves}${gguf}`;
+        if (!info.ready) where.value = "remote";
+      })
+      .catch(() => {
+        env.textContent = "Could not check this computer.";
+      });
+    const source = (value, label, checked) => {
+      const box = el("input", { type: "checkbox", value });
+      box.checked = checked;
+      return { box, row: el("label", { class: "switch" }, [label, box]) };
+    };
+    const sources = [
+      source("topics", "Teacher writes lessons on topics", true),
+      source("tools", "Tool-use lessons (files, web, memory)", true),
+      source("classes", "Everything from this agent's classes", true),
+      source("examples", "Examples from its tune packs", true),
+    ];
+    const topics = el("textarea", {
+      rows: "4",
+      placeholder: "Python web apps\nReact and TypeScript UI\nHTML and CSS layout\nDebugging and tests",
+    });
+    const perTopic = el("input", { type: "number", value: "12", min: "1", max: "50" });
+    const teacher = el("input", { type: "text", list: "model-list", placeholder: "default teacher (a server model)" });
+    modelList().catch(() => {});
+    const epochs = el("input", { type: "number", value: "2", min: "1", max: "10" });
+    const rank = el("input", { type: "number", value: "16", min: "4", max: "128" });
+    const maxLen = el("input", { type: "number", value: "1024", min: "256", max: "8192" });
+    return card(
+      "LoRA: train the weights",
+      [
+        el("p", {
+          class: "muted",
+          text: "Real training: server teachers write lessons, and a LoRA adapter changes the student model's weights. Train here if this computer has a GPU, or on a rented GPU or VPS; the result installs into Ollama and the student switches to it.",
+        }),
+        env,
+        el("label", {}, ["Student", student]),
+        el("label", {}, ["Model to train (Hugging Face)", base]),
+        note,
+        otherRepo,
+        otherOllama,
+        el("label", {}, ["Where to train", where]),
+        ...sources.map((item) => item.row),
+        el("label", {}, ["Topics, one per line", topics]),
+        el("label", {}, ["Lessons per topic", perTopic]),
+        el("label", {}, ["Teacher model", teacher]),
+        el("details", {}, [
+          el("summary", { text: "Advanced" }),
+          el("label", {}, ["Epochs", epochs]),
+          el("label", {}, ["LoRA rank", rank]),
+          el("label", {}, ["Max tokens per example", maxLen]),
+        ]),
+        el("button", {
+          class: "primary",
+          text: "Start LoRA training",
+          onclick: async () => {
+            const chosen = sources.filter((item) => item.box.checked).map((item) => item.box.value);
+            const topicList = topics.value.split("\n").map((line) => line.trim()).filter(Boolean);
+            const other = base.value === "__other__";
+            try {
+              const job = await post("/studio/api/lora/jobs", {
+                agent_id: student.value,
+                base_model: other ? otherRepo.value.trim() : base.value,
+                ollama_base: other ? otherOllama.value.trim() : "",
+                runner: where.value,
+                sources: chosen,
+                topics: topicList,
+                examples_per_topic: Number(perTopic.value) || 12,
+                teacher_model: teacher.value.trim() || null,
+                epochs: Number(epochs.value) || 2,
+                rank: Number(rank.value) || 16,
+                max_seq_len: Number(maxLen.value) || 1024,
+              });
+              go(`lora/${job.id}`);
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+        ...(lora.jobs.length
+          ? [
+              el("h3", { text: "LoRA runs" }),
+              ...lora.jobs.slice(0, 8).map((job) =>
+                el("button", { class: "list-item", onclick: () => go(`lora/${job.id}`) }, [
+                  el("span", { class: "grow" }, [
+                    el("strong", { text: job.base_model }),
+                    el("span", { text: `${job.runner === "local" ? "this computer" : "remote worker"} · ${when(job.created_at)}` }),
+                  ]),
+                  statusPill(job.status),
+                ])
+              ),
+            ]
+          : []),
+      ]
+    );
+  }
+
+  async function renderLoraJob(jobId) {
+    const generation = renderGeneration;
+    const job = await api(`/studio/api/lora/jobs/${jobId}`);
+    setChrome("lora", "LoRA training");
+    const active = ["queued", "running"].includes(job.status);
+    const busy = /^(Trained\. Installing|Downloading the base|Creating the tuned)/.test(job.message);
+    const nodes = [
+      card(job.base_model, [
+        el("div", { class: "row-between" }, [
+          statusPill(job.status),
+          el("span", { class: "pill", text: `${job.step}/${job.total_steps || "?"} steps` }),
+        ]),
+        meter(job.progress),
+        el("p", { class: "muted", text: job.message }),
+        job.error ? el("p", { class: "error-text", text: job.error }) : null,
+        el("div", { class: "figures" }, [
+          figure("Held-out loss before", job.eval_loss_before),
+          figure("Held-out loss after", job.eval_loss_after),
+        ]),
+        el("p", {
+          class: "muted",
+          text: `${job.train_examples} training examples, ${job.eval_examples} held out · ${job.runner === "local" ? "this computer" : "remote worker"}${job.metrics.device ? ` · ${job.metrics.device}` : ""}`,
+        }),
+      ]),
+      card("Training loss per step", [lossChart(job.metrics.loss_curve)]),
+    ];
+    if (job.commands && job.runner === "remote") {
+      const block = (label, text) =>
+        el("div", {}, [
+          el("div", { class: "row-between" }, [
+            el("strong", { text: label }),
+            el("button", {
+              class: "secondary",
+              text: "Copy",
+              onclick: async () => {
+                try {
+                  await navigator.clipboard.writeText(text);
+                  notify("Copied.");
+                } catch {
+                  notify("Select the text and copy it.");
+                }
+              },
+            }),
+          ]),
+          el("pre", { class: "command-block", text }),
+        ]);
+      nodes.push(
+        card("Run it on a rented GPU or VPS", [
+          el("p", {
+            class: "muted",
+            text: `On the GPU machine, run these. It must be able to reach ${job.commands.studio_url} (Tailscale on both machines is the easy way). For gated models, set HF_TOKEN there first.`,
+          }),
+          job.commands.warning ? el("p", { class: "error-text", text: job.commands.warning }) : null,
+          block("Linux or macOS", job.commands.bash),
+          block("Windows PowerShell", job.commands.powershell),
+        ])
+      );
+    }
+    const actions = [];
+    if (active) {
+      actions.push(el("button", {
+        class: "danger",
+        text: "Stop",
+        onclick: async () => {
+          await post(`/studio/api/lora/jobs/${jobId}/cancel`);
+          render();
+        },
+      }));
+    }
+    if (job.status === "succeeded" && !job.served_model && !busy) {
+      actions.push(el("button", {
+        class: "secondary",
+        text: "Try installing into Ollama again",
+        onclick: async () => {
+          await post(`/studio/api/lora/jobs/${jobId}/install`);
+          render();
+        },
+      }));
+    }
+    if (job.previous_model) {
+      actions.push(el("button", {
+        class: "secondary",
+        text: `Switch the student back to ${job.previous_model}`,
+        onclick: async () => {
+          await post(`/studio/api/lora/jobs/${jobId}/revert`);
+          render();
+        },
+      }));
+    }
+    const key = token();
+    const suffix = key ? `?token=${encodeURIComponent(key)}` : "";
+    nodes.push(
+      card("Files", [
+        ...(job.files.length
+          ? job.files.map((name) =>
+              el("a", { class: "list-item", href: `/studio/api/lora/jobs/${jobId}/files/${name}${suffix}` }, [
+                el("span", { class: "grow" }, [el("strong", { text: name })]),
+                el("span", { class: "pill", text: "download" }),
+              ])
+            )
+          : [empty("Files appear here as the job runs.")]),
+        actions.length ? el("div", { class: "row" }, actions) : null,
+      ])
+    );
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(...nodes);
+    if (active || busy) {
+      startPolling(() => renderLoraJob(jobId).catch(() => stopPolling()));
+    } else {
+      stopPolling();
+    }
   }
 
   function tuneButton(pack, backend, label, available) {
@@ -1737,6 +2202,7 @@
         case "models": return await renderModels();
         case "tune": return await renderTuning(id);
         case "job": return await renderJob(id);
+        case "lora": return await renderLoraJob(id);
         case "more": return await renderMore();
         default: return go("home");
       }
@@ -1875,6 +2341,7 @@
         models: "Local models",
         tune: "Tuning",
         job: "Tuning run",
+        lora: "LoRA training",
         more: "More",
       }[name] || "Studio"
     );

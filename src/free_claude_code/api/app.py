@@ -27,6 +27,7 @@ from free_claude_code.core.trace import (
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioStoreError
 from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.lora import LoraError
 from free_claude_code.studio.obsidian import ObsidianError
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError
@@ -88,6 +89,7 @@ def create_app(services: ApiServices) -> FastAPI:
     @app.exception_handler(TuningError)
     @app.exception_handler(SchoolError)
     @app.exception_handler(ObsidianError)
+    @app.exception_handler(LoraError)
     async def studio_error_handler(request: Request, exc: Exception):
         """Report Studio failures as plain, actionable JSON."""
         response = JSONResponse(

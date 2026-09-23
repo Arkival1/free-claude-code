@@ -11,9 +11,14 @@
     .\scripts\windows\start-studio.ps1
 .EXAMPLE
     .\scripts\windows\start-studio.ps1 -Port 9000 -NoBrowser
+.EXAMPLE
+    .\scripts\windows\start-studio.ps1 -WithTraining
+    Also installs PyTorch, transformers, and PEFT so Studio can train LoRA
+    adapters on this PC (an NVIDIA GPU is strongly advised).
 #>
 param(
     [int] $Port = 0,
+    [switch] $WithTraining,
     [switch] $NoBrowser,
     [switch] $DryRun,
     [switch] $Help
@@ -127,10 +132,16 @@ Write-Host "FCC Studio - starting from $RepoRoot"
 
 Confirm-Uv
 
-Invoke-Step "Installing Python 3.14 and the app's packages (first run takes a few minutes)" {
-    uv sync --python $PythonRequest
+$SyncArgs = @("sync", "--python", $PythonRequest)
+$SyncNote = "first run takes a few minutes"
+if ($WithTraining) {
+    $SyncArgs += @("--extra", "lora")
+    $SyncNote = "with LoRA training libraries: the first run downloads a few GB"
+}
+Invoke-Step "Installing Python 3.14 and the app's packages ($SyncNote)" {
+    & uv @SyncArgs
     if ($LASTEXITCODE -ne 0) { throw "Package install failed (uv exit $LASTEXITCODE)." }
-} "uv sync --python $PythonRequest"
+} "uv $($SyncArgs -join ' ')"
 
 $effectivePort = if ($Port -gt 0) { $Port } else { $DefaultPort }
 if ($Port -gt 0) {
@@ -153,6 +164,11 @@ Write-Host "Phone:   open Studio > More > Install on your iPhone for the address
 Write-Host "If Windows Firewall asks, allow Python on Private networks so your phone can connect."
 Write-Host "Press Ctrl+C to stop."
 
+$RunArgs = @("run", "--python", $PythonRequest)
+if ($WithTraining) {
+    $RunArgs += @("--extra", "lora")
+}
+$RunArgs += "fcc-server"
 Invoke-Step "Starting the server" {
-    uv run --python $PythonRequest fcc-server
-} "uv run --python $PythonRequest fcc-server"
+    & uv @RunArgs
+} "uv $($RunArgs -join ' ')"

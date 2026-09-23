@@ -23,6 +23,9 @@ type CourseStatus = Literal[
     "planning", "teaching", "examining", "passed", "failed", "cancelled"
 ]
 type SampleSplit = Literal["train", "eval"]
+type LoraRunner = Literal["local", "remote"]
+type Quantize = Literal["auto", "4bit", "none"]
+type CommandStatus = Literal["pending", "approved", "denied", "ran", "expired"]
 
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
 """Job states that still hold a worker."""
@@ -278,3 +281,67 @@ class ExamQuestion(Record):
     score: float | None = None
     feedback: str = ""
     created_at: int = Field(default_factory=now_ms)
+
+
+class LoraJob(Record):
+    """One LoRA weight-training run for a local student model."""
+
+    id: str = Field(default_factory=lambda: new_id("lora"))
+    agent_id: str
+    base_model: str
+    ollama_base: str = ""
+    runner: LoraRunner = "local"
+    status: JobStatus = "queued"
+    sources: tuple[str, ...] = ()
+    teacher_model: str | None = None
+    topics: tuple[str, ...] = ()
+    examples_per_topic: int = 8
+    rank: int = 16
+    alpha: int = 32
+    epochs: int = 2
+    learning_rate: float = 2e-4
+    max_seq_len: int = 1024
+    batch_size: int = 1
+    grad_accum: int = 4
+    quantize: Quantize = "auto"
+    dataset_ready: bool = False
+    train_examples: int = 0
+    eval_examples: int = 0
+    step: int = 0
+    total_steps: int = 0
+    loss: float | None = None
+    eval_loss_before: float | None = None
+    eval_loss_after: float | None = None
+    metrics: JsonObject = Field(default_factory=dict)
+    worker_token: str = ""
+    served_model: str = ""
+    previous_model: str = ""
+    message: str = ""
+    error: str | None = None
+    heartbeat_at: int | None = None
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+    @property
+    def progress(self) -> float:
+        """Return training completion between 0 and 1."""
+        if self.status == "succeeded":
+            return 1.0
+        if self.total_steps <= 0:
+            return 0.0
+        return min(1.0, self.step / self.total_steps)
+
+
+class CommandRequest(Record):
+    """A shell command an agent asked to run in its project."""
+
+    id: str = Field(default_factory=lambda: new_id("cmd"))
+    agent_id: str
+    chat_id: str
+    site_id: str
+    command: str
+    status: CommandStatus = "pending"
+    exit_code: int | None = None
+    output: str = ""
+    created_at: int = Field(default_factory=now_ms)
+    decided_at: int | None = None

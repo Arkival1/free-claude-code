@@ -9,7 +9,7 @@ from .llm import ChatMessage, LLMReply, StudioLLMError, StudioModelRouter, ToolC
 from .memory import MemoryService
 from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
 from .store import StudioStore
-from .tools import FINISH_TOOL, AgentToolbox, ToolContext, tool_specs
+from .tools import COMMAND_TOOL, FINISH_TOOL, AgentToolbox, ToolContext, tool_specs
 from .tuning import pack_exemplars, pack_system_text
 
 AGENT_BASE_PROMPT = (
@@ -19,10 +19,15 @@ AGENT_BASE_PROMPT = (
     "short report of what you did."
 )
 SITE_PROMPT = (
-    "You have a website workspace. Build real, complete pages: write index.html "
-    "with semantic HTML, styles.css for layout and type, and app.js only when "
-    "behavior is needed. Keep every asset inside the workspace and check your "
-    "work with read_file before finishing."
+    "You have a project workspace. Build complete, working websites and apps: "
+    "real file structure, all the code, a README. Read files back before you "
+    "finish to check your work."
+)
+COMMAND_PROMPT = (
+    "You can run shell commands in the project with run_command: install "
+    "packages, build, and run tests or scripts, then read the output and fix "
+    "what fails. Commands must finish on their own; never start dev servers or "
+    "watchers. The user may have to approve each command."
 )
 
 
@@ -70,6 +75,8 @@ class AgentRunner:
             parts.append(await self._memory.context_block(agent.id, query))
         if site_id:
             parts.append(SITE_PROMPT)
+            if self._toolbox.commands_enabled and COMMAND_TOOL in agent.tools:
+                parts.append(COMMAND_PROMPT)
         return "\n\n".join(part for part in parts if part.strip())
 
     async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:
@@ -94,7 +101,12 @@ class AgentRunner:
         history = await self._history(agent, chat)
         if not history or history[-1].content != user_text:
             history.append(ChatMessage.user(user_text))
-        context = ToolContext(agent_id=agent.id, chat_id=chat.id, site_id=chat.site_id)
+        context = ToolContext(
+            agent_id=agent.id,
+            chat_id=chat.id,
+            site_id=chat.site_id,
+            agent_name=agent.name,
+        )
         result = await self._loop(
             agent,
             chat,
@@ -125,7 +137,10 @@ class AgentRunner:
             data={"kind": "run_started", "run_id": run.id},
         )
         context = ToolContext(
-            agent_id=agent.id, chat_id=chat.id, site_id=run.site_id or chat.site_id
+            agent_id=agent.id,
+            chat_id=chat.id,
+            site_id=run.site_id or chat.site_id,
+            agent_name=agent.name,
         )
         history = [ChatMessage.user(run.goal)]
         result = await self._loop(
@@ -174,7 +189,12 @@ class AgentRunner:
         max_steps: int | None = None,
     ) -> TurnResult:
         """Take one turn in an existing conversation someone else is driving."""
-        context = ToolContext(agent_id=agent.id, chat_id=chat.id, site_id=chat.site_id)
+        context = ToolContext(
+            agent_id=agent.id,
+            chat_id=chat.id,
+            site_id=chat.site_id,
+            agent_name=agent.name,
+        )
         return await self._loop(
             agent,
             chat,
@@ -196,7 +216,7 @@ class AgentRunner:
         max_steps: int,
         extra_system: str = "",
     ) -> TurnResult:
-        specs = tool_specs(agent.tools)
+        specs = tool_specs(agent.tools, commands_enabled=self._toolbox.commands_enabled)
         system = await self.system_prompt(agent, query=query, site_id=context.site_id)
         if extra_system:
             system = f"{system}\n\n{extra_system}"

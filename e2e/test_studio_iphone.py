@@ -153,3 +153,63 @@ def test_classes_default_to_a_server_teacher_and_a_local_student(
     student = card.locator("select").nth(1)
     expect(teacher.locator("option:checked")).to_contain_text("server")
     expect(student.locator("option:checked")).to_contain_text("local")
+
+
+def test_lora_job_page_shows_live_training(page: Page, admin_base_url: str) -> None:
+    api = page.request
+    student = api.post(
+        f"{admin_base_url}/studio/api/agents",
+        data={"name": "Pocket", "model": "local/tiny", "tools": []},
+    ).json()
+    pack = api.post(
+        f"{admin_base_url}/studio/api/tuning/packs", data={"agent_id": student["id"]}
+    ).json()
+    api.post(
+        f"{admin_base_url}/studio/api/tuning/packs/{pack['id']}/samples",
+        data={"pairs": [[f"q{i}", f"a{i}"] for i in range(6)]},
+    )
+    job = api.post(
+        f"{admin_base_url}/studio/api/lora/jobs",
+        data={
+            "agent_id": student["id"],
+            "base_model": "Qwen/Qwen2.5-0.5B-Instruct",
+            "runner": "remote",
+            "sources": ["examples"],
+        },
+    ).json()
+    for _ in range(50):
+        view = api.get(f"{admin_base_url}/studio/api/lora/jobs/{job['id']}").json()
+        if view["dataset_ready"]:
+            break
+        page.wait_for_timeout(100)
+    token = view["commands"]["bash"].split("--token ")[1].split()[0]
+    worker = f"{admin_base_url}/studio/api/lora/worker/{job['id']}"
+    for step, loss in enumerate((2.4, 1.7, 1.2, 0.9, 0.8), start=1):
+        api.post(
+            f"{worker}/progress",
+            headers={"x-lora-token": token},
+            data={"step": step, "total": 10, "loss": loss, "eval_loss_before": 2.2},
+        )
+
+    page.set_viewport_size(IPHONE_VIEWPORT)
+    page.goto(f"{admin_base_url}/studio#lora/{job['id']}")
+    expect(page.locator("#view-title")).to_have_text("LoRA training")
+    expect(page.locator(".figure", has_text="before")).to_contain_text("2.200")
+    chart = page.locator("svg.chart")
+    expect(chart).to_be_visible()
+    expect(page.locator(".chart-label")).to_have_text("0.8")
+
+    box = chart.bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + box["width"] * 0.3, box["y"] + box["height"] / 2)
+    expect(page.locator(".chart-tip")).to_be_visible()
+    expect(page.locator(".chart-tip")).to_contain_text("step")
+
+    page.locator(".chart-table summary").click()
+    expect(page.locator(".chart-table tbody tr")).to_have_count(5)
+    expect(page.locator("pre.command-block").first).to_contain_text("lora_worker.py")
+    overflow = page.evaluate(
+        "() => document.documentElement.scrollWidth - window.innerWidth"
+    )
+    assert overflow <= 0
+    page.screenshot(path="/tmp/claude-0/shots/lora.png", full_page=True)

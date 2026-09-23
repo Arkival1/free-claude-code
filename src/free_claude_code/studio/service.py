@@ -17,6 +17,7 @@ from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject
 
 from .agents import AgentRunner, TurnResult
+from .commands import CommandBroker, CommandError
 from .downloads import CURATED_MODELS, ModelLibrary
 from .guide import GuideAnswer, GuideAssistant, GuideState
 from .llm import (
@@ -26,11 +27,13 @@ from .llm import (
     StudioLLMError,
     StudioModelRouter,
 )
+from .lora import LoraTrainer
 from .memory import MemoryService
 from .models import (
     Agent,
     AgentRun,
     Chat,
+    CommandRequest,
     Course,
     ExamQuestion,
     Lesson,
@@ -95,6 +98,14 @@ class StudioService:
         self._router = router or self._build_router(settings_provider())
         self._tasks: set[asyncio.Task[object]] = set()
         self._room_locks: dict[str, asyncio.Lock] = {}
+        self._commands = CommandBroker(store=store)
+        self._lora = LoraTrainer(
+            store=store,
+            router=self._router,
+            jobs_dir=models_dir / "lora",
+            settings_provider=settings_provider,
+            spawn=self.spawn,
+        )
         self._room_activity: dict[str, int] = {}
         self._memory_sync_lock = asyncio.Lock()
 
@@ -115,6 +126,10 @@ class StudioService:
     @property
     def library(self) -> ModelLibrary:
         return self._library
+
+    @property
+    def lora(self) -> LoraTrainer:
+        return self._lora
 
     def _build_router(self, settings: Settings) -> StudioModelRouter:
         proxy = ProxyLLM(
@@ -155,6 +170,9 @@ class StudioService:
                     settings.web_fetch_allowed_schemes
                 ),
             ),
+            commands=self._commands,
+            command_policy=settings.studio_agent_commands,
+            command_timeout=float(settings.studio_command_timeout),
         )
 
     def _runner(self) -> AgentRunner:
@@ -540,10 +558,28 @@ class StudioService:
         await self._store.delete_where(Message, {"chat_id": chat_id})
         return await self._store.delete(Chat, chat_id)
 
+    # -------------------------------------------------------------- commands
+
+    async def pending_commands(self) -> tuple[CommandRequest, ...]:
+        """Return agent commands waiting for the user's approval."""
+        return await self._commands.pending()
+
+    async def decide_command(self, request_id: str, *, approve: bool) -> CommandRequest:
+        """Approve or deny one waiting command."""
+        try:
+            return await self._commands.decide(request_id, approve=approve)
+        except CommandError as error:
+            raise StudioError(str(error)) from error
+
     # ----------------------------------------------------------------- rooms
 
     async def create_room(
-        self, *, title: str = "", member_ids: Sequence[str] = (), goal: str = ""
+        self,
+        *,
+        title: str = "",
+        member_ids: Sequence[str] = (),
+        goal: str = "",
+        site_id: str | None = None,
     ) -> Chat:
         """Open a chat room for the user and several agents."""
         if not member_ids:
@@ -553,12 +589,18 @@ class StudioService:
                 for agent in await self.agents()
                 if agent.role in {"agent", "teacher", "student", "assistant"}
             ]
+        if site_id:
+            await self._store.require(SiteProject, site_id)
         try:
-            return await self._rooms().create(
+            room = await self._rooms().create(
                 title=title, member_ids=member_ids, goal=goal
             )
         except RoomError as error:
             raise StudioError(str(error)) from error
+        if site_id:
+            room = room.model_copy(update={"site_id": site_id})
+            await self._store.put(room)
+        return room
 
     async def rooms(self) -> tuple[Chat, ...]:
         """Return every room, most recently active first."""

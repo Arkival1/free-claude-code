@@ -67,6 +67,53 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="LoRA weight training",
+        route="/studio#tune",
+        terms=(
+            "lora",
+            "weights",
+            "train",
+            "training",
+            "gpu",
+            "rented",
+            "vps",
+            "finetune",
+            "fine-tune",
+            "adapter",
+            "ollama",
+        ),
+        body=(
+            "LoRA training changes a student model's actual weights. Server "
+            "teachers write lessons on the topics you pick, plus tool-use lessons, "
+            "then a trainer learns from them. Train on this computer if it has a "
+            "GPU, or on a rented GPU or VPS by running the worker command the job "
+            "page shows. The finished adapter installs into Ollama and the student "
+            "switches to it; you can switch back any time."
+        ),
+    ),
+    GuideTopic(
+        title="Building apps",
+        route="/studio#agents",
+        terms=(
+            "app",
+            "apps",
+            "build",
+            "project",
+            "command",
+            "npm",
+            "python",
+            "run",
+            "approve",
+            "code",
+        ),
+        body=(
+            "Agents work in a project folder and can write any source file: web "
+            "pages, Python, TypeScript, configs. If you allow it in settings, they "
+            "can also run commands like npm install, builds, and tests. In Ask "
+            "mode each command shows up in the chat with Run it and Deny buttons."
+        ),
+    ),
+    GuideTopic(
         title="Teacher and student",
         route="/studio#school",
         terms=(

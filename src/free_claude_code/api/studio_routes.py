@@ -5,6 +5,7 @@ import secrets
 import socket
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -15,6 +16,13 @@ from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
 from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.lora import (
+    KNOWN_BASES,
+    WORKER_PATH,
+    LoraAuthError,
+    LoraError,
+)
+from free_claude_code.studio.models import LoraJob
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.tuning import TuningError
@@ -127,10 +135,32 @@ class BootstrapPayload(BaseModel):
     download_guide: bool = False
 
 
+class LoraPayload(BaseModel):
+    agent_id: str
+    base_model: str
+    runner: str = "local"
+    sources: list[str] = Field(default_factory=lambda: ["examples", "classes"])
+    topics: list[str] = Field(default_factory=list)
+    examples_per_topic: int = 8
+    teacher_model: str | None = None
+    ollama_base: str = ""
+    rank: int | None = None
+    alpha: int | None = None
+    epochs: int | None = None
+    learning_rate: float | None = None
+    max_seq_len: int | None = None
+    quantize: str | None = None
+
+
+class WorkerFailure(BaseModel):
+    error: str = "The worker failed."
+
+
 class RoomPayload(BaseModel):
     title: str = ""
     member_ids: list[str] = Field(default_factory=list)
     goal: str = ""
+    site_id: str | None = None
 
 
 class RoomMembersPayload(BaseModel):
@@ -479,6 +509,38 @@ async def delete_chat(
     return {"deleted": await studio.delete_chat(chat_id)}
 
 
+@router.get("/studio/api/commands/pending")
+async def pending_commands(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Return agent commands waiting for approval, and whether commands are on."""
+    pending = await studio.pending_commands()
+    return {
+        "policy": studio.settings.studio_agent_commands,
+        "pending": [item.model_dump() for item in pending],
+    }
+
+
+@router.post("/studio/api/commands/{request_id}/approve")
+async def approve_command(
+    request_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Let an agent run the command it asked for."""
+    return (await studio.decide_command(request_id, approve=True)).model_dump()
+
+
+@router.post("/studio/api/commands/{request_id}/deny")
+async def deny_command(
+    request_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Refuse a command; the agent is told and carries on."""
+    return (await studio.decide_command(request_id, approve=False)).model_dump()
+
+
 @router.get("/studio/api/rooms")
 async def list_rooms(
     studio: StudioService = Depends(get_studio), _: None = Access
@@ -495,7 +557,10 @@ async def create_room(
 ) -> JsonObject:
     """Open a room; with no members listed, every working agent joins."""
     room = await studio.create_room(
-        title=payload.title, member_ids=payload.member_ids, goal=payload.goal
+        title=payload.title,
+        member_ids=payload.member_ids,
+        goal=payload.goal,
+        site_id=payload.site_id,
     )
     return room.model_dump()
 
@@ -872,6 +937,241 @@ async def cancel_tuning(
     return job.model_dump()
 
 
+def _lora_view(job: LoraJob) -> JsonObject:
+    """A job as the UI sees it; the worker token is shown only via commands."""
+    data = job.model_dump(exclude={"worker_token"})
+    data["progress"] = job.progress
+    return data
+
+
+def _worker_url(request: Request, settings: Settings) -> str:
+    """The Studio address a remote worker should call back to."""
+    if settings.studio_lora_public_url:
+        return settings.studio_lora_public_url.rstrip("/")
+    port = request.url.port or settings.port
+    hosts = [host for host in _reachable_hosts(settings.host) if host != "localhost"]
+    return f"http://{hosts[0] if hosts else 'localhost'}:{port}"
+
+
+@router.get("/studio/api/lora")
+async def lora_overview(
+    agent_id: str | None = None,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Return trainable base models and LoRA jobs."""
+    where = {"agent_id": agent_id} if agent_id else None
+    jobs = await studio.store.find(LoraJob, where=where, order_by="created_at DESC")
+    return {
+        "bases": [
+            {
+                "repo": base.repo,
+                "ollama": base.ollama,
+                "size": base.size,
+                "note": base.note,
+                "gated": base.gated,
+            }
+            for base in KNOWN_BASES
+        ],
+        "jobs": [_lora_view(job) for job in jobs],
+    }
+
+
+@router.get("/studio/api/lora/environment")
+async def lora_environment(
+    refresh: bool = False,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Report whether this computer can train, and whether Ollama can serve."""
+    return await studio.lora.probe(refresh=refresh)
+
+
+@router.post("/studio/api/lora/jobs")
+async def create_lora_job(
+    payload: LoraPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Start a LoRA job: build the data, then train here or on a worker."""
+    hyper = payload.model_dump(
+        include={"rank", "alpha", "epochs", "learning_rate", "max_seq_len", "quantize"}
+    )
+    job = await studio.lora.create(
+        agent_id=payload.agent_id,
+        base_model=payload.base_model,
+        runner=payload.runner,
+        sources=payload.sources,
+        topics=payload.topics,
+        examples_per_topic=payload.examples_per_topic,
+        teacher_model=payload.teacher_model,
+        ollama_base=payload.ollama_base,
+        hyper=hyper,
+    )
+    return _lora_view(job)
+
+
+@router.get("/studio/api/lora/jobs/{job_id}")
+async def read_lora_job(
+    job_id: str,
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Return one job, its files, and how to run it on another machine."""
+    job = await studio.store.require(LoraJob, job_id)
+    folder = studio.lora.job_dir(job.id)
+    files = [
+        name
+        for name in (
+            "train.jsonl",
+            "eval.jsonl",
+            "adapter.zip",
+            "adapter.gguf",
+            "Modelfile",
+            "worker.log",
+        )
+        if (folder / name).is_file()
+    ]
+    view = _lora_view(job)
+    view["files"] = files
+    if job.status not in {"succeeded", "failed", "cancelled"}:
+        url = _worker_url(request, settings)
+        commands = studio.lora.worker_commands(job, url)
+        if (urlsplit(url).hostname or "") in {"localhost", "127.0.0.1", "::1"}:
+            commands["warning"] = (
+                "Studio only accepts connections from this computer, so another "
+                "machine can't reach it. Set Address For Remote Trainers (a "
+                "Tailscale address works well) or run Studio with HOST=0.0.0.0."
+            )
+        view["commands"] = commands
+    return view
+
+
+@router.post("/studio/api/lora/jobs/{job_id}/cancel")
+async def cancel_lora_job(
+    job_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Stop a LoRA job."""
+    return _lora_view(await studio.lora.cancel(job_id))
+
+
+@router.post("/studio/api/lora/jobs/{job_id}/install")
+async def install_lora_job(
+    job_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Try installing a finished adapter into Ollama again."""
+    return _lora_view(await studio.lora.install(job_id))
+
+
+@router.post("/studio/api/lora/jobs/{job_id}/revert")
+async def revert_lora_job(
+    job_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Point the student back at the model it used before this job."""
+    return _lora_view(await studio.lora.revert(job_id))
+
+
+@router.get("/studio/api/lora/jobs/{job_id}/files/{name}", include_in_schema=False)
+async def lora_file(
+    job_id: str,
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> FileResponse:
+    """Download a job's dataset, adapter, Modelfile, or trainer log."""
+    return FileResponse(studio.lora.file_path(job_id, name), filename=name)
+
+
+@router.get("/studio/lora/worker.py", include_in_schema=False)
+def lora_worker_script() -> FileResponse:
+    """Serve the standalone trainer so a GPU machine can download it."""
+    return FileResponse(
+        WORKER_PATH, media_type="text/x-python", filename="lora_worker.py"
+    )
+
+
+async def _worker_job(job_id: str, request: Request, studio: StudioService) -> LoraJob:
+    return await studio.lora.authorize(job_id, request.headers.get("x-lora-token", ""))
+
+
+@router.get("/studio/api/lora/worker/{job_id}/spec", include_in_schema=False)
+async def worker_spec(
+    job_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    job = await _worker_job(job_id, request, studio)
+    if job.status in {"succeeded", "failed", "cancelled"}:
+        raise HTTPException(status_code=410, detail="This job has already ended.")
+    return studio.lora.spec(job)
+
+
+@router.get("/studio/api/lora/worker/{job_id}/dataset", include_in_schema=False)
+async def worker_dataset(
+    job_id: str,
+    request: Request,
+    split: str = "train",
+    studio: StudioService = Depends(get_studio),
+) -> FileResponse:
+    job = await _worker_job(job_id, request, studio)
+    if not job.dataset_ready:
+        raise HTTPException(status_code=409, detail="The training set is not ready.")
+    return FileResponse(
+        await studio.lora.dataset_path(job, split), media_type="application/jsonl"
+    )
+
+
+@router.post("/studio/api/lora/worker/{job_id}/progress", include_in_schema=False)
+async def worker_progress(
+    job_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    job = await _worker_job(job_id, request, studio)
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Progress must be a JSON object.")
+    return await studio.lora.report(job, payload)
+
+
+@router.put("/studio/api/lora/worker/{job_id}/files/{name}", include_in_schema=False)
+async def worker_upload(
+    job_id: str,
+    name: str,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    job = await _worker_job(job_id, request, studio)
+    size = await studio.lora.receive(job, name, request.stream())
+    return {"stored": name, "bytes": size}
+
+
+@router.post("/studio/api/lora/worker/{job_id}/finish", include_in_schema=False)
+async def worker_finish(
+    job_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    job = await _worker_job(job_id, request, studio)
+    payload = await request.json()
+    return _lora_view(
+        await studio.lora.finish(job, payload if isinstance(payload, dict) else {})
+    )
+
+
+@router.post("/studio/api/lora/worker/{job_id}/fail", include_in_schema=False)
+async def worker_fail(
+    job_id: str,
+    payload: WorkerFailure,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    job = await _worker_job(job_id, request, studio)
+    return _lora_view(await studio.lora.fail(job.id, payload.error))
+
+
 @router.get("/studio/api/school/courses")
 async def list_courses(
     studio: StudioService = Depends(get_studio), _: None = Access
@@ -1053,7 +1353,11 @@ def studio_error_status(error: Exception) -> int:
     """Map a Studio failure to its HTTP status."""
     if isinstance(error, StudioNotFoundError):
         return 404
-    if isinstance(error, SiteError | DownloadError | TuningError | SchoolError):
+    if isinstance(error, LoraAuthError):
+        return 401
+    if isinstance(
+        error, SiteError | DownloadError | TuningError | SchoolError | LoraError
+    ):
         return 400
     if isinstance(error, StudioError):
         return 400
