@@ -1,5 +1,6 @@
 """Explicit doubles for Studio tests: no network, no real models."""
 
+import inspect
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -25,7 +26,7 @@ class ScriptedLLM:
 
     def __init__(
         self,
-        replies: Sequence[LLMReply | str] | Callable[[str, str], LLMReply | str],
+        replies: Sequence[LLMReply | str] | Callable[[str, str], object],
     ) -> None:
         self._scripted = replies
         self.calls: list[dict[str, object]] = []
@@ -52,6 +53,8 @@ class ScriptedLLM:
         )
         if callable(self._scripted):
             reply = self._scripted(system, last)
+            if inspect.isawaitable(reply):
+                reply = await reply
         elif self._scripted:
             index = min(len(self.calls) - 1, len(self._scripted) - 1)
             reply = self._scripted[index]
@@ -121,7 +124,7 @@ def make_studio(tmp_path, store, web_tools, studio_settings):
     """Build a Studio service driven by a scripted model."""
 
     def build(
-        replies: Sequence[LLMReply | str] | Callable[[str, str], LLMReply | str] = (),
+        replies: Sequence[LLMReply | str] | Callable[[str, str], object] = (),
         **settings_overrides: object,
     ) -> tuple[StudioService, ScriptedLLM]:
         model = ScriptedLLM(replies)

@@ -41,6 +41,19 @@ _CONTENT_TYPES = {
     ".csv": "text/csv; charset=utf-8",
 }
 _SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+# Windows refuses these names in any folder, with or without an extension.
+WINDOWS_RESERVED = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{index}" for index in range(1, 10)}
+    | {f"lpt{index}" for index in range(1, 10)}
+)
+
+
+def is_windows_reserved(segment: str) -> bool:
+    """Return whether Windows would refuse this file or folder name."""
+    stem = segment.split(".", 1)[0].lower()
+    return stem in WINDOWS_RESERVED or segment.endswith((".", " "))
+
 
 STARTER_PAGE = """<!doctype html>
 <html lang="en">
@@ -123,13 +136,15 @@ class SiteWorkspace:
         for segment in segments:
             if segment == ".." or not _SEGMENT_PATTERN.match(segment):
                 raise SiteError(f"Unsafe path segment: {segment!r}")
+            if is_windows_reserved(segment):
+                raise SiteError(f"{segment!r} is a reserved name on Windows.")
         suffix = Path(segments[-1]).suffix.lower()
         if suffix not in ALLOWED_SUFFIXES:
             allowed = ", ".join(sorted(ALLOWED_SUFFIXES))
             raise SiteError(f"Only these file types are allowed: {allowed}")
         target = self.directory(site_id).joinpath(*segments)
         base = self.directory(site_id).resolve()
-        if not str(target.resolve()).startswith(str(base)):
+        if not target.resolve().is_relative_to(base):
             raise SiteError("That file path escapes the site directory.")
         return target
 

@@ -128,7 +128,7 @@ class School:
             course = await self._teach(course, teacher, student)
             course = await self._examine(course, teacher, student)
             if course.passed and tune_on_pass:
-                course = await self._tune_student(course, student)
+                course = await self._tune_student(course, teacher, student)
             return course
         except (SchoolError, StudioLLMError, TuningError) as error:
             logger.warning("Studio class {} failed: {}", course_id, error)
@@ -382,8 +382,10 @@ class School:
             )
         return graded
 
-    async def _tune_student(self, course: Course, student: Agent) -> Course:
-        """Turn a passed class into a very light tune for the student."""
+    async def _tune_student(
+        self, course: Course, teacher: Agent, student: Agent
+    ) -> Course:
+        """Turn a passed class into a very light tune the teacher coaches."""
         transcript = await self._store.transcript(course.chat_id)
         pairs: list[tuple[str, str]] = []
         questions = await self._store.find(
@@ -406,7 +408,10 @@ class School:
             logger.info("Studio class {} had too little material to tune.", course.id)
             return course
         pack = await self._tuner.create_pack(
-            student, name=f"{student.name} · {course.topic[:24]}"
+            student,
+            name=f"{student.name} · {course.topic[:24]}",
+            teacher_model=teacher.model or self._default_model,
+            opted_in=True,
         )
         await self._tuner.add_samples(pack.id, pairs)
         job = await self._tuner.start(pack.id)

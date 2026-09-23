@@ -5,7 +5,7 @@ import json
 import pytest
 
 from free_claude_code.studio.llm import LLMReply
-from free_claude_code.studio.models import Course, ExamQuestion, Lesson
+from free_claude_code.studio.models import Course, ExamQuestion, Lesson, TunePack
 from free_claude_code.studio.school import _takeaway, student_progress
 
 
@@ -141,3 +141,46 @@ def test_takeaway_reads_the_marked_sentence():
         "Tides follow the moon."
     )
     assert _takeaway("No marker here") == ""
+
+
+@pytest.mark.asyncio
+async def test_a_server_model_teaches_a_local_model(make_studio):
+    studio, model = make_studio(classroom_model(), STUDIO_LIGHT_TUNING_ENABLED=True)
+    teacher = await studio.create_agent(
+        name="Professor", role="teacher", model="nvidia_nim/big", tools=[]
+    )
+    student = await studio.create_agent(
+        name="Pocket", role="student", model="local/tiny", tools=[]
+    )
+    course = await studio.open_class(
+        topic="Tides", lesson_count=2, teacher_id=teacher.id, student_id=student.id
+    )
+
+    finished = await studio.run_class(course.id)
+
+    assert finished.passed is True
+    teacher_calls = {
+        call["model"] for call in model.calls if "You are the teacher" in call["system"]
+    }
+    student_calls = {
+        call["model"] for call in model.calls if "You are the student" in call["system"]
+    }
+    assert teacher_calls == {"nvidia_nim/big"}
+    assert student_calls == {"tiny"}  # routed to the local runtime
+
+    memories = [entry.text for entry in await studio.memories(student.id)]
+    assert "The moon pulls the ocean." in memories
+
+    job = await studio.job(finished.tune_job_id or "")
+    pack = await studio.store.require(TunePack, job.pack_id)
+    assert pack.base_model == "local/tiny"
+    assert pack.teacher_model == "nvidia_nim/big"
+    assert pack.opted_in is True
+
+
+@pytest.mark.asyncio
+async def test_an_agent_cannot_teach_itself(make_studio):
+    studio, _ = make_studio([])
+    solo = await studio.create_agent(name="Solo", tools=[])
+    with pytest.raises(Exception, match="two different agents"):
+        await studio.open_class(topic="x", teacher_id=solo.id, student_id=solo.id)

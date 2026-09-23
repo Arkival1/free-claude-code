@@ -238,6 +238,37 @@ class LocalOpenAILLM:
         self._timeout = timeout
         self._transport = transport
 
+    async def list_models(self) -> tuple[str, ...]:
+        """Ask the local runtime which models it is serving."""
+        headers = {}
+        if self._api_key:
+            headers["authorization"] = f"Bearer {self._api_key}"
+        async with httpx.AsyncClient(timeout=5.0, transport=self._transport) as client:
+            try:
+                response = await client.get(f"{self._base_url}/models", headers=headers)
+            except httpx.HTTPError as error:
+                raise LocalModelsUnavailable(
+                    f"No local model server at {self._base_url}: {error}"
+                ) from error
+        if response.status_code >= 400:
+            raise LocalModelsUnavailable(
+                f"The local model server answered {response.status_code}."
+            )
+        try:
+            body = response.json()
+        except ValueError as error:
+            raise LocalModelsUnavailable(
+                "The local model server sent bad JSON."
+            ) from error
+        rows = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(rows, list):
+            return ()
+        return tuple(
+            str(row["id"])
+            for row in rows
+            if isinstance(row, dict) and isinstance(row.get("id"), str)
+        )
+
     async def complete(
         self,
         messages: Sequence[ChatMessage],
@@ -294,12 +325,23 @@ class LocalOpenAILLM:
         return reply
 
 
+class LocalModelsUnavailable(StudioLLMError):
+    """Raised when the local runtime cannot be asked what it serves."""
+
+
 class StudioModelRouter:
     """Route each model reference to the transport that can serve it."""
 
     def __init__(self, *, proxy: LLMClient, local: LLMClient) -> None:
         self._proxy = proxy
         self._local = local
+
+    async def local_models(self) -> tuple[str, ...]:
+        """Return the model ids the local runtime serves right now."""
+        lister = getattr(self._local, "list_models", None)
+        if lister is None:
+            return ()
+        return await lister()
 
     def client_for(self, model: str) -> tuple[LLMClient, str]:
         """Return the client and the wire model id for one Studio reference."""

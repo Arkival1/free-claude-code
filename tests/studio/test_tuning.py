@@ -226,22 +226,15 @@ async def test_cloud_backend_submits_and_polls():
 
 
 @pytest.mark.asyncio
-async def test_cloud_backend_needs_configuration(make_studio):
-    studio, _ = make_studio(
-        [],
-        STUDIO_LIGHT_TUNING_ENABLED=True,
-        STUDIO_TUNING_BACKEND="cloud",
-    )
+async def test_server_tuning_is_refused_without_a_trainer(make_studio):
+    studio, _ = make_studio([], STUDIO_TUNING_BACKEND="cloud")
     agent = await studio.create_agent(name="Cloudy", tools=[])
     pack = await studio.create_pack(agent.id)
     await studio.add_samples(pack.id, [("a", "b"), ("c", "d")])
 
-    job = await studio.start_tuning(pack.id)
-    await studio.wait_for_background()
-
-    finished = await studio.job(job.id)
-    assert finished.status == "failed"
-    assert "Cloud tuning is not configured" in (finished.error or "")
+    with pytest.raises(Exception, match="Server tuning needs a trainer"):
+        await studio.start_tuning(pack.id)
+    assert studio.tuning_options()["server"]["enabled"] is False
 
 
 def test_tuning_error_is_a_runtime_error():

@@ -278,3 +278,9 @@ async def test_unconfigured_vault_is_reported_not_raised(make_studio):
     status = await studio.vault_status()
     assert status.configured is False
     assert status.path == ""
+
+
+def test_note_names_survive_windows():
+    assert note_name("CON") == "CON note"
+    assert note_name("Trailing dots...") == "Trailing dots"
+    assert any("OneDrive" in str(path) for path in candidate_vaults(Path("C:/Users/x")))

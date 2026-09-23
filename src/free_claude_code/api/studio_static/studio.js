@@ -16,6 +16,7 @@
   const toast = document.getElementById("toast");
 
   let poller = null;
+  let renderGeneration = 0;
   let toastTimer = null;
 
   /* ------------------------------------------------------------------ utils */
@@ -252,6 +253,7 @@
   /* ------------------------------------------------------------------ views */
 
   async function renderHome() {
+    const generation = renderGeneration;
     let data = await api("/studio/api/overview");
     if (!data.agents.length) {
       await post("/studio/api/bootstrap");
@@ -378,10 +380,12 @@
       ])
     );
 
+    if (generation !== renderGeneration) return;
     view.replaceChildren(...nodes);
   }
 
   async function renderChats() {
+    const generation = renderGeneration;
     const [{ chats }, { agents }] = await Promise.all([
       api("/studio/api/chats"),
       api("/studio/api/agents"),
@@ -394,6 +398,7 @@
       )
     );
     const nodes = [
+      roomCreator(agents),
       card("New chat", [
         agents.length
           ? picker
@@ -414,7 +419,10 @@
         "All chats",
         chats.length
           ? chats.map((chat) =>
-              el("button", { class: "list-item", onclick: () => go(`chat/${chat.id}`) }, [
+              el("button", {
+                class: "list-item",
+                onclick: () => go(chat.kind === "room" ? `room/${chat.id}` : `chat/${chat.id}`),
+              }, [
                 el("span", { class: "grow" }, [
                   el("strong", { text: chat.title }),
                   el("span", { text: `${chat.kind} · ${when(chat.updated_at)}` }),
@@ -427,10 +435,166 @@
           : empty("No chats yet.")
       ),
     ];
+    if (generation !== renderGeneration) return;
     view.replaceChildren(...nodes);
   }
 
+  const modelBadge = (model) =>
+    el("span", {
+      class: `pill ${String(model).startsWith("local/") ? "good" : ""}`,
+      text: String(model).startsWith("local/") ? "local" : "server",
+    });
+
+  function roomCreator(agents) {
+    const members = agents.filter((agent) => agent.role !== "guide");
+    const title = el("input", { type: "text", placeholder: "Room name (optional)" });
+    const boxes = members.map((agent) => {
+      const box = el("input", { type: "checkbox", value: agent.id });
+      box.checked = true;
+      return el("label", { class: "switch" }, [
+        el("span", { class: "row" }, [agent.name, modelBadge(agent.model)]),
+        box,
+      ]);
+    });
+    return card(
+      "Agent room",
+      [
+        el("p", {
+          class: "muted",
+          text: "Talk to several agents at once. They answer each other, hand work off with @Name, and finish tasks together. Mix local and server models.",
+        }),
+        title,
+        ...(members.length ? boxes : [empty("Create an agent first.")]),
+        el("button", {
+          class: "primary",
+          text: "Open room",
+          onclick: async () => {
+            const memberIds = boxes
+              .map((label) => label.querySelector("input"))
+              .filter((box) => box.checked)
+              .map((box) => box.value);
+            if (!memberIds.length) return notify("Pick at least one agent.");
+            const room = await post("/studio/api/rooms", {
+              title: title.value.trim(),
+              member_ids: memberIds,
+            });
+            go(`room/${room.id}`);
+          },
+        }),
+      ]
+    );
+  }
+
+  async function renderRoom(roomId) {
+    const generation = renderGeneration;
+    const data = await api(`/studio/api/rooms/${roomId}`);
+    setChrome("room", data.room.title);
+    const status = el("div", { class: "row-between" });
+    const log = el("div", { class: "transcript" });
+    let lastSequence = 0;
+
+    const paint = (detail) => {
+      const settings = detail.room.settings || {};
+      const taskStatus = settings.task_status || "idle";
+      status.replaceChildren(
+        el("span", { class: "grow" }, [
+          el("strong", { text: settings.goal ? `Task: ${settings.goal}` : "No task yet" }),
+          settings.summary
+            ? el("p", { class: "muted", text: settings.summary })
+            : null,
+        ]),
+        detail.running
+          ? el("span", { class: "pill warn", text: "agents talking…" })
+          : statusPill(taskStatus === "idle" ? "ready" : taskStatus === "done" ? "succeeded" : taskStatus)
+      );
+      for (const message of detail.messages) {
+        if (message.sequence > lastSequence) {
+          log.append(messageBubble(message));
+          lastSequence = message.sequence;
+        }
+      }
+    };
+
+    const refresh = async () => {
+      const detail = await api(`/studio/api/rooms/${roomId}?after=${lastSequence}`);
+      paint(detail);
+      if (!detail.running) stopPolling();
+      return detail;
+    };
+
+    const watch = () => startPolling(() => refresh().catch(() => stopPolling()));
+
+    const goal = el("input", { type: "text", placeholder: "Build a landing page for my bakery" });
+    const input = el("textarea", { placeholder: "Message the room — @Name to ask one agent", rows: "1" });
+
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      card("Members", [
+        el(
+          "div",
+          { class: "row" },
+          data.members.map((agent) =>
+            el("span", { class: "pill" }, [`@${agent.name} `, modelBadge(agent.model)])
+          )
+        ),
+      ]),
+      card("Task", [
+        status,
+        goal,
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "primary",
+            text: "Start task",
+            onclick: async () => {
+              if (!goal.value.trim()) return notify("Describe the task.");
+              await post(`/studio/api/rooms/${roomId}/task`, { goal: goal.value.trim() });
+              goal.value = "";
+              await refresh();
+              watch();
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "Continue",
+            onclick: async () => {
+              await post(`/studio/api/rooms/${roomId}/continue`);
+              watch();
+            },
+          }),
+          el("button", {
+            class: "danger",
+            text: "Stop",
+            onclick: async () => {
+              await post(`/studio/api/rooms/${roomId}/stop`);
+              notify("The agents will stop after this turn.");
+            },
+          }),
+        ]),
+      ]),
+      log,
+      el("div", { class: "composer" }, [
+        el("div", { class: "grow" }, [input]),
+        el("button", {
+          class: "primary",
+          text: "Send",
+          onclick: async () => {
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = "";
+            await post(`/studio/api/rooms/${roomId}/messages`, { text });
+            await refresh();
+            watch();
+          },
+        }),
+      ])
+    );
+    paint(data);
+    log.lastElementChild?.scrollIntoView({ block: "end" });
+    if (data.running) watch();
+  }
+
   async function renderChat(chatId) {
+    const generation = renderGeneration;
     const data = await api(`/studio/api/chats/${chatId}`);
     const chat = data.chat;
     setChrome("chat", chat.title);
@@ -460,6 +624,7 @@
       }
     });
 
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
       el("div", { class: "row-between" }, [
         el("span", { class: "pill", text: chat.kind }),
@@ -553,6 +718,7 @@
   }
 
   async function renderAgents() {
+    const generation = renderGeneration;
     const [{ agents }, { sites }, { runs }] = await Promise.all([
       api("/studio/api/agents"),
       api("/studio/api/sites"),
@@ -618,6 +784,7 @@
           : empty("No sites yet. Create one when you start a build task.")
       ),
     ];
+    if (generation !== renderGeneration) return;
     view.replaceChildren(...nodes);
   }
 
@@ -668,8 +835,10 @@
     const name = el("input", { type: "text", placeholder: "Researcher" });
     const model = el("input", {
       type: "text",
+      list: "model-list",
       placeholder: "provider/model or local/my-model",
     });
+    modelList().catch(() => {});
     const prompt = el("textarea", { placeholder: "What this agent is for." });
     return [
       el("label", {}, ["Name", name]),
@@ -693,6 +862,7 @@
   }
 
   async function renderAgent(agentId) {
+    const generation = renderGeneration;
     const [{ agents }, { memories }] = await Promise.all([
       api("/studio/api/agents"),
       api(`/studio/api/memory/${agentId}`),
@@ -701,6 +871,7 @@
     if (!agent) return go("agents");
     setChrome("agent", agent.name);
     const memoryInput = el("input", { type: "text", placeholder: "Teach it a fact" });
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
       card(agent.name, [
         el("div", { class: "kv" }, [
@@ -713,6 +884,7 @@
           el("span", { text: "Memory" }),
           el("span", { text: agent.memory_enabled ? "on" : "off" }),
         ]),
+        modelEditor(agent),
         el("div", { class: "row" }, [
           el("button", {
             class: "primary",
@@ -781,8 +953,10 @@
   }
 
   async function renderTask(runId) {
+    const generation = renderGeneration;
     const data = await api(`/studio/api/tasks/${runId}`);
     setChrome("task", "Agent task");
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
       card(data.run.goal, [
         el("div", { class: "row-between" }, [
@@ -811,10 +985,12 @@
   }
 
   async function renderSite(siteId) {
+    const generation = renderGeneration;
     const data = await api(`/studio/api/sites/${siteId}/files`);
     setChrome("site", data.site.name);
     const key = token();
     const preview = `/studio/sites/${siteId}/index.html${key ? `?token=${encodeURIComponent(key)}` : ""}`;
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
       card("Preview", [
         el("iframe", { class: "preview-frame", src: preview, title: "Site preview" }),
@@ -880,7 +1056,39 @@
   }
 
   async function renderLearn() {
-    const data = await api("/studio/api/school/courses");
+    const generation = renderGeneration;
+    const [data, { agents }] = await Promise.all([
+      api("/studio/api/school/courses"),
+      api("/studio/api/agents"),
+    ]);
+    const candidates = agents.filter((agent) => agent.role !== "guide");
+    const isLocal = (agent) => agent.model.startsWith("local/");
+    const first = (test, exclude) =>
+      candidates.find((agent) => agent.id !== exclude && test(agent));
+    // Prefer a server teacher and a local student: the server teaches the local model.
+    const teacherDefault =
+      first((agent) => agent.role === "teacher") ||
+      first((agent) => !isLocal(agent)) ||
+      candidates[0];
+    const teacherId = teacherDefault ? teacherDefault.id : "";
+    const studentDefault =
+      first((agent) => agent.role === "student", teacherId) ||
+      first(isLocal, teacherId) ||
+      first(() => true, teacherId);
+    const agentPicker = (chosen) =>
+      el(
+        "select",
+        {},
+        candidates.map((agent) =>
+          el("option", {
+            value: agent.id,
+            text: `${agent.name} · ${isLocal(agent) ? "local" : "server"} · ${agent.model}`,
+            selected: chosen !== undefined && agent.id === chosen.id,
+          })
+        )
+      );
+    const teacherPicker = agentPicker(teacherDefault);
+    const studentPicker = agentPicker(studentDefault);
     const topic = el("input", {
       type: "text",
       placeholder: "Tide prediction for beginners",
@@ -895,6 +1103,12 @@
             text: "The teacher agent plans lessons, teaches the student agent in a shared chat, then tests it and grades every answer.",
           }),
           el("label", {}, ["Topic", topic]),
+          el("label", {}, ["Teacher", teacherPicker]),
+          el("label", {}, ["Student", studentPicker]),
+          el("p", {
+            class: "muted",
+            text: "A server model teaching a local model works best: the teacher plans, explains, writes the test, and grades; what the student learns goes into its memory.",
+          }),
           el("label", {}, ["Lessons", count]),
           el("button", {
             class: "primary",
@@ -905,6 +1119,8 @@
                 topic: topic.value.trim(),
                 lesson_count: Number(count.value) || 3,
                 start: true,
+                teacher_id: teacherPicker.value,
+                student_id: studentPicker.value,
               });
               go(`class/${course.id}`);
             },
@@ -937,14 +1153,17 @@
           : empty("No classes yet.")
       ),
     ];
+    if (generation !== renderGeneration) return;
     view.replaceChildren(...nodes);
   }
 
   async function renderClass(courseId) {
+    const generation = renderGeneration;
     const data = await api(`/studio/api/school/courses/${courseId}`);
     const course = data.course;
     setChrome("class", course.topic);
     const questions = data.questions || [];
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
       card("Progress", [
         el("div", { class: "row-between" }, [
@@ -1030,10 +1249,31 @@
   }
 
   async function renderModels() {
-    const data = await api("/studio/api/models");
+    const generation = renderGeneration;
+    const [data, available] = await Promise.all([
+      api("/studio/api/models"),
+      api("/studio/api/models/available"),
+    ]);
     setChrome("models", "Local models");
+    const local = available.local;
+    const served = card("Served by your local runtime", [
+      el("p", {
+        class: "muted",
+        text: local.reachable
+          ? `${local.base_url} is serving ${local.models.length} model(s). Use these as an agent's model to run it locally.`
+          : `Nothing answered at ${local.base_url}. Start LM Studio, llama-server, or Ollama, or change Local Model Server in settings.`,
+      }),
+      ...local.models.map((model) =>
+        el("div", { class: "list-item" }, [
+          el("span", { class: "grow" }, [el("strong", { text: model })]),
+          el("span", { class: "pill good", text: "local" }),
+        ])
+      ),
+    ]);
     const url = el("input", { type: "url", placeholder: "https://…/model.gguf" });
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
+      served,
       card("Curated small models", [
         el("p", {
           class: "muted",
@@ -1148,12 +1388,15 @@
   }
 
   async function renderTuning(agentId) {
+    const generation = renderGeneration;
     const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
     const [data, { agents }] = await Promise.all([
       api(`/studio/api/tuning${query}`),
       api("/studio/api/agents"),
     ]);
-    setChrome("tune", "Very light tuning");
+    setChrome("tune", "Tuning");
+    const coach = el("input", { type: "text", list: "model-list", placeholder: "none" });
+    modelList().catch(() => {});
     const picker = el(
       "select",
       {},
@@ -1165,28 +1408,44 @@
         })
       )
     );
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
-      card("How this works", [
-        el("p", {
-          class: "muted",
-          text: "On-device tuning searches for the shortest instruction pack — a preamble, a few rules, and the clearest examples — and scores each candidate against held-out pairs. It is a handful of small calls, so it finishes on a phone. Pick the cloud backend in settings for real weight training.",
-        }),
-        el("div", { class: "row-between" }, [
-          el("span", { class: "pill", text: `backend: ${data.backend}` }),
+      card("Two ways to tune", [
+        el("div", { class: "list-item" }, [
+          el("span", { class: "grow" }, [
+            el("strong", { text: "Local (very light)" }),
+            el("span", { text: data.options.local.note }),
+          ]),
           el("span", {
-            class: `pill ${data.enabled ? "good" : "bad"}`,
-            text: data.enabled ? "tuning on" : "tuning off",
+            class: `pill ${data.options.local.enabled ? "good" : ""}`,
+            text: data.options.local.enabled ? "on" : "per chat",
           }),
         ]),
+        el("div", { class: "list-item" }, [
+          el("span", { class: "grow" }, [
+            el("strong", { text: "Server (weights)" }),
+            el("span", { text: data.options.server.note }),
+          ]),
+          el("span", {
+            class: `pill ${data.options.server.enabled ? "good" : "bad"}`,
+            text: data.options.server.enabled ? "ready" : "no trainer set",
+          }),
+        ]),
+        el("p", {
+          class: "muted",
+          text: "Local tuning searches for the shortest instruction pack and scores it on held-out examples. Give it a coach model and a server model writes the candidates while your local model is scored — server teaching local.",
+        }),
       ]),
       card("Make a tune pack", [
         el("label", {}, ["Agent", picker]),
+        el("label", {}, ["Coach model (optional, e.g. a server model)", coach]),
         el("button", {
           class: "primary",
           text: "Create pack",
           onclick: async () => {
             const pack = await post("/studio/api/tuning/packs", {
               agent_id: picker.value,
+              teacher_model: coach.value.trim() || null,
             });
             notify(`Created ${pack.name}`);
             go(`tune/${picker.value}`);
@@ -1216,21 +1475,11 @@
                     text: "Add examples",
                     onclick: () => openSampleSheet(pack),
                   }),
-                  el("button", {
-                    class: "primary",
-                    text: "Run tune",
-                    onclick: async () => {
-                      try {
-                        const job = await post(
-                          `/studio/api/tuning/packs/${pack.id}/start`
-                        );
-                        notify("Tuning started.");
-                        go(`job/${job.id}`);
-                      } catch (error) {
-                        notify(error.message);
-                      }
-                    },
-                  }),
+                  tuneButton(pack, "local_light", "Tune locally", data.options.local.enabled || pack.opted_in),
+                  tuneButton(pack, "cloud", "Tune on server", data.options.server.enabled),
+                  pack.teacher_model
+                    ? el("span", { class: "pill", text: `coach: ${pack.teacher_model}` })
+                    : null,
                 ]),
               ])
             )
@@ -1251,6 +1500,24 @@
           : empty("No tuning runs yet.")
       )
     );
+  }
+
+  function tuneButton(pack, backend, label, available) {
+    return el("button", {
+      class: backend === "cloud" ? "secondary" : "primary",
+      text: label,
+      disabled: !available,
+      title: available ? "" : "Not set up yet",
+      onclick: async () => {
+        try {
+          const job = await post(`/studio/api/tuning/packs/${pack.id}/start`, { backend });
+          notify(backend === "cloud" ? "Sent to the trainer." : "Tuning started.");
+          go(`job/${job.id}`);
+        } catch (error) {
+          notify(error.message);
+        }
+      },
+    });
   }
 
   function openSampleSheet(pack) {
@@ -1283,8 +1550,10 @@
   }
 
   async function renderJob(jobId) {
+    const generation = renderGeneration;
     const job = await api(`/studio/api/tuning/jobs/${jobId}`);
     setChrome("job", "Tuning run");
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
       card(job.message || "Tuning", [
         el("div", { class: "row-between" }, [
@@ -1301,6 +1570,16 @@
           el("span", { text: job.score == null ? "—" : job.score }),
         ]),
         job.error ? el("p", { class: "muted", text: job.error }) : null,
+        job.backend === "cloud" && ["queued", "running"].includes(job.status)
+          ? el("button", {
+              class: "secondary",
+              text: "Check the trainer now",
+              onclick: async () => {
+                await post(`/studio/api/tuning/jobs/${jobId}/refresh`);
+                render();
+              },
+            })
+          : null,
         ["queued", "running"].includes(job.status)
           ? el("button", {
               class: "danger",
@@ -1321,6 +1600,7 @@
   }
 
   async function renderMore() {
+    const generation = renderGeneration;
     const [overview, vault, { agents }, connect] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
@@ -1332,6 +1612,7 @@
       {},
       agents.map((agent) => el("option", { value: agent.id, text: agent.name }))
     );
+    if (generation !== renderGeneration) return;
     view.replaceChildren(
       connectCard(connect),
       card("Tuning", [
@@ -1373,6 +1654,38 @@
               class: "muted",
               text: "Set STUDIO_OBSIDIAN_VAULT in the admin settings to the vault folder. On iOS that is usually in iCloud Drive under iCloud~md~obsidian.",
             }),
+        el("p", {
+          class: "muted",
+          text: vault.memory_sync
+            ? "Memory mirroring is on: every agent's memory is kept in the vault as linked notes, one per memory. Edit a note or move it between the Working and Long-term folders, then sync to bring the change back."
+            : "Mirror every agent's memory into the vault as linked notes — one per memory, grouped by agent and by working vs long-term. Turn on Mirror Memory Into Obsidian in settings to keep it updated automatically.",
+        }),
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "primary",
+            text: "Sync memory",
+            onclick: async () => {
+              try {
+                const result = await post("/studio/api/obsidian/memory/sync");
+                notify(`Pulled ${result.pulled} edit(s), wrote ${result.written} note(s).`);
+              } catch (error) {
+                notify(error.message);
+              }
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "Pull edits only",
+            onclick: async () => {
+              try {
+                const result = await post("/studio/api/obsidian/memory/pull");
+                notify(`Pulled ${result.pulled} edit(s) from Obsidian.`);
+              } catch (error) {
+                notify(error.message);
+              }
+            },
+          }),
+        ]),
         el("label", {}, ["Import Inbox notes into", picker]),
         el("button", {
           class: "secondary",
@@ -1402,15 +1715,19 @@
   /* ----------------------------------------------------------------- render */
 
   async function render() {
+    renderGeneration += 1;
+    const generation = renderGeneration;
     stopPolling();
     const { name, id } = route();
     setChrome(name, headingFor(name));
+    if (generation !== renderGeneration) return;
     view.replaceChildren(el("p", { class: "muted", text: "Loading…" }));
     try {
       switch (name) {
         case "home": return await renderHome();
         case "chats": return await renderChats();
         case "chat": return await renderChat(id);
+        case "room": return await renderRoom(id);
         case "agents": return await renderAgents();
         case "agent": return await renderAgent(id);
         case "task": return await renderTask(id);
@@ -1424,6 +1741,7 @@
         default: return go("home");
       }
     } catch (error) {
+      if (generation !== renderGeneration) return;
       view.replaceChildren(
         error instanceof OfflineError ? offlineCard() : errorCard(error)
       );
@@ -1484,6 +1802,35 @@
     ]);
   }
 
+  function modelEditor(agent) {
+    const input = el("input", { type: "text", list: "model-list", value: agent.model });
+    modelList().catch(() => {});
+    return el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [el("label", {}, ["Model (server, or local/<id>)", input])]),
+      el("button", {
+        class: "secondary",
+        text: "Save",
+        onclick: async () => {
+          if (!input.value.trim()) return notify("Pick a model.");
+          await patch(`/studio/api/agents/${agent.id}`, { updates: { model: input.value.trim() } });
+          notify("Model updated.");
+          render();
+        },
+      }),
+    ]);
+  }
+
+  async function modelList() {
+    const data = await api("/studio/api/models/available");
+    const list = el("datalist", { id: "model-list" }, [
+      ...data.local.models.map((model) => el("option", { value: model, label: "local" })),
+      ...data.server.map((model) => el("option", { value: model, label: "server" })),
+    ]);
+    document.getElementById("model-list")?.remove();
+    document.body.append(list);
+    return data;
+  }
+
   function errorCard(error) {
     return card("Something went wrong", [
       el("p", { class: "muted", text: error.message }),
@@ -1518,6 +1865,7 @@
         home: "Studio",
         chats: "Chats",
         chat: "Chat",
+        room: "Room",
         agents: "Agents",
         agent: "Agent",
         task: "Agent task",

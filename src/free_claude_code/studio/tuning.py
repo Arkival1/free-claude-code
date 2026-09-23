@@ -1,5 +1,6 @@
 """Very light, phone-sized tuning plus delegation to a cloud trainer."""
 
+import asyncio
 import json
 import re
 from collections.abc import Sequence
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 import httpx
 from loguru import logger
 
+from free_claude_code.config.provider_catalog import SUPPORTED_PROVIDER_IDS
 from free_claude_code.core.json_types import JsonObject
 
 from .llm import ChatMessage, StudioLLMError, StudioModelRouter
@@ -17,6 +19,9 @@ from .store import StudioStore
 MAX_EXEMPLARS = 4
 MAX_EVAL_SAMPLES = 6
 DEFAULT_ROUNDS = 3
+CLOUD_POLL_SECONDS = 30.0
+CLOUD_MAX_WAIT_SECONDS = 6 * 3600.0
+CLOUD_TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 _WORD_PATTERN = re.compile(r"[a-z0-9']+")
 
 STYLE_REQUEST = (
@@ -219,12 +224,18 @@ class LightTuner:
         default_model: str,
         rounds: int = DEFAULT_ROUNDS,
         cloud: CloudTuner | None = None,
+        cloud_provider: str = "",
+        poll_interval: float = CLOUD_POLL_SECONDS,
+        max_wait: float = CLOUD_MAX_WAIT_SECONDS,
     ) -> None:
         self._store = store
         self._router = router
         self._default_model = default_model
         self._rounds = max(1, min(rounds, 8))
         self._cloud = cloud
+        self._cloud_provider = cloud_provider.strip().strip("/")
+        self._poll_interval = max(0.0, poll_interval)
+        self._max_wait = max(0.0, max_wait)
 
     async def create_pack(
         self,
@@ -233,6 +244,8 @@ class LightTuner:
         name: str = "",
         backend: str = "local_light",
         base_model: str = "",
+        teacher_model: str | None = None,
+        opted_in: bool = False,
     ) -> TunePack:
         """Create an inactive pack the user can fill with examples."""
         pack = TunePack.model_validate(
@@ -240,7 +253,9 @@ class LightTuner:
                 "agent_id": agent.id,
                 "name": name or f"{agent.name} light tune",
                 "base_model": base_model or agent.model or self._default_model,
+                "teacher_model": teacher_model or None,
                 "backend": backend,
+                "opted_in": opted_in,
             }
         )
         await self._store.put(pack)
@@ -344,7 +359,9 @@ class LightTuner:
                 message=f"Round {round_index} of {self._rounds}",
                 score=best_score,
             )
-            preamble, rules = await self._propose(model, split.train, round_index)
+            preamble, rules = await self._propose(
+                pack.teacher_model or model, split.train, round_index
+            )
             candidate = await self._evaluate(
                 model,
                 _render_card(preamble, rules),
@@ -457,48 +474,116 @@ class LightTuner:
     async def _run_cloud(self, job: TuneJob) -> TuneJob:
         if self._cloud is None:
             raise TuningError(
-                "Cloud tuning is not configured. Set the cloud trainer URL and key."
+                "Server tuning is not configured. Set the Cloud Trainer URL and key."
             )
         pack = await self._store.require(TunePack, job.pack_id)
         samples = await self._store.find(TuneSample, where={"pack_id": pack.id})
         job = await self._progress(job, step=1, message="Uploading training data")
         remote_id = await self._cloud.submit(
-            base_model=pack.base_model or self._default_model,
+            base_model=self.trainer_model(pack.base_model or self._default_model),
             samples=samples,
             system=pack.preamble,
         )
         await self._store.put(
             pack.model_copy(update={"remote_job_id": remote_id, "updated_at": now_ms()})
         )
-        job = await self._progress(job, step=2, message="Training in the cloud")
+        job = await self._progress(job, step=2, message="Training on the server")
+        waited = 0.0
+        while True:
+            outcome = await self._check_cloud(job, remote_id)
+            if outcome is not None:
+                return outcome
+            if waited >= self._max_wait:
+                return await self._progress(
+                    job,
+                    step=2,
+                    message=(
+                        f"Still training after {waited / 3600:.1f} h. "
+                        "Refresh this run later."
+                    ),
+                )
+            await asyncio.sleep(self._poll_interval)
+            waited += self._poll_interval or 1.0
+
+    def trainer_model(self, model_ref: str) -> str:
+        """Return the name a fine-tuning API knows, without FCC's provider prefix."""
+        provider, separator, rest = model_ref.partition("/")
+        if not separator:
+            return model_ref
+        if provider == self._cloud_provider or provider in SUPPORTED_PROVIDER_IDS:
+            return rest
+        return model_ref
+
+    async def refresh(self, job_id: str) -> TuneJob:
+        """Check a server tuning run once, e.g. after the app restarted."""
+        job = await self._store.require(TuneJob, job_id)
+        if job.backend != "cloud" or job.status not in {"queued", "running"}:
+            return job
+        if self._cloud is None:
+            return await self._fail(job, "Server tuning is not configured.")
+        pack = await self._store.require(TunePack, job.pack_id)
+        if not pack.remote_job_id:
+            return job
+        try:
+            outcome = await self._check_cloud(job, pack.remote_job_id)
+        except (TuningError, httpx.HTTPError) as error:
+            return await self._fail(job, str(error))
+        return outcome or await self._store.require(TuneJob, job_id)
+
+    async def _check_cloud(self, job: TuneJob, remote_id: str) -> TuneJob | None:
+        """Poll once; return the finished job, or None while it still trains."""
+        assert self._cloud is not None
+        current = await self._store.require(TuneJob, job.id)
+        if current.status == "cancelled":
+            return current
         status, tuned_model = await self._cloud.poll(remote_id)
         if status in {"failed", "cancelled"}:
-            raise TuningError(f"Cloud trainer reported status {status}.")
-        if tuned_model:
-            updated = await self._store.require(TunePack, pack.id)
-            await self._store.put(
-                updated.model_copy(
-                    update={
-                        "remote_model": tuned_model,
-                        "active": True,
-                        "updated_at": now_ms(),
-                    }
-                )
+            raise TuningError(f"The trainer reported the run {status}.")
+        if status not in CLOUD_TERMINAL or not tuned_model:
+            await self._progress(
+                job, step=2, message=f"Training on the server ({status})"
             )
-        finished = job.model_copy(
+            return None
+        pack = await self._store.require(TunePack, job.pack_id)
+        applied = await self._apply_cloud_model(pack, tuned_model)
+        finished = current.model_copy(
             update={
-                "status": "succeeded" if tuned_model else "running",
-                "step": 3 if tuned_model else 2,
+                "status": "succeeded",
+                "step": 3,
                 "message": (
-                    f"Cloud model ready: {tuned_model}"
-                    if tuned_model
-                    else f"Cloud job {remote_id} is {status}"
+                    f"Tuned model ready and in use: {applied}"
+                    if applied
+                    else f"Tuned model ready: {tuned_model}. Set Cloud Trainer "
+                    "Provider to use it automatically."
                 ),
                 "updated_at": now_ms(),
             }
         )
         await self._store.put(finished)
         return finished
+
+    async def _apply_cloud_model(self, pack: TunePack, tuned_model: str) -> str | None:
+        """Record the tuned model and point the agent at it when routable."""
+        ref = f"{self._cloud_provider}/{tuned_model}" if self._cloud_provider else None
+        await self._store.put(
+            pack.model_copy(
+                update={
+                    "remote_model": tuned_model,
+                    "active": True,
+                    "metrics": {**pack.metrics, "tuned_model_ref": ref or ""},
+                    "updated_at": now_ms(),
+                }
+            )
+        )
+        agent = await self._store.get(Agent, pack.agent_id)
+        if agent is None or ref is None:
+            return None
+        await self._store.put(
+            agent.model_copy(
+                update={"model": ref, "tune_pack_id": pack.id, "updated_at": now_ms()}
+            )
+        )
+        return ref
 
 
 def _render_card(preamble: str, rules: Sequence[str]) -> str:

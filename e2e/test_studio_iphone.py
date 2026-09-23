@@ -78,3 +78,78 @@ def test_an_unreachable_server_shows_a_readable_screen(
         page.locator(".card", has_text="Can't reach your Studio server")
     ).to_be_visible()
     expect(page.get_by_role("button", name="Try again")).to_be_visible()
+
+
+def test_agents_answer_each_other_in_a_room(page: Page, admin_base_url: str) -> None:
+    for name, model in (("Lead", "open_router/e2e-default"), ("Local", "local/tiny")):
+        page.request.post(
+            f"{admin_base_url}/studio/api/agents",
+            data={"name": name, "model": model, "tools": []},
+        )
+    open_studio(page, admin_base_url)
+
+    page.locator('.tab[data-route="chats"]').click()
+    expect(page.locator(".card", has_text="Agent room")).to_be_visible()
+    page.get_by_role("button", name="Open room").click()
+
+    expect(page.locator("#view-title")).to_have_text("Lead & Local")
+    expect(page.locator(".pill", has_text="local").first).to_be_visible()
+
+    page.get_by_placeholder("Message the room — @Name to ask one agent").fill("Hi both")
+    page.get_by_role("button", name="Send").click()
+
+    expect(page.locator(".bubble.user", has_text="Hi both")).to_be_visible()
+    expect(
+        page.locator(
+            ".bubble.assistant", has_text="Lead (open_router/e2e-default) is on it."
+        )
+    ).to_be_visible()
+    expect(
+        page.locator(".bubble.assistant", has_text="Local (tiny) is on it.")
+    ).to_be_visible()
+
+
+def test_a_slow_screen_never_paints_over_the_next_one(
+    page: Page, admin_base_url: str
+) -> None:
+    def slow_overview(route) -> None:
+        page.wait_for_timeout(1200)
+        route.continue_()
+
+    def is_overview(response) -> bool:
+        return response.url.endswith("/studio/api/overview")
+
+    page.set_viewport_size(IPHONE_VIEWPORT)
+    page.route("**/studio/api/overview", slow_overview)
+    page.goto(f"{admin_base_url}/studio")
+    expect(page.locator(".tab-bar")).to_be_visible()
+
+    page.locator('.tab[data-route="learn"]').click()  # while Home is still loading
+    expect(page.locator(".card", has_text="Open a class")).to_be_visible()
+
+    # Home loads the overview, sets up the starter agents, then loads it again.
+    page.wait_for_event("response", is_overview, timeout=10_000)
+    page.wait_for_event("response", is_overview, timeout=10_000)
+    page.wait_for_timeout(300)  # time for a stale paint to land, if one could
+
+    expect(page.locator(".card", has_text="Open a class")).to_be_visible()
+    expect(page.locator(".card", has_text="Welcome")).to_have_count(0)
+
+
+def test_classes_default_to_a_server_teacher_and_a_local_student(
+    page: Page, admin_base_url: str
+) -> None:
+    for name, model in (("Big", "open_router/e2e-default"), ("Small", "local/tiny")):
+        page.request.post(
+            f"{admin_base_url}/studio/api/agents",
+            data={"name": name, "model": model, "tools": []},
+        )
+    page.set_viewport_size(IPHONE_VIEWPORT)
+    page.goto(f"{admin_base_url}/studio#learn")
+    card = page.locator(".card", has_text="Open a class")
+    expect(card).to_be_visible()
+
+    teacher = card.locator("select").nth(0)
+    student = card.locator("select").nth(1)
+    expect(teacher.locator("option:checked")).to_contain_text("server")
+    expect(student.locator("option:checked")).to_contain_text("local")

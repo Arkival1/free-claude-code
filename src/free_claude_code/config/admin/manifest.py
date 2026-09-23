@@ -695,6 +695,17 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         secret=True,
     ),
     ConfigFieldSpec(
+        "STUDIO_CLOUD_TUNING_PROVIDER",
+        "Cloud Trainer Provider",
+        "studio",
+        "text",
+        settings_attr="studio_cloud_tuning_provider",
+        description=(
+            "FCC provider that serves models the trainer produces, e.g. openai or "
+            "together. When set, a finished server tune switches the agent to it."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_TEACHER_ENABLED",
         "AI Teacher",
         "studio",
@@ -752,6 +763,17 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "boolean",
         settings_attr="studio_obsidian_auto_sync",
         description="Write a note every time a chat turn or class finishes.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_OBSIDIAN_MEMORY_SYNC",
+        "Mirror Memory Into Obsidian",
+        "studio",
+        "boolean",
+        settings_attr="studio_obsidian_memory_sync",
+        description=(
+            "Keep every agent's working and long-term memory in the vault as "
+            "linked notes, one per memory, updated as agents learn."
+        ),
     ),
     ConfigFieldSpec(
         "STUDIO_MEMORY_WORKING_LIMIT",

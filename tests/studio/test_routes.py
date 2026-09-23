@@ -292,3 +292,54 @@ async def test_proxy_auth_guards_studio(make_studio):
         with_query = await client.get("/studio/api/overview?token=s3cret")
         assert with_query.status_code == 200
     await app.state.services.admin.close()
+
+
+@pytest.mark.asyncio
+async def test_rooms_run_in_the_background_and_report_progress(make_studio):
+    studio, _ = make_studio(lambda system, prompt: "Room reply.")
+    app = create_test_app(studio=studio)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        lead = (
+            await client.post("/studio/api/agents", json={"name": "Lead", "tools": []})
+        ).json()
+        room = (
+            await client.post(
+                "/studio/api/rooms", json={"title": "Team", "member_ids": [lead["id"]]}
+            )
+        ).json()
+        assert room["kind"] == "room"
+
+        posted = await client.post(
+            f"/studio/api/rooms/{room['id']}/messages", json={"text": "hello"}
+        )
+        assert posted.status_code == 202
+        assert (await client.get(f"/studio/api/rooms/{room['id']}")).json()["running"]
+
+        await studio.wait_for_background()
+        detail = (await client.get(f"/studio/api/rooms/{room['id']}")).json()
+        assert detail["running"] is False
+        assert [member["name"] for member in detail["members"]] == ["Lead"]
+        assert detail["messages"][-1]["text"] == "Room reply."
+
+        tail = (
+            await client.get(
+                f"/studio/api/rooms/{room['id']}",
+                params={"after": detail["messages"][-1]["sequence"]},
+            )
+        ).json()
+        assert tail["messages"] == []
+
+        task = await client.post(
+            f"/studio/api/rooms/{room['id']}/task", json={"goal": "Plan a picnic"}
+        )
+        assert task.status_code == 202
+        stopped = await client.post(f"/studio/api/rooms/{room['id']}/stop")
+        assert stopped.json()["settings"]["stop_requested"] is True
+        await studio.wait_for_background()
+
+        listed = (await client.get("/studio/api/rooms")).json()["rooms"]
+        assert [item["id"] for item in listed] == [room["id"]]
+    await studio.shutdown()
+    await app.state.services.admin.close()

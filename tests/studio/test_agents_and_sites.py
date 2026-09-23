@@ -153,3 +153,17 @@ async def test_site_rejects_oversized_files(tmp_path):
     workspace = SiteWorkspace(tmp_path)
     with pytest.raises(SiteError):
         await workspace.write("site_1", "index.html", "x" * 600_000)
+
+
+@pytest.mark.parametrize(
+    "name", ["con.html", "NUL.css", "com1.js", "lpt9.txt", "page..html."]
+)
+def test_windows_reserved_names_are_refused(tmp_path, name):
+    with pytest.raises(SiteError):
+        SiteWorkspace(tmp_path).resolve("site_1", name)
+
+
+def test_ordinary_names_that_start_like_reserved_ones_are_fine(tmp_path):
+    workspace = SiteWorkspace(tmp_path)
+    assert workspace.resolve("site_1", "console.html").name == "console.html"
+    assert workspace.resolve("site_1", "contact.html").name == "contact.html"

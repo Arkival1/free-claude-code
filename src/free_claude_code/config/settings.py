@@ -673,6 +673,12 @@ class Settings(BaseModel):
     studio_cloud_tuning_api_key: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_CLOUD_TUNING_API_KEY"
     )
+    studio_cloud_tuning_provider: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_CLOUD_TUNING_PROVIDER"
+    )
+    studio_obsidian_memory_sync: bool = Field(
+        default=False, validation_alias="STUDIO_OBSIDIAN_MEMORY_SYNC"
+    )
     studio_teacher_enabled: bool = Field(
         default=False, validation_alias="STUDIO_TEACHER_ENABLED"
     )

@@ -163,6 +163,28 @@ class AgentRunner:
             )
         return finished
 
+    async def respond(
+        self,
+        agent: Agent,
+        chat: Chat,
+        *,
+        history: list[ChatMessage],
+        query: str,
+        extra_system: str = "",
+        max_steps: int | None = None,
+    ) -> TurnResult:
+        """Take one turn in an existing conversation someone else is driving."""
+        context = ToolContext(agent_id=agent.id, chat_id=chat.id, site_id=chat.site_id)
+        return await self._loop(
+            agent,
+            chat,
+            history=history,
+            context=context,
+            query=query,
+            max_steps=max_steps or self._max_steps,
+            extra_system=extra_system,
+        )
+
     async def _loop(
         self,
         agent: Agent,
@@ -172,9 +194,12 @@ class AgentRunner:
         context: ToolContext,
         query: str,
         max_steps: int,
+        extra_system: str = "",
     ) -> TurnResult:
         specs = tool_specs(agent.tools)
         system = await self.system_prompt(agent, query=query, site_id=context.site_id)
+        if extra_system:
+            system = f"{system}\n\n{extra_system}"
         model = agent.model or self._default_model
         used: list[str] = []
         for step in range(1, max_steps + 1):

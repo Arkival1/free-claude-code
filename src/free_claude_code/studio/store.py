@@ -27,7 +27,16 @@ from .models import (
 )
 
 _JSON_FIELDS = frozenset(
-    {"tools", "tags", "settings", "data", "exemplars", "style_rules", "metrics"}
+    {
+        "tools",
+        "tags",
+        "settings",
+        "data",
+        "exemplars",
+        "style_rules",
+        "metrics",
+        "member_ids",
+    }
 )
 
 TABLES: Mapping[type[Record], str] = {
@@ -80,10 +89,15 @@ def _encode(record: Record) -> dict[str, object]:
 
 
 def _decode[T: Record](model: type[T], row: sqlite3.Row) -> T:
-    values: dict[str, object] = {key: row[key] for key in model.model_fields}
-    for key in values.keys() & _JSON_FIELDS:
-        raw = values[key]
-        values[key] = json.loads(raw) if isinstance(raw, str) else raw
+    values: dict[str, object] = {}
+    for key, field in model.model_fields.items():
+        raw = row[key]
+        if raw is None and field.default is not None:
+            # A column added after this row was written: let the default apply.
+            continue
+        values[key] = (
+            json.loads(raw) if key in _JSON_FIELDS and isinstance(raw, str) else raw
+        )
     return model.model_validate(values)
 
 

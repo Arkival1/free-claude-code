@@ -1,7 +1,9 @@
 """HTTP adapter for the Studio app: agents, models, tuning, and classes."""
 
+import asyncio
 import secrets
 import socket
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -92,6 +94,11 @@ class DownloadPayload(BaseModel):
 class PackPayload(BaseModel):
     agent_id: str
     name: str = ""
+    teacher_model: str | None = None
+
+
+class TuneStartPayload(BaseModel):
+    backend: str | None = None
 
 
 class SamplePayload(BaseModel):
@@ -103,6 +110,8 @@ class CoursePayload(BaseModel):
     topic: str
     lesson_count: int = 3
     start: bool = True
+    teacher_id: str | None = None
+    student_id: str | None = None
 
 
 class MemoryPayload(BaseModel):
@@ -116,6 +125,20 @@ class GuidePayload(BaseModel):
 
 class BootstrapPayload(BaseModel):
     download_guide: bool = False
+
+
+class RoomPayload(BaseModel):
+    title: str = ""
+    member_ids: list[str] = Field(default_factory=list)
+    goal: str = ""
+
+
+class RoomMembersPayload(BaseModel):
+    member_ids: list[str]
+
+
+class GoalPayload(BaseModel):
+    goal: str
 
 
 class SyncPayload(BaseModel):
@@ -265,7 +288,8 @@ def _reachable_hosts(bound_host: str) -> tuple[str, ...]:
     if _is_loopback_bind(bound_host):
         return tuple(hosts)
     hostname = socket.gethostname()
-    if hostname and "." not in hostname:
+    # Windows does not reliably answer Bonjour names, so offer IPs only there.
+    if hostname and "." not in hostname and sys.platform != "win32":
         hosts.append(f"{hostname}.local")
     for address in _local_addresses():
         if address not in hosts:
@@ -455,6 +479,96 @@ async def delete_chat(
     return {"deleted": await studio.delete_chat(chat_id)}
 
 
+@router.get("/studio/api/rooms")
+async def list_rooms(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Return every agent chat room."""
+    return {"rooms": [room.model_dump() for room in await studio.rooms()]}
+
+
+@router.post("/studio/api/rooms")
+async def create_room(
+    payload: RoomPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Open a room; with no members listed, every working agent joins."""
+    room = await studio.create_room(
+        title=payload.title, member_ids=payload.member_ids, goal=payload.goal
+    )
+    return room.model_dump()
+
+
+@router.get("/studio/api/rooms/{room_id}")
+async def read_room(
+    room_id: str,
+    after: int = 0,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Return a room, its members, task state, and transcript."""
+    return await studio.room_detail(room_id, after=after)
+
+
+@router.put("/studio/api/rooms/{room_id}/members")
+async def set_room_members(
+    room_id: str,
+    payload: RoomMembersPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Change who is in a room."""
+    room = await studio.room_members(room_id, payload.member_ids)
+    return room.model_dump()
+
+
+@router.post("/studio/api/rooms/{room_id}/messages", status_code=202)
+async def room_message(
+    room_id: str,
+    payload: MessagePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Post to the room; agents answer in the background."""
+    await studio.room_say(room_id, payload.text)
+    return {"accepted": True}
+
+
+@router.post("/studio/api/rooms/{room_id}/task", status_code=202)
+async def room_task(
+    room_id: str,
+    payload: GoalPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Start a task the agents plan, hand off, and finish together."""
+    await studio.room_start_task(room_id, payload.goal)
+    return {"accepted": True}
+
+
+@router.post("/studio/api/rooms/{room_id}/continue", status_code=202)
+async def room_continue(
+    room_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Let the agents keep going after a pause."""
+    await studio.room_continue(room_id)
+    return {"accepted": True}
+
+
+@router.post("/studio/api/rooms/{room_id}/stop")
+async def room_stop(
+    room_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Stop the agents after the turn in progress."""
+    room = await studio.room_stop(room_id)
+    return room.model_dump()
+
+
 @router.post("/studio/api/tasks")
 async def start_task(
     payload: TaskPayload,
@@ -597,6 +711,31 @@ async def list_models(
     }
 
 
+@router.get("/studio/api/models/available")
+async def available_models(
+    services: ApiServices = Depends(get_services),
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Return server models FCC can route to and local models being served."""
+    # Right after startup the provider catalog is still loading; wait briefly.
+    try:
+        snapshot = await asyncio.wait_for(services.requests.wait_for_catalog(), 5.0)
+        infos = snapshot.cached_prefixed_model_infos()
+    except TimeoutError:
+        infos = services.requests.cached_prefixed_model_infos()
+    settings = services.requests.current_settings()
+    configured = {settings.model, *(settings.model_fallbacks or ())}
+    if settings.studio_default_model:
+        configured.add(settings.studio_default_model)
+    server = sorted({info.model_id for info in infos} | configured)
+    return {
+        "default_model": studio.default_model,
+        "server": server,
+        "local": await studio.local_models(),
+    }
+
+
 @router.post("/studio/api/models/download")
 async def download_model(
     payload: DownloadPayload,
@@ -655,6 +794,7 @@ async def tuning_state(
     return {
         "enabled": studio.settings.studio_light_tuning_enabled,
         "backend": studio.settings.studio_tuning_backend,
+        "options": studio.tuning_options(),
         "packs": [pack.model_dump() for pack in packs],
         "jobs": [{**job.model_dump(), "progress": job.progress} for job in jobs],
     }
@@ -667,7 +807,9 @@ async def create_pack(
     _: None = Access,
 ) -> JsonObject:
     """Create one tune pack for an agent."""
-    pack = await studio.create_pack(payload.agent_id, name=payload.name)
+    pack = await studio.create_pack(
+        payload.agent_id, name=payload.name, teacher_model=payload.teacher_model
+    )
     return pack.model_dump()
 
 
@@ -687,11 +829,24 @@ async def add_samples(
 @router.post("/studio/api/tuning/packs/{pack_id}/start")
 async def start_tuning(
     pack_id: str,
+    payload: TuneStartPayload | None = None,
     studio: StudioService = Depends(get_studio),
     _: None = Access,
 ) -> JsonObject:
-    """Start a very light tuning run."""
-    job = await studio.start_tuning(pack_id)
+    """Start a tuning run: "local_light" on this machine or "cloud" on the server."""
+    backend = payload.backend if payload is not None else None
+    job = await studio.start_tuning(pack_id, backend=backend)
+    return {**job.model_dump(), "progress": job.progress}
+
+
+@router.post("/studio/api/tuning/jobs/{job_id}/refresh")
+async def refresh_tuning(
+    job_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Check a server tuning run again."""
+    job = await studio.refresh_job(job_id)
     return {**job.model_dump(), "progress": job.progress}
 
 
@@ -740,7 +895,11 @@ async def open_course(
 ) -> JsonObject:
     """Open a class and optionally start teaching it right away."""
     course = await studio.open_class(
-        topic=payload.topic, lesson_count=payload.lesson_count, start=payload.start
+        topic=payload.topic,
+        lesson_count=payload.lesson_count,
+        start=payload.start,
+        teacher_id=payload.teacher_id,
+        student_id=payload.student_id,
     )
     return course.model_dump()
 
@@ -826,7 +985,24 @@ async def obsidian_status(
         "candidates": list(status.candidates),
         "folder": studio.settings.studio_obsidian_folder,
         "auto_sync": studio.settings.studio_obsidian_auto_sync,
+        "memory_sync": studio.settings.studio_obsidian_memory_sync,
     }
+
+
+@router.post("/studio/api/obsidian/memory/sync")
+async def obsidian_memory_sync(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Pull memory edits from the vault, then mirror every agent's memory."""
+    return await studio.sync_memory_structure()
+
+
+@router.post("/studio/api/obsidian/memory/pull")
+async def obsidian_memory_pull(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Apply memory edits made in Obsidian without writing anything back."""
+    return {"pulled": await studio.pull_memory_edits()}
 
 
 @router.post("/studio/api/obsidian/sync")

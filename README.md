@@ -367,6 +367,32 @@ chats, memory, tuning, and classes; `models/` for downloaded model files; and
 `sites/` for websites agents build.
 
 <details>
+<summary><strong>Running Studio on Windows, step by step</strong></summary>
+
+1. Get the code: download this branch as a zip and extract it, or run
+   `git clone` in PowerShell. Put it somewhere without spaces if you can,
+   such as `C:\fcc`.
+2. Open the folder, then `scripts\windows`, and double-click
+   **start-studio.cmd**. The first run installs [uv](https://docs.astral.sh/uv/)
+   if it is missing, lets uv install Python 3.14 for you, and installs the
+   app's packages into the folder. That takes a few minutes once; later starts
+   take seconds. You do not need to install Python yourself.
+3. Your browser opens `http://localhost:8082/studio`. Leave the black window
+   open — it is the server. Press Ctrl+C in it to stop.
+4. Open `http://localhost:8082/admin` on the same PC to add a provider key or
+   point **Local Model Server** at LM Studio, `llama-server`, or Ollama.
+5. When Windows Firewall asks, allow Python on **Private networks** only. Your
+   phone can then open the address listed under **More → Install on your
+   iPhone**.
+
+From PowerShell you can pass options instead:
+`.\scripts\windows\start-studio.ps1 -Port 9000 -NoBrowser`. Add `-DryRun` to
+see every step without running it. If PowerShell refuses to run scripts,
+the `.cmd` file above already bypasses that for this one script.
+
+</details>
+
+<details>
 <summary><strong>Agents that search the web and build sites</strong></summary>
 
 An agent is a name, a model, a set of tools, its own memory, and optionally its
@@ -382,6 +408,23 @@ traversal, a file-type allowlist, a 512 KB per-file cap, and a file-count cap.
 
 The first run creates four starter agents: **Guide**, **Builder**, **Teacher**,
 and **Student**.
+
+</details>
+
+<details>
+<summary><strong>Agent rooms: agents talking to each other</strong></summary>
+
+A room is a group chat between you and several agents — mix server and local
+models freely. Write to the room and everyone answers in turn; write `@Name`
+to address one agent. Agents hand work to each other the same way: an agent
+that mentions `@Scout` passes the turn to Scout.
+
+**Start task** gives the room a goal. The first member leads: it plans, hands
+parts off, and the room keeps going until an agent replies `TASK COMPLETE:`
+with a summary. A room pauses after eight turns so agents cannot loop forever
+(press **Continue** to let them carry on) and **Stop** halts it after the turn
+in progress. Every agent keeps working notes of what it said, and a finished
+task goes into each member's long-term memory.
 
 </details>
 
@@ -416,24 +459,31 @@ install. `STUDIO_GUIDE_MODEL` selects the model and
 </details>
 
 <details>
-<summary><strong>Very light tuning</strong></summary>
+<summary><strong>Tuning: local or on the server</strong></summary>
 
-On-device tuning is deliberately small: it searches for the shortest
+Every tune pack has two buttons, and you pick per run.
+
+**Tune locally** is deliberately small: it searches for the shortest
 instruction pack — a preamble, up to five rules, and the clearest few
 exemplars — and scores each candidate with token-F1 against held-out pairs your
 examples are split into. That is a handful of short calls per run
-(`STUDIO_TUNING_ROUNDS`, default 3), so it finishes on a phone, and the run
-reports its baseline score, its tuned score, and live progress. It changes no
-weights.
+(`STUDIO_TUNING_ROUNDS`, default 3), and it reports its baseline score, its
+tuned score, and live progress. It changes no weights, so it works for any
+model, including local ones. Give the pack a **coach model** and a server model
+writes the candidate packs while your local model is the one scored — the
+server teaching the local model.
 
-Switch `STUDIO_TUNING_BACKEND` to `cloud` and set
-`STUDIO_CLOUD_TUNING_BASE_URL`/`STUDIO_CLOUD_TUNING_API_KEY` to send the same
-dataset to an OpenAI-compatible fine-tuning API for real weight training
-instead.
+**Tune on server** sends the same examples to an OpenAI-compatible fine-tuning
+API (`STUDIO_CLOUD_TUNING_BASE_URL`, `STUDIO_CLOUD_TUNING_API_KEY`) for real
+weight training, polls until it finishes, and — when
+`STUDIO_CLOUD_TUNING_PROVIDER` names the FCC provider that serves the result —
+switches the agent to the tuned model. Server tuning trains server models; an
+agent on a local model gets a clear refusal pointing it at local tuning.
 
-Tuning is off until `STUDIO_LIGHT_TUNING_ENABLED` is on, or until you turn it
-on for one chat: a chat's settings sheet has a **Very light tuning** toggle,
-and switching it on opens a fresh chat bound to that agent's tune pack.
+Local tuning is off until `STUDIO_LIGHT_TUNING_ENABLED` is on, or until you
+turn it on for one agent: a chat's settings sheet has a **Very light tuning**
+toggle, and switching it on opens a fresh chat bound to that agent's tune pack
+and allows that pack to run.
 
 </details>
 
@@ -447,10 +497,16 @@ student answers each question without the lesson transcript, and the teacher
 grades every answer against its own rubric. Pass or fail is decided by
 `STUDIO_CLASS_PASS_MARK`.
 
+Pick any two agents as teacher and student when you open the class. The point
+is a server model teaching a local one: the teacher's calls go through FCC to
+your provider, the student's go straight to your local runtime, and the Models
+tab shows which local models that runtime is serving right now.
+
 What the teacher marks as worth remembering goes into the student's long-term
 memory, and a pass with light tuning enabled queues a tune built from the
-class. `STUDIO_TEACHER_MODEL` and `STUDIO_STUDENT_MODEL` pick the two models;
-the student is meant to be a small local one.
+class — coached by the teacher's model and scored on the student's.
+`STUDIO_TEACHER_MODEL` and `STUDIO_STUDENT_MODEL` set the default Teacher and
+Student agents' models.
 
 </details>
 
@@ -468,6 +524,15 @@ classes, and agent memories as markdown notes with YAML frontmatter under
 under `iCloud~md~obsidian`; Studio lists the vaults it can see on the device.
 Notes you drop in the vault's `Inbox` folder import into an agent's memory, and
 `STUDIO_OBSIDIAN_AUTO_SYNC` writes a note after every chat turn.
+
+**Sync memory** mirrors the memory structure itself: a `Memory index` note,
+a hub note per agent, and one note per memory under that agent's
+`Working memory` or `Long-term memory` folder, all wikilinked. It works both
+ways — edit a memory note in Obsidian, or drag it between the two folders to
+change its scope, and the next sync brings the change into Studio. Studio only
+ever deletes notes it wrote itself, and never overwrites a memory note you
+edited since its last pull. `STUDIO_OBSIDIAN_MEMORY_SYNC` keeps the mirror
+current after every chat turn, room conversation, and class.
 
 </details>
 

@@ -19,7 +19,13 @@ from free_claude_code.core.json_types import JsonObject
 from .agents import AgentRunner, TurnResult
 from .downloads import CURATED_MODELS, ModelLibrary
 from .guide import GuideAnswer, GuideAssistant, GuideState
-from .llm import LocalOpenAILLM, ProxyLLM, StudioModelRouter
+from .llm import (
+    LOCAL_MODEL_PREFIX,
+    LocalOpenAILLM,
+    ProxyLLM,
+    StudioLLMError,
+    StudioModelRouter,
+)
 from .memory import MemoryService
 from .models import (
     Agent,
@@ -38,6 +44,7 @@ from .models import (
     now_ms,
 )
 from .obsidian import ObsidianVault, VaultStatus
+from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
 from .sites import SiteWorkspace, slugify
 from .store import StudioNotFoundError, StudioStore
@@ -87,6 +94,9 @@ class StudioService:
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._router = router or self._build_router(settings_provider())
         self._tasks: set[asyncio.Task[object]] = set()
+        self._room_locks: dict[str, asyncio.Lock] = {}
+        self._room_activity: dict[str, int] = {}
+        self._memory_sync_lock = asyncio.Lock()
 
     # ---------------------------------------------------------------- wiring
 
@@ -171,6 +181,7 @@ class StudioService:
             default_model=self.default_model,
             rounds=settings.studio_tuning_rounds,
             cloud=cloud,
+            cloud_provider=settings.studio_cloud_tuning_provider or "",
         )
 
     def _school(self) -> School:
@@ -180,6 +191,13 @@ class StudioService:
             memory=self._memory(),
             tuner=self._tuner(),
             default_model=self.default_model,
+        )
+
+    def _rooms(self) -> RoomService:
+        return RoomService(
+            store=self._store,
+            runner=self._runner(),
+            memory=self._memory(),
         )
 
     def _vault(self) -> ObsidianVault:
@@ -399,10 +417,20 @@ class StudioService:
         chat = await self._store.require(Chat, chat_id)
         if chat.agent_id is None:
             raise StudioError("This chat has no agent.")
+        if chat.kind == "room":
+            outcome = await self.room_say(chat.id, text, background=False)
+            last = await self._store.transcript(chat.id, limit=1)
+            reply = last[-1].text if last else ""
+            return TurnResult(
+                text=reply,
+                steps=outcome.turns if outcome else 0,
+                tool_calls=outcome.speakers if outcome else (),
+            )
         agent = await self._store.require(Agent, chat.agent_id)
         if agent.role == "guide":
             return await self._guide_turn(chat, agent, text)
         result = await self._runner().reply(agent, chat, text)
+        await self._after_memory_change([agent.id])
         if chat.title in {"New chat", f"{agent.name} chat"}:
             await self._store.put(
                 chat.model_copy(
@@ -469,6 +497,13 @@ class StudioService:
             raise StudioError("This chat has no agent to tune.")
         agent = await self._store.require(Agent, chat.agent_id)
         pack = await self._active_pack(agent)
+        # Turning tuning on in chat settings is the user's consent for this
+        # agent, so the pack may run without the global switch.
+        updates: dict[str, object] = {"opted_in": True}
+        if pack.teacher_model is None and agent.model.startswith(LOCAL_MODEL_PREFIX):
+            updates["teacher_model"] = self.default_model
+        pack = pack.model_copy(update=updates)
+        await self._store.put(pack)
         fresh = await self.create_chat(
             agent_id=agent.id,
             title=f"{agent.name} (tuned)",
@@ -504,6 +539,127 @@ class StudioService:
         """Delete one chat and its transcript."""
         await self._store.delete_where(Message, {"chat_id": chat_id})
         return await self._store.delete(Chat, chat_id)
+
+    # ----------------------------------------------------------------- rooms
+
+    async def create_room(
+        self, *, title: str = "", member_ids: Sequence[str] = (), goal: str = ""
+    ) -> Chat:
+        """Open a chat room for the user and several agents."""
+        if not member_ids:
+            await self.ensure_defaults()
+            member_ids = [
+                agent.id
+                for agent in await self.agents()
+                if agent.role in {"agent", "teacher", "student", "assistant"}
+            ]
+        try:
+            return await self._rooms().create(
+                title=title, member_ids=member_ids, goal=goal
+            )
+        except RoomError as error:
+            raise StudioError(str(error)) from error
+
+    async def rooms(self) -> tuple[Chat, ...]:
+        """Return every room, most recently active first."""
+        return await self.chats(kind="room")
+
+    async def room_detail(self, room_id: str, *, after: int = 0) -> JsonObject:
+        """Return a room, who is in it, its task state, and its transcript."""
+        room = await self._store.require(Chat, room_id)
+        members = await self._rooms().members(room)
+        messages = await self._store.transcript(room_id, after=after)
+        return {
+            "room": room.model_dump(),
+            "members": [member.model_dump() for member in members],
+            "running": self._room_activity.get(room_id, 0) > 0,
+            "messages": [message.model_dump() for message in messages],
+        }
+
+    async def room_members(self, room_id: str, member_ids: Sequence[str]) -> Chat:
+        """Replace a room's members."""
+        try:
+            return await self._rooms().set_members(room_id, member_ids)
+        except RoomError as error:
+            raise StudioError(str(error)) from error
+
+    async def room_say(
+        self, room_id: str, text: str, *, background: bool = True
+    ) -> RoomOutcome | None:
+        """Post as the user; the addressed agents answer and may hand off."""
+        try:
+            _, speakers = await self._rooms().post(room_id, text)
+        except RoomError as error:
+            raise StudioError(str(error)) from error
+        return await self._drive_room(room_id, speakers, background=background)
+
+    async def room_start_task(
+        self, room_id: str, goal: str, *, background: bool = True
+    ) -> RoomOutcome | None:
+        """Give the room a task; the lead agent plans it and hands parts off."""
+        try:
+            _, speakers = await self._rooms().start_task(room_id, goal)
+        except RoomError as error:
+            raise StudioError(str(error)) from error
+        return await self._drive_room(room_id, speakers, background=background)
+
+    async def room_continue(
+        self, room_id: str, *, background: bool = True
+    ) -> RoomOutcome | None:
+        """Let the lead agent pick the conversation back up."""
+        room = await self._store.require(Chat, room_id)
+        members = await self._rooms().members(room)
+        if not members:
+            raise StudioError("This room has no agents.")
+        return await self._drive_room(room_id, members[:1], background=background)
+
+    async def room_stop(self, room_id: str) -> Chat:
+        """Stop the agents after the turn in progress."""
+        try:
+            return await self._rooms().stop(room_id)
+        except RoomError as error:
+            raise StudioError(str(error)) from error
+
+    async def _drive_room(
+        self, room_id: str, speakers: Sequence[Agent], *, background: bool
+    ) -> RoomOutcome | None:
+        # Count the work as active before it is scheduled, so a status read
+        # made right after posting already reports the agents as talking.
+        self._room_activity[room_id] = self._room_activity.get(room_id, 0) + 1
+        if background:
+            self.spawn(self._converse(room_id, speakers))
+            return None
+        return await self._converse(room_id, speakers)
+
+    async def _converse(self, room_id: str, speakers: Sequence[Agent]) -> RoomOutcome:
+        lock = self._room_locks.setdefault(room_id, asyncio.Lock())
+        try:
+            async with lock:
+                outcome = await self._rooms().converse(room_id, speakers)
+            room = await self._store.require(Chat, room_id)
+            await self._after_memory_change(list(room.member_ids))
+        finally:
+            # Only report the room idle once its memory is mirrored too.
+            remaining = self._room_activity.get(room_id, 1) - 1
+            if remaining > 0:
+                self._room_activity[room_id] = remaining
+            else:
+                self._room_activity.pop(room_id, None)
+        return outcome
+
+    async def _after_memory_change(self, agent_ids: Sequence[str]) -> None:
+        """Mirror memory into Obsidian after agents write to it, when enabled."""
+        settings = self.settings
+        if not (
+            agent_ids
+            and settings.studio_obsidian_memory_sync
+            and settings.studio_obsidian_vault
+        ):
+            return
+        try:
+            await self.sync_memory_structure()
+        except (OSError, RuntimeError) as error:
+            logger.warning("Studio memory mirror failed: {}", error)
 
     # ------------------------------------------------------------ agent runs
 
@@ -548,6 +704,7 @@ class StudioService:
             chat = await self._store.require(Chat, chat_id)
             run = await self._store.require(AgentRun, run_id)
             await self._runner().run_task(agent, chat, run)
+            await self._after_memory_change([agent.id])
         except (StudioNotFoundError, StudioError) as error:
             logger.warning("Studio task {} failed to start: {}", run_id, error)
 
@@ -647,6 +804,25 @@ class StudioService:
             self.spawn(self._library.download(asset.id))
         return asset
 
+    async def local_models(self) -> JsonObject:
+        """Report which models the local runtime is serving right now."""
+        base_url = self.settings.studio_local_base_url
+        try:
+            served = await self._router.local_models()
+        except StudioLLMError as error:
+            return {
+                "base_url": base_url,
+                "reachable": False,
+                "models": [],
+                "error": str(error),
+            }
+        return {
+            "base_url": base_url,
+            "reachable": True,
+            "models": [f"{LOCAL_MODEL_PREFIX}{model}" for model in served],
+            "error": None,
+        }
+
     async def assets(self) -> tuple[ModelAsset, ...]:
         """Return every tracked model download."""
         return await self._library.assets()
@@ -668,11 +844,22 @@ class StudioService:
         where = {"agent_id": agent_id} if agent_id else None
         return await self._store.find(TunePack, where=where, order_by="created_at DESC")
 
-    async def create_pack(self, agent_id: str, *, name: str = "") -> TunePack:
-        """Create one tune pack for an agent."""
+    async def create_pack(
+        self,
+        agent_id: str,
+        *,
+        name: str = "",
+        teacher_model: str | None = None,
+        opted_in: bool = False,
+    ) -> TunePack:
+        """Create one tune pack; a teacher model may coach a local student."""
         agent = await self._store.require(Agent, agent_id)
         return await self._tuner().create_pack(
-            agent, name=name, backend=self.settings.studio_tuning_backend
+            agent,
+            name=name,
+            backend=self.settings.studio_tuning_backend,
+            teacher_model=teacher_model,
+            opted_in=opted_in,
         )
 
     async def add_samples(
@@ -685,12 +872,39 @@ class StudioService:
         """Return the examples attached to a pack."""
         return await self._store.find(TuneSample, where={"pack_id": pack_id})
 
-    async def start_tuning(self, pack_id: str, *, background: bool = True) -> TuneJob:
-        """Queue one tuning run, starting it in the background by default."""
-        if not self.settings.studio_light_tuning_enabled:
+    async def start_tuning(
+        self,
+        pack_id: str,
+        *,
+        backend: str | None = None,
+        background: bool = True,
+    ) -> TuneJob:
+        """Queue a tuning run on the server trainer or locally, per request."""
+        settings = self.settings
+        pack = await self._store.require(TunePack, pack_id)
+        chosen = backend or pack.backend
+        if chosen not in {"local_light", "cloud"}:
+            raise StudioError("Choose local or server tuning.")
+        if chosen == "local_light" and not (
+            settings.studio_light_tuning_enabled or pack.opted_in
+        ):
             raise StudioError(
-                "Light tuning is off. Turn it on in Studio settings or from a "
-                "chat's settings."
+                "Light tuning is off. Turn it on in Studio settings, or in this "
+                "agent's chat settings."
+            )
+        if chosen == "cloud" and not settings.studio_cloud_tuning_base_url:
+            raise StudioError(
+                "Server tuning needs a trainer. Set Cloud Trainer URL and Key in "
+                "Studio settings."
+            )
+        if chosen == "cloud" and pack.base_model.startswith(LOCAL_MODEL_PREFIX):
+            raise StudioError(
+                "Server tuning trains server models, and this agent runs a local "
+                "model. Use local tuning, or give the agent a server model first."
+            )
+        if chosen != pack.backend:
+            await self._store.put(
+                pack.model_copy(update={"backend": chosen, "updated_at": now_ms()})
             )
         tuner = self._tuner()
         try:
@@ -700,6 +914,27 @@ class StudioService:
         if background:
             self.spawn(tuner.run(job.id))
         return job
+
+    async def refresh_job(self, job_id: str) -> TuneJob:
+        """Check a server tuning run again, e.g. after a restart."""
+        return await self._tuner().refresh(job_id)
+
+    def tuning_options(self) -> JsonObject:
+        """Say which tuning backends can run right now and why not."""
+        settings = self.settings
+        return {
+            "local": {
+                "enabled": settings.studio_light_tuning_enabled,
+                "rounds": settings.studio_tuning_rounds,
+                "note": "Instruction-pack search. Runs anywhere, including for local models.",
+            },
+            "server": {
+                "enabled": bool(settings.studio_cloud_tuning_base_url),
+                "provider": settings.studio_cloud_tuning_provider or "",
+                "note": "Weight training on an OpenAI-compatible fine-tuning API.",
+            },
+            "default": settings.studio_tuning_backend,
+        }
 
     async def run_tuning(self, job_id: str) -> TuneJob:
         """Run one queued tuning job to completion and return its final state."""
@@ -730,14 +965,30 @@ class StudioService:
     # ---------------------------------------------------------------- school
 
     async def open_class(
-        self, *, topic: str, lesson_count: int = 3, start: bool = False
+        self,
+        *,
+        topic: str,
+        lesson_count: int = 3,
+        start: bool = False,
+        teacher_id: str | None = None,
+        student_id: str | None = None,
     ) -> Course:
-        """Open a class between the teacher and student agents."""
+        """Open a class; any agent can teach and any other agent can learn."""
         await self.ensure_defaults()
-        teacher = await self.agent_by_name(TEACHER_AGENT_NAME)
-        student = await self.agent_by_name(STUDENT_AGENT_NAME)
+        teacher = (
+            await self._store.require(Agent, teacher_id)
+            if teacher_id
+            else await self.agent_by_name(TEACHER_AGENT_NAME)
+        )
+        student = (
+            await self._store.require(Agent, student_id)
+            if student_id
+            else await self.agent_by_name(STUDENT_AGENT_NAME)
+        )
         if teacher is None or student is None:
             raise StudioError("The teacher and student agents are missing.")
+        if teacher.id == student.id:
+            raise StudioError("Pick two different agents to teach and to learn.")
         course = await self._school().open_course(
             topic=topic,
             teacher=teacher,
@@ -751,9 +1002,13 @@ class StudioService:
 
     async def run_class(self, course_id: str) -> Course:
         """Teach and test one class, tuning the student when it passes."""
-        return await self._school().run_course(
+        course = await self._school().run_course(
             course_id, tune_on_pass=self.settings.studio_light_tuning_enabled
         )
+        await self._after_memory_change(
+            [course.teacher_agent_id, course.student_agent_id]
+        )
+        return course
 
     def start_class(self, course_id: str) -> None:
         """Run a class in the background so the UI can watch it live."""
@@ -794,7 +1049,11 @@ class StudioService:
     ) -> MemoryEntry | None:
         """Write one memory by hand."""
         await self._store.require(Agent, agent_id)
-        return await self._memory().remember(agent_id, text, scope=scope, source="user")
+        entry = await self._memory().remember(
+            agent_id, text, scope=scope, source="user"
+        )
+        await self._after_memory_change([agent_id])
+        return entry
 
     async def forget(self, memory_id: str) -> bool:
         """Delete one memory."""
@@ -854,6 +1113,38 @@ class StudioService:
         entries = await self._memory().entries(agent_id)
         path = await self._vault().export_memory(agent, entries)
         return str(path)
+
+    async def pull_memory_edits(self) -> int:
+        """Apply edits the user made to memory notes in Obsidian."""
+        current = {entry.id: entry for entry in await self._store.find(MemoryEntry)}
+        edits = await self._vault().memory_edits(current)
+        for edit in edits:
+            entry = current[edit.memory_id]
+            await self._store.put(
+                entry.model_copy(
+                    update={"text": edit.text, "scope": edit.scope, "used_at": now_ms()}
+                )
+            )
+        return len(edits)
+
+    async def sync_memory_structure(self) -> JsonObject:
+        """Pull Obsidian edits first, then mirror every agent's memory."""
+        async with self._memory_sync_lock:
+            return await self._sync_memory_structure()
+
+    async def _sync_memory_structure(self) -> JsonObject:
+        pulled = await self.pull_memory_edits()
+        agents = await self.agents()
+        entries: dict[str, list[MemoryEntry]] = {agent.id: [] for agent in agents}
+        for entry in await self._store.find(MemoryEntry, order_by="created_at ASC"):
+            entries.setdefault(entry.agent_id, []).append(entry)
+        result = await self._vault().mirror_memory(agents, entries)
+        return {
+            "pulled": pulled,
+            "written": result.notes_written,
+            "removed": result.notes_removed,
+            "agents": result.agents,
+        }
 
     async def import_vault_notes(self, agent_id: str) -> int:
         """Read the vault Inbox into one agent's long-term memory."""

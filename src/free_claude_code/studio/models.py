@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from free_claude_code.core.json_types import JsonObject
 
 type AgentRole = Literal["assistant", "agent", "teacher", "student", "guide"]
-type ChatKind = Literal["chat", "agent", "classroom", "guide"]
+type ChatKind = Literal["chat", "agent", "classroom", "guide", "room"]
 type MessageRole = Literal["user", "assistant", "system", "tool", "event"]
 type MemoryScope = Literal["working", "long_term"]
 type AssetStatus = Literal[
@@ -70,6 +70,7 @@ class Chat(Record):
     kind: ChatKind = "chat"
     agent_id: str | None = None
     partner_agent_id: str | None = None
+    member_ids: tuple[str, ...] = ()
     parent_chat_id: str | None = None
     course_id: str | None = None
     site_id: str | None = None
@@ -152,6 +153,7 @@ class TunePack(Record):
     agent_id: str
     name: str
     base_model: str
+    teacher_model: str | None = None
     backend: TuneBackend = "local_light"
     preamble: str = ""
     style_rules: tuple[str, ...] = ()
@@ -159,6 +161,7 @@ class TunePack(Record):
     metrics: JsonObject = Field(default_factory=dict)
     remote_job_id: str | None = None
     remote_model: str | None = None
+    opted_in: bool = False
     version: int = 1
     active: bool = False
     created_at: int = Field(default_factory=now_ms)

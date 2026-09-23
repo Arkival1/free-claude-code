@@ -1,6 +1,7 @@
 """Isolated browser-test composition for the local Admin UI."""
 
 import asyncio
+import re
 import socket
 import sys
 import threading
@@ -40,7 +41,27 @@ from free_claude_code.runtime.configuration import ConfigurationService
 from free_claude_code.runtime.folder_picker import NativeFolderPicker
 from free_claude_code.runtime.provider_manager import ProviderRuntimeManager
 from free_claude_code.studio import StudioService, StudioStore
+from free_claude_code.studio.llm import LLMReply, StudioModelRouter
 from tests.web_tools_support import StubWebToolsClient
+
+
+class _StudioEchoModel:
+    """Answer as whichever Studio agent is speaking, without any network."""
+
+    async def complete(
+        self,
+        messages,
+        *,
+        system="",
+        tools=(),
+        temperature=0.2,
+        max_tokens=1024,
+        model=None,
+    ) -> LLMReply:
+        del messages, tools, temperature, max_tokens
+        match = re.search(r"You are (\w+), one of several AI agents", system)
+        name = match.group(1) if match else "Agent"
+        return LLMReply(text=f"{name} ({model}) is on it.")
 
 
 class _ModelListingProvider(BaseProvider):
@@ -248,6 +269,7 @@ def admin_base_url(
         settings_provider=manager.current_settings,
         models_dir=tmp_path / "studio" / "models",
         sites_dir=tmp_path / "studio" / "sites",
+        router=StudioModelRouter(proxy=_StudioEchoModel(), local=_StudioEchoModel()),
     )
     app = RuntimeASGIApp(
         create_app(
