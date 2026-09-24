@@ -570,6 +570,24 @@ that looks like a credential removed, a time limit (`STUDIO_COMMAND_TIMEOUT`),
 and the whole process tree stopped when it expires. It is off by default.
 Rooms can be given a project too, so a team of agents builds in one folder.
 
+**Giving Jarvis orders.** When you tell Jarvis to have an agent do something,
+Studio hands the job out the moment you say it, before Jarvis even answers, so
+an order never depends on the model choosing to call a tool. It understands
+"have Builder make a timer app", "tell the Researcher to look into cheap GPUs",
+"ask Helper to plan my week", "I need Builder to fix the menu", "@Researcher
+compare phones", "Builder, fix the menu", "let the Researcher know I like short
+answers", and "get an agent to …" (Jarvis picks who: the Builder for making
+things, the Researcher for finding out, the Helper for plans). Several orders
+in one message all start, each agent works in the background and reports back
+in Jarvis's conversation, and Jarvis just confirms who is doing what. "Stop
+Builder" (or "tell the Builder to stop") stops its background work. Jarvis
+won't hand the same job out twice.
+
+Jarvis also has `team_status` (what every agent is doing and last finished,
+with results) and `stop_agent`, and plans bigger goals by splitting them into
+parts for the right agents, running independent parts at the same time. Ask
+"what is everyone doing?" any time.
+
 The first run creates the main AI (**Jarvis**) and six starter agents:
 **Guide**, **Builder**, **Researcher**, **Helper**, **Teacher**, and
 **Student**.

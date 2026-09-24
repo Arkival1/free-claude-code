@@ -1,7 +1,7 @@
 """The bounded tool loop every Studio agent runs."""
 
 import asyncio
-from collections.abc import Callable, MutableMapping, Sequence
+from collections.abc import Awaitable, Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 
 from loguru import logger
@@ -28,7 +28,12 @@ WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
 MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user):"
 
 
-def with_memory_note(history: list[ChatMessage], note: str) -> list[ChatMessage]:
+STUDIO_NOTE_HEADER = "Studio already did this for this message (not from the user):"
+
+
+def with_memory_note(
+    history: list[ChatMessage], note: str, *, header: str = MEMORY_NOTE_HEADER
+) -> list[ChatMessage]:
     """Put this message's recalled memory on the newest user message.
 
     Keeping it out of the instructions lets the instructions and the earlier
@@ -39,7 +44,7 @@ def with_memory_note(history: list[ChatMessage], note: str) -> list[ChatMessage]
     for index in range(len(history) - 1, -1, -1):
         message = history[index]
         if message.role == "user":
-            marked = f"{MEMORY_NOTE_HEADER}\n{note}\n\n---\n{message.content}"
+            marked = f"{header}\n{note}\n\n---\n{message.content}"
             return [
                 *history[:index],
                 ChatMessage.user(marked),
@@ -69,16 +74,27 @@ MAIN_PROMPT = (
     "You are {name}, the user's main AI. You run a team of agents on this "
     "machine and talk with the user through a voice-friendly console, so keep "
     "replies short, clear, and easy to read aloud. Answer simple questions "
-    "yourself. Hand real work to the team: ask_agent gives one agent a task "
-    "and waits for its report; team_task puts several agents in a room to "
-    "work on a goal together. Pass a project name when the work builds a "
-    "website or app, and background=true for long builds so you can keep "
-    "talking while the builder works. Use research yourself when you need to "
-    "understand something first, and end that reply with the links of the "
-    "sources you used; they show on screen. When the user gives you a "
-    "YouTube link, study it with study_video; videos the team studied before "
-    "are in video_notes. Give each agent everything it needs in the "
-    "task text, then tell the user what was done and where to find it. When "
+    "yourself; hand real work to the team.\n"
+    "How you run the team:\n"
+    "- When the user tells you to have an agent do something, it gets done: "
+    "Studio hands those orders out the moment the user speaks and tells you "
+    "in a note. Confirm who is doing what; never redo the work yourself or "
+    "ask the user to repeat it.\n"
+    "- For a bigger goal, think first: split it into parts and give each part "
+    "to the agent whose job it is (Researcher to find out, Builder to make, "
+    "Helper to plan). Use ask_agent with background=true for parts that can "
+    "run at the same time so you keep talking, and team_task when agents "
+    "must work on it together in one room. Put everything the agent needs in "
+    "the task text, and pass a project name when the work builds a website "
+    "or app.\n"
+    "- Use team_status before you answer anything about progress, and to "
+    "follow up on work you handed out; use stop_agent when the user wants "
+    "something stopped. When an agent reports back here, tell the user what "
+    "it did and where to find it, and hand out the next step if there is one.\n"
+    "Use research yourself when you need to understand something first, and "
+    "end that reply with the links of the sources you used; they show on "
+    "screen. When the user gives you a YouTube link, study it with "
+    "study_video; videos the team studied before are in video_notes. When "
     "the user asks how to do something in this app, where something is, or "
     "why something is not working, call app_help and answer with the page and "
     "button names it gives."
@@ -240,11 +256,23 @@ class AgentRunner:
                 history.append(ChatMessage.assistant(message.text))
         return history
 
-    async def reply(self, agent: Agent, chat: Chat, user_text: str) -> TurnResult:
-        """Answer one user message, using tools when the agent asks for them."""
+    async def reply(
+        self,
+        agent: Agent,
+        chat: Chat,
+        user_text: str,
+        *,
+        prepare: Callable[[], Awaitable[str]] | None = None,
+    ) -> TurnResult:
+        """Answer one user message, using tools when the agent asks for them.
+
+        ``prepare`` runs once the message is recorded and before the model is
+        asked; what it returns rides on the message as a note from Studio.
+        """
         await self._store.append_message(
             chat_id=chat.id, role="user", text=user_text, author="user"
         )
+        note = await prepare() if prepare is not None else ""
         history = await self._history(agent, chat)
         if not history or history[-1].content != user_text:
             history.append(ChatMessage.user(user_text))
@@ -256,6 +284,7 @@ class AgentRunner:
             context=context,
             query=user_text,
             max_steps=self._max_steps,
+            turn_note=note,
         )
         if agent.memory_enabled and not result.failed and result.text:
             await self._memory.remember(
@@ -351,6 +380,7 @@ class AgentRunner:
         query: str,
         max_steps: int,
         extra_system: str = "",
+        turn_note: str = "",
     ) -> TurnResult:
         await self._toolbox.check_online()
         names = self._toolbox.tool_names(agent.tools, role=agent.role)
@@ -373,6 +403,8 @@ class AgentRunner:
             history = with_memory_note(
                 history, await self._memory.context_block(agent.id, query)
             )
+        if turn_note:
+            history = with_memory_note(history, turn_note, header=STUDIO_NOTE_HEADER)
         model = agent.model or self._default_model
         used: list[str] = []
         checked = False

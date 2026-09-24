@@ -109,13 +109,21 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "conversation",
             "delegate",
             "boss",
+            "order",
+            "orders",
+            "have builder",
+            "tell agent",
+            "stop agent",
         ),
         body=(
             "Jarvis is the main AI. Type on the HUD and press SEND; his words "
             "appear as he writes them. Ask for anything: he answers himself, or "
             "sends the job to the Builder, Researcher, or Helper and reports back. "
-            "Say 'have Builder make a timer app' or 'have Researcher look into "
-            "cheap GPUs'. NEW TALK clears the conversation but keeps his memory. "
+            "Orders are carried out the moment you say them: 'have Builder make a "
+            "timer app', 'tell the Researcher to look into cheap GPUs', '@Helper "
+            "plan my week', 'get an agent to ...' (he picks who), several in one "
+            "message, or 'stop Builder'. Ask 'what is everyone doing?' for a team "
+            "update. NEW TALK clears the conversation but keeps his memory. "
             "You can rename him with Main Agent Name in Settings, under Studio."
         ),
         asks=(

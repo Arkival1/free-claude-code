@@ -76,6 +76,7 @@ from .models import (
     now_ms,
 )
 from .obsidian import ObsidianVault, VaultStatus
+from .orders import parse_orders, pick_agent
 from .platforms import (
     PlatformError,
     PlatformPage,
@@ -104,6 +105,7 @@ from .tools import (
     MAIN_TOOL_NAMES,
     TOOL_SPEC_BY_NAME,
     AgentToolbox,
+    ToolContext,
 )
 from .tuning import CloudTuner, LightTuner, TuningError
 from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
@@ -229,6 +231,7 @@ class StudioService:
         self._console_extras: tuple[float, JsonObject] | None = None
         self._stand_in_note = ""
         self._video_lock = asyncio.Lock()
+        self._run_jobs: dict[str, asyncio.Task[object]] = {}
         self._studying: set[str] = set()
         self._router.use_stand_in(self._stand_in_model)
 
@@ -954,7 +957,12 @@ class StudioService:
         if agent.role == "guide":
             return await self._guide_turn(chat, agent, text)
         async with self._working(agent.id):
-            result = await self._runner().reply(agent, chat, text)
+            prepare = (
+                (lambda: self._carry_out_orders(agent, chat, text))
+                if agent.role == MAIN_ROLE
+                else None
+            )
+            result = await self._runner().reply(agent, chat, text, prepare=prepare)
         await self._after_memory_change([agent.id], wait=False)
         if chat.title in {"New chat", f"{agent.name} chat"}:
             await self._store.put(
@@ -1275,7 +1283,9 @@ class StudioService:
             }
         )
         await self._store.put(run)
-        self.spawn(self._run_task(agent.id, chat.id, run.id))
+        job = self.spawn(self._run_task(agent.id, chat.id, run.id))
+        self._run_jobs[run.id] = job
+        job.add_done_callback(lambda _: self._run_jobs.pop(run.id, None))
         return run
 
     async def _run_task(self, agent_id: str, chat_id: str, run_id: str) -> None:
@@ -1309,6 +1319,151 @@ class StudioService:
                 "chat_id": chat.id,
                 "status": run.status,
             },
+        )
+
+    async def stop_agent_work(self, agent_id: str) -> list[AgentRun]:
+        """Stop an agent's background tasks; returns the tasks that were stopped."""
+        stopped: list[AgentRun] = []
+        for run in await self.runs(agent_id=agent_id):
+            if run.status not in {"queued", "running"}:
+                continue
+            job = self._run_jobs.pop(run.id, None)
+            if job is None:
+                continue
+            job.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await job
+            current = await self._store.require(AgentRun, run.id)
+            finished = current.model_copy(
+                update={
+                    "status": "cancelled",
+                    "error": "Stopped by the user.",
+                    "updated_at": now_ms(),
+                }
+            )
+            await self._store.put(finished)
+            await self._store.append_message(
+                chat_id=run.chat_id,
+                role="event",
+                text="Stopped by the user.",
+                author="studio",
+                data={"kind": "run_finished", "run_id": run.id, "status": "cancelled"},
+            )
+            stopped.append(finished)
+        return stopped
+
+    async def team_report(self) -> str:
+        """What every agent is doing and has just done, for the main AI."""
+        runs = await self.runs()
+        busy = await self._busy_agents(runs)
+        now = now_ms()
+        lines: list[str] = []
+        for agent in await self.agents():
+            if agent.archived or agent.role in {MAIN_ROLE, "guide"}:
+                continue
+            own = [run for run in runs if run.agent_id == agent.id]
+            active = next((r for r in own if r.status in {"queued", "running"}), None)
+            done = next((r for r in own if r.status not in {"queued", "running"}), None)
+            state = "working" if agent.id in busy or active else "free"
+            line = f"- {agent.name} ({agent.role}, {state})"
+            if active is not None:
+                line += f": on step {active.step} of {active.max_steps} of '{active.goal[:120]}'"
+            if done is not None:
+                minutes = max(0, (now - done.updated_at) // 60_000)
+                outcome = (done.result or done.error or "").strip().replace("\n", " ")
+                line += (
+                    f". Last task {done.status} {minutes} min ago: '{done.goal[:80]}'"
+                    + (f" — {outcome[:160]}" if outcome else "")
+                )
+            lines.append(line)
+        pending = await self._commands.pending()
+        if pending:
+            lines.append(
+                f"{len(pending)} command(s) wait for the user's Run it or Deny."
+            )
+        return "\n".join(lines) or "The team has no agents yet."
+
+    async def _carry_out_orders(self, main: Agent, chat: Chat, text: str) -> str:
+        """Hand out the jobs the user told the main AI to give, before it answers.
+
+        'Have Builder make a page', '@Researcher look into X', 'get an agent to
+        ...', and 'stop Builder' are carried out right away, so an order never
+        depends on a small model choosing to call a tool.
+        """
+        team = [
+            agent
+            for agent in await self.agents()
+            if not agent.archived and agent.role not in {MAIN_ROLE, "guide"}
+        ]
+        orders = parse_orders(text, [agent.name for agent in team])
+        if not orders:
+            return ""
+        crew = Crew(
+            store=self._store,
+            host=self,
+            helper_pipeline=self.settings.studio_helper_pipeline,
+        )
+        context = ToolContext(
+            agent_id=main.id,
+            chat_id=chat.id,
+            site_id=chat.site_id,
+            agent_name=main.name,
+            agent_role=main.role,
+        )
+        done: list[str] = []
+        for order in orders:
+            name = order.agent or pick_agent(
+                order.task, [(agent.name, agent.role) for agent in team]
+            )
+            worker = next((agent for agent in team if agent.name == name), None)
+            if worker is None:
+                continue
+            if order.stop:
+                stopped = await self.stop_agent_work(worker.id)
+                line = (
+                    f"Stopped {worker.name}: "
+                    + "; ".join(f"'{run.goal[:80]}'" for run in stopped)
+                    if stopped
+                    else f"{worker.name} had no background task to stop."
+                )
+                await self._store.append_message(
+                    chat_id=chat.id,
+                    role="tool",
+                    text=line,
+                    author="stop_agent",
+                    data={"tool": "stop_agent", "agent": worker.name, "order": True},
+                )
+                done.append(line)
+                continue
+            try:
+                outcome = await crew.ask_agent(
+                    context,
+                    agent=worker.name,
+                    task=order.task,
+                    project="",
+                    background=True,
+                )
+            except (ValueError, StudioError) as error:
+                done.append(f"Could not give {worker.name} the job: {error}")
+                continue
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="tool",
+                text=outcome.text,
+                author="ask_agent",
+                data={**outcome.data, "order": True, "task": order.task},
+            )
+            done.append(
+                f"{worker.name} is now working on: {order.task}. {outcome.text}"
+            )
+        if not done:
+            return ""
+        return (
+            "The user's orders were handed out already:\n"
+            + "\n".join(f"- {line}" for line in done)
+            + "\nDo not hand these out again or do the work yourself. Tell the user "
+            "in a sentence or two who is doing what; each agent reports back here "
+            "when it finishes. Answer anything else they asked."
         )
 
     async def start_agent_task(

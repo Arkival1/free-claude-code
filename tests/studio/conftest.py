@@ -11,7 +11,7 @@ from free_claude_code.application.web_tools.ports import WebFetchEgressPolicy
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.web_tools import WebFetchResult, WebSearchResult
-from free_claude_code.studio.agents import MEMORY_NOTE_HEADER
+from free_claude_code.studio.agents import MEMORY_NOTE_HEADER, STUDIO_NOTE_HEADER
 from free_claude_code.studio.llm import (
     ChatMessage,
     LLMReply,
@@ -52,13 +52,19 @@ class ScriptedLLM:
         # Recalled memory rides on the newest message; keep the user's words
         # as "prompt" so scripts can match them, and the memory beside them.
         memory = ""
-        if last.startswith(MEMORY_NOTE_HEADER):
-            memory, _, last = last.partition("\n\n---\n")
+        studio_note = ""
+        while last.startswith((MEMORY_NOTE_HEADER, STUDIO_NOTE_HEADER)):
+            note, _, last = last.partition("\n\n---\n")
+            if note.startswith(MEMORY_NOTE_HEADER):
+                memory = note
+            else:
+                studio_note = note
         self.calls.append(
             {
                 "system": system,
                 "prompt": last,
                 "memory": memory,
+                "studio_note": studio_note,
                 "temperature": temperature,
                 "model": model,
                 "tools": [tool.name for tool in tools],

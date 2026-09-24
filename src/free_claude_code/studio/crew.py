@@ -6,6 +6,7 @@ from typing import Protocol
 
 from free_claude_code.core.json_types import JsonObject
 
+from .memory import keywords
 from .models import Agent, AgentRun, Chat, SiteProject
 from .rooms import RoomOutcome
 from .sites import slugify
@@ -66,6 +67,18 @@ class CrewHost(Protocol):
         """Start one agent task in the background and return at once."""
         ...
 
+    async def runs(self, *, agent_id: str | None = None) -> tuple[AgentRun, ...]:
+        """Return agent tasks, newest first."""
+        ...
+
+    async def team_report(self) -> str:
+        """Describe what every agent is doing and has just done."""
+        ...
+
+    async def stop_agent_work(self, agent_id: str) -> list[AgentRun]:
+        """Stop one agent's background tasks."""
+        ...
+
 
 class Crew:
     """Resolve names and projects, run the hand-off, and report back."""
@@ -88,6 +101,24 @@ class Crew:
     ) -> ToolOutcome:
         """Run one task on another agent and report its result."""
         worker = await self._resolve(agent, caller_id=context.agent_id)
+        same = await self._already_on_it(worker, task, context.chat_id)
+        if same is not None:
+            return ToolOutcome(
+                text=(
+                    f"{worker.name} is already working on this ('{same.goal[:120]}') "
+                    "and will report here when done."
+                ),
+                data={
+                    "tool": "ask_agent",
+                    "agent_id": worker.id,
+                    "agent": worker.name,
+                    "run_id": same.id,
+                    "chat_id": same.chat_id,
+                    "status": same.status,
+                    "background": True,
+                    "duplicate": True,
+                },
+            )
         site = await self._project(
             context,
             project,
@@ -190,6 +221,43 @@ class Crew:
             },
             failed=not outcome.completed,
         )
+
+    async def status(self, context: ToolContext) -> ToolOutcome:
+        """What the team is doing, for the main AI."""
+        return ToolOutcome(
+            text=await self._host.team_report(), data={"tool": "team_status"}
+        )
+
+    async def stop(self, context: ToolContext, *, agent: str) -> ToolOutcome:
+        """Stop an agent's background work."""
+        worker = await self._resolve(agent, caller_id=context.agent_id)
+        stopped = await self._host.stop_agent_work(worker.id)
+        text = (
+            f"Stopped {worker.name}: "
+            + "; ".join(f"'{run.goal[:80]}'" for run in stopped)
+            if stopped
+            else f"{worker.name} had no background task to stop."
+        )
+        return ToolOutcome(
+            text=text,
+            data={"tool": "stop_agent", "agent": worker.name, "stopped": len(stopped)},
+        )
+
+    async def _already_on_it(
+        self, worker: Agent, task: str, chat_id: str
+    ) -> AgentRun | None:
+        """A task this conversation already gave this agent that is still going."""
+        wanted = set(keywords(task))
+        for run in await self._host.runs(agent_id=worker.id):
+            if run.status not in {"queued", "running"}:
+                continue
+            chat = await self._store.get(Chat, run.chat_id)
+            if chat is None or chat.parent_chat_id != chat_id:
+                continue
+            have = set(keywords(run.goal))
+            if wanted and have and len(wanted & have) / len(wanted | have) >= 0.5:
+                return run
+        return None
 
     async def consult(self, context: ToolContext, *, question: str) -> ToolOutcome:
         """Have the Researcher look something up for another agent."""

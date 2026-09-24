@@ -33,7 +33,11 @@ FINISH_TOOL = "finish"
 COMMAND_TOOL = "run_command"
 ASK_AGENT_TOOL = "ask_agent"
 TEAM_TASK_TOOL = "team_task"
-DELEGATION_TOOLS = frozenset({ASK_AGENT_TOOL, TEAM_TASK_TOOL})
+TEAM_STATUS_TOOL = "team_status"
+STOP_AGENT_TOOL = "stop_agent"
+DELEGATION_TOOLS = frozenset(
+    {ASK_AGENT_TOOL, TEAM_TASK_TOOL, TEAM_STATUS_TOOL, STOP_AGENT_TOOL}
+)
 WEB_TOOLS: tuple[str, ...] = ("web_search", "web_fetch")
 RESEARCH_TOOL = "research"
 TEST_CODE_TOOL = "test_code"
@@ -61,6 +65,7 @@ PARALLEL_TOOLS = frozenset(
         APP_HELP_TOOL,
         CHECK_PROJECT_TOOL,
         VIDEO_NOTES_TOOL,
+        TEAM_STATUS_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -419,6 +424,24 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=TEAM_STATUS_TOOL,
+        description=(
+            "See what every agent is doing right now and what it last finished, "
+            "with results, plus commands waiting for the user. Use it before "
+            "answering questions about progress, and to follow up on work."
+        ),
+        parameters={"type": "object", "properties": {}},
+    ),
+    ToolSpec(
+        name=STOP_AGENT_TOOL,
+        description="Stop an agent's background work when the user asks you to.",
+        parameters={
+            "type": "object",
+            "properties": {"agent": {"type": "string", "description": "Agent name."}},
+            "required": ["agent"],
+        },
+    ),
+    ToolSpec(
         name=TEAM_TASK_TOOL,
         description=(
             "Put several agents in a room to work on one goal together, handing "
@@ -489,6 +512,8 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
 MAIN_TOOL_NAMES: tuple[str, ...] = (
     ASK_AGENT_TOOL,
     TEAM_TASK_TOOL,
+    TEAM_STATUS_TOOL,
+    STOP_AGENT_TOOL,
     RESEARCH_TOOL,
     ASK_HELPER_TOOL,
     "web_search",
@@ -560,6 +585,14 @@ class TeamDelegate(Protocol):
 
     async def consult(self, context: ToolContext, *, question: str) -> ToolOutcome:
         """Ask the team's Researcher a question and wait for its answer."""
+        ...
+
+    async def status(self, context: ToolContext) -> ToolOutcome:
+        """Report what the team is doing."""
+        ...
+
+    async def stop(self, context: ToolContext, *, agent: str) -> ToolOutcome:
+        """Stop an agent's background work."""
         ...
 
     async def help(
@@ -732,7 +765,7 @@ class AgentToolbox:
                     return await self._remember(call, context)
                 case "recall":
                     return await self._recall(call, context)
-                case "ask_agent" | "team_task":
+                case "ask_agent" | "team_task" | "team_status" | "stop_agent":
                     return await self._delegate_call(call, context)
                 case "research":
                     return await self._research(call)
@@ -1192,6 +1225,13 @@ class AgentToolbox:
         if self._delegate is None or not self.delegation_allowed(context.agent_role):
             raise ValueError("Only the main agent can hand work to other agents.")
         project = str(call.arguments.get("project") or "").strip()
+        if call.name == TEAM_STATUS_TOOL:
+            return await self._delegate.status(context)
+        if call.name == STOP_AGENT_TOOL:
+            agent = str(call.arguments.get("agent", "")).strip()
+            if not agent:
+                raise ValueError("Say which agent to stop.")
+            return await self._delegate.stop(context, agent=agent)
         if call.name == ASK_AGENT_TOOL:
             agent = str(call.arguments.get("agent", "")).strip()
             task = str(call.arguments.get("task", "")).strip()
