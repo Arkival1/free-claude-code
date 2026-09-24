@@ -367,6 +367,37 @@ chats, memory, tuning, and classes; `models/` for downloaded model files; and
 `sites/` for websites agents build.
 
 <details>
+<summary><strong>Studio as a desktop app on Windows</strong></summary>
+
+1. Download this branch as a zip and extract it, for example to `C:\fcc`.
+2. Open `scripts\windows` and double-click **install-studio-app.cmd** once.
+   It installs uv, Python 3.14, the app's packages, and the main AI's voice
+   (a few minutes the first time), then adds an **FCC Studio** icon to your
+   Desktop and Start menu and opens the app. Add `-StartWithWindows` from
+   PowerShell to open it when you sign in; `-Uninstall` removes the icons.
+3. From then on, double-click **FCC Studio**. A small "Waking Jarvis up"
+   window shows while the server starts in the background (no black console
+   window), then Studio opens in its own app window with its own taskbar
+   icon, using Microsoft Edge (or Chrome) without tabs or an address bar.
+   Closing the window stops the server. Run `studio-app.ps1 -KeepServer` to
+   leave it running for your phone.
+4. Every Free Claude Code setting is inside the app: **Settings** in the left
+   menu (or **More → Open settings**) shows the full settings page, with its
+   search box. Settings only open on the PC running Studio.
+
+Server logs are in `%LOCALAPPDATA%\FCC Studio\logs` if the app will not start.
+
+**Replies as they are written.** With a local model, the HUD shows the main
+AI's reply word by word while LM Studio writes it, and **Agents at work**
+shows the watched agent's reply the same way. The HUD checks for news twice a
+second while anyone is working and every few seconds otherwise; the CPU and
+memory gauges and the mission list are only rebuilt when something changed.
+On phones and PCs with four or fewer processor cores, the gold core draws
+fewer particles at 30 frames a second so the processor stays free for the AI.
+
+</details>
+
+<details>
 <summary><strong>Running Studio on Windows, step by step</strong></summary>
 
 1. Get the code: download this branch as a zip and extract it, or run

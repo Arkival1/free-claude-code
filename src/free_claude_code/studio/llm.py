@@ -315,16 +315,17 @@ class LocalOpenAILLM:
             and row.get("type") != "embeddings"
         )
 
-    async def complete(
+    def _request(
         self,
         messages: Sequence[ChatMessage],
         *,
-        system: str = "",
-        tools: Sequence[ToolSpec] = (),
-        temperature: float = 0.2,
-        max_tokens: int = 1024,
-        model: str | None = None,
-    ) -> LLMReply:
+        system: str,
+        tools: Sequence[ToolSpec],
+        temperature: float,
+        max_tokens: int,
+        model: str | None,
+        stream: bool,
+    ) -> tuple[JsonObject, dict[str, str]]:
         fast = self._fast()
         # Tool instructions never change between turns and the system prompt
         # ends with this turn's memory, so this order keeps the longest part
@@ -347,7 +348,7 @@ class LocalOpenAILLM:
             "messages": wire,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "stream": False,
+            "stream": stream,
             "cache_prompt": True,
         }
         if fast:
@@ -357,6 +358,27 @@ class LocalOpenAILLM:
         headers = {"content-type": "application/json"}
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
+        return payload, headers
+
+    async def complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        system: str = "",
+        tools: Sequence[ToolSpec] = (),
+        temperature: float = 0.2,
+        max_tokens: int = 1024,
+        model: str | None = None,
+    ) -> LLMReply:
+        payload, headers = self._request(
+            messages,
+            system=system,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model=model,
+            stream=False,
+        )
         body = await _post_json(
             f"{self._base_url}/chat/completions",
             payload,
@@ -364,26 +386,153 @@ class LocalOpenAILLM:
             timeout=self._timeout,
             transport=self._transport,
         )
-        reply = _openai_reply(body)
-        if reply.tool_calls or not tools:
-            return reply
-        call, final = parse_tool_directive(reply.text)
-        if call is not None:
-            return LLMReply(
-                text="",
-                tool_calls=(call,),
-                model=reply.model,
-                stop_reason="tool_use",
-                usage=reply.usage,
-            )
-        if final is not None:
-            return LLMReply(
-                text=final,
-                model=reply.model,
-                stop_reason=reply.stop_reason,
-                usage=reply.usage,
-            )
+        return _text_protocol_reply(_openai_reply(body), tools)
+
+    async def complete_streaming(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        on_text: Callable[[str], None],
+        system: str = "",
+        tools: Sequence[ToolSpec] = (),
+        temperature: float = 0.2,
+        max_tokens: int = 1024,
+        model: str | None = None,
+    ) -> LLMReply:
+        """Complete one call, reporting the visible reply as it is written."""
+        payload, headers = self._request(
+            messages,
+            system=system,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model=model,
+            stream=True,
+        )
+        text: list[str] = []
+        finish = ""
+        served = ""
+        shown = ""
+        async with httpx.AsyncClient(
+            timeout=self._timeout, transport=self._transport
+        ) as client:
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{self._base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                ) as response:
+                    if response.status_code >= 400:
+                        detail = (await response.aread()).decode("utf-8", "replace")
+                        raise StudioLLMError(
+                            f"Model endpoint returned {response.status_code}: "
+                            f"{detail[:400]}"
+                        )
+                    if "text/event-stream" not in response.headers.get(
+                        "content-type", ""
+                    ):
+                        # Some runtimes ignore stream=true; take the whole answer.
+                        try:
+                            body = json.loads(await response.aread())
+                        except ValueError as error:
+                            raise StudioLLMError(
+                                "Model endpoint returned malformed JSON."
+                            ) from error
+                        if not isinstance(body, dict):
+                            raise StudioLLMError("Model endpoint returned no reply.")
+                        return _text_protocol_reply(_openai_reply(body), tools)
+                    async for line in response.aiter_lines():
+                        chunk = _stream_chunk(line)
+                        if chunk is None:
+                            continue
+                        served = str(chunk.get("model") or served)
+                        choices = chunk.get("choices")
+                        first = (
+                            choices[0] if isinstance(choices, list) and choices else {}
+                        )
+                        if not isinstance(first, dict):
+                            continue
+                        finish = str(first.get("finish_reason") or finish)
+                        delta = first.get("delta")
+                        piece = (
+                            delta.get("content") if isinstance(delta, dict) else None
+                        )
+                        if isinstance(piece, str) and piece:
+                            text.append(piece)
+                            visible = visible_reply("".join(text))
+                            if visible != shown:
+                                shown = visible
+                                on_text(visible)
+            except httpx.HTTPError as error:
+                raise StudioLLMError(f"Model endpoint unreachable: {error}") from error
+        body = {
+            "model": served,
+            "choices": [
+                {
+                    "message": {"content": "".join(text)},
+                    "finish_reason": finish,
+                }
+            ],
+        }
+        return _text_protocol_reply(_openai_reply(body), tools)
+
+
+def _text_protocol_reply(reply: LLMReply, tools: Sequence[ToolSpec]) -> LLMReply:
+    """Turn a text-protocol directive in a local reply into a tool call."""
+    if reply.tool_calls or not tools:
         return reply
+    call, final = parse_tool_directive(reply.text)
+    if call is not None:
+        return LLMReply(
+            text="",
+            tool_calls=(call,),
+            model=reply.model,
+            stop_reason="tool_use",
+            usage=reply.usage,
+        )
+    if final is not None:
+        return LLMReply(
+            text=final,
+            model=reply.model,
+            stop_reason=reply.stop_reason,
+            usage=reply.usage,
+        )
+    return reply
+
+
+def _stream_chunk(line: str) -> JsonObject | None:
+    """Decode one server-sent event line of a streamed completion."""
+    if not line.startswith("data:"):
+        return None
+    data = line[len("data:") :].strip()
+    if not data or data == "[DONE]":
+        return None
+    try:
+        chunk = json.loads(data)
+    except ValueError:
+        return None
+    return chunk if isinstance(chunk, dict) else None
+
+
+_FINAL_OPEN = re.compile(r'^\s*\{\s*"final"\s*:\s*"', re.DOTALL)
+
+
+def visible_reply(text: str) -> str:
+    """The part of a reply still being written that a person should see.
+
+    Hidden thinking is dropped, a tool call in progress shows nothing, and a
+    text-protocol final answer shows its words as they arrive.
+    """
+    text = strip_thinking(text)
+    opened = _FINAL_OPEN.match(text)
+    if opened:
+        body = text[opened.end() :]
+        body = re.sub(r'"\s*\}?\s*$', "", body)
+        return body.replace("\\n", "\n").replace('\\"', '"').strip()
+    if text.lstrip().startswith(("{", "```")):
+        return ""
+    return text
 
 
 class LocalModelsUnavailable(StudioLLMError):
@@ -431,11 +580,27 @@ class StudioModelRouter:
         tools: Sequence[ToolSpec] = (),
         temperature: float = 0.2,
         max_tokens: int = 1024,
+        on_text: Callable[[str], None] | None = None,
     ) -> LLMReply:
-        """Complete one call with the transport owning the given model."""
+        """Complete one call with the transport owning the given model.
+
+        With on_text, a runtime that can stream reports the reply as it is
+        written, so people see words appear instead of waiting for all of it.
+        """
         if self._stand_in is not None:
             model = await self._stand_in(model) or model
         client, wire_model = self.client_for(model)
+        streaming = getattr(client, "complete_streaming", None)
+        if on_text is not None and streaming is not None:
+            return await streaming(
+                messages,
+                on_text=on_text,
+                system=system,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                model=wire_model,
+            )
         return await client.complete(
             messages,
             system=system,

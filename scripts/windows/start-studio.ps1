@@ -33,75 +33,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# Windows on ARM emulates x64, whose Python package ecosystem has broader wheel support.
-$PythonRequest = "cpython-3.14.0-windows-x86_64-none"
-$MinUvVersion = [version] "0.12.13"
-$UvInstallUrl = "https://astral.sh/uv/install.ps1"
-$DefaultPort = 8082
-$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+. (Join-Path $PSScriptRoot "studio-common.ps1")
 
 function Show-Help {
     Get-Help -Detailed $PSCommandPath | Out-String | Write-Host
-}
-
-function Invoke-Step {
-    param([string] $Description, [scriptblock] $Action, [string] $Display)
-    Write-Host ""
-    Write-Host "==> $Description" -ForegroundColor Cyan
-    if ($DryRun) {
-        Write-Host "+ $Display"
-        return
-    }
-    & $Action
-}
-
-function Get-UvVersion {
-    $command = Get-Command uv -ErrorAction SilentlyContinue
-    if ($null -eq $command) {
-        return $null
-    }
-    $output = (& $command.Source --version) 2>$null
-    if ($output -match "uv (\d+\.\d+\.\d+)") {
-        return [version] $Matches[1]
-    }
-    return $null
-}
-
-function Add-UvToPath {
-    if (-not $env:USERPROFILE) {
-        return
-    }
-    foreach ($candidate in @(
-            (Join-Path $env:USERPROFILE ".local\bin"),
-            (Join-Path $env:USERPROFILE ".cargo\bin")
-        )) {
-        if ((Test-Path $candidate) -and -not ($env:Path -split ";" -contains $candidate)) {
-            $env:Path = "$candidate;$env:Path"
-        }
-    }
-}
-
-function Confirm-Uv {
-    Add-UvToPath
-    $version = Get-UvVersion
-    if ($null -eq $version) {
-        Invoke-Step "Installing uv (it manages Python for this app)" {
-            powershell -NoProfile -ExecutionPolicy Bypass -Command "irm $UvInstallUrl | iex"
-            Add-UvToPath
-        } "irm $UvInstallUrl | iex"
-        if (-not $DryRun -and $null -eq (Get-UvVersion)) {
-            throw "uv did not install. Open a new PowerShell window and run this script again."
-        }
-        return
-    }
-    if ($version -lt $MinUvVersion) {
-        Invoke-Step "Updating uv $version to $MinUvVersion or newer" {
-            uv self update
-        } "uv self update"
-    }
-    else {
-        Write-Host "uv $version found."
-    }
 }
 
 function Wait-AndOpenStudio {
@@ -137,23 +72,12 @@ Write-Host "FCC Studio - starting from $RepoRoot"
 
 Confirm-Uv
 
-$SyncArgs = @("sync", "--python", $PythonRequest)
+$Extras = Get-StudioExtras -NoVoice:$NoVoice -WithTraining:$WithTraining
 $SyncNote = "first run takes a few minutes"
-$Extras = @()
-if (-not $NoVoice) {
-    $Extras += @("--extra", "studio_voice")
-}
-if ($WithTraining) {
-    $Extras += @("--extra", "lora")
-}
-$SyncArgs += $Extras
 if ($WithTraining) {
     $SyncNote = "with LoRA training libraries: the first run downloads a few GB"
 }
-Invoke-Step "Installing Python 3.14 and the app's packages ($SyncNote)" {
-    & uv @SyncArgs
-    if ($LASTEXITCODE -ne 0) { throw "Package install failed (uv exit $LASTEXITCODE)." }
-} "uv $($SyncArgs -join ' ')"
+Install-StudioPackages -Extras $Extras -Note $SyncNote
 
 $effectivePort = if ($Port -gt 0) { $Port } else { $DefaultPort }
 if ($Port -gt 0) {
@@ -176,8 +100,7 @@ Write-Host "Phone:   open Studio > More > Install on your iPhone for the address
 Write-Host "If Windows Firewall asks, allow Python on Private networks so your phone can connect."
 Write-Host "Press Ctrl+C to stop."
 
-$RunArgs = @("run", "--python", $PythonRequest) + $Extras
-$RunArgs += "fcc-server"
+$RunArgs = Get-ServerArgs -Extras $Extras
 Invoke-Step "Starting the server" {
     & uv @RunArgs
 } "uv $($RunArgs -join ' ')"

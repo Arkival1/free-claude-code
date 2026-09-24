@@ -74,6 +74,9 @@ function viewFromLocation() {
 
 const byId = (id) => document.getElementById(id);
 
+// Inside the Studio app the settings wear Studio's dark console look.
+if (window.self !== window.top) document.documentElement.classList.add("embedded");
+
 function sourceLabel(source) {
   const labels = {
     default: "default",

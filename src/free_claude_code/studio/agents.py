@@ -1,6 +1,6 @@
 """The bounded tool loop every Studio agent runs."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 
 from loguru import logger
@@ -97,6 +97,7 @@ class AgentRunner:
         memory: MemoryService,
         default_model: str,
         max_steps: int = 12,
+        live: MutableMapping[str, str] | None = None,
     ) -> None:
         self._store = store
         self._router = router
@@ -104,6 +105,8 @@ class AgentRunner:
         self._memory = memory
         self._default_model = default_model
         self._max_steps = max(1, max_steps)
+        # Chat id -> the reply being written right now, for live display.
+        self._live = live
 
     async def system_prompt(
         self, agent: Agent, *, query: str, site_id: str | None
@@ -328,8 +331,10 @@ class AgentRunner:
                     system=system,
                     tools=specs if names else (),
                     max_tokens=2048,
+                    on_text=self._show_live(chat.id),
                 )
             except StudioLLMError as error:
+                self._clear_live(chat.id)
                 logger.warning("Studio agent call failed: {}", error)
                 await self._store.append_message(
                     chat_id=chat.id,
@@ -345,6 +350,7 @@ class AgentRunner:
                     failed=True,
                     error=str(error),
                 )
+            self._clear_live(chat.id)
             if not reply.tool_calls:
                 text = reply.text or "(no reply)"
                 await self._record_assistant(chat, agent, text, reply)
@@ -403,6 +409,20 @@ class AgentRunner:
             failed=True,
             error="step_limit",
         )
+
+    def _show_live(self, chat_id: str) -> Callable[[str], None] | None:
+        live = self._live
+        if live is None:
+            return None
+
+        def show(text: str) -> None:
+            live[chat_id] = text
+
+        return show
+
+    def _clear_live(self, chat_id: str) -> None:
+        if self._live is not None:
+            self._live.pop(chat_id, None)
 
     async def _record_assistant(
         self, chat: Chat, agent: Agent, text: str, reply: LLMReply

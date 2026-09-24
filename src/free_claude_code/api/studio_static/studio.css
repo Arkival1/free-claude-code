@@ -2296,3 +2296,27 @@ input.page-search {
   letter-spacing: 0.04em;
   box-shadow: 0 0 14px rgba(64, 214, 255, 0.12);
 }
+
+/* A reply being written: a blinking caret after the newest word. */
+.hud-line.live > span:last-child::after,
+.hud-step.live > span:last-child::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--hud-gold);
+  animation: hud-blink 0.9s steps(2, jump-none) infinite;
+}
+
+/* Settings: the full settings page, framed inside the app. */
+body[data-page="settings"] .view {
+  max-width: none;
+  padding: 0 0 calc(var(--safe-bottom) + 64px);
+}
+
+.settings-frame {
+  display: block;
+  width: 100%;
+  flex: 1;
+  min-height: calc(100dvh - 130px);
+  border: 0;
+  background: var(--bg);
+}

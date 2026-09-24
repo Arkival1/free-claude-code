@@ -1035,3 +1035,42 @@ body.settings-searching .advanced-toggle {
 .settings-section .field.advanced-field.search-hit {
   display: flex;
 }
+
+/* Shown inside the Studio app: match its dark console look. */
+html.embedded {
+  --bg: #02070d;
+  --panel: #05121c;
+  --panel-strong: #071a28;
+  --card: #071722;
+  --card-hover: #0c2231;
+  --input: #02101a;
+  --input-focus: #041826;
+  --text: #d9f6ff;
+  --muted: #7fa9ba;
+  --line: rgba(64, 214, 255, 0.14);
+  --line-strong: rgba(64, 214, 255, 0.3);
+  --accent: #ffc861;
+  --accent-dark: #e8a93c;
+  --accent-muted: rgba(255, 200, 97, 0.1);
+  --accent-border: rgba(255, 200, 97, 0.4);
+  --glow-accent: 0 0 14px rgba(255, 200, 97, 0.2);
+}
+
+html.embedded body {
+  background:
+    linear-gradient(rgba(64, 214, 255, 0.03) 1px, transparent 1px) 0 0 / 100% 28px,
+    linear-gradient(90deg, rgba(64, 214, 255, 0.025) 1px, transparent 1px) 0 0 / 28px 100%,
+    var(--bg);
+}
+
+html.embedded .topbar h2 {
+  color: #40d6ff;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 22px;
+}
+
+html.embedded .studio-open {
+  display: none;
+}

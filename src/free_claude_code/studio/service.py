@@ -121,6 +121,7 @@ MAIN_PROMPT_NOTE = (
     "that needs building, research, or commands to the right agents."
 )
 _LOCAL_PROBE_SECONDS = 15.0
+_DASHBOARD_SECONDS = 4.0
 TEACH_MATERIAL_CHARS = 12_000
 TEACH_PROMPT = (
     "You are turning material into a skill an AI agent will follow later. "
@@ -202,6 +203,8 @@ class StudioService:
         self._local_probe: tuple[float, JsonObject] | None = None
         self._loaded_probe: tuple[float, tuple[str, ...] | None] | None = None
         self._agent_busy: dict[str, int] = {}
+        self._live_text: dict[str, str] = {}
+        self._console_extras: tuple[float, JsonObject] | None = None
         self._stand_in_note = ""
         self._router.use_stand_in(self._stand_in_model)
 
@@ -485,6 +488,7 @@ class StudioService:
             memory=self._memory(),
             default_model=self.default_model,
             max_steps=self.settings.studio_agent_max_steps,
+            live=self._live_text,
         )
 
     def _tuner(self) -> LightTuner:
@@ -1422,6 +1426,7 @@ class StudioService:
                 "busy": busy,
             },
             "chat": {"id": chat.id, "title": chat.title} if chat else None,
+            "live": self._live_text.get(chat.id, "") if chat else "",
             "run": {
                 "id": run.id,
                 "goal": run.goal,
@@ -1512,15 +1517,49 @@ class StudioService:
                 "web": self.web_status(),
                 "voice": self.voice_status(),
             },
-            "monitor": await anyio.to_thread.run_sync(
-                lambda: system_monitor.sample(self._models_dir)
-            ),
+            "live": self._live_text.get(chat.id, ""),
             "room": await self._room_snapshot(),
-            "timeline": await self._timeline(
-                runs, {str(member["id"]): str(member["name"]) for member in team}
+            **await self._dashboard_extras(
+                runs,
+                {str(member["id"]): str(member["name"]) for member in team},
+                len(shared),
             ),
-            "insights": await self._insights(len(shared)),
         }
+
+    async def _dashboard_extras(
+        self, runs: Sequence[AgentRun], names: Mapping[str, str], shared: int
+    ) -> JsonObject:
+        """Gauges, missions, and memory counts, rebuilt only when needed.
+
+        The HUD polls quickly while agents work. The CPU and memory gauges
+        refresh every few seconds; missions and memory counts are rebuilt only
+        when a task, chat, or the shared memory has changed.
+        """
+        now = time.monotonic()
+        newest = await self._store.find(Chat, order_by="updated_at DESC", limit=1)
+        signature: JsonObject = {
+            "shared": shared,
+            "runs": [[run.id, run.status, run.updated_at] for run in runs[:8]],
+            "chat": newest[0].updated_at if newest else 0,
+        }
+        cached = self._console_extras
+        if cached is None or cached[1].get("signature") != signature:
+            cached = (
+                cached[0] if cached else 0.0,
+                {
+                    "signature": signature,
+                    "timeline": await self._timeline(runs, names),
+                    "insights": await self._insights(shared),
+                    "monitor": cached[1].get("monitor") if cached else None,
+                },
+            )
+        if cached[1].get("monitor") is None or now - cached[0] >= _DASHBOARD_SECONDS:
+            monitor = await anyio.to_thread.run_sync(
+                lambda: system_monitor.sample(self._models_dir)
+            )
+            cached = (now, {**cached[1], "monitor": monitor})
+        self._console_extras = cached
+        return {key: value for key, value in cached[1].items() if key != "signature"}
 
     async def _room_snapshot(self) -> JsonObject | None:
         """The most recent agent room, for the HUD's team chat panel."""

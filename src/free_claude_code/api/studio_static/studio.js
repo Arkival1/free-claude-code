@@ -252,6 +252,33 @@
 
   /* ------------------------------------------------------------------ views */
 
+  // Every Free Claude Code setting, inside the app. The settings page only
+  // answers on the PC running Studio, so a phone gets directions instead.
+  async function renderSettings() {
+    const generation = renderGeneration;
+    let here = false;
+    try {
+      here = (await fetch("/admin/api/status", { cache: "no-store" })).ok;
+    } catch {
+      here = false;
+    }
+    if (generation !== renderGeneration) return;
+    if (!here) {
+      view.replaceChildren(
+        card("Settings", [
+          el("p", {
+            class: "muted",
+            text: "Settings change on the PC running Studio: open the FCC Studio app there and choose Settings. They are kept off other devices so nobody else on your network can change them.",
+          }),
+        ])
+      );
+      return;
+    }
+    view.replaceChildren(
+      el("iframe", { class: "settings-frame", src: "/admin/studio", title: "Free Claude Code settings" })
+    );
+  }
+
   async function renderChats() {
     const generation = renderGeneration;
     const [{ chats }, { agents }, { sites }] = await Promise.all([
@@ -2255,6 +2282,13 @@
     view.replaceChildren(
       finder,
       nothing,
+      card("Settings", [
+        el("p", {
+          class: "muted",
+          text: "Every Free Claude Code option: providers and keys, models, messaging, Studio, and voice.",
+        }),
+        el("button", { class: "primary", type: "button", text: "Open settings", onclick: () => go("settings") }),
+      ]),
       voiceCard(voiceInfo),
       webCard(overview.settings.web),
       connectCard(connect),
@@ -2373,7 +2407,12 @@
     const ctx = canvas.getContext("2d");
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const small = Math.min(window.innerWidth, window.innerHeight) < 700;
-    const count = small ? 1100 : 2200;
+    // Fewer particles and 30 frames a second on phones and older PCs keep
+    // the core smooth and leave the processor for the AI.
+    const modest = small || (navigator.hardwareConcurrency || 4) <= 4;
+    const frameGap = modest ? 1000 / 30 : 0;
+    let lastFrame = 0;
+    const count = small ? 900 : modest ? 1400 : 2200;
     const golden = Math.PI * (3 - Math.sqrt(5));
     const points = Array.from({ length: count }, (_, i) => {
       const y = 1 - (i / (count - 1)) * 2;
@@ -2418,7 +2457,7 @@
 
     const resize = () => {
       const box = canvas.getBoundingClientRect();
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const dpr = Math.min(modest ? 1.25 : 2, window.devicePixelRatio || 1);
       width = Math.max(1, box.width);
       height = Math.max(1, box.height);
       canvas.width = Math.round(width * dpr);
@@ -2568,6 +2607,8 @@
     function loop(now) {
       frame = requestAnimationFrame(loop);
       if (!visible || document.hidden) return;
+      if (frameGap && now - lastFrame < frameGap) return;
+      lastFrame = now;
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       spin += dt * (state.current.spin + state.burst * 2);
@@ -3178,6 +3219,7 @@
     ["Models", "models", "▣"],
     ["Tuning & LoRA", "tune", "⟁"],
     ["Knowledge & Memory", "more", "✦"],
+    ["Settings", "settings", "⚙"],
   ];
 
   function ringGauge(label, value, detail) {
@@ -3291,6 +3333,20 @@
           sayAloud(message.text, refs, () => hud.afterReply?.());
         }
       }
+    }
+    // The reply being written right now, word by word.
+    const live = (data.live || "").trim();
+    if (live) {
+      if (!refs.live) {
+        refs.live = el("div", { class: "hud-line ai live" }, [hudTag(hud.name.toUpperCase()), el("span")]);
+      }
+      refs.live.lastChild.textContent = live;
+      refs.log.querySelector(".hud-empty")?.remove();
+      if (refs.log.lastElementChild !== refs.live) refs.log.append(refs.live);
+      refs.log.scrollTop = refs.log.scrollHeight;
+    } else if (refs.live) {
+      refs.live.remove();
+      refs.live = null;
     }
     if (!refs.log.childElementCount) {
       refs.log.append(
@@ -3510,6 +3566,8 @@
     hud.orb = null;
     clearInterval(hud.clockTimer);
     hud.clockTimer = null;
+    clearInterval(hud.fastTimer);
+    hud.fastTimer = null;
   }
 
   const BRIEFING_PROMPT =
@@ -3593,6 +3651,7 @@
     const watchWork = async () => {
       const id = hud.watch;
       if (!id) {
+        hud.watchBusy = false;
         refs.processHead.replaceChildren(
           el("p", { class: "hud-empty", text: "Pick an agent to watch its work live: each search, file, and step as it happens." })
         );
@@ -3608,6 +3667,7 @@
       if (generation !== renderGeneration || hud.watch !== id) return;
       const who = work.agent;
       const run = work.run;
+      hud.watchBusy = Boolean(who.busy);
       const header = [
         el("div", { class: `hud-process-title${who.busy ? " busy" : ""}` }, [
           el("span", { class: "hud-agent-icon", "aria-hidden": "true", text: agentGlyph(who.role) }),
@@ -3637,6 +3697,22 @@
         while (log.childElementCount > 120) log.firstElementChild.remove();
         log.scrollTop = log.scrollHeight;
       }
+      const writing = (work.live || "").trim();
+      let liveStep = log.querySelector(".hud-step.live");
+      if (writing) {
+        if (!liveStep) {
+          liveStep = el("div", { class: "hud-step think live" }, [
+            el("span", { class: "hud-step-meta" }, [el("span", { class: "hud-tag", text: "WRITING" })]),
+            el("span"),
+          ]);
+        }
+        liveStep.lastChild.textContent = writing.length > 700 ? `…${writing.slice(-700)}` : writing;
+        if (log.lastElementChild !== liveStep) log.append(liveStep);
+        log.querySelector(".hud-empty")?.remove();
+        log.scrollTop = log.scrollHeight;
+      } else {
+        liveStep?.remove();
+      }
       if (!log.childElementCount) {
         log.append(el("p", { class: "hud-empty", text: `${who.name} hasn't worked on anything yet.` }));
       }
@@ -3657,8 +3733,11 @@
       watchWork();
     };
 
+    let polling = false;
     const poll = async () => {
       if (generation !== renderGeneration) return stopPolling();
+      if (polling) return;
+      polling = true;
       try {
         const next = await api(`/studio/api/main?after=${hud.lastSeq}`);
         if (generation !== renderGeneration) return;
@@ -3668,6 +3747,8 @@
         if (generation !== renderGeneration) return;
         hud.offline = true;
         hudState(refs);
+      } finally {
+        polling = false;
       }
     };
 
@@ -4083,6 +4164,11 @@
     updateHud(refs, data);
     watchWork();
     startPolling(poll);
+    // While someone is working, check more often so replies appear as they
+    // are written instead of in jumps.
+    hud.fastTimer = setInterval(() => {
+      if (hud.thinking || hud.watchBusy || refs.live) poll();
+    }, 500);
   }
 
   function voiceCard(status) {
@@ -4168,6 +4254,7 @@
       stopSpeaking(null);
     }
     document.body.dataset.ui = hudView ? "hud" : "page";
+    document.body.dataset.page = name;
     setChrome(name, headingFor(name));
     if (generation !== renderGeneration) return;
     view.replaceChildren(el("p", { class: "muted", text: "Loading…" }));
@@ -4189,6 +4276,7 @@
         case "job": return await renderJob(id);
         case "lora": return await renderLoraJob(id);
         case "more": return await renderMore();
+        case "settings": return await renderSettings();
         default: return go("home");
       }
     } catch (error) {
@@ -4329,6 +4417,7 @@
         job: "Tuning run",
         lora: "LoRA training",
         more: "More",
+        settings: "Settings",
       }[name] || "Studio"
     );
   }

@@ -178,3 +178,44 @@ async def test_lm_studio_says_which_model_is_loaded():
         transport=httpx.MockTransport(lambda _: httpx.Response(404)),
     )
     assert await other.loaded_models() is None
+
+
+@pytest.mark.asyncio
+async def test_the_hud_sees_the_reply_while_it_is_written(
+    tmp_path, store, web_tools, studio_settings
+):
+    import asyncio
+
+    gate = asyncio.Event()
+
+    class StreamingLocal(FakeLocal):
+        async def complete_streaming(self, messages, *, on_text, **kwargs):
+            on_text("Good eve")
+            await gate.wait()
+            on_text("Good evening, sir.")
+            return LLMReply(text="Good evening, sir.")
+
+    studio, *_ = build(
+        tmp_path,
+        store,
+        web_tools,
+        studio_settings,
+        local=StreamingLocal(),
+        STUDIO_MAIN_AGENT_MODEL="local/qwen-4b",
+    )
+
+    await studio.main_say("hello")
+    for _ in range(100):
+        console = await studio.main_console()
+        if console["live"]:
+            break
+        await asyncio.sleep(0.01)
+    assert console["live"] == "Good eve"
+    main = await studio.main_agent()
+    assert (await studio.agent_activity(main.id))["live"] == "Good eve"
+
+    gate.set()
+    await studio.wait_for_background()
+    console = await studio.main_console()
+    assert console["live"] == ""
+    assert console["messages"][-1]["text"] == "Good evening, sir."

@@ -615,3 +615,38 @@ def test_watching_an_agent_work_from_the_hud(page: Page, admin_base_url: str) ->
 
     process.get_by_role("button", name="OPEN").click()
     expect(page.locator(".bubble.user", has_text="make a landing page")).to_be_visible()
+
+
+def test_every_setting_is_inside_the_app(page: Page, admin_base_url: str) -> None:
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{admin_base_url}/studio")
+    expect(page.locator(".hud")).to_be_visible()
+
+    page.locator(".hud-nav-item", has_text="Settings").click()
+    expect(page.locator("#view-title")).to_have_text("Settings")
+    frame = page.frame_locator("iframe.settings-frame")
+    expect(frame.locator("#pageTitle")).to_have_text("Studio")
+    expect(frame.locator("#field-STUDIO_MAIN_AGENT_MODEL")).to_be_visible()
+    expect(frame.locator("html.embedded")).to_have_count(1)
+    frame.get_by_role("button", name="Providers", exact=True).click()
+    expect(frame.locator("#pageTitle")).to_have_text("Providers")
+    frame.get_by_label("Search settings").fill("fast local")
+    expect(
+        frame.locator('.field[data-key="STUDIO_LOCAL_FAST_REPLIES"]')
+    ).to_be_visible()
+
+    page.locator('.tab[data-route="more"]').click()
+    page.get_by_role("button", name="Open settings").click()
+    expect(page.locator("iframe.settings-frame")).to_be_visible()
+
+
+def test_a_phone_is_told_where_settings_live(page: Page, admin_base_url: str) -> None:
+    page.route(
+        "**/admin/api/status", lambda route: route.fulfill(status=403, body="local")
+    )
+    open_studio(page, admin_base_url, "settings")
+
+    expect(page.locator(".card", has_text="Settings")).to_contain_text(
+        "on the PC running Studio"
+    )
+    expect(page.locator("iframe")).to_have_count(0)
