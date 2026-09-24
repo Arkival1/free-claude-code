@@ -19,6 +19,34 @@ RESEARCHER_TOOLS: tuple[str, ...] = (
     "finish",
 )
 RESEARCHER_PROMPT = (
+    "Research questions for the user and the team with the research tool. "
+    "Each run reads at least 3 web pages, 2 Reddit threads with real "
+    "discussion, and 2 YouTube videos through their transcripts, plus Stack "
+    "Overflow, GitHub, and docs for coding questions. Pass web, reddit, or "
+    "youtube only when the user asks for a different mix. If the results are "
+    "thin or off topic, research again with sharper wording. Compare where the "
+    "sources agree and disagree. When they contain code, try it with test_code "
+    "before recommending it, and say what passed. Answer with a short answer "
+    "first, then the key findings cited as [n], what Reddit users and the "
+    "videos add, and finally a Links list with every source you used. Save the "
+    "key findings with remember, tagged verified or unverified, so the other "
+    "agents can use them."
+)
+BUILDER_PROMPT = (
+    "Build complete, working websites, apps, and games on your own. Plan the "
+    "files with update_plan, then write finished code: no placeholders or "
+    "TODOs, mobile-friendly by default, and a README that says how to open or "
+    "run it. Change existing files with edit_file after reading them; find "
+    "things with search_files and list_files. Before you finish, run "
+    "check_project and fix everything it reports, and run and test your work "
+    "with run_command or test_code when you can. When an error resists a "
+    "quick fix, use ask_researcher with the exact error, what you tried, and "
+    "your stack (the Helper turns the findings into a plan), or ask_helper to "
+    "think a problem through. Follow the skills and tools the user taught "
+    "you. Finish with what you built, its main files, and how to open it."
+)
+# Earlier starter prompts, upgraded in place when the user never edited them.
+_OLD_RESEARCHER_PROMPT_V1 = (
     "Research questions for the user and the team with the research tool, "
     "which reads at least ten sources across the web, Reddit, YouTube, Stack "
     "Overflow, GitHub, and docs. Compare what the sources say. When they "
@@ -27,7 +55,7 @@ RESEARCHER_PROMPT = (
     "the key findings with remember, tagged verified or unverified, so the "
     "other agents can use them."
 )
-BUILDER_PROMPT = (
+_OLD_BUILDER_PROMPT_V1 = (
     "Build complete, working websites, apps, and games on your own: plan the "
     "files with update_plan, write the code, and change existing files with "
     "edit_file after reading them; find things with search_files and "
@@ -88,7 +116,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "update_plan",
         ),
     ),
-    ("Run and test code", ("run_command", "test_code")),
+    ("Run and test code", ("run_command", "test_code", "check_project")),
     ("Ask teammates", ("ask_researcher", "ask_helper")),
     ("Memory", ("remember", "recall")),
 )
@@ -111,7 +139,15 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         "Designer",
         "builder",
         DESIGNER_PROMPT,
-        (*_BUILD, *_WEB, "test_code", "ask_researcher", "ask_helper", *_MEMORY),
+        (
+            *_BUILD,
+            *_WEB,
+            "test_code",
+            "check_project",
+            "ask_researcher",
+            "ask_helper",
+            *_MEMORY,
+        ),
     ),
     (
         "Tester",
@@ -123,6 +159,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "search_files",
             "run_command",
             "test_code",
+            "check_project",
             *_WEB,
             "ask_researcher",
             "ask_helper",
@@ -166,3 +203,9 @@ def agent_options() -> JsonObject:
             for label, tools in TOOL_GROUPS
         ],
     }
+
+
+PROMPT_UPGRADES: dict[str, str] = {
+    _OLD_RESEARCHER_PROMPT_V1: RESEARCHER_PROMPT,
+    _OLD_BUILDER_PROMPT_V1: BUILDER_PROMPT,
+}

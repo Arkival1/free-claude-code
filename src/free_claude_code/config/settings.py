@@ -805,6 +805,15 @@ class Settings(BaseModel):
     studio_research_sources: int = Field(
         default=10, ge=3, le=25, validation_alias="STUDIO_RESEARCH_SOURCES"
     )
+    studio_research_web: int = Field(
+        default=3, ge=0, le=10, validation_alias="STUDIO_RESEARCH_WEB"
+    )
+    studio_research_reddit: int = Field(
+        default=2, ge=0, le=6, validation_alias="STUDIO_RESEARCH_REDDIT"
+    )
+    studio_research_youtube: int = Field(
+        default=2, ge=0, le=6, validation_alias="STUDIO_RESEARCH_YOUTUBE"
+    )
 
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
     # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).

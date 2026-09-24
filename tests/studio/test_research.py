@@ -751,6 +751,6 @@ async def test_web_status_reports_reddit_and_youtube_modes(make_studio):
     )
     status = studio.web_status()
     assert status["reddit"] == "official API"
-    assert status["youtube"] == "web search"
+    assert status["youtube"] == "YouTube search, no key"
     assert status["sources"] == 12
     assert "secret" not in json.dumps(status)

@@ -1043,7 +1043,8 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         secret=True,
         description=(
             "YouTube Data API key from Google Cloud. Lets research search "
-            "YouTube directly; without it, videos are found through web search. "
+            "YouTube through the official API; without it, research reads "
+            "YouTube's own search page. "
             "Transcripts are read either way when a video has captions."
         ),
     ),
@@ -1076,6 +1077,39 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         description=(
             "How many sources the research tool gathers and reads for each "
             "question, from 3 to 25."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_RESEARCH_WEB",
+        "Research Web Pages",
+        "studio",
+        "number",
+        settings_attr="studio_research_web",
+        description=(
+            "Web pages every research run reads, at least. 0 to 10; agents "
+            "use a different number when you ask for one."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_RESEARCH_REDDIT",
+        "Research Reddit Threads",
+        "studio",
+        "number",
+        settings_attr="studio_research_reddit",
+        description=(
+            "Reddit threads every research run reads, 0 to 6. Only threads "
+            "that are on topic and have real replies or votes count."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_RESEARCH_YOUTUBE",
+        "Research YouTube Videos",
+        "studio",
+        "number",
+        settings_attr="studio_research_youtube",
+        description=(
+            "YouTube videos every research run reads, 0 to 6. Only videos whose "
+            "transcript could be read count."
         ),
     ),
     ConfigFieldSpec(

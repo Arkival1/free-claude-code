@@ -644,8 +644,10 @@ and YouTube videos (title, description, and transcript when the video has
 captions). Two optional credentials make these reliable:
 
 - **YouTube API Key** (`STUDIO_YOUTUBE_API_KEY`, from Google Cloud, YouTube
-  Data API v3) lets research search YouTube directly; without it, videos are
-  found through web search.
+  Data API v3) is optional: research searches YouTube through the API with it,
+  and through YouTube's own search page without it. Transcripts come from the
+  video page, or from YouTube's player API when the page is behind a consent
+  or bot check.
 - **Reddit App ID and Secret** (`STUDIO_REDDIT_CLIENT_ID`,
   `STUDIO_REDDIT_CLIENT_SECRET`): create a free *script* app at
   reddit.com/prefs/apps. Research then reads Reddit through its official API,
@@ -659,12 +661,26 @@ For Google results, use a Serper key as the Web Search API Key.
 <summary><strong>Deep research, testing what it finds, and the Builder asking for help</strong></summary>
 
 The `research` tool answers a question from at least ten sources
-(`STUDIO_RESEARCH_SOURCES`, 3 to 25). It searches the web plus Reddit, YouTube,
-Stack Overflow, GitHub, MDN, and dev.to, and takes results from each in turn
-so no single site dominates. If it is still short of ten sources, it tries more
-angles ("tutorial", "best practices", "common mistakes"). Then it reads every
-source and returns the sentences that answer the question, numbered `[1]`,
-`[2]`, and so on so the agent can cite them.
+(`STUDIO_RESEARCH_SOURCES`, 3 to 25), and every run brings back a fixed mix
+with links:
+
+| Kind | Default | Setting | What counts |
+| --- | --- | --- | --- |
+| Web pages | 3 | `STUDIO_RESEARCH_WEB` | The most on-topic results, read in full |
+| Reddit threads | 2 | `STUDIO_RESEARCH_REDDIT` | On topic (at least half the question's key words), with real replies or votes; NSFW, removed, and silent threads are skipped, and the most upvoted and discussed come first |
+| YouTube videos | 2 | `STUDIO_RESEARCH_YOUTUBE` | On topic, not Shorts, and only if the transcript could be read |
+
+Ask for a different mix any time ("research this with no YouTube", "get me 4
+Reddit threads") and the agent passes that to the tool for that question. If
+fewer good threads or videos exist, the report says so instead of filling in
+off-topic ones. Coding questions also search Stack Overflow, GitHub, MDN, and
+dev.to; everyday questions don't. The rest of the sources come from each
+platform in turn so no single site dominates, with more angles tried if it is
+still short. The report groups sources under Web, Reddit, and YouTube, with
+each thread's score and comment count and whether a transcript was read, and
+numbers them `[1]`, `[2]`, and so on so the agent can cite them. The
+Researcher answers with a short answer, the findings, what Reddit and the
+videos add, and a list of every link it used.
 
 The **Researcher** tests code before recommending it: `test_code` saves a
 snippet in its **Research lab** project and runs it (Python or JavaScript), then
@@ -677,7 +693,13 @@ like a coding assistant's: `read_file` with line numbers and ranges,
 `edit_file` to change exact text without rewriting the file, `search_files` to
 find text across the project (regular expressions, file patterns), `list_files`
 with patterns such as `src/**/*.js`, `run_command` and `test_code` to run and
-test, and `update_plan` to keep a checklist of its steps. The tools are the
+test, `update_plan` to keep a checklist of its steps, and `check_project` to
+check the whole project without running it: links, images, scripts, and
+stylesheets that point at missing files, `#anchors` with no matching id,
+unbalanced brackets in JavaScript and CSS, Python syntax errors, invalid JSON,
+and pages missing a title, a mobile viewport, or image alt text. When the
+Builder says it is finished after changing files, Studio runs the check first
+and sends it back once to fix anything found. The tools are the
 same whether the Builder runs on a local model or a server one; only the
 internet tools need a connection. When it hits an error it can't fix quickly,
 it calls `ask_researcher` with the exact error. The Researcher looks it up,

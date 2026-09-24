@@ -80,10 +80,12 @@ from .presets import (
     BUILDER_PROMPT,
     HELPER_PROMPT,
     HELPER_TOOLS,
+    PROMPT_UPGRADES,
     RESEARCHER_PROMPT,
     RESEARCHER_TOOLS,
     agent_options,
 )
+from .research import ResearchMix
 from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
 from .search import SearchError, StudioSearch
@@ -114,6 +116,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "search_files",
         "update_plan",
         "ask_helper",
+        "check_project",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
@@ -487,6 +490,11 @@ class StudioService:
             web_access=settings.studio_web_access,
             reader=self._reader(),
             research_sources=settings.studio_research_sources,
+            research_mix=ResearchMix(
+                web=settings.studio_research_web,
+                reddit=settings.studio_research_reddit,
+                youtube=settings.studio_research_youtube,
+            ),
             connectivity=self._connectivity,
             app_help=self.app_help,
         )
@@ -696,13 +704,15 @@ class StudioService:
             else:
                 continue
             missing = tuple(tool for tool in wanted if tool not in agent.tools)
-            if not missing and role == agent.role:
+            prompt = PROMPT_UPGRADES.get(agent.system_prompt, agent.system_prompt)
+            if not missing and role == agent.role and prompt == agent.system_prompt:
                 continue
             await self._store.put(
                 agent.model_copy(
                     update={
                         "tools": (*agent.tools, *missing),
                         "role": role,
+                        "system_prompt": prompt,
                         "updated_at": now_ms(),
                     }
                 )
@@ -1306,8 +1316,15 @@ class StudioService:
             "access": self.settings.studio_web_access,
             "online": self._connectivity.online,
             "reddit": "official API" if reader.reddit_app_ready else "public pages",
-            "youtube": "YouTube API" if reader.youtube_search_ready else "web search",
+            "youtube": "YouTube API"
+            if reader.youtube_search_ready
+            else "YouTube search, no key",
             "sources": self.settings.studio_research_sources,
+            "mix": {
+                "web": self.settings.studio_research_web,
+                "reddit": self.settings.studio_research_reddit,
+                "youtube": self.settings.studio_research_youtube,
+            },
         }
 
     async def test_search(self, query: str) -> JsonObject:

@@ -11,6 +11,7 @@ from .memory import MemoryService
 from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
 from .store import StudioStore
 from .tools import (
+    CHECK_PROJECT_TOOL,
     COMMAND_TOOL,
     FINISH_TOOL,
     MAIN_ROLE,
@@ -21,6 +22,8 @@ from .tools import (
     tool_specs,
 )
 from .tuning import pack_exemplars, pack_system_text
+
+WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
 
 MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user):"
 
@@ -71,7 +74,8 @@ MAIN_PROMPT = (
     "work on a goal together. Pass a project name when the work builds a "
     "website or app, and background=true for long builds so you can keep "
     "talking while the builder works. Use research yourself when you need to "
-    "understand something first. Give each agent everything it needs in the "
+    "understand something first, and end that reply with the links of the "
+    "sources you used; they show on screen. Give each agent everything it needs in the "
     "task text, then tell the user what was done and where to find it. When "
     "the user asks how to do something in this app, where something is, or "
     "why something is not working, call app_help and answer with the page and "
@@ -369,6 +373,7 @@ class AgentRunner:
             )
         model = agent.model or self._default_model
         used: list[str] = []
+        checked = False
         for step in range(1, max_steps + 1):
             try:
                 reply = await self._router.complete(
@@ -403,6 +408,38 @@ class AgentRunner:
                 await self._record_assistant(chat, agent, text, reply)
                 return TurnResult(text=text, steps=step, tool_calls=tuple(used))
             finish = self._finish_call(reply.tool_calls)
+            if (
+                finish is not None
+                and not checked
+                and step < max_steps
+                and CHECK_PROJECT_TOOL in names
+                and context.site_id
+                and WRITE_TOOLS & set(used)
+            ):
+                checked = True
+                problems = await self._check_before_finish(chat, agent, context)
+                if problems:
+                    history.append(
+                        ChatMessage(
+                            role="assistant",
+                            content=reply.text,
+                            tool_calls=reply.tool_calls,
+                        )
+                    )
+                    history.extend(
+                        ChatMessage(
+                            role="tool",
+                            tool_call_id=call.id,
+                            content=(
+                                "Not finished yet. check_project found problems; "
+                                f"fix them, then finish:\n{problems}"
+                                if call is finish
+                                else "Skipped: fix the project problems first."
+                            ),
+                        )
+                        for call in reply.tool_calls
+                    )
+                    continue
             if finish is not None:
                 summary = str(finish.arguments.get("summary", "")) or reply.text
                 await self._record_assistant(chat, agent, summary, reply)
@@ -493,6 +530,26 @@ class AgentRunner:
             author=agent.name,
             data={"model": reply.model or agent.model, "usage": dict(reply.usage)},
         )
+
+    async def _check_before_finish(
+        self, chat: Chat, agent: Agent, context: ToolContext
+    ) -> str:
+        """Check a builder's project before it may finish; return any problems."""
+        outcome = await self._toolbox.run(
+            ToolCall(id="finish-check", name=CHECK_PROJECT_TOOL, arguments={}),
+            context,
+        )
+        problems = outcome.data.get("problems")
+        if outcome.failed or not isinstance(problems, list) or not problems:
+            return ""
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=outcome.text[:4_000],
+            author=CHECK_PROJECT_TOOL,
+            data={**outcome.data, "failed": False, "before_finish": True},
+        )
+        return outcome.text
 
     @staticmethod
     def _finish_call(calls: Sequence[ToolCall]) -> ToolCall | None:

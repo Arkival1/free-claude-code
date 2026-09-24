@@ -3338,11 +3338,11 @@
         el("p", {}, [el("strong", { text: "Search: " }), service]),
         el("p", {}, [
           el("strong", { text: "Research: " }),
-          `${web.sources} sources per question from the web, Reddit (${web.reddit}), YouTube (${web.youtube}, transcripts when captioned), Stack Overflow, GitHub, MDN, and dev.to.`,
+          `${web.sources} sources per question. Every run reads at least ${(web.mix || {}).web ?? 3} web pages, ${(web.mix || {}).reddit ?? 2} Reddit threads that are on topic and have real replies (${web.reddit}), and ${(web.mix || {}).youtube ?? 2} YouTube videos whose transcripts could be read (${web.youtube}), each with its link. Coding questions add Stack Overflow, GitHub, MDN, and dev.to. Ask for a different mix any time, like "research this with no YouTube".`,
         ]),
         el("p", {
           class: "muted",
-          text: "Keys go in admin settings on the computer running Studio, under Studio. Web Search API Key: Brave Search (starts with BSA), Tavily (tvly-), or Serper for Google results. YouTube API Key: from Google Cloud, lets research search YouTube directly. Reddit App ID and Secret: from reddit.com/prefs/apps, a free 'script' app, so Reddit doesn't block research.",
+          text: "Keys go in admin settings on the computer running Studio, under Studio. Web Search API Key: Brave Search (starts with BSA), Tavily (tvly-), or Serper for Google results. YouTube API Key (optional): from Google Cloud; without it research uses YouTube's own search page. Reddit App ID and Secret: from reddit.com/prefs/apps, a free 'script' app, so Reddit doesn't block research.",
         }),
         el("div", { class: "row" }, [
           el("div", { class: "grow" }, [query]),

@@ -23,7 +23,8 @@ from .connectivity import Connectivity
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
 from .platforms import PlatformError, PlatformReader, platform_of
-from .research import PLATFORMS, DeepResearch
+from .project_check import CHECKED_FILES, check_project
+from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
 from .sites import SiteError, SiteWorkspace
 
@@ -38,6 +39,7 @@ TEST_CODE_TOOL = "test_code"
 ASK_RESEARCHER_TOOL = "ask_researcher"
 ASK_HELPER_TOOL = "ask_helper"
 APP_HELP_TOOL = "app_help"
+CHECK_PROJECT_TOOL = "check_project"
 HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
 MAX_READ_LINES = 400
@@ -54,6 +56,7 @@ PARALLEL_TOOLS = frozenset(
         ASK_RESEARCHER_TOOL,
         ASK_HELPER_TOOL,
         APP_HELP_TOOL,
+        CHECK_PROJECT_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -230,10 +233,13 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name=RESEARCH_TOOL,
         description=(
-            "Research a question in depth: searches the web, Reddit, YouTube, "
-            "Stack Overflow, GitHub, MDN, and dev.to, reads at least ten "
-            "sources, and returns the useful parts numbered so you can cite "
-            "them. Use it for how-to, best practice, and fixing errors."
+            "Research a question in depth and read at least ten sources: by "
+            "default at least 3 web pages, 2 on-topic Reddit threads with real "
+            "discussion, and 2 YouTube videos with their transcripts, plus Stack "
+            "Overflow, GitHub, MDN, and dev.to for coding questions. Returns the "
+            "useful parts numbered with their links so you can cite them. Use it "
+            "for how-to, best practice, reviews, and fixing errors. Set web, "
+            "reddit, or youtube only when the user asks for a different number."
         ),
         parameters={
             "type": "object",
@@ -244,9 +250,33 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                     "items": {"type": "string", "enum": list(PLATFORMS)},
                     "description": "Optional: only these platforms.",
                 },
+                "web": {
+                    "type": "integer",
+                    "description": "Optional: how many web pages (default 3).",
+                },
+                "reddit": {
+                    "type": "integer",
+                    "description": "Optional: how many Reddit threads (default 2, 0 for none).",
+                },
+                "youtube": {
+                    "type": "integer",
+                    "description": "Optional: how many YouTube videos (default 2, 0 for none).",
+                },
             },
             "required": ["question"],
         },
+    ),
+    ToolSpec(
+        name=CHECK_PROJECT_TOOL,
+        description=(
+            "Check the whole project for mistakes without running it: links, "
+            "images, scripts, and stylesheets that point at missing files, "
+            "#anchors with no matching id, unbalanced brackets in JavaScript and "
+            "CSS, Python syntax errors, invalid JSON, and pages missing a title, "
+            "a mobile viewport, or image alt text. Run it before you finish and "
+            "fix what it reports."
+        ),
+        parameters={"type": "object", "properties": {}},
     ),
     ToolSpec(
         name=TEST_CODE_TOOL,
@@ -552,6 +582,7 @@ class AgentToolbox:
         web_access: str = "all",
         reader: PlatformReader | None = None,
         research_sources: int = 10,
+        research_mix: ResearchMix | None = None,
         connectivity: Connectivity | None = None,
         app_help: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
@@ -567,6 +598,7 @@ class AgentToolbox:
         self._web_access = web_access
         self._reader = reader or PlatformReader()
         self._research_sources = research_sources
+        self._research_mix = research_mix or ResearchMix()
         self._connectivity = connectivity
         self._app_help = app_help
 
@@ -663,6 +695,8 @@ class AgentToolbox:
                     return await self._consult(call, context)
                 case "app_help":
                     return await self._app_help_call(call)
+                case "check_project":
+                    return await self._check_project(context)
                 case _:
                     return ToolOutcome(
                         text=f"Unknown tool '{call.name}'.",
@@ -929,6 +963,33 @@ class AgentToolbox:
         material = str(call.arguments.get("material") or "").strip()
         return await self._delegate.help(context, request=request, material=material)
 
+    async def _check_project(self, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        contents: dict[str, str] = {}
+        for item in await self._sites.files(site_id):
+            if item.path.startswith("lab/") or not item.path.endswith(CHECKED_FILES):
+                continue
+            try:
+                contents[item.path] = await self._sites.read(site_id, item.path)
+            except SiteError, UnicodeDecodeError:
+                continue
+        problems = check_project(contents)
+        text = (
+            f"Checked {len(contents)} files; found {len(problems)} problem(s):\n"
+            + "\n".join(f"- {problem}" for problem in problems)
+            if problems
+            else f"Checked {len(contents)} files; found no problems."
+        )
+        return ToolOutcome(
+            text=text,
+            data={
+                "tool": CHECK_PROJECT_TOOL,
+                "site_id": site_id,
+                "checked": len(contents),
+                "problems": problems,
+            },
+        )
+
     async def _app_help_call(self, call: ToolCall) -> ToolOutcome:
         if self._app_help is None:
             raise ValueError("App help is not available here.")
@@ -1059,11 +1120,18 @@ class AgentToolbox:
         question = str(call.arguments.get("question", "")).strip()
         raw = call.arguments.get("platforms")
         platforms = [str(item) for item in raw] if isinstance(raw, list) else []
+        base = self._research_mix
+        mix = ResearchMix(
+            web=_count_arg(call.arguments.get("web"), base.web, top=10),
+            reddit=_count_arg(call.arguments.get("reddit"), base.reddit, top=6),
+            youtube=_count_arg(call.arguments.get("youtube"), base.youtube, top=6),
+        )
         engine = DeepResearch(
             search=self._searcher,
             reader=self._reader,
             fetch=lambda url: self._web.fetch(url, egress=self._egress),
             wanted=self._research_sources,
+            mix=mix,
         )
         report = await engine.run(question, platforms=platforms)
         return ToolOutcome(
@@ -1078,6 +1146,7 @@ class AgentToolbox:
                         "url": source.url,
                         "platform": source.platform,
                         "read": source.read,
+                        "detail": source.detail,
                     }
                     for source in report.sources
                 ],
@@ -1150,6 +1219,17 @@ class AgentToolbox:
                 "This conversation has no project workspace. Attach a project first."
             )
         return context.site_id
+
+
+def _count_arg(value: object, default: int, *, top: int) -> int:
+    """A source count the agent asked for, or the default when it did not."""
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        return default
+    try:
+        number = int(value)
+    except ValueError:
+        return default
+    return max(0, min(top, number))
 
 
 def _int_arg(value: object) -> int | None:

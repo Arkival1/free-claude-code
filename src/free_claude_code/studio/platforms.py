@@ -1,5 +1,6 @@
 """Read Reddit threads and YouTube videos the way a researcher would."""
 
+import html as html_lib
 import json
 import re
 import time
@@ -38,6 +39,15 @@ _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _CAPTIONS = re.compile(r'"captionTracks":(\[.*?\])')
 _DESCRIPTION = re.compile(r'"shortDescription":"((?:[^"\\]|\\.)*)"')
 _TITLE = re.compile(r'<meta name="title" content="([^"]*)"')
+_INITIAL_DATA = re.compile(r"var ytInitialData = (\{.*?\});</script>", re.S)
+_XML_CAPTION = re.compile(r"<text[^>]*>(.*?)</text>", re.S)
+_CLOCK = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})$")
+# The Android app's player answer carries caption links that YouTube hands
+# over even when the watch page is behind a consent or bot check.
+_PLAYER_URL = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
+_PLAYER_CLIENT = {"clientName": "ANDROID", "clientVersion": "20.10.38", "hl": "en"}
+# Only videos (no channels, playlists, or shorts shelves) in YouTube search.
+_VIDEOS_ONLY = "EgIQAQ%3D%3D"
 _REDDIT_TOKENS: dict[str, tuple[str, float]] = {}
 """App-only Reddit tokens by client id, with their expiry time."""
 
@@ -55,6 +65,144 @@ class PlatformPage:
     title: str
     text: str
     note: str = ""
+    score: int = 0
+    comments: int = 0
+    transcript: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RedditPost:
+    """One Reddit search result, with the numbers that say whether it is good."""
+
+    title: str
+    url: str
+    subreddit: str
+    score: int = 0
+    comments: int = 0
+    text: str = ""
+    nsfw: bool = False
+    removed: bool = False
+
+    def hit(self) -> SearchHit:
+        return SearchHit(
+            title=f"r/{self.subreddit}: {self.title}",
+            url=self.url,
+            snippet=f"{self.comments} comments. {self.text[:240]}",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class VideoResult:
+    """One YouTube search result."""
+
+    video_id: str
+    title: str
+    channel: str = ""
+    seconds: int | None = None
+    views: int | None = None
+    snippet: str = ""
+
+    @property
+    def url(self) -> str:
+        return f"https://www.youtube.com/watch?v={self.video_id}"
+
+    def hit(self) -> SearchHit:
+        by = f" ({self.channel})" if self.channel else ""
+        return SearchHit(title=f"{self.title}{by}", url=self.url, snippet=self.snippet)
+
+
+def _clock_seconds(text: str) -> int | None:
+    match = _CLOCK.match(text.strip())
+    if not match:
+        return None
+    hours, minutes, seconds = (int(part or 0) for part in match.groups())
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _runs(data: object) -> str:
+    if not isinstance(data, dict):
+        return ""
+    if "simpleText" in data:
+        return str(data["simpleText"])
+    runs = data.get("runs")
+    return (
+        "".join(str(run.get("text", "")) for run in runs if isinstance(run, dict))
+        if isinstance(runs, list)
+        else ""
+    )
+
+
+def _video_renderers(data: object) -> list[JsonObject]:
+    found: list[JsonObject] = []
+    stack = [data]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            renderer = item.get("videoRenderer")
+            if isinstance(renderer, dict):
+                found.append(renderer)
+            stack.extend(reversed(list(item.values())))
+        elif isinstance(item, list):
+            stack.extend(reversed(item))
+    return found
+
+
+def parse_youtube_results(page: str, *, limit: int = 10) -> tuple[VideoResult, ...]:
+    """Read the videos out of a YouTube search results page."""
+    match = _INITIAL_DATA.search(page)
+    if not match:
+        return ()
+    try:
+        data = json.loads(match.group(1))
+    except ValueError:
+        return ()
+    videos: list[VideoResult] = []
+    seen: set[str] = set()
+    for renderer in _video_renderers(data):
+        video = str(renderer.get("videoId") or "")
+        if not _VIDEO_ID.match(video) or video in seen:
+            continue
+        seen.add(video)
+        views = re.sub(r"[^0-9]", "", _runs(renderer.get("viewCountText")))
+        snippets = renderer.get("detailedMetadataSnippets")
+        snippet = (
+            _runs(snippets[0].get("snippetText"))
+            if isinstance(snippets, list) and snippets and isinstance(snippets[0], dict)
+            else ""
+        )
+        videos.append(
+            VideoResult(
+                video_id=video,
+                title=_runs(renderer.get("title")),
+                channel=_runs(renderer.get("ownerText")),
+                seconds=_clock_seconds(_runs(renderer.get("lengthText"))),
+                views=int(views) if views else None,
+                snippet=snippet,
+            )
+        )
+        if len(videos) >= limit:
+            break
+    return tuple(videos)
+
+
+def caption_text(body: str) -> str:
+    """Turn YouTube caption data (json3 or XML) into plain text."""
+    try:
+        events = json.loads(body).get("events") or []
+    except ValueError, AttributeError:
+        pieces = [
+            html_lib.unescape(re.sub(r"<[^>]+>", "", piece))
+            for piece in _XML_CAPTION.findall(body)
+        ]
+        return " ".join(" ".join(pieces).split())
+    words = [
+        str(segment.get("utf8", ""))
+        for event in events
+        if isinstance(event, dict)
+        for segment in event.get("segs") or []
+        if isinstance(segment, dict)
+    ]
+    return " ".join("".join(words).split())
 
 
 def platform_of(url: str) -> str:
@@ -93,6 +241,10 @@ def _reddit_path(url: str) -> str:
 
 def _field(data: object, key: str) -> str:
     return str(data.get(key) or "") if isinstance(data, dict) else ""
+
+
+def _int(value: object) -> int:
+    return int(value) if isinstance(value, int | float) else 0
 
 
 class PlatformReader:
@@ -176,32 +328,53 @@ class PlatformReader:
 
     # ---------------------------------------------------------------- reddit
 
-    async def reddit_search(
-        self, query: str, *, limit: int = 6
-    ) -> tuple[SearchHit, ...]:
-        """Search every subreddit for threads about a query."""
+    async def reddit_posts(
+        self, query: str, *, limit: int = 15
+    ) -> tuple[RedditPost, ...]:
+        """Search every subreddit, keeping each thread's score and comment count."""
         body = await self._reddit_get(
-            "/search", {"q": query, "limit": limit, "sort": "relevance", "t": "all"}
+            "/search",
+            {
+                "q": query,
+                "limit": limit,
+                "sort": "relevance",
+                "t": "all",
+                "type": "link",
+            },
         )
         if not isinstance(body, dict):
             raise PlatformError("Reddit sent back something unexpected.")
         children = ((body.get("data") or {}).get("children")) or []
-        hits: list[SearchHit] = []
+        posts: list[RedditPost] = []
         for child in children:
             data = child.get("data") if isinstance(child, dict) else None
+            if not isinstance(data, dict):
+                continue
             permalink = _field(data, "permalink")
             if not permalink.startswith("/r/"):
                 continue
-            subreddit = _field(data, "subreddit")
-            comments = data.get("num_comments", 0) if isinstance(data, dict) else 0
-            hits.append(
-                SearchHit(
-                    title=f"r/{subreddit}: {_field(data, 'title')}",
+            text = _field(data, "selftext")
+            posts.append(
+                RedditPost(
+                    title=_field(data, "title"),
                     url=f"https://www.reddit.com{permalink}",
-                    snippet=f"{comments} comments. {_field(data, 'selftext')[:240]}",
+                    subreddit=_field(data, "subreddit"),
+                    score=_int(data.get("score")),
+                    comments=_int(data.get("num_comments")),
+                    text=text,
+                    nsfw=bool(data.get("over_18")),
+                    removed=text in {"[removed]", "[deleted]"}
+                    or bool(data.get("removed_by_category")),
                 )
             )
-        return tuple(hits[:limit])
+        return tuple(posts[:limit])
+
+    async def reddit_search(
+        self, query: str, *, limit: int = 6
+    ) -> tuple[SearchHit, ...]:
+        """Search every subreddit for threads about a query."""
+        posts = await self.reddit_posts(query, limit=limit)
+        return tuple(post.hit() for post in posts)
 
     async def reddit_thread(self, url: str) -> PlatformPage:
         """Read a thread's post and its top comments."""
@@ -235,8 +408,22 @@ class PlatformReader:
                 for data in comments[:MAX_COMMENTS]
                 if isinstance(data, dict) and _field(data, "body").strip()
             )
+        said = [
+            data
+            for data in comments
+            if isinstance(data, dict)
+            and _field(data, "body").strip() not in {"", "[removed]", "[deleted]"}
+        ]
         return PlatformPage(
-            platform="reddit", url=url, title=title, text="\n".join(lines)
+            platform="reddit",
+            url=url,
+            title=title,
+            text="\n".join(lines),
+            score=_int(post.get("score")) if isinstance(post, dict) else 0,
+            comments=max(
+                len(said),
+                _int(post.get("num_comments")) if isinstance(post, dict) else 0,
+            ),
         )
 
     # --------------------------------------------------------------- youtube
@@ -277,6 +464,31 @@ class PlatformReader:
             )
         return tuple(hits[:limit])
 
+    async def youtube_results(
+        self, query: str, *, limit: int = 10
+    ) -> tuple[VideoResult, ...]:
+        """Find videos: the YouTube API with a key, the results page without one."""
+        if self._youtube_key:
+            hits = await self.youtube_search(query, limit=limit)
+            return tuple(
+                VideoResult(
+                    video_id=youtube_id(hit.url) or "",
+                    title=hit.title,
+                    snippet=hit.snippet,
+                )
+                for hit in hits
+                if youtube_id(hit.url)
+            )
+        async with self._client(
+            BROWSER_HEADERS, cookies={"CONSENT": "YES+1"}
+        ) as client:
+            response = await client.get(
+                f"https://www.youtube.com/results?sp={_VIDEOS_ONLY}",
+                params={"search_query": query, "hl": "en"},
+            )
+            response.raise_for_status()
+            return parse_youtube_results(response.text, limit=limit)
+
     async def youtube_video(self, url: str) -> PlatformPage:
         """Read a video's title, description, and transcript when it has one."""
         video = youtube_id(url)
@@ -287,7 +499,7 @@ class PlatformReader:
         async with self._client(
             BROWSER_HEADERS, cookies={"CONSENT": "YES+1"}
         ) as client:
-            page = await client.get(watch, params={"hl": "en"})
+            page = await client.get(f"{watch}&hl=en")
             page.raise_for_status()
             html = page.text
             title_match = _TITLE.search(html)
@@ -302,6 +514,14 @@ class PlatformReader:
             if not title_match:
                 title = await self._oembed_title(client, watch) or title
             transcript, note = await self._transcript(client, html)
+            if not transcript:
+                player = await self._player(client, video)
+                if player is not None:
+                    details = player.get("videoDetails")
+                    description = description or _field(details, "shortDescription")
+                    found, _ = await self._read_tracks(client, _caption_tracks(player))
+                    if found:
+                        transcript, note = found, ""
         parts = [title]
         if description:
             parts.extend(["", "Description:", description[:2_000]])
@@ -313,7 +533,22 @@ class PlatformReader:
             title=title,
             text="\n".join(parts),
             note=note,
+            transcript=bool(transcript),
         )
+
+    @staticmethod
+    async def _player(client: httpx.AsyncClient, video: str) -> JsonObject | None:
+        """Ask YouTube's player API about a video, the way its Android app does."""
+        try:
+            response = await client.post(
+                _PLAYER_URL,
+                json={"context": {"client": _PLAYER_CLIENT}, "videoId": video},
+            )
+            response.raise_for_status()
+            body = response.json()
+        except httpx.HTTPError, ValueError:
+            return None
+        return body if isinstance(body, dict) else None
 
     @staticmethod
     async def _oembed_title(client: httpx.AsyncClient, watch: str) -> str:
@@ -341,6 +576,12 @@ class PlatformReader:
             tracks = json.loads(found.group(1))
         except ValueError:
             return "", "Could not read this video's caption list."
+        return await self._read_tracks(client, tracks)
+
+    @staticmethod
+    async def _read_tracks(
+        client: httpx.AsyncClient, tracks: object
+    ) -> tuple[str, str]:
         if not isinstance(tracks, list) or not tracks:
             return "", "This video has no captions."
         english = [
@@ -356,20 +597,23 @@ class PlatformReader:
         base = str(track.get("baseUrl") or "")
         if not base.startswith("https://www.youtube.com/"):
             return "", "This video's captions are not readable."
+        base = re.sub(r"&fmt=[^&]*", "", base)
         try:
             response = await client.get(f"{base}&fmt=json3")
             response.raise_for_status()
-            events = response.json().get("events") or []
-        except httpx.HTTPError, ValueError:
+            text = caption_text(response.text)
+        except httpx.HTTPError:
             return "", "YouTube would not hand over this video's captions."
-        words = [
-            str(segment.get("utf8", ""))
-            for event in events
-            if isinstance(event, dict)
-            for segment in event.get("segs") or []
-            if isinstance(segment, dict)
-        ]
-        text = " ".join("".join(words).split())
         if not text:
             return "", "This video's captions were empty."
         return text[:MAX_TRANSCRIPT_CHARS], ""
+
+
+def _caption_tracks(player: JsonObject) -> object:
+    captions = player.get("captions")
+    renderer = (
+        captions.get("playerCaptionsTracklistRenderer")
+        if isinstance(captions, dict)
+        else None
+    )
+    return renderer.get("captionTracks") if isinstance(renderer, dict) else None
