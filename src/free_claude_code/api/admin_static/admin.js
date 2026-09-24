@@ -46,6 +46,13 @@ const VIEW_GROUPS = [
     containerId: "messagingSections",
   },
   {
+    id: "studio",
+    label: "Studio",
+    title: "Studio",
+    sections: ["studio"],
+    containerId: "studioSections",
+  },
+  {
     id: "integrations",
     label: "Integrations",
     title: "Integrations",

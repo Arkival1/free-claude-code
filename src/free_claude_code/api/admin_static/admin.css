@@ -978,3 +978,13 @@ button.startup-busy, .startup-spinner { display: inline-flex; align-items: cente
 @media (prefers-reduced-motion: reduce) {
   button.startup-busy::before, .startup-spinner::before { animation: none; }
 }
+
+.studio-open {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.studio-open a {
+  color: var(--accent);
+  font-weight: 600;
+}
