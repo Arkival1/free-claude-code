@@ -108,3 +108,21 @@ async def test_watching_one_agent_work(make_studio):
     assert done["agent"]["busy"] is False
     newer = await studio.agent_activity(builder.id, after=steps[-1]["sequence"])
     assert [m["text"] for m in newer["messages"]][-1] == "Page ready."
+
+
+@pytest.mark.asyncio
+async def test_watching_an_agent_in_a_room_shows_only_its_part(make_studio):
+    studio, _ = make_studio(lambda system, prompt: "On it.")
+    await studio.ensure_defaults()
+    builder = await studio.agent_by_name("Builder")
+    assert builder is not None
+    room = await studio.create_room(title="Team room")
+    await studio.room_say(room.id, "Plan the bakery site", background=False)
+
+    watching = await studio.agent_activity(builder.id)
+
+    assert watching["chat"]["id"] == room.id
+    authors = {
+        step["author"] for step in watching["messages"] if step["role"] != "user"
+    }
+    assert authors == {"Builder"}

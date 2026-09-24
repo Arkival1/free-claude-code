@@ -1416,6 +1416,13 @@ class StudioService:
                 if after
                 else await self._store.transcript(chat.id, limit=40)
             )
+        if chat is not None and chat.kind == "room":
+            # A room holds the whole team; show only this agent's part in it.
+            messages = [
+                message
+                for message in messages
+                if message.role == "user" or message.author == agent.name
+            ]
         run = own_runs[0] if own_runs else None
         return {
             "agent": {

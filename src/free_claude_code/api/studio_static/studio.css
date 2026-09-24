@@ -2320,3 +2320,12 @@ body[data-page="settings"] .view {
   border: 0;
   background: var(--bg);
 }
+
+/* Keep the page title centred whether or not there is a back button. */
+.app-bar h1 {
+  grid-column: 2;
+}
+
+.app-bar #guide-button {
+  grid-column: 3;
+}

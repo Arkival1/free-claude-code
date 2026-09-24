@@ -4246,6 +4246,7 @@
     stopPolling();
     stopListening();
     teardownHud();
+    if (!sheet.hidden) closeSheet();
     const { name, id } = route();
     const hudView = name === "hud" || name === "home";
     if (!hudView) {
