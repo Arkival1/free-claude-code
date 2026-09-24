@@ -43,9 +43,11 @@ MAIN_PROMPT = (
     "yourself. Hand real work to the team: ask_agent gives one agent a task "
     "and waits for its report; team_task puts several agents in a room to "
     "work on a goal together. Pass a project name when the work builds a "
-    "website or app. Give each agent everything it needs in the task text, "
-    "then tell the user what was done and where to find it.\n\nYour team:\n"
-    "{roster}"
+    "website or app, and background=true for long builds so you can keep "
+    "talking while the builder works. Use research yourself when you need to "
+    "understand something first. Give each agent everything it needs in the "
+    "task text, then tell the user what was done and where to find it."
+    "\n\nYour team:\n{roster}"
 )
 WEB_PROMPT = (
     "You are connected to the internet through two tools: web_search finds "
@@ -60,7 +62,8 @@ SHARED_MEMORY_PROMPT = (
 _TOOL_ABILITIES = (
     ("write_file", "builds websites and apps"),
     (COMMAND_TOOL, "runs commands"),
-    ("web_search", "searches the web"),
+    ("research", "does deep research across ten or more sources"),
+    ("ask_researcher", "asks the Researcher when stuck"),
 )
 
 
@@ -109,6 +112,12 @@ class AgentRunner:
             pack = await self._store.get(TunePack, agent.tune_pack_id)
             if pack is not None and pack.active:
                 parts.append(pack_system_text(pack))
+        skills = await self._memory.skills(agent.id)
+        if skills:
+            lines = "\n".join(f"- {entry.text[:900]}" for entry in skills)
+            parts.append(
+                f"Skills the user taught you (use them when they fit):\n{lines}"
+            )
         if agent.memory_enabled:
             if self._toolbox.shared_memory and "remember" in agent.tools:
                 parts.append(SHARED_MEMORY_PROMPT)

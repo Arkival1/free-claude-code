@@ -266,3 +266,52 @@ def test_the_hud_runs_the_main_ai_and_survives_a_reload(
     page.get_by_role("button", name="CLASSIC UI").click()
     expect(page.locator(".tab-bar")).to_be_visible()
     expect(page.locator(".card", has_text="Welcome")).to_be_visible()
+
+
+def test_the_plus_button_adds_an_agent_with_a_role(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url)
+    page.locator('.tab[data-route="agents"]').click()
+
+    page.get_by_role("button", name="Add an agent").click()
+    sheet = page.locator(".sheet-panel")
+    expect(sheet.get_by_role("heading", name="New agent")).to_be_visible()
+    sheet.get_by_role("button", name="Researcher", exact=True).click()
+    expect(sheet.get_by_label("Role")).to_have_value("researcher")
+    expect(sheet.locator('input[value="research"]')).to_be_checked()
+    expect(sheet.locator('input[value="write_file"]')).to_be_checked()
+    expect(sheet.locator('input[value="delete_file"]')).not_to_be_checked()
+    sheet.get_by_role("button", name="Designer", exact=True).click()
+    expect(sheet.get_by_label("Role")).to_have_value("builder")
+    expect(sheet.locator('input[value="ask_researcher"]')).to_be_checked()
+    sheet.get_by_label("Name").fill("Pixel")
+    sheet.get_by_role("button", name="Create agent").click()
+
+    expect(page.locator("#view-title")).to_have_text("Pixel")
+    expect(page.locator(".kv")).to_contain_text("builder")
+    expect(page.locator(".kv")).to_contain_text("research")
+    teach = page.locator(".card", has_text="Teach a skill")
+    expect(teach).to_be_visible()
+    expect(teach.get_by_label("Link")).to_be_visible()
+    expect(teach).to_contain_text("No skills yet.")
+    overflow = page.evaluate(
+        "() => document.documentElement.scrollWidth - window.innerWidth"
+    )
+    assert overflow <= 0
+
+
+def test_the_hud_has_a_plus_button_too(page: Page, admin_base_url: str) -> None:
+    open_studio(page, admin_base_url)
+    page.locator('.tab[data-route="more"]').click()
+    page.get_by_role("button", name="HUD console").click()
+    expect(page.locator(".hud")).to_be_visible()
+
+    page.locator(".hud-add").click()
+    sheet = page.locator(".sheet-panel")
+    sheet.get_by_label("Name").fill("Tess")
+    sheet.get_by_role("button", name="Tester", exact=True).click()
+    sheet.get_by_role("button", name="Create agent").click()
+
+    expect(page.locator(".hud-agent", has_text="Tess")).to_be_visible()
+    expect(page.locator(".hud")).to_be_visible()

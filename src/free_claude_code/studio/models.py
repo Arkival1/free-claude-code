@@ -8,7 +8,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from free_claude_code.core.json_types import JsonObject
 
-type AgentRole = Literal["assistant", "agent", "teacher", "student", "guide", "main"]
+type AgentRole = Literal[
+    "assistant", "agent", "builder", "researcher", "teacher", "student", "guide", "main"
+]
+AGENT_ROLES: tuple[str, ...] = (
+    "assistant",
+    "agent",
+    "builder",
+    "researcher",
+    "teacher",
+    "student",
+    "guide",
+    "main",
+)
 type ChatKind = Literal["chat", "agent", "classroom", "guide", "room"]
 type MessageRole = Literal["user", "assistant", "system", "tool", "event"]
 type MemoryScope = Literal["working", "long_term"]

@@ -742,6 +742,18 @@ class Settings(BaseModel):
     studio_search_base_url: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_SEARCH_BASE_URL"
     )
+    studio_youtube_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_YOUTUBE_API_KEY"
+    )
+    studio_reddit_client_id: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_REDDIT_CLIENT_ID"
+    )
+    studio_reddit_client_secret: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_REDDIT_CLIENT_SECRET"
+    )
+    studio_research_sources: int = Field(
+        default=10, ge=3, le=25, validation_alias="STUDIO_RESEARCH_SOURCES"
+    )
 
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
     # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).

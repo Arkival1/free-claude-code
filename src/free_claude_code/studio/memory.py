@@ -73,6 +73,9 @@ _STOPWORDS = frozenset(
 )
 _DAY_MS = 86_400_000
 
+SKILL_TAG = "skill"
+"""Memories tagged as a skill are always in the agent's prompt."""
+
 SHARED_MEMORY_ID = "shared"
 """The owner id of the memory every agent reads and writes together."""
 
@@ -284,6 +287,15 @@ class MemoryService:
             lines = "\n".join(f"- {entry.text}" for entry in working)
             sections.append(f"Your working notes right now:\n{lines}")
         return "\n\n".join(sections)
+
+    async def skills(self, agent_id: str, *, limit: int = 8) -> tuple[MemoryEntry, ...]:
+        """Return what the user taught this agent, newest first."""
+        entries = await self._store.find(
+            MemoryEntry,
+            where={"agent_id": agent_id, "scope": "long_term"},
+            order_by="created_at DESC",
+        )
+        return tuple(entry for entry in entries if SKILL_TAG in entry.tags)[:limit]
 
     async def entries(
         self, agent_id: str, *, scope: str | None = None

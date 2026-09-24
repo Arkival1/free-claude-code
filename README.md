@@ -486,6 +486,63 @@ A **Researcher** agent is created for deep research: it searches, reads the
 best sources, answers with links, and saves what it finds to shared memory.
 Ask the main AI to send it, or write `@Researcher` in a room.
 
+**More platforms.** `web_fetch` reads Reddit threads (post plus top comments)
+and YouTube videos (title, description, and transcript when the video has
+captions). Two optional credentials make these reliable:
+
+- **YouTube API Key** (`STUDIO_YOUTUBE_API_KEY`, from Google Cloud, YouTube
+  Data API v3) lets research search YouTube directly; without it, videos are
+  found through web search.
+- **Reddit App ID and Secret** (`STUDIO_REDDIT_CLIENT_ID`,
+  `STUDIO_REDDIT_CLIENT_SECRET`): create a free *script* app at
+  reddit.com/prefs/apps. Research then reads Reddit through its official API,
+  since Reddit often blocks unauthenticated requests.
+
+For Google results, use a Serper key as the Web Search API Key.
+
+</details>
+
+<details>
+<summary><strong>Deep research, testing what it finds, and the Builder asking for help</strong></summary>
+
+The `research` tool answers a question from at least ten sources
+(`STUDIO_RESEARCH_SOURCES`, 3 to 25). It searches the web plus Reddit, YouTube,
+Stack Overflow, GitHub, MDN, and dev.to, and takes results from each in turn
+so no single site dominates. If it is still short of ten sources, it tries more
+angles ("tutorial", "best practices", "common mistakes"). Then it reads every
+source and returns the sentences that answer the question, numbered `[1]`,
+`[2]`, and so on so the agent can cite them.
+
+The **Researcher** tests code before recommending it: `test_code` saves a
+snippet in its **Research lab** project and runs it (Python or JavaScript), then
+reports PASSED or FAILED. Findings go into team memory tagged `verified` or
+`unverified`. Running code follows `STUDIO_AGENT_COMMANDS`: with `ask`, each
+run waits for your **Run it**.
+
+The **Builder** builds websites, apps, and games on its own. When it hits an
+error it can't fix quickly, it calls `ask_researcher` with the exact error. The
+Researcher looks it up, tests the fix, and answers, and the Builder applies the
+fix and tests again. Both conversations are visible as linked chats.
+
+The main AI can hand work off with `background: true`, so the Builder keeps
+working while you talk. When it finishes, the main AI's conversation gets a
+note saying how it went.
+
+</details>
+
+<details>
+<summary><strong>Adding agents and teaching them skills</strong></summary>
+
+Tap **+** on the Agents tab, or in the HUD's Team panel, to add an agent. Start
+from a preset (Builder, Researcher, Designer, Tester, Assistant, or Custom),
+then set its name, role, and model, and choose its tools: Internet, Build
+files, Run and test code, Ask the Researcher, and Memory.
+
+Each agent's page has **Teach a skill**. Paste a link (a docs page, a Reddit
+thread, or a YouTube video) or write notes about a tool, command, or code
+pattern. The agent reads it, keeps a short how-to, and sees your skills in
+every prompt, so the Builder follows the tools and patterns you taught it.
+
 </details>
 
 <details>

@@ -69,6 +69,12 @@ class AgentPayload(BaseModel):
     system_prompt: str = ""
     tools: list[str] | None = None
     memory_enabled: bool = True
+    description: str = ""
+
+
+class TeachPayload(BaseModel):
+    text: str = ""
+    url: str = ""
 
 
 class AgentUpdatePayload(BaseModel):
@@ -454,8 +460,39 @@ async def create_agent(
         system_prompt=payload.system_prompt,
         tools=payload.tools,
         memory_enabled=payload.memory_enabled,
+        description=payload.description,
     )
     return agent.model_dump()
+
+
+@router.get("/studio/api/agent-options")
+async def agent_options(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """List the roles and tools the add-agent sheet offers."""
+    return studio.agent_options()
+
+
+@router.post("/studio/api/agents/{agent_id}/teach")
+async def teach_agent(
+    agent_id: str,
+    payload: TeachPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Teach one agent a skill from a link or notes."""
+    entry = await studio.teach_agent(agent_id, text=payload.text, url=payload.url)
+    return entry.model_dump()
+
+
+@router.get("/studio/api/agents/{agent_id}/skills")
+async def agent_skills(
+    agent_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Return what the user taught one agent."""
+    return {"skills": [entry.model_dump() for entry in await studio.skills(agent_id)]}
 
 
 @router.patch("/studio/api/agents/{agent_id}")

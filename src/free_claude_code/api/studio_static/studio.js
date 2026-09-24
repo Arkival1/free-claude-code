@@ -859,7 +859,13 @@
             )
           : empty("No agents yet.")
       ),
-      card("New agent", newAgentForm()),
+      card("Add an agent", [
+        el("p", {
+          class: "muted",
+          text: "Give it a name, a role, a model, and the tools it may use: building, running code, the internet, deep research, or asking the Researcher for help.",
+        }),
+        el("button", { class: "primary", text: "+ New agent", onclick: () => openAddAgent() }),
+      ]),
       card(
         "Recent tasks",
         runs.length
@@ -892,7 +898,96 @@
       ),
     ];
     if (generation !== renderGeneration) return;
-    view.replaceChildren(...nodes);
+    view.replaceChildren(
+      ...nodes,
+      el("button", { class: "fab", "aria-label": "Add an agent", text: "+", onclick: () => openAddAgent() })
+    );
+  }
+
+  async function openAddAgent(onCreated) {
+    let options;
+    try {
+      options = await api("/studio/api/agent-options");
+    } catch (error) {
+      return notify(error.message);
+    }
+    modelList().catch(() => {});
+    const name = el("input", { type: "text", placeholder: "e.g. Pixel", "aria-label": "Name" });
+    const role = el(
+      "select",
+      { "aria-label": "Role" },
+      options.roles.map((row) => el("option", { value: row.role, text: row.role }))
+    );
+    const roleNote = el("p", { class: "muted" });
+    const model = el("input", {
+      type: "text",
+      list: "model-list",
+      "aria-label": "Model",
+      placeholder: "Leave empty for the default, or local/<model>",
+    });
+    const prompt = el("textarea", { "aria-label": "Instructions", placeholder: "What this agent is for and how it should work." });
+    const boxes = new Map();
+    const groups = options.tool_groups.map((group) =>
+      el("fieldset", { class: "tool-group" }, [
+        el("legend", { text: group.label }),
+        ...group.tools.map((tool) => {
+          const box = el("input", { type: "checkbox", value: tool.name });
+          boxes.set(tool.name, box);
+          return el("label", { class: "check", title: tool.description }, [box, el("span", { text: tool.name.replace(/_/g, " ") })]);
+        }),
+      ])
+    );
+    const showNote = () => {
+      roleNote.textContent = (options.roles.find((row) => row.role === role.value) || {}).note || "";
+    };
+    role.addEventListener("change", showNote);
+    const presetButtons = el("div", { class: "chips" });
+    const applyPreset = (preset) => {
+      role.value = preset.role;
+      prompt.value = preset.prompt;
+      for (const [tool, box] of boxes) box.checked = preset.tools.includes(tool);
+      for (const chip of presetButtons.children) chip.setAttribute("aria-pressed", String(chip.dataset.name === preset.name));
+      showNote();
+    };
+    presetButtons.append(
+      ...options.presets.map((preset) =>
+        el("button", { class: "chip", type: "button", "data-name": preset.name, "aria-pressed": "false", text: preset.name, onclick: () => applyPreset(preset) })
+      )
+    );
+    applyPreset(options.presets[0]);
+    openSheet("New agent", [
+      el("p", { class: "muted", text: "Start from a preset, then change anything." }),
+      presetButtons,
+      el("label", {}, ["Name", name]),
+      el("label", {}, ["Role", role]),
+      roleNote,
+      el("label", {}, ["Model", model]),
+      el("label", {}, ["Instructions", prompt]),
+      ...groups,
+      el("button", {
+        class: "primary",
+        text: "Create agent",
+        onclick: async () => {
+          if (!name.value.trim()) return notify("Name the agent.");
+          const tools = [...boxes].filter(([, box]) => box.checked).map(([tool]) => tool);
+          try {
+            const agent = await post("/studio/api/agents", {
+              name: name.value.trim(),
+              role: role.value,
+              model: model.value.trim(),
+              system_prompt: prompt.value.trim(),
+              tools: [...tools, "finish"],
+            });
+            closeSheet();
+            notify(`${agent.name} joined the team.`);
+            if (onCreated) onCreated(agent);
+            else go(`agent/${agent.id}`);
+          } catch (error) {
+            notify(error.message);
+          }
+        },
+      }),
+    ]);
   }
 
   function taskForm(agents, sites) {
@@ -938,41 +1033,12 @@
     ];
   }
 
-  function newAgentForm() {
-    const name = el("input", { type: "text", placeholder: "Researcher" });
-    const model = el("input", {
-      type: "text",
-      list: "model-list",
-      placeholder: "provider/model or local/my-model",
-    });
-    modelList().catch(() => {});
-    const prompt = el("textarea", { placeholder: "What this agent is for." });
-    return [
-      el("label", {}, ["Name", name]),
-      el("label", {}, ["Model", model]),
-      el("label", {}, ["Instructions", prompt]),
-      el("button", {
-        class: "primary",
-        text: "Create agent",
-        onclick: async () => {
-          if (!name.value.trim()) return notify("Name the agent.");
-          await post("/studio/api/agents", {
-            name: name.value.trim(),
-            model: model.value.trim(),
-            system_prompt: prompt.value.trim(),
-          });
-          notify("Agent created.");
-          render();
-        },
-      }),
-    ];
-  }
-
   async function renderAgent(agentId) {
     const generation = renderGeneration;
-    const [{ agents }, { memories }] = await Promise.all([
+    const [{ agents }, { memories }, { skills }] = await Promise.all([
       api("/studio/api/agents"),
       api(`/studio/api/memory/${agentId}`),
+      api(`/studio/api/agents/${agentId}/skills`),
     ]);
     const agent = agents.find((item) => item.id === agentId);
     if (!agent) return go("agents");
@@ -1018,6 +1084,7 @@
           }),
         ]),
       ]),
+      teachCard(agent, skills),
       card(
         "Memory",
         [
@@ -1056,6 +1123,62 @@
             : [empty("Nothing remembered yet.")]),
         ]
       )
+    );
+  }
+
+  function teachCard(agent, skills) {
+    const link = el("input", {
+      type: "url",
+      placeholder: "https://… docs page, Reddit thread, or YouTube video",
+    });
+    const notes = el("textarea", {
+      placeholder: "Or write it out: a tool, a command, a code pattern, how you like things done.",
+    });
+    const button = el("button", {
+      class: "primary",
+      text: "Teach",
+      onclick: async () => {
+        if (!link.value.trim() && !notes.value.trim()) return notify("Add a link or some notes.");
+        button.disabled = true;
+        button.textContent = "Learning…";
+        try {
+          await post(`/studio/api/agents/${agent.id}/teach`, { url: link.value.trim(), text: notes.value.trim() });
+          notify(`${agent.name} learned it.`);
+          render();
+        } catch (error) {
+          notify(error.message);
+          button.disabled = false;
+          button.textContent = "Teach";
+        }
+      },
+    });
+    return card(
+      "Teach a skill",
+      [
+        el("label", {}, ["Link", link]),
+        el("label", {}, ["Notes", notes]),
+        button,
+        ...(skills.length
+          ? skills.map((skill) =>
+              el("div", { class: "list-item" }, [
+                el("span", { class: "grow" }, [
+                  el("strong", { text: skill.text.split("\n")[0] }),
+                  el("span", { class: "pre", text: skill.text.split("\n").slice(1).join("\n") }),
+                ]),
+                el("button", {
+                  class: "danger",
+                  "aria-label": "Forget this skill",
+                  text: "✕",
+                  onclick: async () => {
+                    await remove(`/studio/api/memory/entry/${skill.id}`);
+                    render();
+                  },
+                }),
+              ])
+            )
+          : [empty("No skills yet.")]),
+      ],
+      `${agent.name} reads the link, keeps a short how-to, and follows it whenever it fits. Reddit threads and YouTube videos work too.`
     );
   }
 
@@ -2395,9 +2518,13 @@
       [
         el("p", {}, [el("strong", { text: "Agents: " }), access]),
         el("p", {}, [el("strong", { text: "Search: " }), service]),
+        el("p", {}, [
+          el("strong", { text: "Research: " }),
+          `${web.sources} sources per question from the web, Reddit (${web.reddit}), YouTube (${web.youtube}, transcripts when captioned), Stack Overflow, GitHub, MDN, and dev.to.`,
+        ]),
         el("p", {
           class: "muted",
-          text: "To add a key, open admin settings on the computer running Studio, then Studio → Web Search API Key. Brave Search (key starts with BSA), Tavily (tvly-), and Serper all have free tiers; SearXNG is free if you run it yourself.",
+          text: "Keys go in admin settings on the computer running Studio, under Studio. Web Search API Key: Brave Search (starts with BSA), Tavily (tvly-), or Serper for Google results. YouTube API Key: from Google Cloud, lets research search YouTube directly. Reddit App ID and Secret: from reddit.com/prefs/apps, a free 'script' app, so Reddit doesn't block research.",
         }),
         el("div", { class: "row" }, [
           el("div", { class: "grow" }, [query]),
@@ -2728,7 +2855,23 @@
           el("button", { class: "hud-send", type: "submit", text: "SEND" }),
         ]
       ),
-      el("div", { class: "hud-team" }, [hudPanel("TEAM", refs.team)]),
+      el("div", { class: "hud-team" }, [
+        hudPanel(
+          "TEAM",
+          refs.team,
+          el("button", {
+            class: "hud-add",
+            type: "button",
+            "aria-label": "Add an agent",
+            text: "+",
+            onclick: () =>
+              openAddAgent(() => {
+                hud.keys.team = "";
+                poll();
+              }),
+          })
+        ),
+      ]),
       el("div", { class: "hud-side" }, [
         hudPanel("ACTIVITY", refs.activity),
         hudPanel(

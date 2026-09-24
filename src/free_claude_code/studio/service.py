@@ -25,14 +25,16 @@ from .downloads import CURATED_MODELS, ModelLibrary
 from .guide import GuideAnswer, GuideAssistant, GuideState
 from .llm import (
     LOCAL_MODEL_PREFIX,
+    ChatMessage,
     LocalOpenAILLM,
     ProxyLLM,
     StudioLLMError,
     StudioModelRouter,
 )
 from .lora import LoraTrainer
-from .memory import SHARED_MEMORY_ID, MemoryService
+from .memory import SHARED_MEMORY_ID, SKILL_TAG, MemoryService
 from .models import (
+    AGENT_ROLES,
     Agent,
     AgentRun,
     Chat,
@@ -50,12 +52,25 @@ from .models import (
     now_ms,
 )
 from .obsidian import ObsidianVault, VaultStatus
+from .platforms import PlatformError, PlatformReader, platform_of
+from .presets import (
+    BUILDER_PROMPT,
+    RESEARCHER_PROMPT,
+    RESEARCHER_TOOLS,
+    agent_options,
+)
 from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
 from .search import SearchError, StudioSearch
 from .sites import SiteWorkspace, slugify
 from .store import StudioNotFoundError, StudioStore
-from .tools import DEFAULT_TOOL_NAMES, MAIN_ROLE, MAIN_TOOL_NAMES, AgentToolbox
+from .tools import (
+    DEFAULT_TOOL_NAMES,
+    MAIN_ROLE,
+    MAIN_TOOL_NAMES,
+    TOOL_SPEC_BY_NAME,
+    AgentToolbox,
+)
 from .tuning import CloudTuner, LightTuner, TuningError
 
 GUIDE_AGENT_NAME = "Guide"
@@ -63,13 +78,11 @@ BUILDER_AGENT_NAME = "Builder"
 TEACHER_AGENT_NAME = "Teacher"
 STUDENT_AGENT_NAME = "Student"
 RESEARCHER_AGENT_NAME = "Researcher"
-RESEARCHER_TOOLS = ("web_search", "web_fetch", "remember", "recall", "finish")
-RESEARCHER_PROMPT = (
-    "Research questions on the web for the user and the team: search, read "
-    "the best two or three sources with web_fetch, compare them, and answer "
-    "clearly with the source links. Save the key findings with remember so "
-    "the other agents can use them."
-)
+_DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
+    BUILDER_AGENT_NAME: ("research", "test_code", "ask_researcher"),
+    RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
+}
+_DEFAULT_ROLES = {BUILDER_AGENT_NAME: "builder", RESEARCHER_AGENT_NAME: "researcher"}
 SHARED_MEMORY_NAME = "Team memory"
 MAIN_CONSOLE_SETTING = "console"
 MAIN_PROMPT_NOTE = (
@@ -77,6 +90,13 @@ MAIN_PROMPT_NOTE = (
     "that needs building, research, or commands to the right agents."
 )
 _LOCAL_PROBE_SECONDS = 15.0
+TEACH_MATERIAL_CHARS = 12_000
+TEACH_PROMPT = (
+    "You are turning material into a skill an AI agent will follow later. "
+    "Write a short, practical how-to: when to use it, the exact commands, "
+    "code patterns, or steps, and the gotchas. Plain text, at most 12 lines, "
+    "no preamble."
+)
 
 
 class StudioError(RuntimeError):
@@ -203,26 +223,39 @@ class StudioService:
             transport=self._search_transport,
         )
 
+    def _reader(self) -> PlatformReader:
+        settings = self.settings
+        return PlatformReader(
+            youtube_api_key=settings.studio_youtube_api_key or "",
+            reddit_client_id=settings.studio_reddit_client_id or "",
+            reddit_client_secret=settings.studio_reddit_client_secret or "",
+            transport=self._search_transport,
+        )
+
+    def _egress(self) -> WebFetchEgressPolicy:
+        settings = self.settings
+        return WebFetchEgressPolicy(
+            allow_private_network_targets=settings.web_fetch_allow_private_networks,
+            allowed_schemes=web_fetch_allowed_scheme_set(
+                settings.web_fetch_allowed_schemes
+            ),
+        )
+
     def _toolbox(self) -> AgentToolbox:
         settings = self.settings
         return AgentToolbox(
             web_tools=self._web_tools,
             sites=self._sites,
             memory=self._memory(),
-            egress=WebFetchEgressPolicy(
-                allow_private_network_targets=(
-                    settings.web_fetch_allow_private_networks
-                ),
-                allowed_schemes=web_fetch_allowed_scheme_set(
-                    settings.web_fetch_allowed_schemes
-                ),
-            ),
+            egress=self._egress(),
             commands=self._commands,
             command_policy=settings.studio_agent_commands,
             command_timeout=float(settings.studio_command_timeout),
             delegate=Crew(store=self._store, host=self),
             searcher=self._search(),
             web_access=settings.studio_web_access,
+            reader=self._reader(),
+            research_sources=settings.studio_research_sources,
         )
 
     def _runner(self) -> AgentRunner:
@@ -321,14 +354,14 @@ class StudioService:
             ),
             (
                 BUILDER_AGENT_NAME,
-                "agent",
+                "builder",
                 self.default_model,
-                "Research on the web and build complete, working websites.",
+                BUILDER_PROMPT,
                 _default_tools(),
             ),
             (
                 RESEARCHER_AGENT_NAME,
-                "agent",
+                "researcher",
                 self.default_model,
                 RESEARCHER_PROMPT,
                 RESEARCHER_TOOLS,
@@ -348,6 +381,7 @@ class StudioService:
                 (),
             ),
         )
+        await self._upgrade_defaults(existing)
         created: list[Agent] = []
         if all(agent.role != MAIN_ROLE for agent in existing):
             main = Agent.model_validate(
@@ -383,6 +417,36 @@ class StudioService:
             created.append(agent)
         return tuple(created)
 
+    def agent_options(self) -> JsonObject:
+        """Roles, presets, and tool groups for the add-agent sheet."""
+        return agent_options()
+
+    async def _upgrade_defaults(self, existing: Sequence[Agent]) -> None:
+        """Give starter agents from older versions their newer tools and roles."""
+        for agent in existing:
+            if agent.role == MAIN_ROLE:
+                wanted = MAIN_TOOL_NAMES
+                role = MAIN_ROLE
+            elif agent.name in _DEFAULT_UPGRADES:
+                wanted = _DEFAULT_UPGRADES[agent.name]
+                role = (
+                    _DEFAULT_ROLES[agent.name] if agent.role == "agent" else agent.role
+                )
+            else:
+                continue
+            missing = tuple(tool for tool in wanted if tool not in agent.tools)
+            if not missing and role == agent.role:
+                continue
+            await self._store.put(
+                agent.model_copy(
+                    update={
+                        "tools": (*agent.tools, *missing),
+                        "role": role,
+                        "updated_at": now_ms(),
+                    }
+                )
+            )
+
     async def agents(self) -> tuple[Agent, ...]:
         """Return every agent, oldest first."""
         return await self._store.find(Agent, order_by="created_at ASC")
@@ -407,17 +471,25 @@ class StudioService:
         system_prompt: str = "",
         tools: Sequence[str] | None = None,
         memory_enabled: bool = True,
+        description: str = "",
     ) -> Agent:
-        """Create one agent with its own model, tools, and memory."""
+        """Create one agent with its own role, model, tools, and memory."""
         if not name.strip():
             raise StudioError("An agent needs a name.")
+        if role not in AGENT_ROLES or role in {MAIN_ROLE, "guide"}:
+            raise StudioError(f"Pick a role; {role!r} is not one Studio knows.")
+        chosen = tuple(dict.fromkeys(tools)) if tools is not None else _default_tools()
+        unknown = [tool for tool in chosen if tool not in TOOL_SPEC_BY_NAME]
+        if unknown:
+            raise StudioError(f"Unknown tools: {', '.join(unknown)}.")
         agent = Agent.model_validate(
             {
                 "name": name.strip(),
                 "role": role,
                 "model": model or self.default_model,
                 "system_prompt": system_prompt,
-                "tools": tuple(tools) if tools is not None else _default_tools(),
+                "description": description or system_prompt[:200],
+                "tools": chosen,
                 "memory_enabled": memory_enabled,
                 "local_only": (model or "").startswith("local/"),
             }
@@ -660,7 +732,8 @@ class StudioService:
             member_ids = [
                 agent.id
                 for agent in await self.agents()
-                if agent.role in {"agent", "teacher", "student", "assistant"}
+                if agent.role
+                in {"agent", "builder", "researcher", "teacher", "student", "assistant"}
             ]
         if site_id:
             await self._store.require(SiteProject, site_id)
@@ -785,6 +858,7 @@ class StudioService:
         goal: str,
         site_id: str | None = None,
         chat_id: str | None = None,
+        parent_chat_id: str | None = None,
     ) -> AgentRun:
         """Queue one autonomous agent task and start it in the background."""
         agent = await self._store.require(Agent, agent_id)
@@ -798,6 +872,7 @@ class StudioService:
                 title=goal.strip()[:48],
                 kind="agent",
                 site_id=site_id,
+                parent_chat_id=parent_chat_id,
             )
         )
         run = AgentRun.model_validate(
@@ -818,10 +893,48 @@ class StudioService:
             agent = await self._store.require(Agent, agent_id)
             chat = await self._store.require(Chat, chat_id)
             run = await self._store.require(AgentRun, run_id)
-            await self._runner().run_task(agent, chat, run)
+            finished = await self._runner().run_task(agent, chat, run)
+            await self._refresh_site_count(finished.site_id)
             await self._after_memory_change([agent.id])
+            if chat.parent_chat_id:
+                await self._report_to_parent(chat, agent, finished)
         except (StudioNotFoundError, StudioError) as error:
             logger.warning("Studio task {} failed to start: {}", run_id, error)
+
+    async def _report_to_parent(self, chat: Chat, agent: Agent, run: AgentRun) -> None:
+        """Tell the conversation that handed off the work how it went."""
+        parent_id = chat.parent_chat_id
+        if parent_id is None or await self._store.get(Chat, parent_id) is None:
+            return
+        summary = (run.result or run.error or "").strip()[:600]
+        await self._store.append_message(
+            chat_id=parent_id,
+            role="event",
+            text=f"{agent.name} finished in the background ({run.status}): {summary}",
+            author=agent.name,
+            data={
+                "kind": "background_done",
+                "run_id": run.id,
+                "chat_id": chat.id,
+                "status": run.status,
+            },
+        )
+
+    async def start_agent_task(
+        self,
+        agent: Agent,
+        goal: str,
+        *,
+        site_id: str | None,
+        parent_chat_id: str | None,
+    ) -> AgentRun:
+        """Start a hand-off in the background; the crew uses this."""
+        return await self.start_task(
+            agent_id=agent.id,
+            goal=goal,
+            site_id=site_id,
+            parent_chat_id=parent_chat_id,
+        )
 
     async def runs(self, *, agent_id: str | None = None) -> tuple[AgentRun, ...]:
         """Return agent tasks, newest first."""
@@ -895,7 +1008,14 @@ class StudioService:
 
     def web_status(self) -> JsonObject:
         """Say how agents reach the internet, without revealing any key."""
-        return {**self._search().status(), "access": self.settings.studio_web_access}
+        reader = self._reader()
+        return {
+            **self._search().status(),
+            "access": self.settings.studio_web_access,
+            "reddit": "official API" if reader.reddit_app_ready else "public pages",
+            "youtube": "YouTube API" if reader.youtube_search_ready else "web search",
+            "sources": self.settings.studio_research_sources,
+        }
 
     async def test_search(self, query: str) -> JsonObject:
         """Run one search the way agents do, so the user can check the setup."""
@@ -1400,6 +1520,68 @@ class StudioService:
         )
         await self._after_memory_change([agent_id])
         return entry
+
+    async def teach_agent(
+        self, agent_id: str, *, text: str = "", url: str = ""
+    ) -> MemoryEntry:
+        """Turn a link or notes into a skill the agent keeps in every prompt."""
+        agent = await self._store.require(Agent, agent_id)
+        notes = text.strip()
+        link = url.strip()
+        material = ""
+        if link:
+            material = await self._read_for_teaching(link)
+        if not notes and not material:
+            raise StudioError("Give a link or write what to teach.")
+        prompt = "\n\n".join(
+            part
+            for part in (
+                f"Material from {link}:\n{material}" if material else "",
+                f"The user's notes:\n{notes}" if notes else "",
+            )
+            if part
+        )
+        try:
+            reply = await self._router.complete(
+                [ChatMessage.user(prompt)],
+                model=agent.model or self.default_model,
+                system=TEACH_PROMPT,
+                max_tokens=700,
+            )
+            skill = reply.text.strip()
+        except StudioLLMError as error:
+            logger.warning("Studio could not condense a skill: {}", error)
+            skill = ""
+        if not skill:
+            skill = (notes or material)[:1_200]
+        if link:
+            skill = f"{skill}\nSource: {link}"
+        entry = await self._memory().remember(
+            agent.id,
+            skill,
+            tags=(SKILL_TAG,),
+            source=link or "taught",
+            author="you",
+        )
+        if entry is None:
+            raise StudioError("There was nothing to teach.")
+        await self._after_memory_change([agent.id])
+        return entry
+
+    async def skills(self, agent_id: str) -> tuple[MemoryEntry, ...]:
+        """Return what the user taught one agent."""
+        await self._store.require(Agent, agent_id)
+        return await self._memory().skills(agent_id, limit=50)
+
+    async def _read_for_teaching(self, url: str) -> str:
+        try:
+            if platform_of(url) != "web":
+                page = await self._reader().read(url)
+                return page.text[:TEACH_MATERIAL_CHARS]
+            fetched = await self._web_tools.fetch(url, egress=self._egress())
+            return fetched.data[:TEACH_MATERIAL_CHARS]
+        except (PlatformError, httpx.HTTPError, OSError, ValueError) as error:
+            raise StudioError(f"Could not read that link: {error}") from error
 
     async def forget(self, memory_id: str) -> bool:
         """Delete one memory."""

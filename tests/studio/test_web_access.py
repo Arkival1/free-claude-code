@@ -309,8 +309,8 @@ async def test_a_researcher_joins_the_team_and_the_main_ai_knows_it(make_studio)
     assert {"web_search", "web_fetch", "remember"} <= set(researcher.tools)
 
     await studio.main_say("hi", background=False)
-    assert "- Researcher (agent," in str(model.calls[-1]["system"])
-    assert "searches the web" in str(model.calls[-1]["system"])
+    assert "- Researcher (researcher," in str(model.calls[-1]["system"])
+    assert "deep research" in str(model.calls[-1]["system"])
 
 
 @pytest.mark.asyncio

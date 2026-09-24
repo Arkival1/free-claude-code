@@ -463,9 +463,13 @@ label {
 
 .kv {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px 12px;
   font-size: 14px;
+}
+
+.kv span {
+  overflow-wrap: anywhere;
 }
 
 .kv span:nth-child(odd) { color: var(--muted); }
@@ -1248,4 +1252,97 @@ button.hud-item {
 .stack {
   display: grid;
   gap: 8px;
+}
+
+/* Add-agent sheet and floating add button. */
+.fab {
+  position: fixed;
+  right: calc(var(--safe-right) + 18px);
+  bottom: calc(var(--safe-bottom) + 84px);
+  z-index: 7;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 30px;
+  line-height: 1;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.fab:focus-visible,
+.chip:focus-visible,
+.hud-add:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  min-height: var(--tap);
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.chip[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.tool-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 8px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.tool-group legend {
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--tap);
+  color: var(--text);
+  font-size: 15px;
+}
+
+label.check input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
+.pre {
+  white-space: pre-wrap;
+}
+
+.hud-add {
+  min-width: var(--tap);
+  min-height: 32px;
+  border: 1px solid var(--hud-line);
+  background: var(--hud-cyan-soft);
+  color: var(--hud-cyan);
+  font: 700 1.1rem/1 var(--hud-mono);
+  cursor: pointer;
 }

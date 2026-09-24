@@ -870,6 +870,50 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_YOUTUBE_API_KEY",
+        "YouTube API Key",
+        "studio",
+        "secret",
+        settings_attr="studio_youtube_api_key",
+        secret=True,
+        description=(
+            "YouTube Data API key from Google Cloud. Lets research search "
+            "YouTube directly; without it, videos are found through web search. "
+            "Transcripts are read either way when a video has captions."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_REDDIT_CLIENT_ID",
+        "Reddit App ID",
+        "studio",
+        "text",
+        settings_attr="studio_reddit_client_id",
+        description=(
+            "From reddit.com/prefs/apps (create a 'script' app). With the "
+            "secret, research reads Reddit through its official API instead "
+            "of the public pages Reddit often blocks."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_REDDIT_CLIENT_SECRET",
+        "Reddit App Secret",
+        "studio",
+        "secret",
+        settings_attr="studio_reddit_client_secret",
+        secret=True,
+    ),
+    ConfigFieldSpec(
+        "STUDIO_RESEARCH_SOURCES",
+        "Sources Per Research",
+        "studio",
+        "number",
+        settings_attr="studio_research_sources",
+        description=(
+            "How many sources the research tool gathers and reads for each "
+            "question, from 3 to 25."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_SEARCH_BASE_URL",
         "SearXNG Address",
         "studio",

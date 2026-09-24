@@ -55,6 +55,31 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Research and teaching agents",
+        route="/studio#agents",
+        terms=(
+            "research",
+            "sources",
+            "reddit",
+            "youtube",
+            "teach",
+            "skill",
+            "learn",
+            "builder",
+            "stuck",
+            "error",
+        ),
+        body=(
+            "The research tool reads ten or more sources per question: the web, "
+            "Reddit threads, YouTube transcripts, Stack Overflow, GitHub, MDN, and "
+            "dev.to. The Researcher tests code it finds with test_code in its "
+            "Research lab before recommending it. The Builder calls ask_researcher "
+            "when it is stuck on an error. Teach any agent a skill from its page: "
+            "paste a link or notes and it keeps a short how-to it follows. Add "
+            "agents with the + button and pick a role and tools."
+        ),
+    ),
+    GuideTopic(
         title="Agent tasks",
         route="/studio#agents",
         terms=("task", "autonomous", "run", "goal", "build", "website", "site"),

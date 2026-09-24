@@ -154,7 +154,7 @@ async def test_main_ai_hands_a_build_to_an_agent(make_studio):
     assert "<h1>Bakery</h1>" in await studio.workspace.read(site.id, "index.html")
 
     main_call = next(call for call in model.calls if _is_main(str(call["system"])))
-    assert "- Builder (agent," in str(main_call["system"])
+    assert "- Builder (builder," in str(main_call["system"])
     assert ASK_AGENT_TOOL in main_call["tools"]
     builder_calls = [call for call in model.calls if not _is_main(str(call["system"]))]
     assert all(ASK_AGENT_TOOL not in call["tools"] for call in builder_calls)

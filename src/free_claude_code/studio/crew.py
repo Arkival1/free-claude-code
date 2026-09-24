@@ -8,9 +8,10 @@ from .models import Agent, AgentRun, Chat, SiteProject
 from .rooms import RoomOutcome
 from .sites import slugify
 from .store import StudioStore
-from .tools import MAIN_ROLE, ToolContext, ToolOutcome
+from .tools import MAIN_ROLE, RESEARCHER_ROLE, ToolContext, ToolOutcome
 
 MAX_REPORT_CHARS = 2_000
+RESEARCH_LAB = "Research lab"
 _BUILD_WORDS = re.compile(
     r"\b(build|make|create|website|site|app|page|landing|code|script|game)\b",
     re.IGNORECASE,
@@ -52,6 +53,17 @@ class CrewHost(Protocol):
         """Run one goal in a new room until the agents settle."""
         ...
 
+    async def start_agent_task(
+        self,
+        agent: Agent,
+        goal: str,
+        *,
+        site_id: str | None,
+        parent_chat_id: str | None,
+    ) -> AgentRun:
+        """Start one agent task in the background and return at once."""
+        ...
+
 
 class Crew:
     """Resolve names and projects, run the hand-off, and report back."""
@@ -61,7 +73,13 @@ class Crew:
         self._host = host
 
     async def ask_agent(
-        self, context: ToolContext, *, agent: str, task: str, project: str
+        self,
+        context: ToolContext,
+        *,
+        agent: str,
+        task: str,
+        project: str,
+        background: bool = False,
     ) -> ToolOutcome:
         """Run one task on another agent and report its result."""
         worker = await self._resolve(agent, caller_id=context.agent_id)
@@ -72,6 +90,32 @@ class Crew:
             builds="write_file" in worker.tools,
             owner=worker,
         )
+        if background:
+            started = await self._host.start_agent_task(
+                worker,
+                task,
+                site_id=site.id if site else context.site_id,
+                parent_chat_id=context.chat_id,
+            )
+            lines = [
+                f"{worker.name} is working on it in the background and will "
+                "report here when done."
+            ]
+            if site is not None:
+                lines.append(f"Project: {site.name}")
+            return ToolOutcome(
+                text="\n".join(lines),
+                data={
+                    "tool": "ask_agent",
+                    "agent_id": worker.id,
+                    "agent": worker.name,
+                    "run_id": started.id,
+                    "chat_id": started.chat_id,
+                    "site_id": started.site_id,
+                    "status": started.status,
+                    "background": True,
+                },
+            )
         run, chat = await self._host.run_agent_task(
             worker,
             task,
@@ -142,6 +186,53 @@ class Crew:
             failed=not outcome.completed,
         )
 
+    async def consult(self, context: ToolContext, *, question: str) -> ToolOutcome:
+        """Have the Researcher look something up for another agent."""
+        researchers = [
+            agent
+            for agent in await self._host.agents()
+            if agent.role == RESEARCHER_ROLE
+            and not agent.archived
+            and agent.id != context.agent_id
+        ]
+        if not researchers:
+            raise ValueError(
+                "The team has no researcher. Add one with the + button and "
+                "the researcher role."
+            )
+        researcher = researchers[0]
+        lab = await self._lab(researcher)
+        run, chat = await self._host.run_agent_task(
+            researcher,
+            f"{context.agent_name} asks: {question}",
+            site_id=lab.id,
+            parent_chat_id=context.chat_id,
+        )
+        report = (run.result or run.error or "(no answer)").strip()
+        return ToolOutcome(
+            text=f"{researcher.name} answered: {report}"[:MAX_REPORT_CHARS],
+            data={
+                "tool": "ask_researcher",
+                "agent_id": researcher.id,
+                "agent": researcher.name,
+                "run_id": run.id,
+                "chat_id": chat.id,
+                "status": run.status,
+            },
+            failed=run.status != "succeeded",
+        )
+
+    async def _lab(self, researcher: Agent) -> SiteProject:
+        wanted = RESEARCH_LAB.casefold()
+        for site in await self._host.sites():
+            if site.name.casefold() == wanted:
+                return site
+        return await self._host.create_site(
+            name=RESEARCH_LAB,
+            description="Where the researcher tests code before recommending it.",
+            agent_id=researcher.id,
+        )
+
     async def _resolve(self, name: str, *, caller_id: str) -> Agent:
         wanted = name.strip().lstrip("@").strip().casefold()
         team = [
@@ -170,6 +261,8 @@ class Crew:
         owner: Agent,
     ) -> SiteProject | None:
         name = project.strip()
+        if not name and owner.role == RESEARCHER_ROLE and not context.site_id:
+            return await self._lab(owner)
         if not name:
             # Build work needs somewhere to write files; small models often
             # forget the optional project, so give the work a home.

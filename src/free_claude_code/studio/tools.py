@@ -1,8 +1,13 @@
 """The tools Studio agents can call, and the sandbox that executes them."""
 
+import sys
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
+
+import aiohttp
+import httpx
 
 from free_claude_code.application.web_tools.ports import (
     WebFetchEgressPolicy,
@@ -14,6 +19,8 @@ from free_claude_code.core.json_types import JsonObject
 from .commands import CommandBroker, CommandError
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
+from .platforms import PlatformError, PlatformReader, platform_of
+from .research import PLATFORMS, DeepResearch
 from .search import SearchError, StudioSearch
 from .sites import SiteError, SiteWorkspace
 
@@ -23,6 +30,20 @@ ASK_AGENT_TOOL = "ask_agent"
 TEAM_TASK_TOOL = "team_task"
 DELEGATION_TOOLS = frozenset({ASK_AGENT_TOOL, TEAM_TASK_TOOL})
 WEB_TOOLS: tuple[str, ...] = ("web_search", "web_fetch")
+RESEARCH_TOOL = "research"
+TEST_CODE_TOOL = "test_code"
+ASK_RESEARCHER_TOOL = "ask_researcher"
+NETWORK_TOOLS = frozenset({*WEB_TOOLS, RESEARCH_TOOL})
+RESEARCHER_ROLE = "researcher"
+TEST_LANGUAGES = {
+    "python": "py",
+    "py": "py",
+    "javascript": "js",
+    "js": "js",
+    "node": "js",
+    "html": "html",
+    "css": "css",
+}
 MAIN_ROLE = "main"
 MAX_FETCH_CHARS = 6_000
 MAX_SEARCH_RESULTS = 6
@@ -107,6 +128,59 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=RESEARCH_TOOL,
+        description=(
+            "Research a question in depth: searches the web, Reddit, YouTube, "
+            "Stack Overflow, GitHub, MDN, and dev.to, reads at least ten "
+            "sources, and returns the useful parts numbered so you can cite "
+            "them. Use it for how-to, best practice, and fixing errors."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "What to find out."},
+                "platforms": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(PLATFORMS)},
+                    "description": "Optional: only these platforms.",
+                },
+            },
+            "required": ["question"],
+        },
+    ),
+    ToolSpec(
+        name=TEST_CODE_TOOL,
+        description=(
+            "Try out a code snippet before relying on it: saves it in the "
+            "project's lab folder and runs it (python or javascript), returning "
+            "the output and exit code. HTML and CSS are saved for preview."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "language": {
+                    "type": "string",
+                    "enum": ["python", "javascript", "html", "css"],
+                },
+                "code": {"type": "string"},
+            },
+            "required": ["language", "code"],
+        },
+    ),
+    ToolSpec(
+        name=ASK_RESEARCHER_TOOL,
+        description=(
+            "Ask the team's Researcher to look something up and report back, "
+            "for example how to fix an error you are stuck on. Include the "
+            "exact error, what you tried, and your stack."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": ["question"],
+        },
+    ),
+    ToolSpec(
         name="remember",
         description="Save one durable fact into your own memory.",
         parameters={
@@ -138,6 +212,13 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                     "description": (
                         "Optional project to work in, by name; a new one is "
                         "created when no project has that name."
+                    ),
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": (
+                        "True to let the agent work in the background and "
+                        "report when done, instead of waiting for it."
                     ),
                 },
             },
@@ -194,6 +275,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
 MAIN_TOOL_NAMES: tuple[str, ...] = (
     ASK_AGENT_TOOL,
     TEAM_TASK_TOOL,
+    RESEARCH_TOOL,
     "web_search",
     "web_fetch",
     "remember",
@@ -247,9 +329,19 @@ class TeamDelegate(Protocol):
     """Lets the main agent hand work to the rest of the team."""
 
     async def ask_agent(
-        self, context: ToolContext, *, agent: str, task: str, project: str
+        self,
+        context: ToolContext,
+        *,
+        agent: str,
+        task: str,
+        project: str,
+        background: bool = False,
     ) -> ToolOutcome:
         """Run one task on another agent and report its result."""
+        ...
+
+    async def consult(self, context: ToolContext, *, question: str) -> ToolOutcome:
+        """Ask the team's Researcher a question and wait for its answer."""
         ...
 
     async def team_task(
@@ -307,6 +399,8 @@ class AgentToolbox:
         delegate: TeamDelegate | None = None,
         searcher: StudioSearch | None = None,
         web_access: str = "all",
+        reader: PlatformReader | None = None,
+        research_sources: int = 10,
     ) -> None:
         self._web = web_tools
         self._sites = sites
@@ -318,6 +412,8 @@ class AgentToolbox:
         self._delegate = delegate
         self._searcher = searcher
         self._web_access = web_access
+        self._reader = reader or PlatformReader()
+        self._research_sources = research_sources
 
     @property
     def commands_enabled(self) -> bool:
@@ -333,7 +429,9 @@ class AgentToolbox:
 
     def tool_names(self, names: Sequence[str], *, role: str) -> tuple[str, ...]:
         """Apply the web access setting to an agent's own tool list."""
-        chosen = [name for name in names if self.web_enabled or name not in WEB_TOOLS]
+        chosen = [
+            name for name in names if self.web_enabled or name not in NETWORK_TOOLS
+        ]
         if self._web_access == "all" and role != "guide":
             chosen.extend(name for name in WEB_TOOLS if name not in chosen)
         return tuple(chosen)
@@ -344,7 +442,7 @@ class AgentToolbox:
 
     async def run(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         """Execute one tool call, converting every failure into tool output."""
-        if call.name in WEB_TOOLS and not self.web_enabled:
+        if call.name in NETWORK_TOOLS and not self.web_enabled:
             return ToolOutcome(
                 text="Web access is off in Studio settings.",
                 data={"tool": call.name},
@@ -372,6 +470,12 @@ class AgentToolbox:
                     return await self._recall(call, context)
                 case "ask_agent" | "team_task":
                     return await self._delegate_call(call, context)
+                case "research":
+                    return await self._research(call)
+                case "test_code":
+                    return await self._test_code(call, context)
+                case "ask_researcher":
+                    return await self._consult(call, context)
                 case _:
                     return ToolOutcome(
                         text=f"Unknown tool '{call.name}'.",
@@ -383,6 +487,11 @@ class AgentToolbox:
             WebFetchEgressViolation,
             CommandError,
             SearchError,
+            PlatformError,
+            httpx.HTTPError,
+            aiohttp.ClientError,
+            OSError,
+            RuntimeError,
             ValueError,
         ) as error:
             return ToolOutcome(
@@ -428,6 +537,20 @@ class AgentToolbox:
         url = str(call.arguments.get("url", "")).strip()
         if not url:
             raise ValueError("A URL is required.")
+        if platform_of(url) != "web":
+            page = await self._reader.read(url)
+            body = page.text[:MAX_FETCH_CHARS]
+            note = f"\n\n({page.note})" if page.note else ""
+            return ToolOutcome(
+                text=f"{page.title}\n{page.url}\n\n{body}{note}",
+                data={
+                    "tool": "web_fetch",
+                    "url": page.url,
+                    "title": page.title,
+                    "platform": page.platform,
+                    "chars": len(body),
+                },
+            )
         result = await self._web.fetch(url, egress=self._egress)
         body = result.data[:MAX_FETCH_CHARS]
         return ToolOutcome(
@@ -571,7 +694,11 @@ class AgentToolbox:
             if not agent or not task:
                 raise ValueError("Say which agent and what the task is.")
             return await self._delegate.ask_agent(
-                context, agent=agent, task=task, project=project
+                context,
+                agent=agent,
+                task=task,
+                project=project,
+                background=call.arguments.get("background") is True,
             )
         raw_agents = call.arguments.get("agents")
         if isinstance(raw_agents, str):
@@ -587,6 +714,97 @@ class AgentToolbox:
         return await self._delegate.team_task(
             context, agents=agents, goal=goal, project=project
         )
+
+    async def _research(self, call: ToolCall) -> ToolOutcome:
+        if self._searcher is None:
+            raise ValueError("Web search is not set up.")
+        question = str(call.arguments.get("question", "")).strip()
+        raw = call.arguments.get("platforms")
+        platforms = [str(item) for item in raw] if isinstance(raw, list) else []
+        engine = DeepResearch(
+            search=self._searcher,
+            reader=self._reader,
+            fetch=lambda url: self._web.fetch(url, egress=self._egress),
+            wanted=self._research_sources,
+        )
+        report = await engine.run(question, platforms=platforms)
+        return ToolOutcome(
+            text=report.render(),
+            data={
+                "tool": RESEARCH_TOOL,
+                "question": report.question,
+                "sources": [
+                    {
+                        "n": source.number,
+                        "title": source.title,
+                        "url": source.url,
+                        "platform": source.platform,
+                        "read": source.read,
+                    }
+                    for source in report.sources
+                ],
+                "wanted": report.wanted,
+            },
+            failed=not report.sources,
+        )
+
+    async def _test_code(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        language = str(call.arguments.get("language", "")).strip().lower()
+        code = call.arguments.get("code")
+        suffix = TEST_LANGUAGES.get(language)
+        if suffix is None:
+            raise ValueError("test_code runs python or javascript, or saves html/css.")
+        if not isinstance(code, str) or not code.strip():
+            raise ValueError("Give the code to test.")
+        path = f"lab/test_{time.time_ns() // 1_000_000}.{suffix}"
+        await self._sites.write(site_id, path, code)
+        if suffix in {"html", "css"}:
+            return ToolOutcome(
+                text=f"Saved {path}. Open the project preview to check it.",
+                data={"tool": TEST_CODE_TOOL, "path": path, "ran": False},
+            )
+        if not self.commands_enabled or self._commands is None:
+            raise CommandError(
+                "Testing code needs Agents Can Run Commands set to Ask or Auto "
+                f"in Studio settings. The snippet is saved as {path}."
+            )
+        runner = f'"{sys.executable}"' if suffix == "py" else "node"
+        result = await self._commands.request(
+            agent_id=context.agent_id,
+            agent_name=context.agent_name,
+            chat_id=context.chat_id,
+            site_id=site_id,
+            command=f"{runner} {path}",
+            cwd=self._sites.directory(site_id),
+            policy=self._command_policy,
+            timeout=self._command_timeout,
+        )
+        request = result.request
+        passed = request.status == "ran" and (request.exit_code or 0) == 0
+        verdict = "PASSED" if passed else "FAILED"
+        return ToolOutcome(
+            text=f"{verdict} ({path})\n{result.text}",
+            data={
+                "tool": TEST_CODE_TOOL,
+                "path": path,
+                "ran": request.status == "ran",
+                "passed": passed,
+                "exit_code": request.exit_code,
+                "request_id": request.id,
+            },
+            failed=not passed,
+        )
+
+    async def _consult(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        if self._delegate is None:
+            raise ValueError("There is no team to ask.")
+        if context.agent_role == RESEARCHER_ROLE:
+            raise ValueError("You are the researcher; use research instead.")
+        question = str(call.arguments.get("question", "")).strip()
+        if not question:
+            raise ValueError("Say what the researcher should find out.")
+        return await self._delegate.consult(context, question=question)
 
     def _require_site(self, context: ToolContext) -> str:
         if not context.site_id:
