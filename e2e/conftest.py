@@ -9,6 +9,7 @@ import time
 from collections.abc import AsyncIterator, Iterator, Mapping
 from pathlib import Path
 
+import httpx
 import pytest
 import uvicorn
 from playwright.sync_api import Page
@@ -272,6 +273,8 @@ def admin_base_url(
         models_dir=tmp_path / "studio" / "models",
         sites_dir=tmp_path / "studio" / "sites",
         router=StudioModelRouter(proxy=_StudioEchoModel(), local=_StudioEchoModel()),
+        # Browser tests never download the voice models.
+        voice_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
     )
     app = RuntimeASGIApp(
         create_app(

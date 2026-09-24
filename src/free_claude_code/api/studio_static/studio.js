@@ -2266,11 +2266,12 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
       api("/studio/api/connect"),
+      api("/studio/api/voice"),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -2281,6 +2282,7 @@
     if (generation !== renderGeneration) return;
     view.replaceChildren(
       appearanceCard(),
+      voiceCard(voiceInfo),
       webCard(overview.settings.web),
       connectCard(connect),
       card("Tuning", [
@@ -2446,42 +2448,283 @@
   const voiceOn = () => storedGet(VOICE_KEY) !== "off";
   const speechSupported = () => "speechSynthesis" in window;
   const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition;
+  const SILENT_WAV =
+    "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+  const SPOKEN_CHUNK = 220;
+  const TURN_SILENCE_SECONDS = 1.1;
+  const TURN_MAX_SECONDS = 20;
+  const TURN_WAIT_SECONDS = 8;
+  const voice = {
+    status: null,
+    audio: null,
+    unlocked: false,
+    token: 0,
+    talk: false,
+    stream: null,
+    ctx: null,
+    stopRecording: null,
+    setupRequested: false,
+  };
+
+  function authHeaders(extra = {}) {
+    const headers = { ...extra };
+    const key = token();
+    if (key) headers["x-api-key"] = key;
+    return headers;
+  }
+
+  function voiceStatus() {
+    return voice.status || { speak: "browser", listen: "browser", speak_ready: false, listen_ready: false };
+  }
+
+  const renderedVoice = () => {
+    const status = voiceStatus();
+    return status.speak !== "browser" && status.speak_ready;
+  };
+
+  const recordedEars = () => {
+    const status = voiceStatus();
+    return (
+      status.listen !== "browser" &&
+      status.listen_ready &&
+      window.isSecureContext &&
+      Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+    );
+  };
 
   function pickVoice() {
     const voices = speechSynthesis.getVoices();
-    const english = voices.filter((voice) => /^en[-_]GB/i.test(voice.lang));
+    const english = voices.filter((item) => /^en[-_]GB/i.test(item.lang));
     return (
-      english.find((voice) => /daniel|arthur|george|male/i.test(voice.name)) ||
+      english.find((item) => /daniel|arthur|george|ryan|male/i.test(item.name)) ||
       english[0] ||
-      voices.find((voice) => /^en/i.test(voice.lang)) ||
+      voices.find((item) => /^en/i.test(item.lang)) ||
       null
     );
   }
 
   function unlockSpeech() {
-    // iOS only lets a page speak after a tap has started speech once.
-    if (hud.unlocked || !speechSupported()) return;
-    hud.unlocked = true;
-    const silent = new SpeechSynthesisUtterance(" ");
-    silent.volume = 0;
-    speechSynthesis.speak(silent);
+    // iOS only lets a page make sound after a tap has started some once.
+    if (!voice.audio) voice.audio = new Audio();
+    if (voice.unlocked) return;
+    voice.unlocked = true;
+    voice.audio.src = SILENT_WAV;
+    voice.audio.play().catch(() => {});
+    if (speechSupported()) {
+      const silent = new SpeechSynthesisUtterance(" ");
+      silent.volume = 0;
+      speechSynthesis.speak(silent);
+    }
   }
 
-  function speak(text, refs) {
-    if (!voiceOn() || !hud.unlocked || !speechSupported() || !text) return;
-    const utterance = new SpeechSynthesisUtterance(text.replace(/[*_`#>]/g, "").slice(0, 600));
-    const voice = pickVoice();
-    if (voice) utterance.voice = voice;
-    utterance.rate = 1.02;
-    utterance.onstart = () => {
-      hud.speaking = true;
-      hudState(refs);
-    };
-    utterance.onend = utterance.onerror = () => {
-      hud.speaking = false;
-      hudState(refs);
-    };
-    speechSynthesis.speak(utterance);
+  function spokenParts(text) {
+    const clean = text
+      .replace(/```[\s\S]*?(```|$)/g, " I've put the code on screen. ")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/https?:\/\/\S+/g, "the link on screen")
+      .replace(/\s*\[\d+\]/g, "")
+      .replace(/[*_#>|`~]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const sentences = clean.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [];
+    const parts = [];
+    let current = "";
+    for (const sentence of sentences.map((item) => item.trim()).filter(Boolean)) {
+      if (current && `${current} ${sentence}`.length > SPOKEN_CHUNK) {
+        parts.push(current);
+        current = sentence;
+      } else {
+        current = current ? `${current} ${sentence}` : sentence;
+      }
+    }
+    if (current) parts.push(current);
+    return parts.slice(0, 14);
+  }
+
+  function setSpeaking(on, refs) {
+    hud.speaking = on;
+    if (refs) hudState(refs);
+  }
+
+  function stopSpeaking(refs) {
+    voice.token += 1;
+    if (voice.audio && voice.unlocked) voice.audio.pause();
+    if (speechSupported()) speechSynthesis.cancel();
+    setSpeaking(false, refs);
+  }
+
+  function playBlob(blob, turn) {
+    return new Promise((resolve) => {
+      const audio = voice.audio || (voice.audio = new Audio());
+      const url = URL.createObjectURL(blob);
+      let watch = null;
+      const finish = () => {
+        audio.onended = audio.onerror = null;
+        clearInterval(watch);
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      watch = setInterval(() => {
+        if (turn !== voice.token) {
+          audio.pause();
+          finish();
+        }
+      }, 100);
+      audio.onended = finish;
+      audio.onerror = finish;
+      audio.src = url;
+      audio.play().catch(finish);
+    });
+  }
+
+  function speakWithBrowser(text, refs, done) {
+    if (!speechSupported() || !voice.unlocked) return done?.();
+    const turn = voice.token;
+    const parts = spokenParts(text);
+    if (!parts.length) return done?.();
+    setSpeaking(true, refs);
+    parts.forEach((part, index) => {
+      const utterance = new SpeechSynthesisUtterance(part);
+      const chosen = pickVoice();
+      if (chosen) utterance.voice = chosen;
+      utterance.rate = 1.02;
+      utterance.pitch = 0.95;
+      if (index === parts.length - 1) {
+        utterance.onend = utterance.onerror = () => {
+          if (turn !== voice.token) return;
+          setSpeaking(false, refs);
+          done?.();
+        };
+      }
+      speechSynthesis.speak(utterance);
+    });
+  }
+
+  async function sayAloud(text, refs, done) {
+    if (!voiceOn() || !text) return done?.();
+    stopSpeaking(refs);
+    if (!renderedVoice() || !voice.unlocked) return speakWithBrowser(text, refs, done);
+    const turn = voice.token;
+    const parts = spokenParts(text);
+    if (!parts.length) return done?.();
+    const render = (part) =>
+      fetch("/studio/api/voice/speak", {
+        method: "POST",
+        headers: authHeaders({ "content-type": "application/json" }),
+        body: JSON.stringify({ text: part }),
+      }).then((response) => (response.ok ? response.blob() : Promise.reject(new Error(`voice ${response.status}`))));
+    setSpeaking(true, refs);
+    // Render the next sentence while this one plays, so speech flows.
+    let next = render(parts[0]);
+    for (let index = 0; index < parts.length; index += 1) {
+      let blob;
+      try {
+        blob = await next;
+      } catch {
+        if (turn !== voice.token) return;
+        setSpeaking(false, refs);
+        return speakWithBrowser(parts.slice(index).join(" "), refs, done);
+      }
+      if (turn !== voice.token) return;
+      next = index + 1 < parts.length ? render(parts[index + 1]) : null;
+      next?.catch(() => {});
+      await playBlob(blob, turn);
+      if (turn !== voice.token) return;
+    }
+    setSpeaking(false, refs);
+    done?.();
+  }
+
+  function encodeWav(chunks, rate, target = 16000) {
+    const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const input = new Float32Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      input.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const ratio = rate / target;
+    const count = Math.floor(length / ratio);
+    const view = new DataView(new ArrayBuffer(44 + count * 2));
+    const text = (at, value) => [...value].forEach((ch, i) => view.setUint8(at + i, ch.charCodeAt(0)));
+    text(0, "RIFF");
+    view.setUint32(4, 36 + count * 2, true);
+    text(8, "WAVE");
+    text(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, target, true);
+    view.setUint32(28, target * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    text(36, "data");
+    view.setUint32(40, count * 2, true);
+    for (let i = 0; i < count; i += 1) {
+      const start = Math.floor(i * ratio);
+      const end = Math.min(length, Math.floor((i + 1) * ratio));
+      let sum = 0;
+      for (let j = start; j < end; j += 1) sum += input[j];
+      const sample = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
+      view.setInt16(44 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+    return new Blob([view], { type: "audio/wav" });
+  }
+
+  async function recordTurn(refs) {
+    if (!voice.stream) {
+      voice.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    }
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!voice.ctx) voice.ctx = new Context();
+    if (voice.ctx.state === "suspended") await voice.ctx.resume();
+    const ctx = voice.ctx;
+    const source = ctx.createMediaStreamSource(voice.stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    const chunks = [];
+    let heard = false;
+    let silence = 0;
+    let elapsed = 0;
+    let floor = 0.004;
+    return new Promise((resolve) => {
+      const finish = (keep) => {
+        processor.onaudioprocess = null;
+        source.disconnect();
+        processor.disconnect();
+        voice.stopRecording = null;
+        refs.root.style.setProperty("--level", "0");
+        resolve(keep && heard ? encodeWav(chunks, ctx.sampleRate) : null);
+      };
+      voice.stopRecording = finish;
+      processor.onaudioprocess = (event) => {
+        const data = event.inputBuffer.getChannelData(0);
+        chunks.push(new Float32Array(data));
+        let power = 0;
+        for (let i = 0; i < data.length; i += 1) power += data[i] * data[i];
+        const level = Math.sqrt(power / data.length);
+        const seconds = data.length / ctx.sampleRate;
+        elapsed += seconds;
+        if (elapsed < 0.3) floor = Math.max(floor, level);
+        refs.root.style.setProperty("--level", Math.min(1, level * 12).toFixed(2));
+        if (level > Math.max(0.015, floor * 3)) {
+          heard = true;
+          silence = 0;
+        } else if (heard) {
+          silence += seconds;
+        }
+        if ((heard && silence > TURN_SILENCE_SECONDS) || elapsed > TURN_MAX_SECONDS) finish(true);
+        else if (!heard && elapsed > TURN_WAIT_SECONDS) finish(false);
+      };
+      source.connect(processor);
+      processor.connect(ctx.destination);
+    });
+  }
+
+  function releaseMicrophone() {
+    voice.stream?.getTracks().forEach((track) => track.stop());
+    voice.stream = null;
   }
 
   function stopListening() {
@@ -2493,7 +2736,39 @@
       }
     }
     hud.recognizer = null;
+    voice.stopRecording?.(false);
     hud.listening = false;
+  }
+
+  function voiceHelp() {
+    openSheet("Talking to your main AI", [
+      el("p", {
+        text: "Browsers only share the microphone with secure pages. On this PC, open Studio at http://localhost:8082/studio and the microphone works.",
+      }),
+      el("p", {
+        text: "On your iPhone, Studio needs an https:// address. The easy way is Tailscale, which is free:",
+      }),
+      el("ol", {}, [
+        el("li", { text: "Install Tailscale on the PC and on the iPhone, and sign in to both with the same account." }),
+        el("li", { text: "On the PC, in a terminal, run: tailscale serve --bg 8082" }),
+        el("li", { text: "It prints an address like https://your-pc.tail1234.ts.net. Open that plus /studio on the iPhone and add it to the Home Screen." }),
+      ]),
+      el("p", {
+        class: "muted",
+        text: "Only your own devices on your Tailscale account can open that address.",
+      }),
+    ]);
+  }
+
+  async function transcribeTurn(blob) {
+    const response = await fetch("/studio/api/voice/transcribe", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "audio/wav" }),
+      body: blob,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || `Could not hear that (${response.status})`);
+    return (body.text || "").trim();
   }
 
   function hudState(refs) {
@@ -2501,19 +2776,27 @@
       ? "offline"
       : hud.listening
         ? "listening"
-        : hud.speaking
-          ? "speaking"
-          : hud.thinking
-            ? "thinking"
-            : "idle";
+        : hud.hearing
+          ? "hearing"
+          : hud.speaking
+            ? "speaking"
+            : hud.thinking
+              ? "thinking"
+              : "idle";
     refs.root.dataset.state = state;
+    refs.root.dataset.talk = voice.talk ? "on" : "off";
     refs.status.textContent = {
       offline: "LINK LOST — RETRYING",
-      listening: "LISTENING",
+      listening: voice.talk ? "LISTENING · TALK MODE" : "LISTENING",
+      hearing: "HEARING YOU",
       speaking: "SPEAKING",
       thinking: "WORKING",
-      idle: "STANDING BY",
+      idle: voice.talk ? "TALK MODE · STANDING BY" : "STANDING BY",
     }[state];
+    if (refs.talk) {
+      refs.talk.textContent = voice.talk ? "END TALK" : "TALK";
+      refs.talk.setAttribute("aria-pressed", String(voice.talk));
+    }
   }
 
   const shortModel = (model) => (model || "").replace(/^local\//, "").split("/").pop();
@@ -2561,6 +2844,28 @@
       ]);
     }
     return el("div", { class: "hud-line event" }, [hudTag("SYS"), message.text]);
+  }
+
+  function voicePillKey(status) {
+    const setup = status.setup || {};
+    return [status.speak, status.speak_ready, status.listen_ready, setup.phase, Math.round((setup.progress || 0) * 20)];
+  }
+
+  function voicePill(status) {
+    const setup = status.setup || {};
+    if (setup.phase === "running") {
+      return el("span", { class: "hud-pill warn", title: setup.message || "" }, [
+        `VOICE ${Math.round((setup.progress || 0) * 100)}%`,
+      ]);
+    }
+    if (setup.phase === "failed" && !status.speak_ready) {
+      return el("span", { class: "hud-pill bad", title: setup.message || "" }, ["VOICE SETUP FAILED"]);
+    }
+    if (status.speak === "browser" || !status.speak_ready) {
+      return el("span", { class: "hud-pill", title: "Using the browser's voice" }, ["VOICE BROWSER"]);
+    }
+    const where = status.speak === "builtin" ? "OFFLINE" : "SERVER";
+    return el("span", { class: "hud-pill good", title: `Ears: ${status.listen}` }, [`VOICE ${where}`]);
   }
 
   function webPill(web) {
@@ -2665,8 +2970,21 @@
 
     const local = data.systems.local || {};
     const web = data.systems.web || {};
-    if (changed("pills", [local.reachable, data.systems.main_model, data.memory, data.approvals.length, data.systems.commands, web])) {
+    voice.status = data.systems.voice || voice.status;
+    const spoken = voiceStatus();
+    if (
+      spoken.speak === "builtin" &&
+      !spoken.speak_ready &&
+      spoken.setup &&
+      spoken.setup.phase === "idle" &&
+      !voice.setupRequested
+    ) {
+      voice.setupRequested = true;
+      post("/studio/api/voice/setup").catch(() => {});
+    }
+    if (changed("pills", [local.reachable, data.systems.main_model, data.memory, data.approvals.length, data.systems.commands, web, voicePillKey(spoken)])) {
       refs.pills.replaceChildren(
+        voicePill(spoken),
         webPill(web),
         el("span", { class: `hud-pill ${local.reachable ? "good" : "bad"}`, title: local.base_url || "" }, [
           `LOCAL ${local.reachable ? `ONLINE · ${(local.models || []).length}` : "OFFLINE"}`,
@@ -2698,9 +3016,11 @@
       refs.log.scrollTop = refs.log.scrollHeight;
       for (const message of fresh) {
         const meta = message.data || {};
-        if (message.role === "assistant" && !meta.partial && message.sequence > hud.spokenSeq) {
+        const fromMain = message.role === "assistant" && !meta.partial && message.author === hud.name;
+        const finishedWork = message.role === "event" && meta.kind === "background_done";
+        if ((fromMain || finishedWork) && message.sequence > hud.spokenSeq) {
           hud.spokenSeq = message.sequence;
-          speak(message.text, refs);
+          sayAloud(message.text, refs, () => hud.afterReply?.());
         }
       }
     }
@@ -2795,6 +3115,13 @@
       placeholder: `Talk to ${data.agent.name}…`,
     });
     const refs = {
+      talk: el("button", {
+        class: "hud-button hud-talk",
+        type: "button",
+        text: "TALK",
+        "aria-pressed": "false",
+        onclick: () => toggleTalk(),
+      }),
       name: el("span", { class: "hud-name" }),
       clock: el("span", { class: "hud-clock" }),
       pills: el("div", { class: "hud-pills" }),
@@ -2823,7 +3150,7 @@
       if (!text) return;
       input.value = "";
       unlockSpeech();
-      if (speechSupported()) speechSynthesis.cancel();
+      stopSpeaking(refs);
       hud.optimistic?.remove();
       hud.optimistic = el("div", { class: "hud-line you pending" }, [hudTag("YOU"), text]);
       refs.log.querySelector(".hud-empty")?.remove();
@@ -2842,15 +3169,8 @@
       poll();
     };
 
-    const listen = () => {
+    const hearWithBrowser = () => {
       const Engine = Recognition();
-      if (!Engine) return;
-      if (hud.listening) {
-        stopListening();
-        hudState(refs);
-        return;
-      }
-      unlockSpeech();
       const recognizer = new Engine();
       let heard = "";
       recognizer.lang = navigator.language || "en-US";
@@ -2863,7 +3183,11 @@
         input.value = heard;
       };
       recognizer.onerror = (event) => {
-        if (event.error !== "aborted") notify(`Microphone: ${event.error}`);
+        if (event.error === "aborted" || event.error === "no-speech") return;
+        // Anything else would just fail again, so leave talk mode.
+        voice.talk = false;
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") voiceHelp();
+        else notify(`Microphone: ${event.error}`);
       };
       recognizer.onend = () => {
         const finished = hud.recognizer === recognizer;
@@ -2871,6 +3195,7 @@
         hud.listening = false;
         hudState(refs);
         if (finished && heard.trim()) send(heard);
+        else if (finished && voice.talk) setTimeout(() => voice.talk && hear(), 250);
       };
       hud.recognizer = recognizer;
       hud.listening = true;
@@ -2878,16 +3203,95 @@
       recognizer.start();
     };
 
+    const hear = async () => {
+      if (generation !== renderGeneration) return;
+      if (hud.listening) {
+        stopListening();
+        hudState(refs);
+        return;
+      }
+      unlockSpeech();
+      stopSpeaking(refs);
+      if (recordedEars()) {
+        hud.listening = true;
+        hudState(refs);
+        let blob = null;
+        try {
+          blob = await recordTurn(refs);
+        } catch (error) {
+          hud.listening = false;
+          voice.talk = false;
+          hudState(refs);
+          if (error && error.name === "NotAllowedError") voiceHelp();
+          else notify(`Microphone: ${error.message || error}`);
+          return;
+        }
+        hud.listening = false;
+        hudState(refs);
+        if (generation !== renderGeneration) return;
+        if (!blob) {
+          if (voice.talk) setTimeout(() => voice.talk && hear(), 250);
+          return;
+        }
+        hud.hearing = true;
+        hudState(refs);
+        let text = "";
+        try {
+          text = await transcribeTurn(blob);
+        } catch (error) {
+          notify(error.message);
+        }
+        hud.hearing = false;
+        hudState(refs);
+        if (text) send(text);
+        else if (voice.talk) hear();
+        return;
+      }
+      if (Recognition() && window.isSecureContext) return hearWithBrowser();
+      voice.talk = false;
+      hudState(refs);
+      voiceHelp();
+    };
+
+    const toggleTalk = () => {
+      voice.talk = !voice.talk;
+      if (voice.talk) {
+        storedSet(VOICE_KEY, "on");
+        voiceButton.textContent = "VOICE ON";
+        voiceButton.setAttribute("aria-pressed", "true");
+        hear();
+      } else {
+        stopListening();
+        stopSpeaking(refs);
+        releaseMicrophone();
+      }
+      hudState(refs);
+    };
+
+    // In talk mode, listen again once the reply has been spoken and the
+    // main AI has finished working.
+    hud.afterReply = () => {
+      const resume = () => {
+        if (generation !== renderGeneration || !voice.talk) return;
+        if (hud.thinking || hud.speaking || hud.listening || hud.hearing) {
+          setTimeout(resume, 300);
+          return;
+        }
+        hear();
+      };
+      resume();
+    };
+
     const voiceButton = el("button", {
       class: "hud-button",
       type: "button",
       text: voiceOn() ? "VOICE ON" : "VOICE OFF",
       "aria-pressed": String(voiceOn()),
-      hidden: !speechSupported(),
       onclick: () => {
         const next = !voiceOn();
         storedSet(VOICE_KEY, next ? "on" : "off");
-        if (!next && speechSupported()) speechSynthesis.cancel();
+        unlockSpeech();
+        if (!next) stopSpeaking(refs);
         voiceButton.textContent = next ? "VOICE ON" : "VOICE OFF";
         voiceButton.setAttribute("aria-pressed", String(next));
       },
@@ -2906,7 +3310,13 @@
         refs.pills,
       ]),
       el("section", { class: "hud-core" }, [
-        el("div", { class: "hud-orb", html: ORB_SVG }),
+        el("button", {
+          class: "hud-orb",
+          type: "button",
+          "aria-label": "Talk mode: speak with your main AI",
+          html: ORB_SVG,
+          onclick: () => toggleTalk(),
+        }),
         refs.status,
       ]),
       refs.log,
@@ -2923,10 +3333,9 @@
           el("button", {
             class: "hud-mic",
             type: "button",
-            "aria-label": "Speak",
+            "aria-label": "Speak one message",
             text: "●",
-            hidden: !Recognition(),
-            onclick: listen,
+            onclick: () => hear(),
           }),
           input,
           el("button", { class: "hud-send", type: "submit", text: "SEND" }),
@@ -2992,6 +3401,7 @@
             }
           },
         }),
+        refs.talk,
         voiceButton,
         el("button", { class: "hud-button", type: "button", text: "MENU", onclick: () => go("more") }),
         el("button", {
@@ -3006,6 +3416,73 @@
     view.replaceChildren(root);
     updateHud(refs, data);
     startPolling(poll);
+  }
+
+  function voiceCard(status) {
+    const setup = status.setup || {};
+    const builtin = status.builtin || {};
+    const lines = [];
+    if (status.speak === "builtin") {
+      lines.push(
+        status.speak_ready
+          ? `Built-in voice ready: ${builtin.voice === "jarvis" ? "Jarvis (a blend of two British voices)" : builtin.voice}, ${builtin.effect === "jarvis" ? "with the AI-in-the-room effect" : "dry"}. It runs on this PC and works offline.`
+          : setup.phase === "running"
+            ? `Downloading the voice: ${Math.round((setup.progress || 0) * 100)}%. ${setup.message || ""}`
+            : `The built-in voice needs a one-time download (${Math.round((builtin.download_bytes || 0) / 1e6)} MB), then it works offline.`
+      );
+    } else if (status.speak === "server") {
+      lines.push(`Speaking through the voice server at ${status.server.speak_url}.`);
+    } else {
+      lines.push(
+        builtin.speech_package
+          ? "Using the browser's voice."
+          : "Using the browser's voice. For the built-in Jarvis voice, start Studio with the Windows launcher (it installs the voice), or install the studio_voice extra."
+      );
+    }
+    lines.push(
+      status.listen === "builtin"
+        ? status.listen_ready
+          ? `Your voice is understood on this PC (Whisper ${builtin.whisper}), offline.`
+          : "Speech recognition downloads with the voice."
+        : status.listen === "server"
+          ? "Your voice is understood by the speech-to-text server."
+          : "Your voice is understood by the browser's recognizer (needs internet)."
+    );
+    if (setup.phase === "failed") lines.push(`Last download failed: ${setup.message}`);
+    const hearButton = el("button", {
+      class: "primary",
+      text: "Hear him",
+      onclick: () => {
+        unlockSpeech();
+        voice.status = status;
+        sayAloud("Good evening. All systems are online, and the team is standing by.", null);
+      },
+    });
+    const setupButton = el("button", {
+      class: "secondary",
+      text: setup.phase === "running" ? "Downloading…" : "Download the voice",
+      disabled: setup.phase === "running",
+      onclick: async () => {
+        try {
+          await post("/studio/api/voice/setup");
+          notify("Downloading the voice in the background.");
+          render();
+        } catch (error) {
+          notify(error.message);
+        }
+      },
+    });
+    const needsSetup = status.speak === "builtin" && (!status.speak_ready || (status.listen === "builtin" && !status.listen_ready));
+    return card(
+      "Main AI voice",
+      [
+        ...lines.map((line) => el("p", { class: "muted", text: line })),
+        setup.phase === "running" ? meter(setup.progress || 0) : null,
+        el("div", { class: "row" }, [hearButton, needsSetup ? setupButton : null]),
+        el("button", { class: "secondary", text: "Using your voice on the iPhone", onclick: () => voiceHelp() }),
+      ],
+      "In the HUD, tap the orb or TALK to have a spoken conversation: you talk, he answers out loud, then he listens again."
+    );
   }
 
   function appearanceCard() {
@@ -3041,6 +3518,11 @@
     stopListening();
     const { name, id } = route();
     const hudView = name === "hud" || (name === "home" && uiMode() === "hud");
+    if (!hudView) {
+      voice.talk = false;
+      releaseMicrophone();
+      stopSpeaking(null);
+    }
     document.body.dataset.ui = hudView ? "hud" : "classic";
     setChrome(name, headingFor(name));
     if (generation !== renderGeneration) return;

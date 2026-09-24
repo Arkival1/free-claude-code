@@ -12,6 +12,10 @@
 .EXAMPLE
     .\scripts\windows\start-studio.ps1 -Port 9000 -NoBrowser
 .EXAMPLE
+    .\scripts\windows\start-studio.ps1 -NoVoice
+    Skips the main AI's built-in voice (Kokoro speech and Whisper listening,
+    about 150 MB of packages). The browser's voice is used instead.
+.EXAMPLE
     .\scripts\windows\start-studio.ps1 -WithTraining
     Also installs PyTorch, transformers, and PEFT so Studio can train LoRA
     adapters on this PC (an NVIDIA GPU is strongly advised).
@@ -19,6 +23,7 @@
 param(
     [int] $Port = 0,
     [switch] $WithTraining,
+    [switch] $NoVoice,
     [switch] $NoBrowser,
     [switch] $DryRun,
     [switch] $Help
@@ -134,8 +139,15 @@ Confirm-Uv
 
 $SyncArgs = @("sync", "--python", $PythonRequest)
 $SyncNote = "first run takes a few minutes"
+$Extras = @()
+if (-not $NoVoice) {
+    $Extras += @("--extra", "studio_voice")
+}
 if ($WithTraining) {
-    $SyncArgs += @("--extra", "lora")
+    $Extras += @("--extra", "lora")
+}
+$SyncArgs += $Extras
+if ($WithTraining) {
     $SyncNote = "with LoRA training libraries: the first run downloads a few GB"
 }
 Invoke-Step "Installing Python 3.14 and the app's packages ($SyncNote)" {
@@ -164,10 +176,7 @@ Write-Host "Phone:   open Studio > More > Install on your iPhone for the address
 Write-Host "If Windows Firewall asks, allow Python on Private networks so your phone can connect."
 Write-Host "Press Ctrl+C to stop."
 
-$RunArgs = @("run", "--python", $PythonRequest)
-if ($WithTraining) {
-    $RunArgs += @("--extra", "lora")
-}
+$RunArgs = @("run", "--python", $PythonRequest) + $Extras
 $RunArgs += "fcc-server"
 Invoke-Step "Starting the server" {
     & uv @RunArgs

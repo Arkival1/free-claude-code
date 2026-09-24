@@ -16,6 +16,7 @@ from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
 from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.local_voice import LocalVoiceError
 from free_claude_code.studio.lora import (
     KNOWN_BASES,
     WORKER_PATH,
@@ -26,6 +27,7 @@ from free_claude_code.studio.models import Agent, LoraJob
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.tuning import TuningError
+from free_claude_code.studio.voice import MAX_AUDIO_BYTES, VoiceError
 
 from .dependencies import get_services, get_settings
 from .ports import ApiServices
@@ -407,6 +409,65 @@ async def web_test(
 ) -> JsonObject:
     """Run one search exactly as an agent would."""
     return await studio.test_search(payload.query)
+
+
+class SpeakPayload(BaseModel):
+    text: str
+
+
+@router.get("/studio/api/voice")
+async def voice_status(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Say how the main AI speaks and listens, and whether it is ready."""
+    return studio.voice_status()
+
+
+@router.post("/studio/api/voice/setup")
+async def voice_setup(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Download the built-in voice and speech recognition, once."""
+    return studio.start_voice_setup()
+
+
+@router.post("/studio/api/voice/speak", include_in_schema=False)
+async def voice_speak(
+    payload: SpeakPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> Response:
+    """Say one reply in the main AI's voice."""
+    speech = await studio.speak(payload.text)
+    return Response(
+        content=speech.audio,
+        media_type=speech.content_type,
+        headers={"cache-control": "no-store"},
+    )
+
+
+@router.post("/studio/api/voice/transcribe")
+async def voice_transcribe(
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Turn one recorded turn of the user's speech into text."""
+    declared = int(request.headers.get("content-length") or 0)
+    if declared > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="That recording is too long.")
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="That recording is too long.")
+        chunks.append(chunk)
+    content_type = request.headers.get("content-type", "audio/wav").split(";")[0]
+    if not content_type.startswith("audio/"):
+        raise HTTPException(status_code=415, detail="Send the recording as audio.")
+    text = await studio.transcribe(b"".join(chunks), content_type=content_type)
+    return {"text": text}
 
 
 @router.get("/studio/api/main")
@@ -1483,6 +1544,8 @@ def studio_error_status(error: Exception) -> int:
         return 404
     if isinstance(error, LoraAuthError):
         return 401
+    if isinstance(error, VoiceError | LocalVoiceError):
+        return 409
     if isinstance(
         error, SiteError | DownloadError | TuningError | SchoolError | LoraError
     ):

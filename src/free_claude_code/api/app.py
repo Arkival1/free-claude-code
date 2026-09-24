@@ -27,11 +27,13 @@ from free_claude_code.core.trace import (
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioStoreError
 from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.local_voice import LocalVoiceError
 from free_claude_code.studio.lora import LoraError
 from free_claude_code.studio.obsidian import ObsidianError
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError
 from free_claude_code.studio.tuning import TuningError
+from free_claude_code.studio.voice import VoiceError
 
 from .admin_cache import AdminNoStoreMiddleware, attach_admin_no_store
 from .admin_routes import router as admin_router
@@ -90,6 +92,8 @@ def create_app(services: ApiServices) -> FastAPI:
     @app.exception_handler(SchoolError)
     @app.exception_handler(ObsidianError)
     @app.exception_handler(LoraError)
+    @app.exception_handler(VoiceError)
+    @app.exception_handler(LocalVoiceError)
     async def studio_error_handler(request: Request, exc: Exception):
         """Report Studio failures as plain, actionable JSON."""
         response = JSONResponse(

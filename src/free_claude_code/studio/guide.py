@@ -31,6 +31,28 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Talking to the main AI",
+        route="/studio#more",
+        terms=(
+            "voice",
+            "talk",
+            "speak",
+            "listen",
+            "microphone",
+            "mic",
+            "jarvis",
+            "hear",
+        ),
+        body=(
+            "The main AI speaks with a built-in neural voice and understands you "
+            "with Whisper, both on this PC and offline after a one-time download. "
+            "In the HUD, tap the orb or TALK: you speak, he answers aloud, then "
+            "listens again. More, Main AI voice has Hear him. The microphone works "
+            "on this PC at localhost; on a phone, open Studio over HTTPS with "
+            "tailscale serve."
+        ),
+    ),
+    GuideTopic(
         title="Internet access",
         route="/studio#more",
         terms=(

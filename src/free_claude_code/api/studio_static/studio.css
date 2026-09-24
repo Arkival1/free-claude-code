@@ -1372,3 +1372,40 @@ label.check input {
   gap: 6px;
   font-size: 15px;
 }
+
+/* The orb is the talk button; it swells with your voice while listening. */
+button.hud-orb {
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  --level: 0;
+}
+
+button.hud-orb:focus-visible {
+  outline: 2px solid var(--hud-cyan);
+  outline-offset: 6px;
+}
+
+.hud[data-state="listening"] .orb-core {
+  animation: none;
+  transform: scale(calc(0.88 + var(--level) * 0.45));
+  transition: transform 80ms linear;
+}
+
+.hud[data-state="hearing"] .hud-orb {
+  color: var(--hud-amber);
+}
+
+.hud[data-state="hearing"] .orb-arc,
+.hud[data-state="hearing"] .orb-arc-2 {
+  animation-duration: 0.9s;
+}
+
+.hud[data-talk="on"] .hud-talk {
+  background: var(--hud-good);
+  border-color: var(--hud-good);
+  color: var(--hud-bg);
+}

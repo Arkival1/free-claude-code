@@ -733,6 +733,45 @@ class Settings(BaseModel):
     studio_ui_theme: NonEmptyString = Field(
         default="classic", validation_alias="STUDIO_UI_THEME"
     )
+    studio_voice_engine: NonEmptyString = Field(
+        default="auto", validation_alias="STUDIO_VOICE_ENGINE"
+    )
+    studio_voice_quality: NonEmptyString = Field(
+        default="high", validation_alias="STUDIO_VOICE_QUALITY"
+    )
+    studio_voice_effect: NonEmptyString = Field(
+        default="jarvis", validation_alias="STUDIO_VOICE_EFFECT"
+    )
+    studio_voice_speed: float = Field(
+        default=1.05, ge=0.6, le=1.6, validation_alias="STUDIO_VOICE_SPEED"
+    )
+    studio_voice_ears: NonEmptyString = Field(
+        default="base.en", validation_alias="STUDIO_VOICE_EARS"
+    )
+    studio_voice_speak_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VOICE_SPEAK_URL"
+    )
+    studio_voice_speak_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VOICE_SPEAK_KEY"
+    )
+    studio_voice_speak_model: NonEmptyString = Field(
+        default="kokoro", validation_alias="STUDIO_VOICE_SPEAK_MODEL"
+    )
+    studio_voice_name: NonEmptyString = Field(
+        default="jarvis", validation_alias="STUDIO_VOICE_NAME"
+    )
+    studio_voice_listen_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VOICE_LISTEN_URL"
+    )
+    studio_voice_listen_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VOICE_LISTEN_KEY"
+    )
+    studio_voice_listen_model: NonEmptyString = Field(
+        default="whisper-1", validation_alias="STUDIO_VOICE_LISTEN_MODEL"
+    )
+    studio_voice_language: OptionalNonEmptyString = Field(
+        default="en", validation_alias="STUDIO_VOICE_LANGUAGE"
+    )
     studio_web_access: NonEmptyString = Field(
         default="all", validation_alias="STUDIO_WEB_ACCESS"
     )
@@ -862,6 +901,44 @@ class Settings(BaseModel):
         if value not in ("off", "ask", "auto"):
             raise ValueError(
                 f"STUDIO_AGENT_COMMANDS must be 'off', 'ask', or 'auto', got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_voice_engine")
+    @classmethod
+    def validate_studio_voice_engine(cls, value: str) -> str:
+        if value not in ("auto", "builtin", "server", "browser"):
+            raise ValueError(
+                "STUDIO_VOICE_ENGINE must be auto, builtin, server, or browser, "
+                f"got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_voice_quality")
+    @classmethod
+    def validate_studio_voice_quality(cls, value: str) -> str:
+        if value not in ("high", "compact"):
+            raise ValueError(
+                f"STUDIO_VOICE_QUALITY must be high or compact, got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_voice_effect")
+    @classmethod
+    def validate_studio_voice_effect(cls, value: str) -> str:
+        if value not in ("jarvis", "none"):
+            raise ValueError(
+                f"STUDIO_VOICE_EFFECT must be jarvis or none, got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_voice_ears")
+    @classmethod
+    def validate_studio_voice_ears(cls, value: str) -> str:
+        if value not in ("tiny.en", "base.en", "small.en", "medium.en"):
+            raise ValueError(
+                "STUDIO_VOICE_EARS must be tiny.en, base.en, small.en, or "
+                f"medium.en, got {value!r}"
             )
         return value
 

@@ -822,6 +822,152 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_VOICE_ENGINE",
+        "Main AI Voice Engine",
+        "studio",
+        "select",
+        settings_attr="studio_voice_engine",
+        options=(
+            ConfigOptionSpec("auto", "Automatic (built-in when installed)"),
+            ConfigOptionSpec("builtin", "Built-in, on this PC, offline"),
+            ConfigOptionSpec("server", "A voice server"),
+            ConfigOptionSpec("browser", "The browser's own voice"),
+        ),
+        description=(
+            "Built-in runs a neural voice and speech recognition on this PC with "
+            "no server and no internet, after a one-time download."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_NAME",
+        "Main AI Voice",
+        "studio",
+        "text",
+        settings_attr="studio_voice_name",
+        description=(
+            "jarvis is a blend of two British men (bm_george and bm_lewis). "
+            "Others: bm_george, bm_lewis, bm_daniel, bm_fable, am_michael, "
+            "am_adam, bf_emma, af_heart. For a voice server, use its voice names."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_EFFECT",
+        "Voice Effect",
+        "studio",
+        "select",
+        settings_attr="studio_voice_effect",
+        options=(
+            ConfigOptionSpec("jarvis", "AI in the room (subtle sheen and space)"),
+            ConfigOptionSpec("none", "Dry voice"),
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_SPEED",
+        "Voice Speed",
+        "studio",
+        "number",
+        settings_attr="studio_voice_speed",
+        description="1.0 is natural; 1.05 is crisp.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_QUALITY",
+        "Voice Quality",
+        "studio",
+        "select",
+        settings_attr="studio_voice_quality",
+        advanced=True,
+        options=(
+            ConfigOptionSpec("high", "High (325 MB download)"),
+            ConfigOptionSpec("compact", "Compact (92 MB download)"),
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_EARS",
+        "Speech Recognition Size",
+        "studio",
+        "select",
+        settings_attr="studio_voice_ears",
+        advanced=True,
+        options=(
+            ConfigOptionSpec("tiny.en", "Tiny (75 MB, fastest)"),
+            ConfigOptionSpec("base.en", "Base (145 MB, recommended)"),
+            ConfigOptionSpec("small.en", "Small (480 MB, more accurate)"),
+            ConfigOptionSpec(
+                "medium.en", "Medium (1.5 GB, most accurate, slow on CPU)"
+            ),
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_SPEAK_URL",
+        "Voice Server",
+        "studio",
+        "text",
+        settings_attr="studio_voice_speak_url",
+        description=(
+            "Only for the voice-server engine: an OpenAI-compatible speech "
+            "server such as Kokoro-FastAPI (http://localhost:8880/v1) or "
+            "https://api.openai.com/v1."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_SPEAK_KEY",
+        "Voice Server Key",
+        "studio",
+        "secret",
+        settings_attr="studio_voice_speak_key",
+        secret=True,
+        description="Only needed for paid services such as OpenAI.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_SPEAK_MODEL",
+        "Voice Model",
+        "studio",
+        "text",
+        settings_attr="studio_voice_speak_model",
+        description="kokoro for Kokoro-FastAPI; tts-1 or gpt-4o-mini-tts for OpenAI.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_LISTEN_URL",
+        "Speech-To-Text Server",
+        "studio",
+        "text",
+        settings_attr="studio_voice_listen_url",
+        description=(
+            "OpenAI-compatible transcription server that turns your voice into "
+            "text, e.g. whisper.cpp's server started with --inference-path "
+            "/v1/audio/transcriptions (then http://localhost:8178/v1), Speaches, "
+            "or https://api.openai.com/v1. Used when the built-in ears are not "
+            "installed."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_LISTEN_KEY",
+        "Speech-To-Text Key",
+        "studio",
+        "secret",
+        settings_attr="studio_voice_listen_key",
+        secret=True,
+        description="Leave empty to reuse the voice server key for the same server.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_LISTEN_MODEL",
+        "Speech-To-Text Model",
+        "studio",
+        "text",
+        settings_attr="studio_voice_listen_model",
+        advanced=True,
+        description="whisper-1 for OpenAI; most local servers ignore it.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_LANGUAGE",
+        "Voice Language",
+        "studio",
+        "text",
+        settings_attr="studio_voice_language",
+        advanced=True,
+        description="Language you speak, as a code such as en; empty detects it.",
+    ),
+    ConfigFieldSpec(
         "STUDIO_WEB_ACCESS",
         "Agents On The Internet",
         "studio",

@@ -31,6 +31,7 @@ from .llm import (
     StudioLLMError,
     StudioModelRouter,
 )
+from .local_voice import LocalVoice, SetupState, speech_package_ready
 from .lora import LoraTrainer
 from .memory import SHARED_MEMORY_ID, SKILL_TAG, MemoryService
 from .models import (
@@ -72,6 +73,7 @@ from .tools import (
     AgentToolbox,
 )
 from .tuning import CloudTuner, LightTuner, TuningError
+from .voice import SpeechAudio, VoiceError, VoiceService, speakable
 
 GUIDE_AGENT_NAME = "Guide"
 BUILDER_AGENT_NAME = "Builder"
@@ -141,13 +143,17 @@ class StudioService:
         sites_dir: Path,
         router: StudioModelRouter | None = None,
         search_transport: httpx.AsyncBaseTransport | None = None,
+        voice_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._store = store
         self._web_tools = web_tools
         self._search_transport = search_transport
+        self._voice_transport = voice_transport
         self._settings_provider = settings_provider
         self._sites = SiteWorkspace(sites_dir)
         self._library = ModelLibrary(store=store, models_dir=models_dir)
+        self._models_dir = models_dir
+        self._voice_setup = SetupState()
         self._router = router or self._build_router(settings_provider())
         self._tasks: set[asyncio.Task[object]] = set()
         self._room_locks: dict[str, asyncio.Lock] = {}
@@ -221,6 +227,129 @@ class StudioService:
             base_url=settings.studio_search_base_url or "",
             fallback=self._web_tools,
             transport=self._search_transport,
+        )
+
+    def local_voice(self) -> LocalVoice:
+        """The built-in voice and ears, stored with the models."""
+        settings = self.settings
+        return LocalVoice(
+            self._models_dir / "voice",
+            quality=settings.studio_voice_quality,
+            voice=settings.studio_voice_name,
+            speed=settings.studio_voice_speed,
+            effect=settings.studio_voice_effect,
+            whisper_size=settings.studio_voice_ears,
+            language=settings.studio_voice_language or "",
+            transport=self._voice_transport,
+        )
+
+    def voice_engines(self) -> tuple[str, str]:
+        """Which engine speaks and which listens: builtin, server, or browser."""
+        settings = self.settings
+        chosen = settings.studio_voice_engine
+        if chosen == "auto":
+            chosen = (
+                "builtin"
+                if speech_package_ready()
+                else "server"
+                if settings.studio_voice_speak_url
+                else "browser"
+            )
+        local = self.local_voice()
+        if chosen == "builtin":
+            listen = (
+                "builtin"
+                if local.status()["listen_package"]
+                else "server"
+                if settings.studio_voice_listen_url
+                else "browser"
+            )
+            return "builtin", listen
+        if chosen == "server":
+            return "server", "server" if settings.studio_voice_listen_url else "browser"
+        return "browser", "browser"
+
+    def voice_status(self) -> JsonObject:
+        """Everything the HUD needs to know to talk and listen."""
+        speak, listen = self.voice_engines()
+        local = self.local_voice()
+        details = local.status()
+        speak_ready = (
+            bool(details["speech_ready"]) if speak == "builtin" else speak == "server"
+        )
+        listen_ready = (
+            bool(details["listen_ready"]) if listen == "builtin" else listen == "server"
+        )
+        return {
+            "speak": speak,
+            "listen": listen,
+            "speak_ready": speak_ready,
+            "listen_ready": listen_ready,
+            "builtin": details,
+            "server": self.voice().status(),
+            "setup": self._voice_setup.as_json(),
+        }
+
+    def start_voice_setup(self) -> JsonObject:
+        """Download the built-in voice and ears once, in the background."""
+        state = self._voice_setup
+        if state.phase != "running":
+            state.phase = "running"
+            state.done = 0
+            state.total = 0
+            state.message = "Preparing the voice"
+            self.spawn(self._voice_setup_run())
+        return self.voice_status()
+
+    async def _voice_setup_run(self) -> None:
+        state = self._voice_setup
+
+        async def progress(done: int, total: int, message: str) -> None:
+            state.done, state.total, state.message = done, total, message
+
+        try:
+            await self.local_voice().setup(state, progress)
+        finally:
+            state.phase = "failed" if state.errors else "ready"
+            state.message = "; ".join(state.errors) or "Voice ready"
+
+    async def speak(self, text: str) -> SpeechAudio:
+        """Say one reply in the main AI's voice, on this PC or via a server."""
+        speak, _ = self.voice_engines()
+        if speak == "builtin":
+            if not self.local_voice().speech_ready():
+                raise VoiceError("The built-in voice is still downloading.")
+            audio = await self.local_voice().speak(speakable(text))
+            return SpeechAudio(audio=audio, content_type="audio/wav")
+        if speak == "server":
+            return await self.voice().speak(text)
+        raise VoiceError("The browser speaks for the main AI; nothing to render here.")
+
+    async def transcribe(self, audio: bytes, *, content_type: str) -> str:
+        """Turn one recorded turn of the user's speech into text."""
+        _, listen = self.voice_engines()
+        if listen == "builtin":
+            if "wav" not in content_type:
+                raise VoiceError("The built-in ears take WAV recordings.")
+            return await self.local_voice().transcribe(audio)
+        if listen == "server":
+            return await self.voice().transcribe(audio, content_type=content_type)
+        raise VoiceError("The browser listens for the main AI.")
+
+    def voice(self) -> VoiceService:
+        """The voice-server engine, as configured right now."""
+        settings = self.settings
+        name = settings.studio_voice_name
+        return VoiceService(
+            speak_url=settings.studio_voice_speak_url or "",
+            speak_key=settings.studio_voice_speak_key or "",
+            speak_model=settings.studio_voice_speak_model,
+            voice="bm_george" if name == "jarvis" else name,
+            listen_url=settings.studio_voice_listen_url or "",
+            listen_key=settings.studio_voice_listen_key or "",
+            listen_model=settings.studio_voice_listen_model,
+            language=settings.studio_voice_language or "",
+            transport=self._voice_transport,
         )
 
     def _reader(self) -> PlatformReader:
@@ -1164,6 +1293,7 @@ class StudioService:
                 "server_model": self.default_model,
                 "commands": self.settings.studio_agent_commands,
                 "web": self.web_status(),
+                "voice": self.voice_status(),
             },
         }
 

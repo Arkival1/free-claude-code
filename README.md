@@ -419,6 +419,25 @@ delegation. Give it a local model to keep everything on your machine:
 `STUDIO_MAIN_AGENT_MODEL=local/qwen2.5-coder:7b`. Without that setting it uses
 the Studio default model.
 
+**His voice.** The main AI talks and listens on your PC with no server and no
+internet: speech is Kokoro, a small neural voice (the default `jarvis` voice
+blends two of its British men, with a subtle "AI in the room" effect), and
+your voice is understood by Whisper. Both run on the CPU. The Windows launcher
+installs them (`-NoVoice` skips it; elsewhere use `--extra studio_voice`), and
+the HUD downloads the model files once (about 500 MB), after which they work
+offline. Tap the orb or **TALK** for a spoken conversation: you speak, he
+answers out loud, then he listens again until you press **END TALK**. The ● button sends one spoken message.
+**More → Main AI voice** has a **Hear him** button and the download status.
+Voice settings are under admin → Studio: engine, voice (`jarvis`,
+`bm_george`, `bm_lewis`, `bm_daniel`, `bm_fable`, and others), effect, speed,
+and the speech-recognition size. A voice server (Kokoro-FastAPI, Speaches,
+whisper.cpp's server, or OpenAI) can be used instead of the built-in engine.
+
+Browsers only share the microphone with secure pages. On the PC,
+`http://localhost:8082/studio` counts as secure. On an iPhone, use HTTPS:
+install Tailscale on both devices and run `tailscale serve --bg 8082` on the
+PC, then open the `https://…ts.net/studio` address it prints.
+
 **Shared memory.** With `STUDIO_SHARED_MEMORY` on (the default), every agent's
 `remember` goes into one team memory that all agents recall from, tagged with
 who wrote it, unless the agent marks it `private`. Finished tasks and room

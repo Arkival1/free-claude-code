@@ -371,3 +371,102 @@ def test_the_hud_has_a_plus_button_too(page: Page, admin_base_url: str) -> None:
 
     expect(page.locator(".hud-agent", has_text="Tess")).to_be_visible()
     expect(page.locator(".hud")).to_be_visible()
+
+
+FAKE_MICROPHONE = """
+navigator.mediaDevices.getUserMedia = async () => {
+  const ctx = new AudioContext();
+  await ctx.resume();
+  const tone = ctx.createOscillator();
+  tone.frequency.value = 220;
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  const out = ctx.createMediaStreamDestination();
+  tone.connect(gain).connect(out);
+  tone.start();
+  // Say something for 0.8 s, then fall silent, like a person finishing a turn.
+  setTimeout(() => {
+    gain.gain.setValueAtTime(0.5, ctx.currentTime);
+    gain.gain.setValueAtTime(0, ctx.currentTime + 0.8);
+  }, 400);
+  window.__micOpened = (window.__micOpened || 0) + 1;
+  return out.stream;
+};
+"""
+
+
+def _silent_wav(seconds: float = 0.2, rate: int = 24000) -> bytes:
+    import io
+    import wave
+
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(b"\x00\x00" * int(seconds * rate))
+    return buffer.getvalue()
+
+
+def test_talk_mode_hears_you_and_answers_out_loud(
+    page: Page, admin_base_url: str
+) -> None:
+    page.add_init_script(FAKE_MICROPHONE)
+    ready = {
+        "speak": "builtin",
+        "listen": "builtin",
+        "speak_ready": True,
+        "listen_ready": True,
+        "setup": {"phase": "ready", "progress": 1.0, "message": "Voice ready"},
+        "builtin": {"voice": "jarvis", "effect": "jarvis", "whisper": "base.en"},
+    }
+
+    def voice_ready(route) -> None:
+        response = route.fetch()
+        body = response.json()
+        if "systems" in body:
+            body["systems"]["voice"] = ready
+        route.fulfill(response=response, json=body)
+
+    spoken: list[str] = []
+    recordings: list[bytes] = []
+
+    def speak(route) -> None:
+        spoken.append(route.request.post_data_json["text"])
+        route.fulfill(
+            status=200, body=_silent_wav(), headers={"content-type": "audio/wav"}
+        )
+
+    def transcribe(route) -> None:
+        recordings.append(route.request.post_data_buffer or b"")
+        route.fulfill(status=200, json={"text": "status report"})
+
+    page.route("**/studio/api/main**", voice_ready)
+    page.route("**/studio/api/voice/speak", speak)
+    page.route("**/studio/api/voice/transcribe", transcribe)
+
+    open_studio(page, admin_base_url)
+    page.locator('.tab[data-route="more"]').click()
+    page.get_by_role("button", name="HUD console").click()
+    expect(page.locator(".hud-pill", has_text="VOICE OFFLINE")).to_be_visible()
+
+    page.get_by_role("button", name="TALK", exact=True).click()
+    expect(page.locator(".hud-status")).to_contain_text("TALK MODE")
+    expect(page.locator(".hud-line.you", has_text="status report")).to_be_visible(
+        timeout=15000
+    )
+    expect(page.locator(".hud-line.ai", has_text="is on it")).to_be_visible()
+    expect(page.locator(".hud-status")).to_have_text(
+        "LISTENING · TALK MODE", timeout=15000
+    )
+
+    assert recordings and recordings[0][:4] == b"RIFF", "a WAV of the turn was sent"
+    assert recordings[0][24:28] == (16000).to_bytes(4, "little"), "16 kHz for Whisper"
+    assert any("is on it" in text for text in spoken), spoken
+    assert page.evaluate("window.__micOpened") == 1, "the microphone stays open"
+
+    page.get_by_role("button", name="END TALK").click()
+    expect(page.locator(".hud-status")).to_have_text("STANDING BY")
+    expect(page.get_by_role("button", name="TALK", exact=True)).to_have_attribute(
+        "aria-pressed", "false"
+    )

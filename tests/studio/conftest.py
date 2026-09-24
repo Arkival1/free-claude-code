@@ -143,6 +143,7 @@ def make_studio(tmp_path, store, web_tools, studio_settings):
             sites_dir=tmp_path / "sites",
             router=StudioModelRouter(proxy=model, local=model),
             search_transport=OFFLINE_SEARCH,
+            voice_transport=OFFLINE_SEARCH,
         )
         return service, model
 
