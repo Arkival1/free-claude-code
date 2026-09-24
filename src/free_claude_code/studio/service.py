@@ -22,6 +22,7 @@ from free_claude_code.core.json_types import JsonObject
 from . import system_monitor
 from .agents import AgentRunner, TurnResult
 from .commands import CommandBroker, CommandError
+from .connectivity import Connectivity
 from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
 from .guide import GuideAnswer, GuideAssistant, GuideState
@@ -168,6 +169,7 @@ class StudioService:
         self._web_tools = web_tools
         self._search_transport = search_transport
         self._voice_transport = voice_transport
+        self._connectivity = Connectivity(transport=search_transport)
         self._settings_provider = settings_provider
         self._sites = SiteWorkspace(sites_dir)
         self._library = ModelLibrary(store=store, models_dir=models_dir)
@@ -408,6 +410,7 @@ class StudioService:
             web_access=settings.studio_web_access,
             reader=self._reader(),
             research_sources=settings.studio_research_sources,
+            connectivity=self._connectivity,
         )
 
     def _runner(self) -> AgentRunner:
@@ -1179,6 +1182,7 @@ class StudioService:
         return {
             **self._search().status(),
             "access": self.settings.studio_web_access,
+            "online": self._connectivity.online,
             "reddit": "official API" if reader.reddit_app_ready else "public pages",
             "youtube": "YouTube API" if reader.youtube_search_ready else "web search",
             "sources": self.settings.studio_research_sources,
@@ -1268,6 +1272,7 @@ class StudioService:
 
     async def main_console(self, *, after: int = 0) -> JsonObject:
         """Return what the HUD shows: the conversation, the team, and systems."""
+        await self._connectivity.check()
         agent = await self.main_agent()
         chat = await self.main_chat()
         messages = (

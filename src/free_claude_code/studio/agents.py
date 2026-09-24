@@ -55,6 +55,12 @@ WEB_PROMPT = (
     "factual, or that you are unsure of, instead of guessing, and name your "
     "sources."
 )
+OFFLINE_PROMPT = (
+    "This computer is offline right now, so your internet tools are paused; "
+    "they come back on their own when the connection returns. Work from "
+    "recall, your memory, the project files, and what you already know. If "
+    "something really needs checking online, say so and carry on."
+)
 SHARED_MEMORY_PROMPT = (
     "Your team shares one memory. Save what the whole team should know with "
     "remember; it is private only when you say so."
@@ -125,6 +131,8 @@ class AgentRunner:
             parts.append(await self._memory.context_block(agent.id, query))
         if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):
             parts.append(WEB_PROMPT)
+        elif self._toolbox.web_paused(agent.tools, role=agent.role):
+            parts.append(OFFLINE_PROMPT)
         if site_id:
             parts.append(SITE_PROMPT)
             if self._toolbox.commands_enabled and COMMAND_TOOL in agent.tools:
@@ -289,6 +297,7 @@ class AgentRunner:
         max_steps: int,
         extra_system: str = "",
     ) -> TurnResult:
+        await self._toolbox.check_online()
         names = self._toolbox.tool_names(agent.tools, role=agent.role)
         specs = tool_specs(
             names,

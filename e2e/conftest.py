@@ -273,8 +273,9 @@ def admin_base_url(
         models_dir=tmp_path / "studio" / "models",
         sites_dir=tmp_path / "studio" / "sites",
         router=StudioModelRouter(proxy=_StudioEchoModel(), local=_StudioEchoModel()),
-        # Browser tests never download the voice models.
+        # Browser tests never download the voice models or search the web.
         voice_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+        search_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
     )
     app = RuntimeASGIApp(
         create_app(

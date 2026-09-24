@@ -78,7 +78,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "Search, Tavily, or Serper key in admin settings under Studio, Web "
             "Search API Key, or point it at your own SearXNG. The Researcher "
             "agent is built for deep research; ask the main AI to send it, or "
-            "mention @Researcher in a room. More, Internet access tests it."
+            "mention @Researcher in a room. More, Internet access tests it. "
+            "When this PC goes offline, web tools pause and agents work from "
+            "memory; they come back on their own when the internet does."
         ),
     ),
     GuideTopic(

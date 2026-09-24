@@ -507,6 +507,14 @@ local models: Studio does the browsing and gives the model the results.
 `STUDIO_WEB_ACCESS` sets who may: `all` (the default), `listed` (only agents
 with `web_search`/`web_fetch` in their tools), or `off`.
 
+Web tools follow the connection of the PC running Studio (your phone is only
+the screen). Studio checks for internet about once a minute. While the PC is
+offline, agents don't get `web_search`, `web_fetch`, or `research`, and they
+are told to work from memory and the project files instead. If a web tool
+fails to connect partway through, the tools are paused straight away. They come
+back on their own within about 15 seconds of the connection returning. The HUD
+shows **WEB OFFLINE** while this is happening.
+
 Without a key, searches go to DuckDuckGo. It often blocks automated searches,
 so Studio retries once and then falls back to Wikipedia's search. For reliable
 full-web search, add a key in **admin → Studio → Web Search API Key**:

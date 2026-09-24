@@ -3109,6 +3109,11 @@
 
   function webPill(web) {
     if (web.access === "off") return el("span", { class: "hud-pill bad" }, ["WEB OFF"]);
+    if (web.online === false) {
+      return el("span", { class: "hud-pill warn", title: "No internet: agents work from memory until it is back" }, [
+        "WEB OFFLINE",
+      ]);
+    }
     const name = (web.provider || "web").toUpperCase();
     if (web.problem) return el("span", { class: "hud-pill warn", title: web.problem }, [`WEB ${name}?`]);
     return el("span", { class: `hud-pill ${web.provider === "duckduckgo" ? "" : "good"}`, title: web.label || "" }, [
@@ -3128,6 +3133,10 @@
       listed: "Only agents that have web_search or web_fetch in their tools can use the internet.",
       off: "No agent can use the internet.",
     }[web.access];
+    const connection =
+      web.online === false
+        ? "This PC is offline right now, so web tools are paused and agents work from memory and project files. They come back on their own when the internet does."
+        : "This PC is online. If the internet drops, agents switch to memory and project files until it is back.";
     const service =
       web.provider === "duckduckgo"
         ? "DuckDuckGo, no key needed. It often blocks automated searches, so a key is more reliable."
@@ -3138,6 +3147,7 @@
       "Internet access",
       [
         el("p", {}, [el("strong", { text: "Agents: " }), access]),
+        el("p", {}, [el("strong", { text: "Connection: " }), connection]),
         el("p", {}, [el("strong", { text: "Search: " }), service]),
         el("p", {}, [
           el("strong", { text: "Research: " }),
@@ -3396,7 +3406,11 @@
       ["Local brain", local.reachable ? `${(local.models || []).length} models` : "offline", local.reachable],
       ["Main core", shortModel(data.systems.main_model), true],
       ["Server model", shortModel(data.systems.server_model), !String(data.systems.server_model || "").startsWith("local/")],
-      ["Web search", web.access === "off" ? "off" : web.label || "web", web.access !== "off" && !web.problem],
+      [
+        "Web search",
+        web.access === "off" ? "off" : web.online === false ? "offline · memory only" : web.label || "web",
+        web.access !== "off" && web.online !== false && !web.problem,
+      ],
       ["Voice", voiceInfo.speak_ready ? voiceInfo.speak : "browser", Boolean(voiceInfo.speak_ready)],
       ["Ears", voiceInfo.listen_ready ? voiceInfo.listen : "browser", Boolean(voiceInfo.listen_ready)],
     ];

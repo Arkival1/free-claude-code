@@ -25,6 +25,8 @@ class BrokenWebTools(RecordingWebTools):
 
 def api_server(seen: list[httpx.Request], *, status: int = 200):
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "www.gstatic.com":
+            return httpx.Response(204)  # Studio's are-we-online probe
         seen.append(request)
         if status != 200:
             return httpx.Response(status, json={"error": "nope"})

@@ -19,6 +19,7 @@ from free_claude_code.application.web_tools.ports import (
 from free_claude_code.core.json_types import JsonObject
 
 from .commands import CommandBroker, CommandError
+from .connectivity import Connectivity
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
 from .platforms import PlatformError, PlatformReader, platform_of
@@ -51,6 +52,10 @@ TEST_LANGUAGES = {
     "css": "css",
 }
 MAIN_ROLE = "main"
+OFFLINE_NOTE = (
+    "The internet looks unreachable from this computer, so web tools are paused "
+    "until it is back. Carry on with recall, the project files, and what you know."
+)
 MAX_FETCH_CHARS = 6_000
 MAX_SEARCH_RESULTS = 6
 
@@ -510,6 +515,7 @@ class AgentToolbox:
         web_access: str = "all",
         reader: PlatformReader | None = None,
         research_sources: int = 10,
+        connectivity: Connectivity | None = None,
     ) -> None:
         self._web = web_tools
         self._sites = sites
@@ -523,6 +529,7 @@ class AgentToolbox:
         self._web_access = web_access
         self._reader = reader or PlatformReader()
         self._research_sources = research_sources
+        self._connectivity = connectivity
 
     @property
     def commands_enabled(self) -> bool:
@@ -536,12 +543,34 @@ class AgentToolbox:
     def web_enabled(self) -> bool:
         return self._web_access != "off"
 
+    @property
+    def online(self) -> bool:
+        """Whether this computer could reach the internet at the last check."""
+        return self._connectivity is None or self._connectivity.online
+
+    async def check_online(self) -> bool:
+        """Refresh the internet check (cached) before an agent's turn."""
+        if self._connectivity is None:
+            return True
+        return await self._connectivity.check()
+
+    def web_paused(self, names: Sequence[str], *, role: str) -> bool:
+        """True when the agent would have web tools but the internet is down."""
+        if self.online or not self.web_enabled:
+            return False
+        return (self._web_access == "all" and role != "guide") or any(
+            name in NETWORK_TOOLS for name in names
+        )
+
     def tool_names(self, names: Sequence[str], *, role: str) -> tuple[str, ...]:
-        """Apply the web access setting to an agent's own tool list."""
-        chosen = [
-            name for name in names if self.web_enabled or name not in NETWORK_TOOLS
-        ]
-        if self._web_access == "all" and role != "guide":
+        """Apply web access and the internet connection to an agent's tools.
+
+        Web tools are offered whenever the setting allows them and the
+        computer is online, and left out while it is offline.
+        """
+        reachable = self.web_enabled and self.online
+        chosen = [name for name in names if reachable or name not in NETWORK_TOOLS]
+        if reachable and self._web_access == "all" and role != "guide":
             chosen.extend(name for name in WEB_TOOLS if name not in chosen)
         return tuple(chosen)
 
@@ -611,8 +640,13 @@ class AgentToolbox:
             RuntimeError,
             ValueError,
         ) as error:
+            text = f"{call.name} failed: {error}"
+            if call.name in NETWORK_TOOLS and _connection_lost(error):
+                if self._connectivity is not None:
+                    self._connectivity.mark_offline(str(error))
+                text += f" {OFFLINE_NOTE}"
             return ToolOutcome(
-                text=f"{call.name} failed: {error}",
+                text=text,
                 data={"tool": call.name, "error": str(error)},
                 failed=True,
             )
@@ -1097,3 +1131,10 @@ def _is_text(content_type: str) -> bool:
         "application/toml",
         "application/x-yaml",
     }
+
+
+def _connection_lost(error: BaseException) -> bool:
+    """Whether a web tool failed because the internet could not be reached."""
+    if isinstance(error, httpx.TransportError | aiohttp.ClientConnectionError):
+        return not isinstance(error, httpx.UnsupportedProtocol)
+    return isinstance(error, ConnectionError | TimeoutError)
