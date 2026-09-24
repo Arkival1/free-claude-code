@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import anyio.to_thread
@@ -27,7 +27,16 @@ from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
-from .guide import GuideAnswer, GuideAssistant, GuideState
+from .guide import (
+    GUIDE_TOPICS,
+    STARTER_QUESTIONS,
+    GuideAnswer,
+    GuideAssistant,
+    GuideState,
+    diagnose,
+    offline_answer,
+    page_name,
+)
 from .llm import (
     LOCAL_MODEL_PREFIX,
     ChatMessage,
@@ -479,6 +488,7 @@ class StudioService:
             reader=self._reader(),
             research_sources=settings.studio_research_sources,
             connectivity=self._connectivity,
+            app_help=self.app_help,
         )
 
     def _runner(self) -> AgentRunner:
@@ -535,10 +545,8 @@ class StudioService:
         )
         return ObsidianVault(root, folder=settings.studio_obsidian_folder)
 
-    def _guide(self) -> GuideAssistant:
-        return GuideAssistant(
-            router=self._router, model=self.settings.studio_guide_model
-        )
+    def _guide(self, model: str) -> GuideAssistant:
+        return GuideAssistant(router=self._router, model=model)
 
     def spawn(self, coroutine) -> asyncio.Task[object]:
         """Run background work and keep a reference until it finishes."""
@@ -872,6 +880,10 @@ class StudioService:
                 "topics": list(answer.topics),
                 "route": answer.route,
                 "offline": answer.offline,
+                "links": [
+                    {"label": link.label, "route": link.route} for link in answer.links
+                ],
+                "suggestions": list(answer.suggestions),
             },
         )
         return TurnResult(text=answer.text, steps=1)
@@ -2294,23 +2306,122 @@ class StudioService:
     # ----------------------------------------------------------------- guide
 
     async def guide_state(self) -> GuideState:
-        """Describe this install for the guide model."""
+        """Describe this install, live, for the guide and its problem check.
+
+        The guide answers with its own small model when that is downloaded or
+        served; otherwise it borrows the model LM Studio has loaded, the same
+        stand-in the other agents use, so it is never stuck on built-in help
+        while a model is running on this PC.
+        """
         settings = self.settings
         ready = await self._library.ready_models()
-        return GuideState(
-            agent_count=len(await self.agents()),
+        local = await self._local_status()
+        listed = local.get("models")
+        served = tuple(
+            str(name) for name in (listed if isinstance(listed, list) else [])
+        )
+        guide_model = await self.effective_model(settings.studio_guide_model)
+        guide_ready = (
+            guide_model in served
+            or (guide_model == settings.studio_guide_model and bool(ready))
+            if guide_model.startswith(LOCAL_MODEL_PREFIX)
+            else self._server_model_ready(guide_model)
+        )
+        agents = [agent for agent in await self.agents() if not agent.archived]
+        main = next((agent for agent in agents if agent.role == MAIN_ROLE), None)
+        main_model = await self.effective_model(
+            (main.model if main else "") or self.default_model
+        )
+        busy = await self._busy_agents(await self.runs())
+        web = self.web_status()
+        voice = self.voice_status()
+        online = web.get("online")
+        state = GuideState(
+            agent_count=len(agents),
             site_count=len(await self.sites()),
             ready_models=len(ready),
-            guide_model=settings.studio_guide_model,
-            guide_model_ready=bool(ready),
+            guide_model=guide_model,
+            guide_model_ready=guide_ready,
             tuning_enabled=settings.studio_light_tuning_enabled,
             teacher_enabled=settings.studio_teacher_enabled,
             vault_configured=bool(settings.studio_obsidian_vault),
+            main_name=main.name if main else settings.studio_main_agent_name,
+            main_model=main_model,
+            main_model_ready=main_model.startswith(LOCAL_MODEL_PREFIX)
+            or self._server_model_ready(main_model),
+            local_url=str(local.get("base_url") or settings.studio_local_base_url),
+            local_reachable=bool(local.get("reachable")),
+            local_models=served,
+            web_online=online if isinstance(online, bool) else None,
+            web_access=str(web.get("access") or ""),
+            search_provider=str(web.get("label") or web.get("provider") or ""),
+            search_problem=str(web.get("problem") or ""),
+            voice_speak=str(voice.get("speak") or ""),
+            voice_ready=bool(voice.get("speak_ready")),
+            commands=settings.studio_agent_commands,
+            approvals=len(await self._commands.pending()),
+            busy_agents=tuple(agent.name for agent in agents if agent.id in busy),
+            agents=tuple(agent.name for agent in agents),
+            last_error=self._main_error or "",
+        )
+        return replace(state, problems=diagnose(state))
+
+    async def ask_guide(
+        self, question: str, history: Sequence[ChatMessage] = ()
+    ) -> GuideAnswer:
+        """Answer one question about the app, knowing this install's state."""
+        state = await self.guide_state()
+        return await self._guide(state.guide_model).answer(
+            question, state, history=history
         )
 
-    async def ask_guide(self, question: str) -> GuideAnswer:
-        """Answer one question about the app with the small guide model."""
-        return await self._guide().answer(question, await self.guide_state())
+    async def app_help(self, question: str) -> str:
+        """The guide's notes on a question, for Jarvis's app_help tool.
+
+        No model call: the matching notes, where to tap, and anything wrong
+        right now, so Jarvis answers app questions with the real button names.
+        """
+        state = await self.guide_state()
+        answer = offline_answer(question, state)
+        lines = [answer.text]
+        if state.problems and not answer.text.startswith("Right now:"):
+            lines.append(
+                "Right now: "
+                + " ".join(f"{p.title}: {p.fix}" for p in state.problems[:3])
+            )
+        if answer.links:
+            lines.append(
+                "Pages: " + ", ".join(link.label for link in answer.links) + "."
+            )
+        return "\n\n".join(lines)
+
+    async def guide_overview(self) -> JsonObject:
+        """What the guide sheet opens with: problems, starters, and every topic."""
+        state = await self.guide_state()
+        return {
+            "problems": [
+                {
+                    "title": problem.title,
+                    "fix": problem.fix,
+                    "route": problem.route,
+                    "page": page_name(problem.route) if problem.route else "",
+                }
+                for problem in state.problems
+            ],
+            "starters": list(STARTER_QUESTIONS),
+            "topics": [
+                {
+                    "title": topic.title,
+                    "where": topic.where,
+                    "route": topic.route,
+                    "page": page_name(topic.route) if topic.route else "",
+                }
+                for topic in GUIDE_TOPICS
+            ],
+            "model": state.guide_model,
+            "offline": not state.guide_model_ready
+            and state.guide_model.startswith(LOCAL_MODEL_PREFIX),
+        }
 
     # -------------------------------------------------------------- overview
 

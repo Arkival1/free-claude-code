@@ -4,7 +4,7 @@ import fnmatch
 import re
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -37,6 +37,7 @@ RESEARCH_TOOL = "research"
 TEST_CODE_TOOL = "test_code"
 ASK_RESEARCHER_TOOL = "ask_researcher"
 ASK_HELPER_TOOL = "ask_helper"
+APP_HELP_TOOL = "app_help"
 HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
 MAX_READ_LINES = 400
@@ -52,6 +53,7 @@ PARALLEL_TOOLS = frozenset(
         "recall",
         ASK_RESEARCHER_TOOL,
         ASK_HELPER_TOOL,
+        APP_HELP_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -378,6 +380,25 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=APP_HELP_TOOL,
+        description=(
+            "Look up how FCC Studio works: which page and button does something, "
+            "how to set it up, and what is wrong with this install right now. Use "
+            "it when the user asks how to do something in the app or why "
+            "something is not working."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The user's question about the app.",
+                }
+            },
+            "required": ["question"],
+        },
+    ),
+    ToolSpec(
         name=FINISH_TOOL,
         description="Finish the task and report the result to the user.",
         parameters={
@@ -390,7 +411,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 
 TOOL_SPEC_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
 DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
-    spec.name for spec in TOOL_SPECS if spec.name not in DELEGATION_TOOLS
+    spec.name
+    for spec in TOOL_SPECS
+    if spec.name not in DELEGATION_TOOLS and spec.name != APP_HELP_TOOL
 )
 MAIN_TOOL_NAMES: tuple[str, ...] = (
     ASK_AGENT_TOOL,
@@ -401,6 +424,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     "web_fetch",
     "remember",
     "recall",
+    APP_HELP_TOOL,
     FINISH_TOOL,
 )
 SHARED_REMEMBER_SPEC = ToolSpec(
@@ -529,6 +553,7 @@ class AgentToolbox:
         reader: PlatformReader | None = None,
         research_sources: int = 10,
         connectivity: Connectivity | None = None,
+        app_help: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
         self._web = web_tools
         self._sites = sites
@@ -543,6 +568,7 @@ class AgentToolbox:
         self._reader = reader or PlatformReader()
         self._research_sources = research_sources
         self._connectivity = connectivity
+        self._app_help = app_help
 
     @property
     def commands_enabled(self) -> bool:
@@ -635,6 +661,8 @@ class AgentToolbox:
                     return await self._test_code(call, context)
                 case "ask_researcher":
                     return await self._consult(call, context)
+                case "app_help":
+                    return await self._app_help_call(call)
                 case _:
                     return ToolOutcome(
                         text=f"Unknown tool '{call.name}'.",
@@ -900,6 +928,17 @@ class AgentToolbox:
             raise ValueError("Say what you need help with.")
         material = str(call.arguments.get("material") or "").strip()
         return await self._delegate.help(context, request=request, material=material)
+
+    async def _app_help_call(self, call: ToolCall) -> ToolOutcome:
+        if self._app_help is None:
+            raise ValueError("App help is not available here.")
+        question = str(call.arguments.get("question", "")).strip()
+        if not question:
+            raise ValueError("Say what the user asked about the app.")
+        return ToolOutcome(
+            text=await self._app_help(question),
+            data={"tool": APP_HELP_TOOL, "question": question},
+        )
 
     async def _delete_file(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)

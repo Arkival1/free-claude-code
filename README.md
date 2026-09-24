@@ -577,6 +577,33 @@ The first run creates the main AI (**Jarvis**) and six starter agents:
 </details>
 
 <details>
+<summary><strong>The Guide: ask anything about the app</strong></summary>
+
+Open the Guide with **ASK THE GUIDE** on the HUD, the **?** button at the top,
+the **?** key, or by tapping **SYSTEM STATUS** when it is not OPTIMAL. It
+knows every page and button: what each feature does and exactly where to tap,
+from setting up LM Studio to teaching an agent a skill.
+
+- **What is wrong right now.** The sheet opens with a live check of this
+  install: LM Studio unreachable or with no model loaded, a model with no API
+  key, a failed reply, commands waiting for approval, the PC offline, a search
+  key problem, or the voice not downloaded. Each has its fix and an **Open**
+  button for the right page.
+- **Answers that take you there.** Every answer ends with **Open** buttons for
+  the pages it mentions and a few follow-up questions to tap. **Where
+  everything is** lists every feature with its location.
+- **Uses the model already running.** The Guide answers in its own words with
+  its small guide model, or, when that is not downloaded, with the model LM
+  Studio has loaded. With no model at all it answers from built-in help. It
+  gets only the notes that match the question plus a one-line index of the
+  whole app, so a small local model reads it quickly.
+- **Jarvis knows too.** Jarvis has an `app_help` tool that returns the same
+  notes and live problems, so "how do I…" and "why isn't … working" questions
+  asked on the HUD get the real button and page names.
+
+</details>
+
+<details>
 <summary><strong>Internet access for every agent</strong></summary>
 
 Every agent can search the web and read pages, including agents running on

@@ -184,6 +184,14 @@
   }
   backButton.addEventListener("click", () => history.back());
   guideButton.addEventListener("click", openGuide);
+  // "?" opens the guide from anywhere, unless you are typing.
+  document.addEventListener("keydown", (event) => {
+    const typing = event.target.closest && event.target.closest("input, textarea, select, [contenteditable]");
+    if (event.key === "?" && !typing && !event.ctrlKey && !event.metaKey && sheet.hidden) {
+      event.preventDefault();
+      openGuide();
+    }
+  });
   window.addEventListener("hashchange", render);
 
   function startPolling(job) {
@@ -198,56 +206,153 @@
 
   /* ------------------------------------------------------------------ guide */
 
+  // The guide knows every page and button, and what is wrong right now.
+  // Answers come with Open buttons for the pages they mention and a few
+  // follow-up questions to tap.
+  const guideText = (text) => {
+    const nodes = [];
+    for (const [index, piece] of text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/).entries()) {
+      if (!piece) continue;
+      if (index % 2 === 0) nodes.push(piece);
+      else if (piece.startsWith("**")) nodes.push(el("strong", { text: piece.slice(2, -2) }));
+      else nodes.push(el("em", { text: piece.slice(1, -1) }));
+    }
+    return nodes;
+  };
+
   async function openGuide() {
-    const log = el("div", { class: "transcript" });
+    const log = el("div", { class: "transcript guide-log" });
+    const history = [];
     const input = el("input", {
       type: "text",
-      placeholder: "How do I tune a model on my phone?",
+      "aria-label": "Ask the guide",
+      placeholder: "Ask anything about Studio…",
     });
-    const ask = async () => {
-      const question = input.value.trim();
+    const openRoute = (route) => {
+      closeSheet();
+      go(route.replace("/studio#", ""));
+    };
+    const openButtons = (links) =>
+      links.length
+        ? el(
+            "div",
+            { class: "chips guide-links" },
+            links.map((link) =>
+              el("button", {
+                class: "secondary",
+                type: "button",
+                text: `Open ${link.label}`,
+                onclick: () => openRoute(link.route),
+              })
+            )
+          )
+        : null;
+    const suggest = (questions) =>
+      questions.length
+        ? el(
+            "div",
+            { class: "chips guide-suggest" },
+            questions.map((question) =>
+              el("button", { class: "chip", type: "button", text: question, onclick: () => ask(question) })
+            )
+          )
+        : null;
+    const intro = el("div", { class: "guide-intro" }, [
+      el("p", { class: "muted", text: "I know every page and button in Studio, and I check this PC for problems." }),
+    ]);
+    async function ask(asked) {
+      const question = (asked || input.value).trim();
       if (!question) return;
       input.value = "";
+      for (const old of log.querySelectorAll(".guide-suggest")) old.remove();
       log.append(el("div", { class: "bubble user", text: question }));
+      const waiting = el("div", { class: "bubble assistant muted", text: "Thinking…" });
+      log.append(waiting);
+      waiting.scrollIntoView({ block: "end" });
       try {
-        const answer = await post("/studio/api/guide/ask", { question });
-        const bubble = el("div", { class: "bubble assistant" }, [
-          el("span", {
-            class: "who",
-            text: answer.offline ? "Guide (built-in help)" : "Guide",
-          }),
-          answer.text,
-        ]);
-        log.append(bubble);
-        if (answer.route) {
-          log.append(
-            el("button", {
-              class: "secondary",
-              text: `Open ${answer.route.replace("/studio#", "")}`,
-              onclick: () => {
-                closeSheet();
-                go(answer.route.replace("/studio#", ""));
-              },
-            })
-          );
-        }
+        const answer = await post("/studio/api/guide/ask", { question, history: history.slice(-8) });
+        history.push({ role: "user", text: question }, { role: "assistant", text: answer.text });
+        const links = answer.links && answer.links.length
+          ? answer.links
+          : answer.route
+            ? [{ label: answer.route.replace("/studio#", ""), route: answer.route }]
+            : [];
+        waiting.replaceWith(
+          el("div", { class: "bubble assistant" }, [
+            el("span", { class: "who", text: answer.offline ? "Guide (built-in help)" : "Guide" }),
+            ...guideText(answer.text),
+          ])
+        );
+        const extras = [openButtons(links), suggest(answer.suggestions || [])].filter(Boolean);
+        log.append(...extras);
+        (extras[extras.length - 1] || log.lastChild).scrollIntoView({ block: "end" });
       } catch (error) {
+        waiting.remove();
         notify(error.message);
       }
-      log.scrollIntoView({ block: "end" });
-    };
+    }
     openSheet("Guide", [
-      el("p", {
-        class: "muted",
-        text: "The guide runs on the small preloaded model and knows how this app works.",
-      }),
+      intro,
       log,
-      el("div", { class: "row" }, [
+      el("form", {
+        class: "row guide-ask",
+        onsubmit: (event) => {
+          event.preventDefault();
+          ask();
+        },
+      }, [
         el("div", { class: "grow" }, [input]),
-        el("button", { class: "primary", text: "Ask", onclick: ask }),
+        el("button", { class: "primary", type: "submit", text: "Ask" }),
       ]),
     ]);
     input.focus();
+    let overview = null;
+    try {
+      overview = await api("/studio/api/guide");
+    } catch {
+      return;
+    }
+    if (!intro.isConnected) return;
+    const parts = [
+      el("p", {
+        class: "muted",
+        text: overview.offline
+          ? "No model is running for me yet, so I answer from built-in help. Load a model in LM Studio and I answer in my own words."
+          : `I know every page and button in Studio, and I check this PC for problems. Answering with ${overview.model}.`,
+      }),
+    ];
+    if (overview.problems.length) {
+      parts.push(
+        el("div", { class: "guide-problems", role: "status" }, [
+          el("strong", { text: "Needs attention right now" }),
+          ...overview.problems.map((problem) =>
+            el("div", { class: "guide-problem" }, [
+              el("span", { class: "grow" }, [el("strong", { text: problem.title }), el("br"), problem.fix]),
+              problem.route
+                ? el("button", { class: "secondary", type: "button", text: `Open ${problem.page}`, onclick: () => openRoute(problem.route) })
+                : null,
+            ])
+          ),
+        ])
+      );
+    } else {
+      parts.push(el("p", { class: "guide-ok", text: "All systems look good." }));
+    }
+    parts.push(suggest(overview.starters));
+    parts.push(
+      el("details", { class: "guide-map" }, [
+        el("summary", { text: "Where everything is" }),
+        ...overview.topics.map((topic) =>
+          el("div", { class: "guide-place" }, [
+            el("span", { class: "grow" }, [el("strong", { text: topic.title }), el("br"), topic.where]),
+            topic.route
+              ? el("button", { class: "secondary", type: "button", text: `Open ${topic.page}`, onclick: () => openRoute(topic.route) })
+              : el("button", { class: "secondary", type: "button", text: "Ask", onclick: () => ask(`Tell me about ${topic.title}`) }),
+          ])
+        ),
+      ])
+    );
+    intro.replaceChildren(...parts.filter(Boolean));
   }
 
   /* ------------------------------------------------------------------ views */
@@ -631,11 +736,26 @@
         actions,
       ]);
     }
+    const links = (message.data && message.data.links) || [];
     return el("div", { class: `bubble ${role}` }, [
       message.author && role !== "user"
         ? el("span", { class: "who", text: message.author })
         : null,
-      message.text,
+      ...(links.length ? guideText(message.text) : [message.text]),
+      links.length
+        ? el(
+            "div",
+            { class: "chips guide-links" },
+            links.map((link) =>
+              el("button", {
+                class: "secondary",
+                type: "button",
+                text: `Open ${link.label}`,
+                onclick: () => go(link.route.replace("/studio#", "")),
+              })
+            )
+          )
+        : null,
     ]);
   }
 
@@ -3697,7 +3817,13 @@
       }),
       name: el("span", { class: "hud-name" }),
       coreName: el("strong", { class: "hud-core-name" }),
-      health: el("span", { class: "hud-health good", text: "OPTIMAL" }),
+      health: el("button", {
+        class: "hud-health good",
+        type: "button",
+        text: "OPTIMAL",
+        title: "Ask the Guide what needs attention",
+        onclick: () => openGuide(),
+      }),
       date: el("span", { class: "hud-date" }),
       clock: el("span", { class: "hud-clock" }),
       pills: el("div", { class: "hud-pills" }),

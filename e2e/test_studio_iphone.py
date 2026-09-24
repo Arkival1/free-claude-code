@@ -720,3 +720,21 @@ def test_jarvis_starts_speaking_before_his_reply_is_finished(
     expect(
         page.locator(".hud-line.ai", has_text="All systems are green.")
     ).to_be_visible()
+
+
+def test_the_guide_knows_where_everything_is(page: Page, admin_base_url: str) -> None:
+    open_hud(page, admin_base_url)
+    page.locator(".hud-health").click()
+
+    sheet = page.locator(".sheet-panel")
+    expect(sheet.locator(".guide-map summary")).to_have_text("Where everything is")
+    sheet.get_by_role("button", name="How do I set up LM Studio?").first.click()
+
+    answer = sheet.locator(".bubble.assistant").last
+    expect(answer).to_contain_text("Developer tab")
+    expect(answer.locator("strong").first).to_have_text("Setting up LM Studio")
+    expect(sheet.locator(".guide-suggest .chip").first).to_be_visible()
+    sheet.locator(".guide-links").last.get_by_role("button", name="Open Models").click()
+
+    expect(page.locator(".sheet-panel")).to_be_hidden()
+    assert page.evaluate("location.hash") == "#models"

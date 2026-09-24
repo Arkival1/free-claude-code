@@ -72,7 +72,10 @@ MAIN_PROMPT = (
     "website or app, and background=true for long builds so you can keep "
     "talking while the builder works. Use research yourself when you need to "
     "understand something first. Give each agent everything it needs in the "
-    "task text, then tell the user what was done and where to find it."
+    "task text, then tell the user what was done and where to find it. When "
+    "the user asks how to do something in this app, where something is, or "
+    "why something is not working, call app_help and answer with the page and "
+    "button names it gives."
     "\n\nYour team:\n{roster}"
 )
 WEB_PROMPT = (

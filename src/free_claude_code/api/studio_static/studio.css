@@ -754,9 +754,20 @@ body[data-ui="hud"] .view {
 }
 
 .hud-health {
+  font: inherit;
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.2em;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hud-health.warn {
+  text-decoration: underline dotted;
+  text-underline-offset: 4px;
 }
 
 .hud-health.good {
@@ -1935,6 +1946,55 @@ button.hud-item {
   color: var(--text);
   font-size: 15px;
   cursor: pointer;
+}
+
+.guide-intro {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.guide-problems {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--hud-amber, #f5b642);
+  border-radius: 12px;
+  background: rgba(245, 182, 66, 0.08);
+}
+
+.guide-problem,
+.guide-place {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.guide-map summary {
+  cursor: pointer;
+  font-weight: 700;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+}
+
+.guide-map .guide-place {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.guide-ok {
+  color: var(--hud-good, #4ade80);
+  margin: 0;
+}
+
+.guide-log .chips {
+  align-self: flex-start;
+}
+
+.guide-suggest .chip {
+  font-size: 14px;
 }
 
 .chip[aria-pressed="true"] {

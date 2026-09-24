@@ -5,6 +5,7 @@ import secrets
 import socket
 import sys
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,6 +17,7 @@ from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
 from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.llm import ChatMessage
 from free_claude_code.studio.local_voice import LocalVoiceError
 from free_claude_code.studio.lora import (
     KNOWN_BASES,
@@ -140,8 +142,14 @@ class MemoryPayload(BaseModel):
     scope: str = "long_term"
 
 
+class GuideTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(max_length=4000)
+
+
 class GuidePayload(BaseModel):
     question: str
+    history: list[GuideTurn] = Field(default_factory=list, max_length=12)
 
 
 class BootstrapPayload(BaseModel):
@@ -1567,14 +1575,31 @@ async def ask_guide(
     studio: StudioService = Depends(get_studio),
     _: None = Access,
 ) -> JsonObject:
-    """Ask the small preloaded guide model how the app works."""
-    answer = await studio.ask_guide(payload.question)
+    """Ask the guide how the app works; it knows this install's state too."""
+    history = [
+        ChatMessage.user(turn.text)
+        if turn.role == "user"
+        else ChatMessage.assistant(turn.text)
+        for turn in payload.history
+    ]
+    answer = await studio.ask_guide(payload.question, history)
     return {
         "text": answer.text,
         "topics": list(answer.topics),
         "route": answer.route,
         "offline": answer.offline,
+        "links": [{"label": link.label, "route": link.route} for link in answer.links],
+        "suggestions": list(answer.suggestions),
     }
+
+
+@router.get("/studio/api/guide")
+async def guide_overview(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """What is wrong right now, starter questions, and where everything lives."""
+    return await studio.guide_overview()
 
 
 def studio_error_status(error: Exception) -> int:
