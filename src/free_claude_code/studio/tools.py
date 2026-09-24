@@ -1,5 +1,7 @@
 """The tools Studio agents can call, and the sandbox that executes them."""
 
+import fnmatch
+import re
 import sys
 import time
 from collections.abc import Sequence
@@ -33,6 +35,10 @@ WEB_TOOLS: tuple[str, ...] = ("web_search", "web_fetch")
 RESEARCH_TOOL = "research"
 TEST_CODE_TOOL = "test_code"
 ASK_RESEARCHER_TOOL = "ask_researcher"
+ASK_HELPER_TOOL = "ask_helper"
+HELPER_ROLE = "helper"
+MAX_SEARCH_MATCHES = 60
+MAX_READ_LINES = 400
 NETWORK_TOOLS = frozenset({*WEB_TOOLS, RESEARCH_TOOL})
 RESEARCHER_ROLE = "researcher"
 TEST_LANGUAGES = {
@@ -88,17 +94,91 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         name="read_file",
-        description="Read one file already in the website workspace.",
+        description=(
+            "Read one file in the project. Give start_line (and max_lines) to read "
+            "a numbered section, which is what you need before edit_file."
+        ),
         parameters={
             "type": "object",
-            "properties": {"path": {"type": "string"}},
+            "properties": {
+                "path": {"type": "string"},
+                "start_line": {"type": "integer", "description": "1-based line."},
+                "max_lines": {"type": "integer"},
+            },
             "required": ["path"],
         },
     ),
     ToolSpec(
+        name="edit_file",
+        description=(
+            "Change part of a file without rewriting it: replace old_text, which "
+            "must appear exactly once (copy it from read_file), with new_text. "
+            "Set replace_all to change every occurrence."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "old_text": {"type": "string"},
+                "new_text": {"type": "string"},
+                "replace_all": {"type": "boolean"},
+            },
+            "required": ["path", "old_text", "new_text"],
+        },
+    ),
+    ToolSpec(
+        name="search_files",
+        description=(
+            "Search the project's files for a regular expression and get "
+            "path:line matches, like grep. Narrow it with glob, e.g. *.js."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string"},
+                "glob": {"type": "string"},
+                "ignore_case": {"type": "boolean"},
+            },
+            "required": ["pattern"],
+        },
+    ),
+    ToolSpec(
         name="list_files",
-        description="List every file in the website workspace.",
-        parameters={"type": "object", "properties": {}},
+        description=(
+            "List the files in the project. Give pattern, e.g. src/**/*.ts or "
+            "*.css, to list only matching files."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"pattern": {"type": "string"}},
+        },
+    ),
+    ToolSpec(
+        name="update_plan",
+        description=(
+            "Write down or update your step-by-step plan for this task, with each "
+            "step pending, in_progress, or done. Keep one step in progress."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "step": {"type": "string"},
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "in_progress", "done"],
+                            },
+                        },
+                        "required": ["step"],
+                    },
+                }
+            },
+            "required": ["steps"],
+        },
     ),
     ToolSpec(
         name="delete_file",
@@ -165,6 +245,28 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "code": {"type": "string"},
             },
             "required": ["language", "code"],
+        },
+    ),
+    ToolSpec(
+        name=ASK_HELPER_TOOL,
+        description=(
+            "Ask the team's Helper to think with you: it filters material (like "
+            "research findings or an error log) against your task, brainstorms "
+            "ways to succeed, and returns concrete next steps."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "string",
+                    "description": "What you are trying to do and where you are stuck.",
+                },
+                "material": {
+                    "type": "string",
+                    "description": "Optional findings, logs, or notes to work from.",
+                },
+            },
+            "required": ["request"],
         },
     ),
     ToolSpec(
@@ -276,6 +378,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     ASK_AGENT_TOOL,
     TEAM_TASK_TOOL,
     RESEARCH_TOOL,
+    ASK_HELPER_TOOL,
     "web_search",
     "web_fetch",
     "remember",
@@ -342,6 +445,12 @@ class TeamDelegate(Protocol):
 
     async def consult(self, context: ToolContext, *, question: str) -> ToolOutcome:
         """Ask the team's Researcher a question and wait for its answer."""
+        ...
+
+    async def help(
+        self, context: ToolContext, *, request: str, material: str
+    ) -> ToolOutcome:
+        """Ask the team's Helper to turn material into a plan for a task."""
         ...
 
     async def team_task(
@@ -458,8 +567,16 @@ class AgentToolbox:
                     return await self._write_file(call, context)
                 case "read_file":
                     return await self._read_file(call, context)
+                case "edit_file":
+                    return await self._edit_file(call, context)
+                case "search_files":
+                    return await self._search_files(call, context)
                 case "list_files":
-                    return await self._list_files(context)
+                    return await self._list_files(call, context)
+                case "update_plan":
+                    return await self._update_plan(call, context)
+                case "ask_helper":
+                    return await self._ask_helper(call, context)
                 case "delete_file":
                     return await self._delete_file(call, context)
                 case "run_command":
@@ -584,23 +701,158 @@ class AgentToolbox:
         site_id = self._require_site(context)
         path = str(call.arguments.get("path", ""))
         content = await self._sites.read(site_id, path)
+        start = _int_arg(call.arguments.get("start_line"))
+        limit = _int_arg(call.arguments.get("max_lines"))
+        data: JsonObject = {"tool": "read_file", "site_id": site_id, "path": path}
+        if start is None and limit is None:
+            text = content[:MAX_FETCH_CHARS]
+            if len(content) > MAX_FETCH_CHARS:
+                text += "\n[... cut; read further with start_line]"
+            return ToolOutcome(text=text, data=data)
+        lines = content.splitlines()
+        first = max(1, start or 1)
+        count = max(1, min(MAX_READ_LINES, limit or MAX_READ_LINES))
+        shown = lines[first - 1 : first - 1 + count]
+        numbered = "\n".join(
+            f"{number:>5}  {line}" for number, line in enumerate(shown, start=first)
+        )
+        last = first + len(shown) - 1
+        header = f"{path}: lines {first}-{last} of {len(lines)}"
         return ToolOutcome(
-            text=content[:MAX_FETCH_CHARS],
-            data={"tool": "read_file", "site_id": site_id, "path": path},
+            text=f"{header}\n{numbered}"[: MAX_FETCH_CHARS * 2],
+            data={**data, "start_line": first, "end_line": last},
         )
 
-    async def _list_files(self, context: ToolContext) -> ToolOutcome:
+    async def _edit_file(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)
-        files = await self._sites.files(site_id)
-        listing = "\n".join(f"{item.path} ({item.size} bytes)" for item in files)
+        path = str(call.arguments.get("path", ""))
+        old = call.arguments.get("old_text")
+        new = call.arguments.get("new_text")
+        if not isinstance(old, str) or not old:
+            raise ValueError("Give old_text: the exact text to replace.")
+        if not isinstance(new, str):
+            raise ValueError("Give new_text: what to put in its place.")
+        content = await self._sites.read(site_id, path)
+        found = content.count(old)
+        replace_all = call.arguments.get("replace_all") is True
+        if found == 0:
+            raise ValueError(
+                f"old_text was not found in {path}. Read the file again and copy "
+                "the text exactly, including spaces."
+            )
+        if found > 1 and not replace_all:
+            raise ValueError(
+                f"old_text appears {found} times in {path}. Include more "
+                "surrounding lines so it is unique, or set replace_all."
+            )
+        updated = (
+            content.replace(old, new) if replace_all else content.replace(old, new, 1)
+        )
+        written = await self._sites.write(site_id, path, updated)
+        changed = found if replace_all else 1
         return ToolOutcome(
-            text=listing or "The site is empty.",
+            text=f"Edited {written.path}: replaced {changed} occurrence(s).",
+            data={
+                "tool": "edit_file",
+                "site_id": site_id,
+                "path": written.path,
+                "replacements": changed,
+            },
+        )
+
+    async def _search_files(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        raw = str(call.arguments.get("pattern", ""))
+        if not raw:
+            raise ValueError("Give a pattern to search for.")
+        flags = re.IGNORECASE if call.arguments.get("ignore_case") is True else 0
+        try:
+            pattern = re.compile(raw, flags)
+        except re.error as error:
+            raise ValueError(
+                f"That pattern is not a valid regular expression: {error}"
+            ) from error
+        glob = str(call.arguments.get("glob") or "").strip()
+        matches: list[str] = []
+        searched = 0
+        for item in await self._sites.files(site_id):
+            if glob and not _glob_match(item.path, glob):
+                continue
+            if not _is_text(item.content_type):
+                continue
+            try:
+                content = await self._sites.read(site_id, item.path)
+            except SiteError:
+                continue
+            searched += 1
+            for number, line in enumerate(content.splitlines(), start=1):
+                if pattern.search(line):
+                    matches.append(f"{item.path}:{number}: {line.strip()[:200]}")
+                    if len(matches) >= MAX_SEARCH_MATCHES:
+                        break
+            if len(matches) >= MAX_SEARCH_MATCHES:
+                break
+        text = "\n".join(matches) or f"No matches in {searched} file(s)."
+        if len(matches) >= MAX_SEARCH_MATCHES:
+            text += "\n[more matches not shown; narrow the pattern or glob]"
+        return ToolOutcome(
+            text=text,
+            data={"tool": "search_files", "matches": len(matches), "files": searched},
+        )
+
+    async def _list_files(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        pattern = str(call.arguments.get("pattern") or "").strip()
+        files = [
+            item
+            for item in await self._sites.files(site_id)
+            if not pattern or _glob_match(item.path, pattern)
+        ]
+        listing = "\n".join(f"{item.path} ({item.size} bytes)" for item in files)
+        empty = f"No files match {pattern}." if pattern else "The site is empty."
+        return ToolOutcome(
+            text=listing or empty,
             data={
                 "tool": "list_files",
                 "site_id": site_id,
                 "files": [item.path for item in files],
             },
         )
+
+    async def _update_plan(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        raw = call.arguments.get("steps")
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("Give the plan as a list of steps.")
+        marks = {"done": "[x]", "in_progress": "[>]", "pending": "[ ]"}
+        lines: list[str] = []
+        for item in raw[:20]:
+            if isinstance(item, dict):
+                step = str(item.get("step", "")).strip()
+                status = str(item.get("status") or "pending")
+            else:
+                step, status = str(item).strip(), "pending"
+            if step:
+                lines.append(f"{marks.get(status, '[ ]')} {step}")
+        if not lines:
+            raise ValueError("The plan has no steps.")
+        plan = "\n".join(lines)
+        await self._memory.replace_plan(context.agent_id, plan, chat_id=context.chat_id)
+        done = sum(1 for line in lines if line.startswith("[x]"))
+        return ToolOutcome(
+            text=f"Plan ({done}/{len(lines)} done):\n{plan}",
+            data={"tool": "update_plan", "steps": len(lines), "done": done},
+        )
+
+    async def _ask_helper(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        if self._delegate is None:
+            raise ValueError("There is no team to ask.")
+        if context.agent_role == HELPER_ROLE:
+            raise ValueError("You are the helper; think it through yourself.")
+        request = str(call.arguments.get("request", "")).strip()
+        if not request:
+            raise ValueError("Say what you need help with.")
+        material = str(call.arguments.get("material") or "").strip()
+        return await self._delegate.help(context, request=request, material=material)
 
     async def _delete_file(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)
@@ -812,3 +1064,36 @@ class AgentToolbox:
                 "This conversation has no project workspace. Attach a project first."
             )
         return context.site_id
+
+
+def _int_arg(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _glob_match(path: str, pattern: str) -> bool:
+    """Match a project path the way people expect globs to behave."""
+    name = path.rsplit("/", 1)[-1]
+    if "/" not in pattern:
+        return fnmatch.fnmatch(name, pattern)
+    if fnmatch.fnmatch(path, pattern):
+        return True
+    # Let "src/**/*.ts" also match files directly in src/.
+    return "**/" in pattern and fnmatch.fnmatch(path, pattern.replace("**/", ""))
+
+
+def _is_text(content_type: str) -> bool:
+    kind = content_type.split(";", 1)[0].strip()
+    return kind.startswith("text/") or kind in {
+        "application/json",
+        "application/javascript",
+        "application/xml",
+        "image/svg+xml",
+        "application/toml",
+        "application/x-yaml",
+    }

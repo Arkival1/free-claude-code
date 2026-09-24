@@ -968,6 +968,17 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         description="Language you speak, as a code such as en; empty detects it.",
     ),
     ConfigFieldSpec(
+        "STUDIO_HELPER_PIPELINE",
+        "Helper Reviews Research",
+        "studio",
+        "boolean",
+        settings_attr="studio_helper_pipeline",
+        description=(
+            "When an agent asks the Researcher, the Helper filters the findings "
+            "and turns them into next steps before they come back."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_WEB_ACCESS",
         "Agents On The Internet",
         "studio",

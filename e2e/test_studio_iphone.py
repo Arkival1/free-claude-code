@@ -373,6 +373,52 @@ def test_the_hud_has_a_plus_button_too(page: Page, admin_base_url: str) -> None:
     expect(page.locator(".hud")).to_be_visible()
 
 
+def test_the_hud_is_a_command_center_on_a_pc(page: Page, admin_base_url: str) -> None:
+    open_studio(page, admin_base_url)
+    page.locator('.tab[data-route="more"]').click()
+    page.get_by_role("button", name="HUD console").click()
+    page.set_viewport_size({"width": 1440, "height": 900})
+
+    expect(page.locator(".hud-orb canvas")).to_be_visible()
+    expect(page.locator(".hud-core-name")).to_have_text("JARVIS")
+    expect(page.locator(".hud-nav-item.active")).to_have_text("◈Command Center")
+    expect(page.locator(".hud-gauge", has_text="CPU")).to_be_visible()
+    expect(page.locator(".hud-llm", has_text="Main core")).to_be_visible()
+    expect(page.locator(".hud-stat", has_text="memories")).to_be_visible()
+
+    room = page.locator(".hud-room")
+    room.get_by_role("button", name="START TEAM ROOM").click()
+    expect(room.locator(".hud-room-title")).to_have_text("Team room")
+    expect(room.locator(".hud-room-meta")).to_contain_text("Helper")
+    room.get_by_label("Message the agent room").fill("Plan a bakery site")
+    room.get_by_role("button", name="POST").click()
+    expect(
+        room.locator(".hud-room-line.user", has_text="Plan a bakery site")
+    ).to_be_visible()
+    expect(room.locator(".hud-room-line.assistant", has_text="Builder")).to_be_visible()
+
+    page.get_by_role("button", name="Executive briefing").click()
+    expect(page.locator(".hud-line.you", has_text="Executive briefing")).to_be_visible()
+    expect(page.locator(".hud-line.ai").last).to_contain_text("is on it")
+
+    page.get_by_role("button", name="Brainstorm").click()
+    expect(page.get_by_label("Talk to Jarvis")).to_have_value(
+        "Ask Helper for ideas on "
+    )
+
+    box = page.locator(".hud-area-room").bounding_box()
+    core = page.locator(".hud-core").bounding_box()
+    assert box and core and box["x"] > core["x"], "the agent room sits top right"
+    assert box["y"] < 200
+    overflow = page.evaluate(
+        "() => document.documentElement.scrollWidth - window.innerWidth"
+    )
+    assert overflow <= 0
+
+    page.locator(".hud-nav-item", has_text="Agents").click()
+    expect(page.locator(".hud")).to_have_count(0)
+
+
 FAKE_MICROPHONE = """
 navigator.mediaDevices.getUserMedia = async () => {
   const ctx = new AudioContext();

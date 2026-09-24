@@ -74,6 +74,7 @@ _STOPWORDS = frozenset(
 _DAY_MS = 86_400_000
 
 SKILL_TAG = "skill"
+PLAN_TAG = "plan"
 """Memories tagged as a skill are always in the agent's prompt."""
 
 SHARED_MEMORY_ID = "shared"
@@ -287,6 +288,25 @@ class MemoryService:
             lines = "\n".join(f"- {entry.text}" for entry in working)
             sections.append(f"Your working notes right now:\n{lines}")
         return "\n\n".join(sections)
+
+    async def replace_plan(
+        self, agent_id: str, plan: str, *, chat_id: str | None = None
+    ) -> MemoryEntry | None:
+        """Keep one current plan in an agent's working notes."""
+        entries = await self._store.find(
+            MemoryEntry, where={"agent_id": agent_id, "scope": "working"}
+        )
+        for entry in entries:
+            if PLAN_TAG in entry.tags:
+                await self._store.delete(MemoryEntry, entry.id)
+        return await self.remember(
+            agent_id,
+            f"Current plan:\n{plan}",
+            scope="working",
+            tags=(PLAN_TAG,),
+            source="plan",
+            chat_id=chat_id,
+        )
 
     async def skills(self, agent_id: str, *, limit: int = 8) -> tuple[MemoryEntry, ...]:
         """Return what the user taught this agent, newest first."""

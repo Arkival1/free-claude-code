@@ -772,6 +772,9 @@ class Settings(BaseModel):
     studio_voice_language: OptionalNonEmptyString = Field(
         default="en", validation_alias="STUDIO_VOICE_LANGUAGE"
     )
+    studio_helper_pipeline: bool = Field(
+        default=True, validation_alias="STUDIO_HELPER_PIPELINE"
+    )
     studio_web_access: NonEmptyString = Field(
         default="all", validation_alias="STUDIO_WEB_ACCESS"
     )

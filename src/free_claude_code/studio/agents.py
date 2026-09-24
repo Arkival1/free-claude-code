@@ -64,6 +64,7 @@ _TOOL_ABILITIES = (
     (COMMAND_TOOL, "runs commands"),
     ("research", "does deep research across ten or more sources"),
     ("ask_researcher", "asks the Researcher when stuck"),
+    ("ask_helper", "asks the Helper for a plan"),
 )
 
 

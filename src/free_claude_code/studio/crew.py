@@ -4,11 +4,13 @@ import re
 from collections.abc import Sequence
 from typing import Protocol
 
+from free_claude_code.core.json_types import JsonObject
+
 from .models import Agent, AgentRun, Chat, SiteProject
 from .rooms import RoomOutcome
 from .sites import slugify
 from .store import StudioStore
-from .tools import MAIN_ROLE, RESEARCHER_ROLE, ToolContext, ToolOutcome
+from .tools import HELPER_ROLE, MAIN_ROLE, RESEARCHER_ROLE, ToolContext, ToolOutcome
 
 MAX_REPORT_CHARS = 2_000
 RESEARCH_LAB = "Research lab"
@@ -68,9 +70,12 @@ class CrewHost(Protocol):
 class Crew:
     """Resolve names and projects, run the hand-off, and report back."""
 
-    def __init__(self, *, store: StudioStore, host: CrewHost) -> None:
+    def __init__(
+        self, *, store: StudioStore, host: CrewHost, helper_pipeline: bool = True
+    ) -> None:
         self._store = store
         self._host = host
+        self._helper_pipeline = helper_pipeline
 
     async def ask_agent(
         self,
@@ -209,17 +214,96 @@ class Crew:
             parent_chat_id=context.chat_id,
         )
         report = (run.result or run.error or "(no answer)").strip()
+        text = f"{researcher.name} answered: {report}"
+        data: JsonObject = {
+            "tool": "ask_researcher",
+            "agent_id": researcher.id,
+            "agent": researcher.name,
+            "run_id": run.id,
+            "chat_id": chat.id,
+            "status": run.status,
+        }
+        helper = await self._teammate(HELPER_ROLE, exclude=context.agent_id)
+        if self._helper_pipeline and helper is not None and run.status == "succeeded":
+            # The Helper filters the findings into something the asker can act on.
+            advice, helped = await self._advise(
+                helper, context, request=question, material=report
+            )
+            text = (
+                f"{researcher.name} found: {report[:900]}\n\n"
+                f"{helper.name}'s plan: {advice}"
+            )
+            data |= {"helper_run_id": helped.id, "helper_chat_id": helped.chat_id}
         return ToolOutcome(
-            text=f"{researcher.name} answered: {report}"[:MAX_REPORT_CHARS],
+            text=text[: MAX_REPORT_CHARS * 2],
+            data=data,
+            failed=run.status != "succeeded",
+        )
+
+    async def help(
+        self, context: ToolContext, *, request: str, material: str
+    ) -> ToolOutcome:
+        """Have the Helper turn a request and material into next steps."""
+        helper = await self._teammate(HELPER_ROLE, exclude=context.agent_id)
+        if helper is None:
+            raise ValueError(
+                "The team has no helper. Add one with the + button and the helper role."
+            )
+        advice, run = await self._advise(
+            helper, context, request=request, material=material
+        )
+        return ToolOutcome(
+            text=f"{helper.name} suggests: {advice}"[: MAX_REPORT_CHARS * 2],
             data={
-                "tool": "ask_researcher",
-                "agent_id": researcher.id,
-                "agent": researcher.name,
+                "tool": "ask_helper",
+                "agent_id": helper.id,
+                "agent": helper.name,
                 "run_id": run.id,
-                "chat_id": chat.id,
+                "chat_id": run.chat_id,
                 "status": run.status,
             },
             failed=run.status != "succeeded",
+        )
+
+    async def _advise(
+        self, helper: Agent, context: ToolContext, *, request: str, material: str
+    ) -> tuple[str, AgentRun]:
+        work = await self._work_context(context)
+        brief = [f"{context.agent_name} needs help: {request}"]
+        if work:
+            brief.append(f"What {context.agent_name} is working on: {work}")
+        if material:
+            brief.append(f"Material to work from:\n{material[:6_000]}")
+        run, _ = await self._host.run_agent_task(
+            helper,
+            "\n\n".join(brief),
+            site_id=context.site_id,
+            parent_chat_id=context.chat_id,
+        )
+        return (run.result or run.error or "(no advice)").strip(), run
+
+    async def _work_context(self, context: ToolContext) -> str:
+        """What the asking agent is trying to finish, from its task or chat."""
+        runs = await self._store.find(
+            AgentRun,
+            where={"chat_id": context.chat_id},
+            order_by="created_at DESC",
+            limit=1,
+        )
+        if runs:
+            return runs[0].goal[:600]
+        transcript = await self._store.transcript(context.chat_id, limit=12)
+        asked = [message for message in transcript if message.role == "user"]
+        return asked[-1].text[:600] if asked else ""
+
+    async def _teammate(self, role: str, *, exclude: str) -> Agent | None:
+        return next(
+            (
+                agent
+                for agent in await self._host.agents()
+                if agent.role == role and not agent.archived and agent.id != exclude
+            ),
+            None,
         )
 
     async def _lab(self, researcher: Agent) -> SiteProject:

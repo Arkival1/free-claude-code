@@ -2386,22 +2386,245 @@
 
   const UI_KEY = "fcc.studio.ui";
   const VOICE_KEY = "fcc.studio.voice";
-  const ORB_SVG = `
-    <svg viewBox="0 0 200 200" aria-hidden="true" focusable="false">
-      <defs>
-        <radialGradient id="hud-glow">
-          <stop offset="0" stop-color="#ffffff" stop-opacity="0.95" />
-          <stop offset="0.35" stop-color="currentColor" stop-opacity="0.9" />
-          <stop offset="1" stop-color="currentColor" stop-opacity="0" />
-        </radialGradient>
-      </defs>
-      <circle class="orb-ring orb-outer" cx="100" cy="100" r="94" />
-      <circle class="orb-ring orb-ticks" cx="100" cy="100" r="84" />
-      <circle class="orb-ring orb-arc" cx="100" cy="100" r="72" />
-      <circle class="orb-ring orb-arc-2" cx="100" cy="100" r="60" />
-      <circle class="orb-ring orb-inner" cx="100" cy="100" r="48" />
-      <circle class="orb-core" cx="100" cy="100" r="40" fill="url(#hud-glow)" />
-    </svg>`;
+  /* A living gold core: a sphere of glowing filaments that breathes, swirls,
+     and answers to voice. Pure canvas, so it runs on phones and old GPUs. */
+  const ORB_STATES = {
+    idle: { spin: 0.14, swirl: 0.0, heat: 0.75, spread: 0.02, streak: 0.25 },
+    thinking: { spin: 0.55, swirl: 0.9, heat: 1.0, spread: 0.04, streak: 0.8 },
+    listening: { spin: 0.2, swirl: 0.15, heat: 0.95, spread: 0.1, streak: 0.35 },
+    hearing: { spin: 0.4, swirl: 0.5, heat: 1.05, spread: 0.06, streak: 0.6 },
+    speaking: { spin: 0.28, swirl: 0.25, heat: 1.1, spread: 0.12, streak: 0.55 },
+    offline: { spin: 0.04, swirl: 0.0, heat: 0.3, spread: 0.0, streak: 0.05 },
+  };
+
+  function createCoreOrb(canvas) {
+    const ctx = canvas.getContext("2d");
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const small = Math.min(window.innerWidth, window.innerHeight) < 700;
+    const count = small ? 1100 : 2200;
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    const points = Array.from({ length: count }, (_, i) => {
+      const y = 1 - (i / (count - 1)) * 2;
+      const r = Math.sqrt(1 - y * y);
+      const theta = golden * i;
+      const shell = Math.random() < 0.22 ? 0.25 + Math.random() * 0.6 : 0.86 + Math.random() * 0.18;
+      return {
+        x: Math.cos(theta) * r,
+        y,
+        z: Math.sin(theta) * r,
+        shell,
+        size: 0.6 + Math.random() * 1.5,
+        phase: Math.random() * Math.PI * 2,
+        streak: Math.random() < 0.22,
+      };
+    });
+    const rings = [0.35, -0.6, 1.1].map((tilt, index) => ({
+      tilt,
+      speed: 0.25 + index * 0.18,
+      radius: 1.08 + index * 0.07,
+      dots: Array.from({ length: small ? 60 : 110 }, (_, i) => ({
+        angle: (i / (small ? 60 : 110)) * Math.PI * 2,
+        jitter: Math.random() * 0.05,
+      })),
+    }));
+    // Filaments: glowing strands wrapped around the sphere on tilted circles.
+    const filaments = Array.from({ length: small ? 16 : 28 }, () => ({
+      tilt: Math.random() * Math.PI,
+      turn: Math.random() * Math.PI * 2,
+      radius: 0.55 + Math.random() * 0.5,
+      length: 0.8 + Math.random() * 2.2,
+      offset: Math.random() * Math.PI * 2,
+      speed: (Math.random() - 0.5) * 0.9,
+    }));
+    const state = { name: "idle", current: { ...ORB_STATES.idle }, level: 0, burst: 0, tiltX: 0, tiltY: 0, targetX: 0, targetY: 0 };
+    let width = 0;
+    let height = 0;
+    let frame = 0;
+    let last = performance.now();
+    let spin = 0;
+    let visible = true;
+
+    const resize = () => {
+      const box = canvas.getBoundingClientRect();
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      width = Math.max(1, box.width);
+      height = Math.max(1, box.height);
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (still) draw(0);
+    };
+    const sizer = new ResizeObserver(resize);
+    sizer.observe(canvas);
+    const watcher = new IntersectionObserver((entries) => {
+      visible = entries.some((entry) => entry.isIntersecting);
+    });
+    watcher.observe(canvas);
+    const onPointer = (event) => {
+      const box = canvas.getBoundingClientRect();
+      state.targetX = ((event.clientY - box.top) / box.height - 0.5) * 0.6;
+      state.targetY = ((event.clientX - box.left) / box.width - 0.5) * 0.6;
+    };
+    canvas.addEventListener("pointermove", onPointer);
+
+    function project(x, y, z, radius, cx, cy) {
+      // Rotate around Y (spin + pointer) then X (tilt), then perspective.
+      const ay = spin + state.tiltY;
+      const cosY = Math.cos(ay);
+      const sinY = Math.sin(ay);
+      const x1 = x * cosY + z * sinY;
+      const z1 = -x * sinY + z * cosY;
+      const ax = 0.35 + state.tiltX;
+      const cosX = Math.cos(ax);
+      const sinX = Math.sin(ax);
+      const y2 = y * cosX - z1 * sinX;
+      const z2 = y * sinX + z1 * cosX;
+      const scale = 2.6 / (2.6 + z2);
+      return { px: cx + x1 * radius * scale, py: cy + y2 * radius * scale, depth: z2, scale };
+    }
+
+    function draw(time) {
+      const t = time / 1000;
+      const goal = ORB_STATES[state.name] || ORB_STATES.idle;
+      for (const key of Object.keys(goal)) {
+        state.current[key] += (goal[key] - state.current[key]) * 0.05;
+      }
+      const c = state.current;
+      const speakPulse = state.name === "speaking" ? 0.35 + 0.35 * Math.abs(Math.sin(t * 8.5)) * (0.6 + 0.4 * Math.sin(t * 2.3)) : 0;
+      const level = Math.max(state.level, speakPulse);
+      state.burst *= 0.93;
+      state.tiltX += (state.targetX - state.tiltX) * 0.04;
+      state.tiltY += (state.targetY - state.tiltY) * 0.04;
+      // The core drifts a little, like it is floating, and leans toward you.
+      const cx = width / 2 + Math.sin(t * 0.37) * width * 0.035 + state.tiltY * width * 0.05;
+      const cy = height / 2 + Math.cos(t * 0.29) * height * 0.03 + state.tiltX * height * 0.05;
+      const base = Math.min(width, height) * 0.34;
+      const breathe = 1 + 0.025 * Math.sin(t * 1.3) + level * 0.18 + state.burst * 0.25;
+      const radius = base * breathe;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.globalCompositeOperation = "lighter";
+
+      // Halo and core glow.
+      const halo = ctx.createRadialGradient(cx, cy, radius * 0.6, cx, cy, radius * 1.7);
+      halo.addColorStop(0, `rgba(255, 170, 60, ${0.1 * c.heat})`);
+      halo.addColorStop(1, "rgba(255, 140, 20, 0)");
+      ctx.fillStyle = halo;
+      ctx.fillRect(0, 0, width, height);
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * (0.8 + level * 0.3));
+      glow.addColorStop(0, `rgba(255, 250, 230, ${0.85 * c.heat})`);
+      glow.addColorStop(0.12, `rgba(255, 214, 130, ${0.6 * c.heat})`);
+      glow.addColorStop(0.45, `rgba(230, 140, 40, ${0.2 * c.heat})`);
+      glow.addColorStop(1, "rgba(120, 50, 0, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, width, height);
+
+      // Energy filaments.
+      for (const f of filaments) {
+        f.offset += f.speed * 0.012 * (1 + c.swirl * 3);
+        const steps = 26;
+        const cosT = Math.cos(f.tilt);
+        const sinT = Math.sin(f.tilt);
+        let previous = null;
+        for (let i = 0; i <= steps; i += 1) {
+          const a = f.offset + (i / steps) * f.length;
+          const wave = 1 + 0.05 * Math.sin(a * 5 + t * 2) + level * 0.1;
+          const x0 = Math.cos(a) * f.radius * wave;
+          const y0 = Math.sin(a) * f.radius * wave;
+          const x = x0 * Math.cos(f.turn) - y0 * sinT * Math.sin(f.turn);
+          const y = y0 * cosT;
+          const z = x0 * Math.sin(f.turn) + y0 * sinT * Math.cos(f.turn);
+          const q = project(x, y, z, radius, cx, cy);
+          if (previous) {
+            const near = (1 - q.depth) / 2;
+            const fade = Math.sin((i / steps) * Math.PI);
+            ctx.strokeStyle = `rgba(255, ${180 + Math.round(near * 60)}, 90, ${(0.05 + near * 0.3) * fade * c.heat + level * 0.1})`;
+            ctx.lineWidth = 0.6 + near * 0.9;
+            ctx.beginPath();
+            ctx.moveTo(previous.px, previous.py);
+            ctx.lineTo(q.px, q.py);
+            ctx.stroke();
+          }
+          previous = q;
+        }
+      }
+
+      // Shell particles.
+      for (const p of points) {
+        const wobble = 1 + c.spread * Math.sin(t * 3 + p.phase) + level * 0.12 * Math.sin(t * 11 + p.phase * 3);
+        const swirl = c.swirl * Math.sin(t * 0.8 + p.y * 3) * 0.6;
+        const cs = Math.cos(swirl);
+        const sn = Math.sin(swirl);
+        const x = (p.x * cs - p.z * sn) * p.shell * wobble;
+        const z = (p.x * sn + p.z * cs) * p.shell * wobble;
+        const q = project(x, p.y * p.shell * wobble, z, radius, cx, cy);
+        const near = (1 - q.depth) / 2;
+        const flicker = 0.55 + 0.45 * Math.sin(t * 2.2 + p.phase);
+        const alpha = Math.min(1, (0.2 + near * 0.85) * flicker * c.heat);
+        const size = p.size * q.scale * (1 + level * 0.6);
+        ctx.fillStyle = `rgba(255, ${170 + Math.round(near * 70)}, ${60 + Math.round(near * 90)}, ${alpha})`;
+        if (p.streak && c.streak > 0.1) {
+          const tail = project(x * 0.94, p.y * p.shell * wobble * 0.94, z * 0.94, radius, cx, cy);
+          ctx.strokeStyle = ctx.fillStyle;
+          ctx.lineWidth = size * 0.7;
+          ctx.beginPath();
+          ctx.moveTo(q.px, q.py);
+          ctx.lineTo(q.px + (q.px - tail.px) * c.streak * 3, q.py + (q.py - tail.py) * c.streak * 3);
+          ctx.stroke();
+        } else {
+          ctx.fillRect(q.px - size / 2, q.py - size / 2, size, size);
+        }
+      }
+
+      // Orbital rings.
+      for (const ring of rings) {
+        const turn = t * ring.speed * (1 + c.swirl);
+        for (const dot of ring.dots) {
+          const a = dot.angle + turn;
+          const rx = Math.cos(a) * ring.radius;
+          const rz = Math.sin(a) * ring.radius;
+          const ry = rz * Math.sin(ring.tilt);
+          const q = project(rx, ry + dot.jitter, rz * Math.cos(ring.tilt), radius, cx, cy);
+          const near = (1 - q.depth) / 2;
+          ctx.fillStyle = `rgba(255, 200, 110, ${(0.08 + near * 0.35) * c.heat})`;
+          ctx.fillRect(q.px, q.py, 1.4 * q.scale, 1.4 * q.scale);
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    function loop(now) {
+      frame = requestAnimationFrame(loop);
+      if (!visible || document.hidden) return;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      spin += dt * (state.current.spin + state.burst * 2);
+      draw(now);
+    }
+    resize();
+    if (!still) frame = requestAnimationFrame(loop);
+
+    return {
+      setState(name) {
+        if (state.name === name) return;
+        state.name = name;
+        if (still) draw(performance.now());
+      },
+      setLevel(value) {
+        state.level = Math.max(0, Math.min(1, value || 0));
+      },
+      burst() {
+        state.burst = 1;
+        if (still) draw(performance.now());
+      },
+      destroy() {
+        cancelAnimationFrame(frame);
+        sizer.disconnect();
+        watcher.disconnect();
+        canvas.removeEventListener("pointermove", onPointer);
+      },
+    };
+  }
 
   const hud = {
     lastSeq: 0,
@@ -2416,6 +2639,9 @@
     recognizer: null,
     optimistic: null,
     keys: {},
+    orb: null,
+    clockTimer: null,
+    roomId: null,
   };
 
   const storedGet = (key) => {
@@ -2695,6 +2921,7 @@
         processor.disconnect();
         voice.stopRecording = null;
         refs.root.style.setProperty("--level", "0");
+        hud.orb?.setLevel(0);
         resolve(keep && heard ? encodeWav(chunks, ctx.sampleRate) : null);
       };
       voice.stopRecording = finish;
@@ -2708,6 +2935,7 @@
         elapsed += seconds;
         if (elapsed < 0.3) floor = Math.max(floor, level);
         refs.root.style.setProperty("--level", Math.min(1, level * 12).toFixed(2));
+        hud.orb?.setLevel(Math.min(1, level * 12));
         if (level > Math.max(0.015, floor * 3)) {
           heard = true;
           silence = 0;
@@ -2785,6 +3013,17 @@
               : "idle";
     refs.root.dataset.state = state;
     refs.root.dataset.talk = voice.talk ? "on" : "off";
+    hud.orb?.setState(state);
+    if (refs.voiceState) {
+      refs.voiceState.textContent = {
+        offline: "Link lost",
+        listening: "Listening…",
+        hearing: "Understanding you",
+        speaking: "Speaking",
+        thinking: "Thinking",
+        idle: voice.talk ? "Talk mode on" : "Tap the core to talk",
+      }[state];
+    }
     refs.status.textContent = {
       offline: "LINK LOST — RETRYING",
       listening: voice.talk ? "LISTENING · TALK MODE" : "LISTENING",
@@ -2961,12 +3200,50 @@
     return true;
   }
 
+  const NAV_ITEMS = [
+    ["Command Center", "home", "◈"],
+    ["Agents", "agents", "◎"],
+    ["Chats", "chats", "◌"],
+    ["Classroom", "learn", "✎"],
+    ["Models", "models", "▣"],
+    ["Tuning & LoRA", "tune", "⟁"],
+    ["Knowledge & Memory", "more", "✦"],
+  ];
+
+  function ringGauge(label, value, detail) {
+    const known = typeof value === "number";
+    const pct = known ? Math.max(0, Math.min(100, value)) : 0;
+    const circumference = 2 * Math.PI * 34;
+    const tone = pct > 85 ? "hot" : pct > 65 ? "warm" : "cool";
+    return el("div", { class: `hud-gauge ${tone}`, role: "img", "aria-label": `${label} ${known ? `${Math.round(pct)}%` : "unknown"}` }, [
+      el("div", {
+        class: "hud-gauge-ring",
+        html: `<svg viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="34" class="track"/><circle cx="40" cy="40" r="34" class="fill" stroke-dasharray="${(circumference * pct) / 100} ${circumference}" transform="rotate(-90 40 40)"/></svg>`,
+      }),
+      el("strong", { text: known ? `${Math.round(pct)}%` : "—" }),
+      el("span", { text: label }),
+      detail ? el("small", { text: detail }) : null,
+    ]);
+  }
+
+  function agentGlyph(role) {
+    return { builder: "⌘", researcher: "⌕", helper: "✧", teacher: "✎", student: "◌", guide: "?", assistant: "◇" }[role] || "◆";
+  }
+
+  function timeAgo(ms) {
+    const seconds = Math.max(0, (Date.now() - ms) / 1000);
+    if (seconds < 60) return "now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    return `${Math.floor(seconds / 86400)}d`;
+  }
+
   function updateHud(refs, data) {
     hud.name = data.agent.name;
     hud.thinking = Boolean(data.thinking);
     hud.offline = false;
     refs.name.textContent = data.agent.name.toUpperCase();
-    refs.clock.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    refs.coreName.textContent = data.agent.name.toUpperCase();
 
     const local = data.systems.local || {};
     const web = data.systems.web || {};
@@ -2982,6 +3259,9 @@
       voice.setupRequested = true;
       post("/studio/api/voice/setup").catch(() => {});
     }
+    const healthy = local.reachable !== false && !data.error;
+    refs.health.textContent = healthy ? "OPTIMAL" : local.reachable === false ? "LOCAL MODELS OFFLINE" : "ATTENTION";
+    refs.health.className = `hud-health ${healthy ? "good" : "warn"}`;
     if (changed("pills", [local.reachable, data.systems.main_model, data.memory, data.approvals.length, data.systems.commands, web, voicePillKey(spoken)])) {
       refs.pills.replaceChildren(
         voicePill(spoken),
@@ -2999,6 +3279,23 @@
       );
     }
 
+    // AI core overview.
+    const busy = data.team.filter((member) => member.busy).length;
+    const insights = data.insights || {};
+    if (changed("overview", [data.systems.main_model, insights.memories, spoken.speak, spoken.speak_ready, busy, local.reachable, healthy])) {
+      const row = (label, value, tone) =>
+        el("div", { class: `hud-overview-row ${tone || ""}` }, [el("span", { text: label }), el("strong", { text: value })]);
+      refs.overview.replaceChildren(
+        row("AI Core", shortModel(data.systems.main_model) || "—", "good"),
+        row("Memory", `${insights.memories ?? 0} stored`, "good"),
+        row("Voice", spoken.speak_ready ? (spoken.speak === "builtin" ? "Offline voice" : "Online") : "Browser", spoken.speak_ready ? "good" : ""),
+        row("Agents", `${busy} running · ${data.team.length} total`, busy ? "warn" : "good"),
+        row("Local brain", local.reachable ? `${(local.models || []).length} models` : "Offline", local.reachable ? "good" : "bad"),
+        row("System", healthy ? "Optimal" : "Check", healthy ? "good" : "warn")
+      );
+    }
+
+    // Conversation.
     if (data.chat.id !== hud.chatId) {
       hud.chatId = data.chat.id;
       hud.lastSeq = 0;
@@ -3020,6 +3317,7 @@
         const finishedWork = message.role === "event" && meta.kind === "background_done";
         if ((fromMain || finishedWork) && message.sequence > hud.spokenSeq) {
           hud.spokenSeq = message.sequence;
+          hud.orb?.burst();
           sayAloud(message.text, refs, () => hud.afterReply?.());
         }
       }
@@ -3033,23 +3331,110 @@
       );
     }
 
+    // Active agents.
     if (changed("team", data.team)) {
       refs.team.replaceChildren(
         ...(data.team.length
           ? data.team.map((member) =>
               el("button", { class: `hud-agent${member.busy ? " busy" : ""}`, onclick: () => go(`agent/${member.id}`) }, [
-                el("span", { class: "hud-dot" }),
+                el("span", { class: "hud-agent-icon", "aria-hidden": "true", text: agentGlyph(member.role) }),
                 el("span", { class: "grow" }, [
                   el("strong", { text: member.name }),
                   el("small", { text: `${member.role} · ${member.local ? "local" : "server"} · ${shortModel(member.model)}` }),
                 ]),
-                el("span", { class: "hud-agent-state", text: member.busy ? "ACTIVE" : "READY" }),
+                el("span", { class: "hud-agent-state" }, [el("span", { class: "hud-dot" }), member.busy ? "ACTIVE" : "READY"]),
               ])
             )
           : [el("p", { class: "hud-empty", text: "No agents yet." })])
       );
     }
 
+    // Mission timeline.
+    const timeline = data.timeline || [];
+    if (changed("timeline", timeline.map((item) => [item.title, item.status, Math.floor(item.at / 60000)]))) {
+      refs.timeline.replaceChildren(
+        ...(timeline.length
+          ? timeline.map((item) =>
+              el("button", { class: `hud-mission ${item.status}`, onclick: () => go(item.route) }, [
+                el("time", { text: timeAgo(item.at) }),
+                el("span", { class: "hud-mission-bar", "aria-hidden": "true" }),
+                el("span", { class: "grow" }, [el("strong", { text: item.title }), el("small", { text: `${item.who} · ${item.status}` })]),
+              ])
+            )
+          : [el("p", { class: "hud-empty", text: "No missions yet. Give the team a job." })])
+      );
+    }
+
+    // System monitor.
+    const monitor = data.monitor || {};
+    if (changed("monitor", [monitor.cpu, monitor.memory, monitor.disk])) {
+      refs.monitor.replaceChildren(
+        ringGauge("CPU", monitor.cpu, monitor.cores ? `${monitor.cores} cores` : ""),
+        ringGauge("RAM", monitor.memory, monitor.memory_gb ? `${monitor.memory_gb} GB` : ""),
+        ringGauge("Disk", monitor.disk, monitor.disk_gb ? `${monitor.disk_gb} GB` : "")
+      );
+    }
+
+    // Memory insights.
+    if (changed("insights", insights)) {
+      const stat = (value, label) => el("div", { class: "hud-stat" }, [el("strong", { text: String(value ?? 0) }), el("span", { text: label })]);
+      refs.insights.replaceChildren(
+        el("div", { class: "hud-constellation", "aria-hidden": "true", html: constellation(insights.memories || 0) }),
+        el("div", { class: "hud-stats" }, [
+          stat(insights.memories, "memories"),
+          stat(insights.shared, "shared"),
+          stat(insights.skills, "skills"),
+          stat(insights.conversations, "conversations"),
+        ]),
+        el("button", { class: "hud-link", type: "button", text: "Open memory & Obsidian ›", onclick: () => go("more") })
+      );
+    }
+
+    // Model status.
+    const voiceInfo = spoken;
+    const llm = [
+      ["Local brain", local.reachable ? `${(local.models || []).length} models` : "offline", local.reachable],
+      ["Main core", shortModel(data.systems.main_model), true],
+      ["Server model", shortModel(data.systems.server_model), !String(data.systems.server_model || "").startsWith("local/")],
+      ["Web search", web.access === "off" ? "off" : web.label || "web", web.access !== "off" && !web.problem],
+      ["Voice", voiceInfo.speak_ready ? voiceInfo.speak : "browser", Boolean(voiceInfo.speak_ready)],
+      ["Ears", voiceInfo.listen_ready ? voiceInfo.listen : "browser", Boolean(voiceInfo.listen_ready)],
+    ];
+    if (changed("llm", llm)) {
+      refs.llm.replaceChildren(
+        ...llm.map(([name, value, ok]) =>
+          el("div", { class: `hud-llm ${ok ? "good" : "idle"}` }, [el("span", { class: "hud-dot" }), el("strong", { text: name }), el("small", { text: value })])
+        )
+      );
+    }
+
+    // Agent chat room.
+    const room = data.room;
+    if (changed("room", room)) {
+      hud.roomId = room ? room.id : null;
+      refs.roomTitle.textContent = room ? room.title : "No room yet";
+      refs.roomMeta.textContent = room
+        ? `${room.members.join(", ")}${room.running ? " · talking" : ""}${room.task_status ? ` · ${room.task_status}` : ""}`
+        : "Start one and the agents can talk to you and to each other.";
+      refs.roomInput.disabled = !room;
+      refs.roomLog.replaceChildren(
+        ...(room && room.messages.length
+          ? room.messages.map((message) =>
+              el("div", { class: `hud-room-line ${message.role}` }, [
+                el("span", { class: "hud-tag", text: message.role === "user" ? "YOU" : (message.author || "").toUpperCase() }),
+                message.text,
+              ])
+            )
+          : [
+              room
+                ? el("p", { class: "hud-empty", text: "Quiet for now. Say something to the team." })
+                : el("button", { class: "hud-button", type: "button", text: "START TEAM ROOM", onclick: refs.startRoom }),
+            ])
+      );
+      refs.roomLog.scrollTop = refs.roomLog.scrollHeight;
+    }
+
+    // Live feed: approvals first, then recent jobs.
     if (changed("activity", [data.runs, data.approvals])) {
       pendingCommands = new Set(data.approvals.map((request) => request.id));
       const names = Object.fromEntries(data.team.map((member) => [member.id, member.name]));
@@ -3065,7 +3450,7 @@
         }),
         ...data.runs.map((run) =>
           el("button", { class: `hud-item run ${run.status}`, onclick: () => go(`task/${run.id}`) }, [
-            el("small", { text: `${names[run.agent_id] || "Agent"} · ${run.status}${run.status === "running" ? ` · step ${run.step}` : ""}` }),
+            el("small", { text: `${names[run.agent_id] || "Agent"} · ${run.status}${run.status === "running" ? ` · step ${run.step}` : ""} · ${timeAgo(run.updated_at)}` }),
             el("span", { text: run.goal.slice(0, 120) }),
           ])
         ),
@@ -3095,14 +3480,43 @@
     hudState(refs);
   }
 
+  function constellation(count) {
+    // A little star map whose size follows how much the team remembers.
+    const stars = Math.max(6, Math.min(26, 6 + Math.round(Math.sqrt(count) * 2)));
+    let seed = 7;
+    const rand = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    const points = Array.from({ length: stars }, () => [8 + rand() * 144, 8 + rand() * 64]);
+    const lines = points
+      .slice(1)
+      .map((point, index) => `<line x1="${points[index][0].toFixed(1)}" y1="${points[index][1].toFixed(1)}" x2="${point[0].toFixed(1)}" y2="${point[1].toFixed(1)}"/>`)
+      .join("");
+    const dots = points.map(([x, y], index) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${index % 5 === 0 ? 2.2 : 1.3}"/>`).join("");
+    return `<svg viewBox="0 0 160 80">${lines}${dots}</svg>`;
+  }
+
+  function teardownHud() {
+    hud.orb?.destroy();
+    hud.orb = null;
+    clearInterval(hud.clockTimer);
+    hud.clockTimer = null;
+  }
+
+  const BRIEFING_PROMPT =
+    "Executive briefing, please: what the team is working on, what finished, what failed, anything that needs my approval, and what you suggest next.";
+
   async function renderHud() {
     const generation = renderGeneration;
     const data = await api("/studio/api/main");
     if (generation !== renderGeneration) return;
     document.body.dataset.ui = "hud";
+    teardownHud();
     hud.keys = {};
     hud.chatId = null;
     hud.optimistic = null;
+    hud.roomId = null;
     const last = data.messages[data.messages.length - 1];
     hud.spokenSeq = last ? last.sequence : 0;
 
@@ -3114,6 +3528,14 @@
       "aria-label": `Talk to ${data.agent.name}`,
       placeholder: `Talk to ${data.agent.name}…`,
     });
+    const roomInput = el("input", {
+      type: "text",
+      autocomplete: "off",
+      enterkeyhint: "send",
+      "aria-label": "Message the agent room",
+      placeholder: "Message the agents…",
+    });
+    const canvas = el("canvas", { class: "hud-orb-canvas", "aria-hidden": "true" });
     const refs = {
       talk: el("button", {
         class: "hud-button hud-talk",
@@ -3123,14 +3545,37 @@
         onclick: () => toggleTalk(),
       }),
       name: el("span", { class: "hud-name" }),
+      coreName: el("strong", { class: "hud-core-name" }),
+      health: el("span", { class: "hud-health good", text: "OPTIMAL" }),
+      date: el("span", { class: "hud-date" }),
       clock: el("span", { class: "hud-clock" }),
       pills: el("div", { class: "hud-pills" }),
       status: el("p", { class: "hud-status", role: "status" }),
+      voiceState: el("strong", { class: "hud-voice-state" }),
+      overview: el("div", { class: "hud-overview" }),
       log: el("div", { class: "hud-log", "aria-live": "polite" }),
-      team: el("div", { class: "hud-list" }),
+      team: el("div", { class: "hud-agents" }),
+      timeline: el("div", { class: "hud-list" }),
+      monitor: el("div", { class: "hud-gauges" }),
+      insights: el("div", { class: "hud-insights" }),
+      llm: el("div", { class: "hud-llms" }),
+      roomTitle: el("strong", { class: "hud-room-title" }),
+      roomMeta: el("small", { class: "hud-room-meta" }),
+      roomInput,
+      roomLog: el("div", { class: "hud-room-log", "aria-live": "polite" }),
       activity: el("div", { class: "hud-list" }),
       memory: el("div", { class: "hud-list" }),
     };
+
+    const tick = () => {
+      const now = new Date();
+      refs.date.textContent = now
+        .toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" })
+        .toUpperCase();
+      refs.clock.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    };
+    tick();
+    hud.clockTimer = setInterval(tick, 1000);
 
     const poll = async () => {
       if (generation !== renderGeneration) return stopPolling();
@@ -3151,6 +3596,7 @@
       input.value = "";
       unlockSpeech();
       stopSpeaking(refs);
+      hud.orb?.burst();
       hud.optimistic?.remove();
       hud.optimistic = el("div", { class: "hud-line you pending" }, [hudTag("YOU"), text]);
       refs.log.querySelector(".hud-empty")?.remove();
@@ -3181,6 +3627,7 @@
           .map((result) => result[0].transcript)
           .join("");
         input.value = heard;
+        hud.orb?.setLevel(0.6);
       };
       recognizer.onerror = (event) => {
         if (event.error === "aborted" || event.error === "no-speech") return;
@@ -3193,6 +3640,7 @@
         const finished = hud.recognizer === recognizer;
         hud.recognizer = null;
         hud.listening = false;
+        hud.orb?.setLevel(0);
         hudState(refs);
         if (finished && heard.trim()) send(heard);
         else if (finished && voice.talk) setTimeout(() => voice.talk && hear(), 250);
@@ -3255,6 +3703,7 @@
 
     const toggleTalk = () => {
       voice.talk = !voice.talk;
+      hud.orb?.burst();
       if (voice.talk) {
         storedSet(VOICE_KEY, "on");
         voiceButton.textContent = "VOICE ON";
@@ -3304,19 +3753,84 @@
       placeholder: "Tell the team to remember…",
     });
 
+    const startRoom = async () => {
+      try {
+        await post("/studio/api/rooms", { title: "Team room" });
+        hud.keys.room = "";
+        poll();
+      } catch (error) {
+        notify(error.message);
+      }
+    };
+    refs.startRoom = startRoom;
+
+    const prefill = (text) => {
+      input.value = text;
+      input.focus();
+      input.setSelectionRange(text.length, text.length);
+    };
+
+    const quick = (label, detail, action) =>
+      el("button", { class: "hud-quick", type: "button", onclick: action }, [
+        el("strong", { text: label }),
+        el("small", { text: detail }),
+      ]);
+
+    const nav = el("nav", { class: "hud-nav", "aria-label": "Studio sections" }, [
+      el("div", { class: "hud-nav-brand", "aria-hidden": "true" }, [
+        el("span", { class: "hud-nav-mark", text: "◉" }),
+        el("span", { text: "STUDIO" }),
+      ]),
+      el(
+        "div",
+        { class: "hud-nav-items" },
+        NAV_ITEMS.map(([label, target, glyph]) =>
+          el(
+            "button",
+            {
+              class: `hud-nav-item${target === "home" ? " active" : ""}`,
+              type: "button",
+              "aria-current": target === "home" ? "page" : null,
+              onclick: () => (target === "home" ? render() : go(target)),
+            },
+            [el("span", { class: "hud-nav-glyph", "aria-hidden": "true", text: glyph }), label]
+          )
+        )
+      ),
+      el("div", { class: "hud-voice-box" }, [
+        el("small", { text: "VOICE STATUS" }),
+        refs.voiceState,
+        el(
+          "div",
+          { class: "hud-wave", "aria-hidden": "true" },
+          Array.from({ length: 14 }, (_, index) => el("span", { style: `--i:${index}` }))
+        ),
+      ]),
+      el("button", {
+        class: "hud-button",
+        type: "button",
+        text: "CLASSIC UI",
+        onclick: () => setUiMode("classic"),
+      }),
+    ]);
+
     const root = el("div", { class: "hud", "data-state": "idle" }, [
+      nav,
       el("header", { class: "hud-top" }, [
-        el("div", { class: "hud-brand" }, [refs.name, refs.clock]),
+        el("div", { class: "hud-brand" }, [refs.name, el("small", { text: "COMMAND CENTER" })]),
+        el("div", { class: "hud-sys" }, [el("small", { text: "SYSTEM STATUS" }), refs.health]),
+        el("div", { class: "hud-time" }, [refs.date, refs.clock]),
         refs.pills,
       ]),
+      el("div", { class: "hud-area-overview" }, [hudPanel("AI CORE OVERVIEW", refs.overview)]),
       el("section", { class: "hud-core" }, [
         el("button", {
           class: "hud-orb",
           type: "button",
           "aria-label": "Talk mode: speak with your main AI",
-          html: ORB_SVG,
           onclick: () => toggleTalk(),
-        }),
+        }, [canvas]),
+        el("div", { class: "hud-core-label" }, [refs.coreName, el("small", { text: "AI CORE" })]),
         refs.status,
       ]),
       refs.log,
@@ -3330,20 +3844,76 @@
           },
         },
         [
-          el("button", {
-            class: "hud-mic",
-            type: "button",
-            "aria-label": "Speak one message",
-            text: "●",
-            onclick: () => hear(),
-          }),
-          input,
-          el("button", { class: "hud-send", type: "submit", text: "SEND" }),
+          el("div", { class: "hud-command-row" }, [
+            el("button", {
+              class: "hud-mic",
+              type: "button",
+              "aria-label": "Speak one message",
+              text: "●",
+              onclick: () => hear(),
+            }),
+            input,
+            el("button", { class: "hud-send", type: "submit", text: "SEND" }),
+          ]),
+          el("div", { class: "hud-foot" }, [
+            refs.talk,
+            voiceButton,
+            el("button", {
+              class: "hud-button",
+              type: "button",
+              text: "NEW TALK",
+              onclick: async () => {
+                try {
+                  await post("/studio/api/main/new");
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+            el("button", { class: "hud-button", type: "button", text: "MENU", onclick: () => go("more") }),
+          ]),
         ]
       ),
-      el("div", { class: "hud-team" }, [
+      el("div", { class: "hud-area-room" }, [
+        el("section", { class: "hud-panel hud-room" }, [
+          el("header", {}, [
+            el("h2", { text: "AGENT CHAT ROOM" }),
+            el("button", {
+              class: "hud-link",
+              type: "button",
+              text: "OPEN ›",
+              onclick: () => (hud.roomId ? go(`room/${hud.roomId}`) : go("chats")),
+            }),
+          ]),
+          el("div", { class: "hud-room-head" }, [refs.roomTitle, refs.roomMeta]),
+          refs.roomLog,
+          el(
+            "form",
+            {
+              class: "hud-remember",
+              onsubmit: async (event) => {
+                event.preventDefault();
+                const text = roomInput.value.trim();
+                if (!text || !hud.roomId) return;
+                try {
+                  await post(`/studio/api/rooms/${hud.roomId}/messages`, { text });
+                  roomInput.value = "";
+                  hud.keys.room = "";
+                  poll();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            },
+            [roomInput, el("button", { class: "hud-button", type: "submit", text: "POST" })]
+          ),
+        ]),
+      ]),
+      el("div", { class: "hud-area-feed" }, [hudPanel("LIVE INTELLIGENCE FEED", refs.activity)]),
+      el("div", { class: "hud-area-team" }, [
         hudPanel(
-          "TEAM",
+          "ACTIVE AGENTS",
           refs.team,
           el("button", {
             class: "hud-add",
@@ -3358,8 +3928,26 @@
           })
         ),
       ]),
-      el("div", { class: "hud-side" }, [
-        hudPanel("ACTIVITY", refs.activity),
+      el("div", { class: "hud-area-timeline" }, [hudPanel("MISSION TIMELINE", refs.timeline)]),
+      el("div", { class: "hud-area-commands" }, [
+        hudPanel(
+          "QUICK COMMANDS",
+          el("div", { class: "hud-quicks" }, [
+            quick("Voice chat", "Talk hands-free", () => toggleTalk()),
+            quick("Executive briefing", "What the team is up to", () => send(BRIEFING_PROMPT)),
+            quick("Build", "Give Builder a job", () => prefill("Have Builder ")),
+            quick("Research", "10+ sources, checked", () => prefill("Have Researcher look into ")),
+            quick("Brainstorm", "Helper turns it into a plan", () => prefill("Ask Helper for ideas on ")),
+            quick("Team room", "All agents together", () =>
+              hud.roomId ? go(`room/${hud.roomId}`) : startRoom()
+            ),
+          ])
+        ),
+      ]),
+      el("div", { class: "hud-area-monitor" }, [hudPanel("SYSTEM MONITOR", refs.monitor)]),
+      el("div", { class: "hud-area-insights" }, [hudPanel("MEMORY INSIGHTS", refs.insights)]),
+      el("div", { class: "hud-area-llm" }, [hudPanel("BRAIN STATUS", refs.llm)]),
+      el("div", { class: "hud-area-memory" }, [
         hudPanel(
           "SHARED MEMORY",
           el("div", {}, [
@@ -3387,33 +3975,10 @@
           ])
         ),
       ]),
-      el("footer", { class: "hud-foot" }, [
-        el("button", {
-          class: "hud-button",
-          type: "button",
-          text: "NEW TALK",
-          onclick: async () => {
-            try {
-              await post("/studio/api/main/new");
-              render();
-            } catch (error) {
-              notify(error.message);
-            }
-          },
-        }),
-        refs.talk,
-        voiceButton,
-        el("button", { class: "hud-button", type: "button", text: "MENU", onclick: () => go("more") }),
-        el("button", {
-          class: "hud-button",
-          type: "button",
-          text: "CLASSIC UI",
-          onclick: () => setUiMode("classic"),
-        }),
-      ]),
     ]);
     refs.root = root;
     view.replaceChildren(root);
+    hud.orb = createCoreOrb(canvas);
     updateHud(refs, data);
     startPolling(poll);
   }
@@ -3516,6 +4081,7 @@
     const generation = renderGeneration;
     stopPolling();
     stopListening();
+    teardownHud();
     const { name, id } = route();
     const hudView = name === "hud" || (name === "home" && uiMode() === "hud");
     if (!hudView) {

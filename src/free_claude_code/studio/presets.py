@@ -12,6 +12,7 @@ RESEARCHER_TOOLS: tuple[str, ...] = (
     "test_code",
     "write_file",
     "read_file",
+    "search_files",
     "list_files",
     "remember",
     "recall",
@@ -28,10 +29,13 @@ RESEARCHER_PROMPT = (
 )
 BUILDER_PROMPT = (
     "Build complete, working websites, apps, and games on your own: plan the "
-    "files, write all the code, run and test it, and fix what fails. When an "
-    "error resists a quick fix, use ask_researcher with the exact error, what "
-    "you tried, and your stack, then apply the fix and test again. Follow the "
-    "skills and tools the user taught you."
+    "files with update_plan, write the code, and change existing files with "
+    "edit_file after reading them; find things with search_files and "
+    "list_files. Run and test your work with run_command and test_code, and "
+    "fix what fails. When an error resists a quick fix, use ask_researcher "
+    "with the exact error, what you tried, and your stack (the Helper turns "
+    "the findings into a plan), or ask_helper to think a problem through. "
+    "Follow the skills and tools the user taught you."
 )
 DESIGNER_PROMPT = (
     "Design and build polished, accessible interfaces: layout, typography, "
@@ -44,28 +48,70 @@ TESTER_PROMPT = (
     "edge cases, and report each bug with the steps to reproduce it and a "
     "suggested fix. Ask the Researcher when an error is unfamiliar."
 )
+HELPER_TOOLS: tuple[str, ...] = (
+    "recall",
+    "remember",
+    "read_file",
+    "list_files",
+    "search_files",
+    "web_search",
+    "web_fetch",
+    "update_plan",
+    "finish",
+)
+HELPER_PROMPT = (
+    "You support the other agents. When an agent brings you a goal and "
+    "material, such as the Researcher's findings, an error log, or notes: "
+    "1) keep only what is relevant, reliable, and doable with this team's "
+    "tools and the user's setup, and drop the rest; 2) brainstorm two or three "
+    "ways to reach the goal; 3) pick the best one and say why in one line; "
+    "4) give numbered, concrete next steps the agent can take now, with "
+    "commands or code patterns when they help; 5) name anything to test or "
+    "verify first. Be brief and practical, fit the plan to the size of the "
+    "task, and save patterns that will help again with remember."
+)
 ASSISTANT_PROMPT = (
     "Help the user with questions and everyday tasks, looking things up when needed."
 )
 
 TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Internet", ("web_search", "web_fetch", "research")),
-    ("Build files", ("write_file", "read_file", "list_files", "delete_file")),
+    (
+        "Code and files",
+        (
+            "read_file",
+            "write_file",
+            "edit_file",
+            "search_files",
+            "list_files",
+            "delete_file",
+            "update_plan",
+        ),
+    ),
     ("Run and test code", ("run_command", "test_code")),
-    ("Ask the Researcher", ("ask_researcher",)),
+    ("Ask teammates", ("ask_researcher", "ask_helper")),
     ("Memory", ("remember", "recall")),
 )
-_BUILD = ("write_file", "read_file", "list_files", "delete_file")
+_BUILD = (
+    "write_file",
+    "read_file",
+    "edit_file",
+    "search_files",
+    "list_files",
+    "delete_file",
+    "update_plan",
+)
 _WEB = ("web_search", "web_fetch", "research")
 _MEMORY = ("remember", "recall")
 PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("Builder", "builder", BUILDER_PROMPT, DEFAULT_TOOL_NAMES),
     ("Researcher", "researcher", RESEARCHER_PROMPT, RESEARCHER_TOOLS),
+    ("Helper", "helper", HELPER_PROMPT, HELPER_TOOLS),
     (
         "Designer",
         "builder",
         DESIGNER_PROMPT,
-        (*_BUILD, *_WEB, "test_code", "ask_researcher", *_MEMORY),
+        (*_BUILD, *_WEB, "test_code", "ask_researcher", "ask_helper", *_MEMORY),
     ),
     (
         "Tester",
@@ -74,10 +120,12 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
         (
             "read_file",
             "list_files",
+            "search_files",
             "run_command",
             "test_code",
             *_WEB,
             "ask_researcher",
+            "ask_helper",
             *_MEMORY,
         ),
     ),
@@ -87,6 +135,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
 ROLE_NOTES = {
     "builder": "Builds websites, apps, and games, and asks the Researcher when stuck.",
     "researcher": "Researches with ten or more sources and answers the others.",
+    "helper": "Filters findings, brainstorms, and turns them into next steps for the others.",
     "agent": "A general worker with the tools you give it.",
     "assistant": "Answers questions and helps with everyday tasks.",
     "teacher": "Teaches classes to another agent.",

@@ -3,10 +3,11 @@
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import anyio.to_thread
 import httpx
 from loguru import logger
 
@@ -18,6 +19,7 @@ from free_claude_code.application.web_tools.ports import (
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject
 
+from . import system_monitor
 from .agents import AgentRunner, TurnResult
 from .commands import CommandBroker, CommandError
 from .crew import Crew
@@ -43,6 +45,7 @@ from .models import (
     Course,
     ExamQuestion,
     Lesson,
+    LoraJob,
     MemoryEntry,
     Message,
     ModelAsset,
@@ -56,6 +59,8 @@ from .obsidian import ObsidianVault, VaultStatus
 from .platforms import PlatformError, PlatformReader, platform_of
 from .presets import (
     BUILDER_PROMPT,
+    HELPER_PROMPT,
+    HELPER_TOOLS,
     RESEARCHER_PROMPT,
     RESEARCHER_TOOLS,
     agent_options,
@@ -80,11 +85,25 @@ BUILDER_AGENT_NAME = "Builder"
 TEACHER_AGENT_NAME = "Teacher"
 STUDENT_AGENT_NAME = "Student"
 RESEARCHER_AGENT_NAME = "Researcher"
+HELPER_AGENT_NAME = "Helper"
 _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
-    BUILDER_AGENT_NAME: ("research", "test_code", "ask_researcher"),
+    BUILDER_AGENT_NAME: (
+        "research",
+        "test_code",
+        "ask_researcher",
+        "edit_file",
+        "search_files",
+        "update_plan",
+        "ask_helper",
+    ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
+    HELPER_AGENT_NAME: HELPER_TOOLS,
 }
-_DEFAULT_ROLES = {BUILDER_AGENT_NAME: "builder", RESEARCHER_AGENT_NAME: "researcher"}
+_DEFAULT_ROLES = {
+    BUILDER_AGENT_NAME: "builder",
+    RESEARCHER_AGENT_NAME: "researcher",
+    HELPER_AGENT_NAME: "helper",
+}
 SHARED_MEMORY_NAME = "Team memory"
 MAIN_CONSOLE_SETTING = "console"
 MAIN_PROMPT_NOTE = (
@@ -380,7 +399,11 @@ class StudioService:
             commands=self._commands,
             command_policy=settings.studio_agent_commands,
             command_timeout=float(settings.studio_command_timeout),
-            delegate=Crew(store=self._store, host=self),
+            delegate=Crew(
+                store=self._store,
+                host=self,
+                helper_pipeline=settings.studio_helper_pipeline,
+            ),
             searcher=self._search(),
             web_access=settings.studio_web_access,
             reader=self._reader(),
@@ -494,6 +517,13 @@ class StudioService:
                 self.default_model,
                 RESEARCHER_PROMPT,
                 RESEARCHER_TOOLS,
+            ),
+            (
+                HELPER_AGENT_NAME,
+                "helper",
+                self.default_model,
+                HELPER_PROMPT,
+                HELPER_TOOLS,
             ),
             (
                 TEACHER_AGENT_NAME,
@@ -862,7 +892,15 @@ class StudioService:
                 agent.id
                 for agent in await self.agents()
                 if agent.role
-                in {"agent", "builder", "researcher", "teacher", "student", "assistant"}
+                in {
+                    "agent",
+                    "builder",
+                    "researcher",
+                    "helper",
+                    "teacher",
+                    "student",
+                    "assistant",
+                }
             ]
         if site_id:
             await self._store.require(SiteProject, site_id)
@@ -1295,6 +1333,119 @@ class StudioService:
                 "web": self.web_status(),
                 "voice": self.voice_status(),
             },
+            "monitor": await anyio.to_thread.run_sync(
+                lambda: system_monitor.sample(self._models_dir)
+            ),
+            "room": await self._room_snapshot(),
+            "timeline": await self._timeline(
+                runs, {str(member["id"]): str(member["name"]) for member in team}
+            ),
+            "insights": await self._insights(len(shared)),
+        }
+
+    async def _room_snapshot(self) -> JsonObject | None:
+        """The most recent agent room, for the HUD's team chat panel."""
+        rooms = await self._store.find(
+            Chat, where={"kind": "room"}, order_by="updated_at DESC", limit=1
+        )
+        if not rooms:
+            return None
+        room = rooms[0]
+        members = [
+            agent.name for agent in await self.agents() if agent.id in room.member_ids
+        ]
+        messages = await self._store.transcript(room.id, limit=10)
+        return {
+            "id": room.id,
+            "title": room.title,
+            "members": members,
+            "goal": str(room.settings.get("goal") or ""),
+            "task_status": str(room.settings.get("task_status") or ""),
+            "running": self._room_activity.get(room.id, 0) > 0,
+            "messages": [
+                {
+                    "sequence": message.sequence,
+                    "role": message.role,
+                    "author": message.author,
+                    "text": message.text[:400],
+                }
+                for message in messages
+                if message.role in {"user", "assistant", "event"}
+            ],
+        }
+
+    async def _timeline(
+        self, runs: Sequence[AgentRun], names: Mapping[str, str]
+    ) -> list[JsonObject]:
+        """Recent missions across tasks, rooms, classes, and training."""
+        items: list[JsonObject] = [
+            {
+                "kind": "task",
+                "title": run.goal[:90],
+                "who": names.get(run.agent_id, "Agent"),
+                "status": run.status,
+                "at": run.updated_at,
+                "route": f"task/{run.id}",
+            }
+            for run in runs[:8]
+        ]
+        for room in await self._store.find(
+            Chat, where={"kind": "room"}, order_by="updated_at DESC", limit=4
+        ):
+            goal = str(room.settings.get("goal") or "")
+            if goal:
+                items.append(
+                    {
+                        "kind": "room",
+                        "title": goal[:90],
+                        "who": room.title,
+                        "status": str(room.settings.get("task_status") or "talking"),
+                        "at": room.updated_at,
+                        "route": f"room/{room.id}",
+                    }
+                )
+        items.extend(
+            {
+                "kind": "class",
+                "title": course.topic[:90],
+                "who": "Classroom",
+                "status": course.status,
+                "at": course.updated_at,
+                "route": f"class/{course.id}",
+            }
+            for course in await self._store.find(
+                Course, order_by="updated_at DESC", limit=3
+            )
+        )
+        items.extend(
+            {
+                "kind": "training",
+                "title": f"LoRA: {job.base_model}"[:90],
+                "who": "Training",
+                "status": job.status,
+                "at": job.updated_at,
+                "route": f"lora/{job.id}",
+            }
+            for job in await self._store.find(
+                LoraJob, order_by="updated_at DESC", limit=3
+            )
+        )
+        items.sort(key=lambda item: int(str(item["at"])), reverse=True)
+        return items[:8]
+
+    async def _insights(self, shared: int) -> JsonObject:
+        """Counts for the HUD's memory panel."""
+        entries = await self._store.find(MemoryEntry)
+        agents_with_memory = {
+            entry.agent_id for entry in entries if entry.agent_id != SHARED_MEMORY_ID
+        }
+        return {
+            "memories": len(entries),
+            "shared": shared,
+            "skills": sum(1 for entry in entries if SKILL_TAG in entry.tags),
+            "agents": len(agents_with_memory),
+            "conversations": len(await self._store.find(Chat)),
+            "projects": len(await self._store.find(SiteProject)),
         }
 
     async def _local_status(self) -> JsonObject:

@@ -9,13 +9,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from free_claude_code.core.json_types import JsonObject
 
 type AgentRole = Literal[
-    "assistant", "agent", "builder", "researcher", "teacher", "student", "guide", "main"
+    "assistant",
+    "agent",
+    "builder",
+    "researcher",
+    "helper",
+    "teacher",
+    "student",
+    "guide",
+    "main",
 ]
 AGENT_ROLES: tuple[str, ...] = (
     "assistant",
     "agent",
     "builder",
     "researcher",
+    "helper",
     "teacher",
     "student",
     "guide",

@@ -398,9 +398,30 @@ the `.cmd` file above already bypasses that for this one script.
 <summary><strong>The HUD and your main AI</strong></summary>
 
 Studio has two looks. **Classic** is the tabbed app. **HUD** turns Home into a
-full-screen console for your main AI (named **Jarvis** by default,
+command center for your main AI (named **Jarvis** by default,
 `STUDIO_MAIN_AGENT_NAME`). Switch under **More → Appearance**; each device
 remembers its choice, and `STUDIO_UI_THEME=hud` makes the HUD the default.
+
+In the middle of the HUD is his core: a gold sphere of glowing particles and
+filaments that floats, turns, and reacts. It swirls while he works, swells
+with your voice while he listens, pulses as he speaks, and dims if the link to
+the server drops. Tap it to start a spoken conversation. Around it:
+
+- **Agent chat room** (top right): the latest team room. Start one with
+  **START TEAM ROOM**, then talk to all the agents at once.
+- **AI core overview** and **brain status**: which model he runs on, whether
+  your local models are reachable, web search, voice, and ears.
+- **Active agents** (tap **+** to add one), **mission timeline** (tasks, rooms,
+  classes, and training), and the **live intelligence feed** (running jobs and
+  commands waiting for **Run it**).
+- **Quick commands**: voice chat, an executive briefing, and shortcuts to give
+  Builder, Researcher, or Helper a job.
+- **System monitor** (CPU, RAM, and disk of the PC running Studio) and
+  **memory insights**.
+- The sidebar goes to the rest of Studio; **CLASSIC UI** switches back.
+
+On an iPhone the same panels stack into one column, with the talk bar pinned
+to the bottom of the screen.
 
 You talk to the main AI in the HUD by typing or with the mic button (when the
 browser supports speech recognition), and it can read its replies aloud
@@ -472,8 +493,9 @@ that looks like a credential removed, a time limit (`STUDIO_COMMAND_TIMEOUT`),
 and the whole process tree stopped when it expires. It is off by default.
 Rooms can be given a project too, so a team of agents builds in one folder.
 
-The first run creates the main AI (**Jarvis**) and five starter agents:
-**Guide**, **Builder**, **Researcher**, **Teacher**, and **Student**.
+The first run creates the main AI (**Jarvis**) and six starter agents:
+**Guide**, **Builder**, **Researcher**, **Helper**, **Teacher**, and
+**Student**.
 
 </details>
 
@@ -538,10 +560,25 @@ reports PASSED or FAILED. Findings go into team memory tagged `verified` or
 `unverified`. Running code follows `STUDIO_AGENT_COMMANDS`: with `ask`, each
 run waits for your **Run it**.
 
-The **Builder** builds websites, apps, and games on its own. When it hits an
-error it can't fix quickly, it calls `ask_researcher` with the exact error. The
-Researcher looks it up, tests the fix, and answers, and the Builder applies the
-fix and tests again. Both conversations are visible as linked chats.
+The **Builder** builds websites, apps, and games on its own, with coding tools
+like a coding assistant's: `read_file` with line numbers and ranges,
+`edit_file` to change exact text without rewriting the file, `search_files` to
+find text across the project (regular expressions, file patterns), `list_files`
+with patterns such as `src/**/*.js`, `run_command` and `test_code` to run and
+test, and `update_plan` to keep a checklist of its steps. The tools are the
+same whether the Builder runs on a local model or a server one; only the
+internet tools need a connection. When it hits an error it can't fix quickly,
+it calls `ask_researcher` with the exact error. The Researcher looks it up,
+tests the fix, and answers, and the Builder applies the fix and tests again.
+Both conversations are visible as linked chats.
+
+The **Helper** supports the other agents. When the Researcher finishes, the
+Helper reads what it found alongside what the asking agent is working on, drops
+what doesn't matter, and turns the rest into a short plan: the best idea to try
+first, a backup, and what to test. The asking agent gets both the findings and
+the plan (`STUDIO_HELPER_PIPELINE` turns this off). Any agent can also call
+`ask_helper` directly to brainstorm or get unstuck, and the main AI can send
+the Helper work like any other agent.
 
 The main AI can hand work off with `background: true`, so the Builder keeps
 working while you talk. When it finishes, the main AI's conversation gets a
@@ -552,10 +589,10 @@ note saying how it went.
 <details>
 <summary><strong>Adding agents and teaching them skills</strong></summary>
 
-Tap **+** on the Agents tab, or in the HUD's Team panel, to add an agent. Start
-from a preset (Builder, Researcher, Designer, Tester, Assistant, or Custom),
-then set its name, role, and model, and choose its tools: Internet, Build
-files, Run and test code, Ask the Researcher, and Memory.
+Tap **+** on the Agents tab, or in the HUD's Active agents panel, to add an
+agent. Start from a preset (Builder, Researcher, Helper, Designer, Tester,
+Assistant, or Custom), then set its name, role, and model, and choose its
+tools: Internet, Code and files, Run and test code, Ask teammates, and Memory.
 
 Each agent's page has **Teach a skill**. Paste a link (a docs page, a Reddit
 thread, or a YouTube video) or write notes about a tool, command, or code

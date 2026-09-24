@@ -396,11 +396,16 @@ async def test_the_builder_asks_the_researcher_when_it_is_stuck(make_studio):
             if prompt.startswith("Builder asks:"):
                 return LLMReply(text="Add `display: grid` to the parent [1].")
             return LLMReply(text="?")
+        if "You support the other agents" in system:
+            assert prompt.startswith("Builder needs help: Why do my cards not line up?")
+            assert "What Builder is working on: fix the layout" in prompt
+            assert "Add `display: grid` to the parent [1]." in prompt
+            return LLMReply(text="1. Put display: grid on .cards. 2. Reload and check.")
         if prompt == "fix the layout":
             return tool_reply(
                 "ask_researcher", {"question": "Why do my cards not line up?"}
             )
-        return LLMReply(text="Fixed it with the researcher's tip.")
+        return LLMReply(text="Fixed it with the team's plan.")
 
     studio, model = make_studio(respond)
     await studio.ensure_defaults()
@@ -410,19 +415,45 @@ async def test_the_builder_asks_the_researcher_when_it_is_stuck(make_studio):
 
     result = await studio.send(chat.id, "fix the layout")
 
-    assert result.text == "Fixed it with the researcher's tip."
+    assert result.text == "Fixed it with the team's plan."
     tool = next(m for m in await studio.transcript(chat.id) if m.role == "tool")
-    assert tool.text == "Researcher answered: Add `display: grid` to the parent [1]."
+    assert tool.text == (
+        "Researcher found: Add `display: grid` to the parent [1].\n\n"
+        "Helper's plan: 1. Put display: grid on .cards. 2. Reload and check."
+    )
     run = await studio.store.require(AgentRun, str(tool.data["run_id"]))
     lab = await studio.site(str(run.site_id))
     assert lab.name == "Research lab"
     sub = await studio.store.require(Chat, run.chat_id)
     assert sub.parent_chat_id == chat.id
+    helped = await studio.store.require(AgentRun, str(tool.data["helper_run_id"]))
+    assert helped.status == "succeeded"
     builder_call = next(
         call for call in model.calls if call["prompt"] == "fix the layout"
     )
-    assert "ask_researcher" in builder_call["tools"]
-    assert "research" in builder_call["tools"]
+    for tool_name in ("ask_researcher", "research", "edit_file", "ask_helper"):
+        assert tool_name in builder_call["tools"]
+
+
+@pytest.mark.asyncio
+async def test_research_comes_back_raw_when_the_helper_pipeline_is_off(make_studio):
+    def respond(system: str, prompt: str):
+        if "Research questions for the user and the team" in system:
+            return LLMReply(text="Use flexbox [2].")
+        if prompt == "fix it":
+            return tool_reply("ask_researcher", {"question": "how?"})
+        return LLMReply(text="done")
+
+    studio, _ = make_studio(respond, STUDIO_HELPER_PIPELINE=False)
+    await studio.ensure_defaults()
+    builder = await studio.agent_by_name("Builder")
+    assert builder is not None
+    chat = await studio.create_chat(agent_id=builder.id)
+
+    await studio.send(chat.id, "fix it")
+
+    tool = next(m for m in await studio.transcript(chat.id) if m.role == "tool")
+    assert tool.text == "Researcher answered: Use flexbox [2]."
 
 
 @pytest.mark.asyncio
@@ -516,7 +547,8 @@ async def test_new_agents_get_a_role_and_tools(make_studio):
     } <= set(presets)
     assert "research" in presets["Researcher"]["tools"]
     groups = {group["label"] for group in options["tool_groups"]}
-    assert "Internet" in groups and "Ask the Researcher" in groups
+    assert "Internet" in groups and "Ask teammates" in groups
+    assert "Helper" in presets and "search_files" in presets["Helper"]["tools"]
 
 
 @pytest.mark.asyncio

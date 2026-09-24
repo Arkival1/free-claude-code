@@ -42,10 +42,15 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "mic",
             "jarvis",
             "hear",
+            "hud",
+            "dashboard",
         ),
         body=(
             "The main AI speaks with a built-in neural voice and understands you "
             "with Whisper, both on this PC and offline after a one-time download. "
+            "The HUD is his command center: the gold core in the middle reacts "
+            "as he works, listens, and speaks, the agent chat room is top right, "
+            "and quick commands give the team jobs. "
             "In the HUD, tap the orb or TALK: you speak, he answers aloud, then "
             "listens again. More, Main AI voice has Hear him. The microphone works "
             "on this PC at localhost; on a phone, open Studio over HTTPS with "
@@ -90,13 +95,18 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "builder",
             "stuck",
             "error",
+            "helper",
+            "ideas",
+            "brainstorm",
         ),
         body=(
             "The research tool reads ten or more sources per question: the web, "
             "Reddit threads, YouTube transcripts, Stack Overflow, GitHub, MDN, and "
             "dev.to. The Researcher tests code it finds with test_code in its "
             "Research lab before recommending it. The Builder calls ask_researcher "
-            "when it is stuck on an error. Teach any agent a skill from its page: "
+            "when it is stuck on an error; the Helper then filters what was found "
+            "into a plan that fits the Builder's work. Any agent can ask_helper to "
+            "brainstorm. Teach any agent a skill from its page: "
             "paste a link or notes and it keeps a short how-to it follows. Add "
             "agents with the + button and pick a role and tools."
         ),
