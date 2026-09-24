@@ -904,6 +904,104 @@
     );
   }
 
+  // Pick the model the main AI (or every agent) thinks with, from the models
+  // on this PC, or from a .gguf file chosen in a normal file window.
+  function openBrainPicker(mainName, onDone) {
+    const who = mainName || "the main AI";
+    const everyone = el("input", { type: "checkbox", checked: true });
+    const status = el("p", { class: "muted", role: "status" });
+    const list = el("div", { class: "stack" });
+    const use = async (model) => {
+      const name = model.replace(/^local\//, "");
+      status.textContent = `Switching to ${name}…`;
+      try {
+        await post("/studio/api/models/use", { model, everyone: everyone.checked });
+      } catch (error) {
+        status.textContent = error.message;
+        return;
+      }
+      closeSheet();
+      notify(everyone.checked ? `Every agent now thinks with ${name}.` : `${who} now thinks with ${name}.`);
+      if (onDone) onDone();
+    };
+    const load = async () => {
+      list.replaceChildren(el("p", { class: "muted", text: "Looking for models on this PC…" }));
+      let local;
+      try {
+        local = (await api("/studio/api/models/available")).local;
+      } catch (error) {
+        list.replaceChildren(el("p", { class: "muted", text: error.message }));
+        return;
+      }
+      const models = local.models.filter((model) => !/embed/i.test(model));
+      if (!local.reachable) {
+        list.replaceChildren(
+          el("p", {
+            class: "muted",
+            text: "LM Studio isn't answering. In LM Studio open Developer and set Status to Running, then press Refresh.",
+          })
+        );
+      } else if (!models.length) {
+        list.replaceChildren(
+          el("p", { class: "muted", text: "No models in LM Studio yet. Use “Find a model file on this PC” below." })
+        );
+      } else {
+        list.replaceChildren(
+          ...models.map((model) =>
+            el("div", { class: "list-item" }, [
+              el("span", { class: "grow" }, [el("strong", { text: model.replace(/^local\//, "") })]),
+              el("button", {
+                class: "primary",
+                type: "button",
+                text: "Use",
+                "aria-label": `Use ${model.replace(/^local\//, "")}`,
+                onclick: () => use(model),
+              }),
+            ])
+          )
+        );
+      }
+    };
+    const find = el("button", {
+      class: "secondary",
+      type: "button",
+      text: "Find a model file on this PC…",
+      onclick: async () => {
+        find.disabled = true;
+        status.textContent = "A file window opened on the PC running Studio. Choose a .gguf model file.";
+        try {
+          const body = await post("/studio/api/models/pick-file");
+          if (!body.picked) status.textContent = "No file chosen.";
+          else if (body.model) {
+            status.textContent = `Added ${body.path}`;
+            await use(body.model);
+          } else {
+            status.textContent = body.note;
+            await load();
+          }
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          find.disabled = false;
+        }
+      },
+    });
+    openSheet(`Choose ${who}'s brain`, [
+      el("p", {
+        class: "muted",
+        text: "Pick a model on this PC. It runs in LM Studio, so nothing leaves your computer.",
+      }),
+      list,
+      el("label", { class: "check" }, [everyone, "Use it for every agent too"]),
+      el("div", { class: "row" }, [
+        find,
+        el("button", { class: "secondary", type: "button", text: "Refresh", onclick: () => load() }),
+      ]),
+      status,
+    ]);
+    load();
+  }
+
   async function openAddAgent(onCreated) {
     let options;
     try {
@@ -1492,6 +1590,12 @@
         text: local.reachable
           ? `${local.base_url} is serving ${local.models.length} model(s). Use these as an agent's model to run it locally.`
           : `Nothing answered at ${local.base_url}. Start LM Studio, llama-server, or Ollama, or change Local Model Server in settings.`,
+      }),
+      el("button", {
+        class: "primary",
+        type: "button",
+        text: "Choose a model from this PC",
+        onclick: () => openBrainPicker("", () => render()),
       }),
       ...local.models.map((model) =>
         el("div", { class: "list-item" }, [
@@ -3778,6 +3882,11 @@
     };
     refs.startRoom = startRoom;
 
+    const rethink = () => {
+      hud.keys = {};
+      poll();
+    };
+
     const prefill = (text) => {
       input.value = text;
       input.focus();
@@ -3836,7 +3945,18 @@
         el("div", { class: "hud-time" }, [refs.date, refs.clock]),
         refs.pills,
       ]),
-      el("div", { class: "hud-area-overview" }, [hudPanel("AI CORE OVERVIEW", refs.overview)]),
+      el("div", { class: "hud-area-overview" }, [
+        hudPanel(
+          "AI CORE OVERVIEW",
+          refs.overview,
+          el("button", {
+            class: "hud-link",
+            type: "button",
+            text: "CHOOSE BRAIN",
+            onclick: () => openBrainPicker(hud.name, rethink),
+          })
+        ),
+      ]),
       el("section", { class: "hud-core" }, [
         el("button", {
           class: "hud-orb",
@@ -3955,6 +4075,7 @@
             quick("Team room", "All agents together", () =>
               hud.roomId ? go(`room/${hud.roomId}`) : startRoom()
             ),
+            quick("Choose brain", "A model on this PC", () => openBrainPicker(hud.name, rethink)),
           ])
         ),
       ]),

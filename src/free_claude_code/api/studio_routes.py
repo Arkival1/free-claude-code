@@ -108,6 +108,11 @@ class DownloadPayload(BaseModel):
     sha256: str = ""
 
 
+class UseModelPayload(BaseModel):
+    model: str = Field(min_length=1, max_length=300)
+    everyone: bool = False
+
+
 class PackPayload(BaseModel):
     agent_id: str
     name: str = ""
@@ -958,6 +963,35 @@ async def available_models(
         "server": server,
         "local": await studio.local_models(),
     }
+
+
+@router.post("/studio/api/models/pick-file")
+async def pick_model_file(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Open a file picker on this PC and add the chosen model to LM Studio."""
+    return await studio.pick_model_file()
+
+
+@router.post("/studio/api/models/use")
+async def use_model(
+    payload: UseModelPayload,
+    services: ApiServices = Depends(get_services),
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Make one model the main AI's brain, or every agent's."""
+    model = payload.model.strip()
+    updates: dict[str, str | None] = {"STUDIO_MAIN_AGENT_MODEL": model}
+    if payload.everyone:
+        updates |= {"STUDIO_DEFAULT_MODEL": model, "STUDIO_GUIDE_MODEL": model}
+    result = await services.admin.apply_admin_config(updates)
+    if not result.get("applied"):
+        errors = result.get("errors")
+        detail = "; ".join(str(e) for e in errors) if isinstance(errors, list) else ""
+        raise HTTPException(status_code=400, detail=detail or "Could not save that.")
+    changed = await studio.choose_model(model, everyone=payload.everyone)
+    return {"model": model, "everyone": payload.everyone, "agents_changed": changed}
 
 
 @router.post("/studio/api/models/download")

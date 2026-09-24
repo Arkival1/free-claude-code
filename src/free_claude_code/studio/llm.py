@@ -2,7 +2,7 @@
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
@@ -269,6 +269,36 @@ class LocalOpenAILLM:
             if isinstance(row, dict) and isinstance(row.get("id"), str)
         )
 
+    async def loaded_models(self) -> tuple[str, ...] | None:
+        """Chat models loaded in memory right now, when the runtime says so.
+
+        LM Studio lists every downloaded model on /v1/models but marks the
+        loaded ones on its /api/v0/models; other runtimes return None here.
+        """
+        root = self._base_url.removesuffix("/v1")
+        headers = {}
+        if self._api_key:
+            headers["authorization"] = f"Bearer {self._api_key}"
+        try:
+            async with httpx.AsyncClient(
+                timeout=5.0, transport=self._transport
+            ) as client:
+                response = await client.get(f"{root}/api/v0/models", headers=headers)
+            body = response.json() if response.status_code < 400 else None
+        except httpx.HTTPError, ValueError:
+            return None
+        rows = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(rows, list):
+            return None
+        return tuple(
+            str(row["id"])
+            for row in rows
+            if isinstance(row, dict)
+            and isinstance(row.get("id"), str)
+            and row.get("state") == "loaded"
+            and row.get("type") != "embeddings"
+        )
+
     async def complete(
         self,
         messages: Sequence[ChatMessage],
@@ -335,6 +365,18 @@ class StudioModelRouter:
     def __init__(self, *, proxy: LLMClient, local: LLMClient) -> None:
         self._proxy = proxy
         self._local = local
+        self._stand_in: Callable[[str], Awaitable[str | None]] | None = None
+
+    def use_stand_in(self, pick: Callable[[str], Awaitable[str | None]]) -> None:
+        """Let a local model answer for a server model that cannot be reached."""
+        self._stand_in = pick
+
+    async def loaded_local_models(self) -> tuple[str, ...] | None:
+        """Return the local models loaded in memory, when the runtime knows."""
+        loaded = getattr(self._local, "loaded_models", None)
+        if loaded is None:
+            return None
+        return await loaded()
 
     async def local_models(self) -> tuple[str, ...]:
         """Return the model ids the local runtime serves right now."""
@@ -360,6 +402,8 @@ class StudioModelRouter:
         max_tokens: int = 1024,
     ) -> LLMReply:
         """Complete one call with the transport owning the given model."""
+        if self._stand_in is not None:
+            model = await self._stand_in(model) or model
         client, wire_model = self.client_for(model)
         return await client.complete(
             messages,

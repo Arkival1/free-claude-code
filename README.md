@@ -423,6 +423,19 @@ the server drops. Tap it to start a spoken conversation. Around it:
 On an iPhone the same panels stack into one column, with the talk bar pinned
 to the bottom of the screen.
 
+**Choosing his brain.** Press **CHOOSE BRAIN** (or the **Choose brain** quick
+command, or **Choose a model from this PC** on the Models page). It lists the
+models LM Studio has on this PC; press **Use** on one. **Find a model file on
+this PC…** opens a normal file window on the PC running Studio: pick any
+`.gguf` model and Studio adds it to LM Studio's models folder (a hard link, so
+no second copy on the same drive) and switches to it. Leave **Use it for every
+agent too** ticked to move the whole team, or untick it for the main AI only.
+The choice is saved as the Main AI Model and Studio Default Model settings.
+
+If the Studio default is a server model whose provider has no key, or a local
+model this PC doesn't have, Studio uses the model loaded in LM Studio instead
+of failing, and the HUD shows which one.
+
 You talk to the main AI in the HUD by typing or with the mic button (when the
 browser supports speech recognition), and it can read its replies aloud
 (**VOICE ON/OFF**). It answers simple questions itself and runs the rest of

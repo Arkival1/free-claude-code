@@ -516,3 +516,51 @@ def test_talk_mode_hears_you_and_answers_out_loud(
     expect(page.get_by_role("button", name="TALK", exact=True)).to_have_attribute(
         "aria-pressed", "false"
     )
+
+
+def test_choosing_jarvis_brain_from_this_pc(page: Page, admin_base_url: str) -> None:
+    used: list[dict] = []
+
+    def available(route) -> None:
+        route.fulfill(
+            json={
+                "default_model": "nvidia_nim/x",
+                "server": [],
+                "local": {
+                    "base_url": "http://localhost:1234/v1",
+                    "reachable": True,
+                    "models": ["local/qwen3.5-4b", "local/nomic-embed-text"],
+                    "error": None,
+                },
+            }
+        )
+
+    def use(route) -> None:
+        used.append(route.request.post_data_json)
+        route.fulfill(json={"model": used[-1]["model"], "agents_changed": 1})
+
+    page.route("**/studio/api/models/available", available)
+    page.route("**/studio/api/models/use", use)
+    page.route(
+        "**/studio/api/models/pick-file",
+        lambda route: route.fulfill(
+            json={"picked": True, "path": "C:/m/coder.gguf", "model": "local/coder"}
+        ),
+    )
+    open_studio(page, admin_base_url)
+    page.locator('.tab[data-route="more"]').click()
+    page.get_by_role("button", name="HUD console").click()
+
+    page.get_by_role("button", name="CHOOSE BRAIN", exact=True).click()
+    sheet = page.locator(".sheet-panel")
+    expect(sheet).to_contain_text("Choose Jarvis's brain")
+    expect(sheet.get_by_role("button", name="Use nomic-embed-text")).to_have_count(0)
+    sheet.get_by_label("Use it for every agent too").uncheck()
+    sheet.get_by_role("button", name="Use qwen3.5-4b").click()
+    expect(page.locator(".toast, [role=status]").first).to_be_attached()
+    assert used == [{"model": "local/qwen3.5-4b", "everyone": False}]
+
+    page.get_by_role("button", name="CHOOSE BRAIN", exact=True).click()
+    sheet.get_by_role("button", name="Find a model file on this PC…").click()
+    expect(sheet).to_be_hidden()
+    assert used[-1] == {"model": "local/coder", "everyone": True}

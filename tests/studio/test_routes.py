@@ -390,3 +390,27 @@ async def test_the_hud_talks_to_the_main_ai_in_the_background(make_studio):
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()
+
+
+@pytest.mark.asyncio
+async def test_choosing_a_model_from_this_pc_saves_it(studio_api, monkeypatch):
+    client, studio, _, app = studio_api
+    await studio.ensure_defaults()
+
+    response = await client.post(
+        "/studio/api/models/use", json={"model": "local/qwen-4b", "everyone": True}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["agents_changed"] >= 6
+    values = await app.state.services.admin.admin_values()
+    assert values["STUDIO_MAIN_AGENT_MODEL"].value == "local/qwen-4b"
+    assert values["STUDIO_DEFAULT_MODEL"].value == "local/qwen-4b"
+    assert (await studio.main_agent()).model == "local/qwen-4b"
+
+    async def cancelled():
+        return {"picked": False}
+
+    monkeypatch.setattr(studio, "pick_model_file", cancelled)
+    picked = await client.post("/studio/api/models/pick-file")
+    assert picked.json() == {"picked": False}

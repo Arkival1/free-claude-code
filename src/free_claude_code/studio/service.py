@@ -16,6 +16,8 @@ from free_claude_code.application.web_tools.ports import (
     WebToolsPort,
     web_fetch_allowed_scheme_set,
 )
+from free_claude_code.config.model_refs import parse_provider_type
+from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject
 
@@ -37,6 +39,13 @@ from .llm import (
 from .local_voice import LocalVoice, SetupState, speech_package_ready
 from .lora import LoraTrainer
 from .memory import SHARED_MEMORY_ID, SKILL_TAG, MemoryService
+from .model_files import (
+    ModelFileError,
+    check_model_file,
+    match_listed_model,
+    pick_model_file,
+    place_in_lmstudio,
+)
 from .models import (
     AGENT_ROLES,
     Agent,
@@ -191,6 +200,9 @@ class StudioService:
         self._main_busy = 0
         self._main_error: str | None = None
         self._local_probe: tuple[float, JsonObject] | None = None
+        self._loaded_probe: tuple[float, tuple[str, ...] | None] | None = None
+        self._stand_in_note = ""
+        self._router.use_stand_in(self._stand_in_model)
 
     # ---------------------------------------------------------------- wiring
 
@@ -230,6 +242,56 @@ class StudioService:
     def default_model(self) -> str:
         settings = self.settings
         return settings.studio_default_model or settings.model
+
+    def _server_model_ready(self, model: str) -> bool:
+        """False when the model's provider needs a key or URL that is not set."""
+        descriptor = PROVIDER_CATALOG.get(parse_provider_type(model))
+        if descriptor is None or descriptor.local or descriptor.credential_attr is None:
+            return True
+        settings = self.settings
+        return all(
+            isinstance(getattr(settings, attr, None), str)
+            and bool(getattr(settings, attr))
+            for attr in descriptor.configuration_attrs()
+        )
+
+    async def _stand_in_model(self, model: str) -> str | None:
+        """Use a model on this PC for one that cannot be reached.
+
+        A fresh install defaults to a server model; when its provider has no
+        key, or a local model is named that the runtime does not have, and LM
+        Studio (or another local runtime) is serving a model, the agents use
+        that instead of failing. The model loaded in memory wins.
+        """
+        local = model.startswith(LOCAL_MODEL_PREFIX)
+        if not local and self._server_model_ready(model):
+            return None
+        status = await self._local_status()
+        listed = status.get("models")
+        served = [
+            str(name)
+            for name in (listed if isinstance(listed, list) else [])
+            if "embed" not in str(name).lower()
+        ]
+        if not status.get("reachable") or not served or model in served:
+            return None
+        now = time.monotonic()
+        cached = self._loaded_probe
+        if cached is None or now - cached[0] >= _LOCAL_PROBE_SECONDS:
+            cached = (now, await self._router.loaded_local_models())
+            self._loaded_probe = cached
+        loaded = [f"{LOCAL_MODEL_PREFIX}{name}" for name in cached[1] or ()]
+        pick = next((name for name in loaded if name in served), served[0])
+        why = "is not on this PC" if local else "has no key"
+        note = f"{model} {why}, so Studio is using {pick} instead."
+        if note != self._stand_in_note:
+            self._stand_in_note = note
+            logger.info("Studio: {}", note)
+        return pick
+
+    async def effective_model(self, model: str) -> str:
+        """The model a call to this reference actually reaches."""
+        return await self._stand_in_model(model) or model
 
     def _memory(self) -> MemoryService:
         settings = self.settings
@@ -584,8 +646,29 @@ class StudioService:
         return agent_options()
 
     async def _upgrade_defaults(self, existing: Sequence[Agent]) -> None:
-        """Give starter agents from older versions their newer tools and roles."""
+        """Give starter agents from older versions their newer tools and roles.
+
+        Starter agents made before a Studio Default Model was set were given
+        the server's model; once one is set, they move to it.
+        """
+        settings = self.settings
+        studio_default = settings.studio_default_model
         for agent in existing:
+            if (
+                studio_default
+                and agent.name in _DEFAULT_ROLES
+                and agent.role != "guide"
+                and agent.model == settings.model
+                and agent.model != studio_default
+            ):
+                agent = agent.model_copy(
+                    update={
+                        "model": studio_default,
+                        "local_only": studio_default.startswith(LOCAL_MODEL_PREFIX),
+                        "updated_at": now_ms(),
+                    }
+                )
+                await self._store.put(agent)
             if agent.role == MAIN_ROLE:
                 wanted = MAIN_TOOL_NAMES
                 role = MAIN_ROLE
@@ -1211,7 +1294,7 @@ class StudioService:
         """Return the main AI, creating the starter team on first use."""
         for agent in await self.agents():
             if agent.role == MAIN_ROLE and not agent.archived:
-                return agent
+                return await self._follow_main_setting(agent)
         await self.ensure_defaults()
         for agent in await self.agents():
             if agent.role == MAIN_ROLE:
@@ -1220,6 +1303,21 @@ class StudioService:
                     await self._store.put(agent)
                 return agent
         raise StudioError("The main AI is missing.")
+
+    async def _follow_main_setting(self, agent: Agent) -> Agent:
+        """The admin's Main AI Model setting always decides the main AI's model."""
+        wanted = self.settings.studio_main_agent_model
+        if not wanted or wanted == agent.model:
+            return agent
+        agent = agent.model_copy(
+            update={
+                "model": wanted,
+                "local_only": wanted.startswith(LOCAL_MODEL_PREFIX),
+                "updated_at": now_ms(),
+            }
+        )
+        await self._store.put(agent)
+        return agent
 
     async def main_chat(self, *, fresh: bool = False) -> Chat:
         """Return the main AI's console conversation, opening one if needed."""
@@ -1331,9 +1429,11 @@ class StudioService:
                 "recent": [entry.model_dump() for entry in shared[:8]],
             },
             "systems": {
-                "main_model": agent.model,
+                "main_model": await self.effective_model(
+                    agent.model or self.default_model
+                ),
                 "local": await self._local_status(),
-                "server_model": self.default_model,
+                "server_model": await self.effective_model(self.default_model),
                 "commands": self.settings.studio_agent_commands,
                 "web": self.web_status(),
                 "voice": self.voice_status(),
@@ -1567,6 +1667,73 @@ class StudioService:
             "models": [f"{LOCAL_MODEL_PREFIX}{model}" for model in served],
             "error": None,
         }
+
+    async def pick_model_file(self) -> JsonObject:
+        """Let the user choose a model file on this PC and add it to LM Studio."""
+        try:
+            path = await pick_model_file()
+        except ModelFileError as error:
+            raise StudioError(str(error)) from error
+        if path is None:
+            return {"picked": False}
+        return await self.add_model_file(path)
+
+    async def add_model_file(self, path: Path) -> JsonObject:
+        """Put a .gguf file where LM Studio loads it, and name it for Studio."""
+        models_dir = self._lora.lmstudio_dir()
+        if models_dir is None:
+            raise StudioError(
+                "Could not find LM Studio's models folder. Open LM Studio once, "
+                "or set LM Studio Models Folder in admin settings under Studio."
+            )
+        try:
+            placed = await anyio.to_thread.run_sync(
+                lambda: place_in_lmstudio(check_model_file(path), models_dir)
+            )
+        except (ModelFileError, OSError) as error:
+            raise StudioError(str(error)) from error
+        self._local_probe = None
+        self._loaded_probe = None
+        status = await self._local_status()
+        listed = status.get("models")
+        names = [
+            str(name).removeprefix(LOCAL_MODEL_PREFIX)
+            for name in (listed if isinstance(listed, list) else [])
+        ]
+        found = match_listed_model(placed, names)
+        return {
+            "picked": True,
+            "path": str(placed),
+            "model": f"{LOCAL_MODEL_PREFIX}{found}" if found else None,
+            "note": ""
+            if found
+            else (
+                "Added to LM Studio. If it is not in the list yet, make sure "
+                "LM Studio's server is running, then press Refresh."
+            ),
+        }
+
+    async def choose_model(self, model: str, *, everyone: bool) -> int:
+        """Switch the main AI, or every agent, to one model. Returns how many."""
+        if not model.strip():
+            raise StudioError("Pick a model first.")
+        changed = 0
+        for agent in await self.agents():
+            if agent.archived or agent.model == model:
+                continue
+            if not everyone and agent.role != MAIN_ROLE:
+                continue
+            await self._store.put(
+                agent.model_copy(
+                    update={
+                        "model": model,
+                        "local_only": model.startswith(LOCAL_MODEL_PREFIX),
+                        "updated_at": now_ms(),
+                    }
+                )
+            )
+            changed += 1
+        return changed
 
     async def assets(self) -> tuple[ModelAsset, ...]:
         """Return every tracked model download."""
