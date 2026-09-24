@@ -6,23 +6,46 @@ IPHONE_VIEWPORT = ViewportSize(width=390, height=844)  # iPhone 15/16 CSS pixels
 MIN_TAP_TARGET = 44.0
 
 
-def open_studio(page: Page, admin_base_url: str) -> None:
+def open_studio(page: Page, admin_base_url: str, screen: str = "more") -> None:
+    """Open one of Studio's pages (everything but the command center)."""
     page.set_viewport_size(IPHONE_VIEWPORT)
-    page.goto(f"{admin_base_url}/studio")
+    page.goto(f"{admin_base_url}/studio#{screen}")
     expect(page.locator(".tab-bar")).to_be_visible()
 
 
-def test_studio_loads_on_an_iphone_viewport(page: Page, admin_base_url: str) -> None:
-    open_studio(page, admin_base_url)
+def open_hud(page: Page, admin_base_url: str) -> None:
+    """Open Studio's home: the main AI's command center."""
+    page.set_viewport_size(IPHONE_VIEWPORT)
+    page.goto(f"{admin_base_url}/studio")
+    expect(page.locator(".hud")).to_be_visible()
 
-    expect(page.locator("#view-title")).to_have_text("Studio")
-    expect(page.get_by_role("button", name="Ask the guide")).to_be_visible()
-    expect(page.locator(".card", has_text="Welcome")).to_be_visible()
+
+def test_studio_loads_on_an_iphone_viewport(page: Page, admin_base_url: str) -> None:
+    open_hud(page, admin_base_url)
+
+    expect(page.locator(".hud-name")).to_have_text("JARVIS")
+    expect(page.get_by_role("button", name="ASK THE GUIDE")).to_be_visible()
+    expect(page.locator(".tab-bar")).to_be_hidden()
+    assert page.evaluate("document.body.dataset.ui") == "hud"
 
     overflow = page.evaluate(
         "() => document.documentElement.scrollWidth - window.innerWidth"
     )
     assert overflow <= 0, "the layout scrolls sideways on an iPhone"
+
+    page.get_by_role("button", name="ASK THE GUIDE").click()
+    expect(page.locator(".sheet-panel")).to_be_visible()
+
+
+def test_every_page_wears_the_hud_look(page: Page, admin_base_url: str) -> None:
+    open_studio(page, admin_base_url, "tune")
+
+    assert page.evaluate("document.body.dataset.ui") == "page"
+    background = page.evaluate("getComputedStyle(document.body).backgroundColor")
+    assert background == "rgb(2, 7, 13)", background
+    expect(page.get_by_role("button", name="HUD console")).to_have_count(0)
+    page.locator('.tab[data-route="home"]').click()
+    expect(page.locator(".hud")).to_be_visible()
 
 
 def test_touch_targets_are_thumb_sized(page: Page, admin_base_url: str) -> None:
@@ -68,6 +91,12 @@ def test_tabs_navigate_without_leaving_the_app(page: Page, admin_base_url: str) 
     expect(web).to_contain_text("Every agent can search the web")
     expect(web).to_contain_text("DuckDuckGo, no key needed")
     expect(web.get_by_role("button", name="Test search")).to_be_visible()
+
+    page.get_by_label("Search settings").fill("internet")
+    expect(web).to_be_visible()
+    expect(page.locator(".card", has_text="Install on your iPhone")).to_be_hidden()
+    page.get_by_label("Search settings").fill("")
+    expect(page.locator(".card", has_text="Install on your iPhone")).to_be_visible()
 
 
 def test_an_unreachable_server_shows_a_readable_screen(
@@ -121,23 +150,21 @@ def test_a_slow_screen_never_paints_over_the_next_one(
         route.continue_()
 
     def is_overview(response) -> bool:
-        return response.url.endswith("/studio/api/overview")
+        return response.url.endswith("/studio/api/main")
 
     page.set_viewport_size(IPHONE_VIEWPORT)
-    page.route("**/studio/api/overview", slow_overview)
+    page.route("**/studio/api/main", slow_overview)
     page.goto(f"{admin_base_url}/studio")
-    expect(page.locator(".tab-bar")).to_be_visible()
 
-    page.locator('.tab[data-route="learn"]').click()  # while Home is still loading
+    # Leave while the command center is still loading.
+    page.evaluate("location.hash = 'learn'")
     expect(page.locator(".card", has_text="Open a class")).to_be_visible()
 
-    # Home loads the overview, sets up the starter agents, then loads it again.
-    page.wait_for_event("response", is_overview, timeout=10_000)
     page.wait_for_event("response", is_overview, timeout=10_000)
     page.wait_for_timeout(300)  # time for a stale paint to land, if one could
 
     expect(page.locator(".card", has_text="Open a class")).to_be_visible()
-    expect(page.locator(".card", has_text="Welcome")).to_have_count(0)
+    expect(page.locator(".hud")).to_have_count(0)
 
 
 def test_classes_default_to_a_server_teacher_and_a_local_student(
@@ -260,8 +287,7 @@ def _tiny_adapter_zip() -> bytes:
 def test_the_lora_card_offers_new_weights_for_lm_studio(
     page: Page, admin_base_url: str
 ) -> None:
-    open_studio(page, admin_base_url)
-    page.goto(f"{admin_base_url}/studio#tune")
+    open_studio(page, admin_base_url, "tune")
     card = page.locator(".card", has_text="LoRA: train the weights")
     expect(card).to_be_visible()
     make = card.get_by_label("What to make")
@@ -278,9 +304,7 @@ def test_the_lora_card_offers_new_weights_for_lm_studio(
 def test_the_hud_runs_the_main_ai_and_survives_a_reload(
     page: Page, admin_base_url: str
 ) -> None:
-    open_studio(page, admin_base_url)
-    page.locator('.tab[data-route="more"]').click()
-    page.get_by_role("button", name="HUD console").click()
+    open_hud(page, admin_base_url)
 
     hud = page.locator(".hud")
     expect(hud).to_be_visible()
@@ -319,9 +343,9 @@ def test_the_hud_runs_the_main_ai_and_survives_a_reload(
     expect(page.locator(".hud")).to_be_visible()
     expect(page.locator(".hud-line.you", has_text="status report")).to_be_visible()
 
-    page.get_by_role("button", name="CLASSIC UI").click()
+    page.locator(".hud-nav-item", has_text="Agents").click()
     expect(page.locator(".tab-bar")).to_be_visible()
-    expect(page.locator(".card", has_text="Welcome")).to_be_visible()
+    expect(page.locator(".hud")).to_have_count(0)
 
 
 def test_the_plus_button_adds_an_agent_with_a_role(
@@ -358,9 +382,7 @@ def test_the_plus_button_adds_an_agent_with_a_role(
 
 
 def test_the_hud_has_a_plus_button_too(page: Page, admin_base_url: str) -> None:
-    open_studio(page, admin_base_url)
-    page.locator('.tab[data-route="more"]').click()
-    page.get_by_role("button", name="HUD console").click()
+    open_hud(page, admin_base_url)
     expect(page.locator(".hud")).to_be_visible()
 
     page.locator(".hud-add").click()
@@ -374,9 +396,7 @@ def test_the_hud_has_a_plus_button_too(page: Page, admin_base_url: str) -> None:
 
 
 def test_the_hud_is_a_command_center_on_a_pc(page: Page, admin_base_url: str) -> None:
-    open_studio(page, admin_base_url)
-    page.locator('.tab[data-route="more"]').click()
-    page.get_by_role("button", name="HUD console").click()
+    open_hud(page, admin_base_url)
     page.set_viewport_size({"width": 1440, "height": 900})
 
     expect(page.locator(".hud-orb canvas")).to_be_visible()
@@ -491,9 +511,7 @@ def test_talk_mode_hears_you_and_answers_out_loud(
     page.route("**/studio/api/voice/speak", speak)
     page.route("**/studio/api/voice/transcribe", transcribe)
 
-    open_studio(page, admin_base_url)
-    page.locator('.tab[data-route="more"]').click()
-    page.get_by_role("button", name="HUD console").click()
+    open_hud(page, admin_base_url)
     expect(page.locator(".hud-pill", has_text="VOICE OFFLINE")).to_be_visible()
 
     page.get_by_role("button", name="TALK", exact=True).click()
@@ -547,9 +565,7 @@ def test_choosing_jarvis_brain_from_this_pc(page: Page, admin_base_url: str) -> 
             json={"picked": True, "path": "C:/m/coder.gguf", "model": "local/coder"}
         ),
     )
-    open_studio(page, admin_base_url)
-    page.locator('.tab[data-route="more"]').click()
-    page.get_by_role("button", name="HUD console").click()
+    open_hud(page, admin_base_url)
 
     page.get_by_role("button", name="CHOOSE BRAIN", exact=True).click()
     sheet = page.locator(".sheet-panel")
@@ -564,3 +580,38 @@ def test_choosing_jarvis_brain_from_this_pc(page: Page, admin_base_url: str) -> 
     sheet.get_by_role("button", name="Find a model file on this PC…").click()
     expect(sheet).to_be_hidden()
     assert used[-1] == {"model": "local/coder", "everyone": True}
+
+
+def test_watching_an_agent_work_from_the_hud(page: Page, admin_base_url: str) -> None:
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{admin_base_url}/studio")
+    expect(page.locator(".hud")).to_be_visible()
+    agents = page.request.get(f"{admin_base_url}/studio/api/agents").json()["agents"]
+    builder = next(agent for agent in agents if agent["name"] == "Builder")
+    chat = page.request.post(
+        f"{admin_base_url}/studio/api/chats", data={"agent_id": builder["id"]}
+    ).json()
+    page.request.post(
+        f"{admin_base_url}/studio/api/chats/{chat['id']}/messages",
+        data={"text": "make a landing page"},
+    )
+
+    panel = page.locator(".hud-area-team")
+    expect(panel).to_contain_text("AGENTS AT WORK")
+    expect(panel.locator(".hud-process")).to_contain_text("Pick an agent")
+    panel.locator(".hud-agent", has_text="Builder").click()
+
+    expect(panel.locator(".hud-agent.watched")).to_contain_text("Builder")
+    process = panel.locator(".hud-process")
+    expect(process.locator(".hud-process-title")).to_contain_text("Builder")
+    expect(process.locator(".hud-process-head")).not_to_contain_text("null")
+    expect(process.locator(".hud-step.task")).to_contain_text("make a landing page")
+    expect(process.locator(".hud-step.done")).to_contain_text("is on it")
+
+    box = panel.bounding_box()
+    core = page.locator(".hud-core").bounding_box()
+    assert box and core and box["x"] < core["x"], "the panel sits on the left"
+    assert box["y"] > core["y"], "below the core"
+
+    process.get_by_role("button", name="OPEN").click()
+    expect(page.locator(".bubble.user", has_text="make a landing page")).to_be_visible()

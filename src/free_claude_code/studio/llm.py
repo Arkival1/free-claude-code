@@ -89,6 +89,20 @@ class LLMClient(Protocol):
     ) -> LLMReply: ...
 
 
+NO_THINK_SWITCH = "/no_think"
+_THINKING = re.compile(r"<think>.*?(?:</think>|$)", re.DOTALL | re.IGNORECASE)
+
+
+def strip_thinking(text: str) -> str:
+    """Drop a reasoning model's <think> section, keeping only its answer."""
+    lowered = text.lower()
+    if "<think>" not in lowered:
+        # Some templates open the section in the prompt; keep what follows it.
+        end = lowered.rfind("</think>")
+        return text[end + len("</think>") :].strip() if end >= 0 else text.strip()
+    return _THINKING.sub("", text).strip()
+
+
 def tool_protocol_instructions(tools: Sequence[ToolSpec]) -> str:
     """Describe the text tool protocol used by models without tool support."""
     if not tools:
@@ -231,12 +245,14 @@ class LocalOpenAILLM:
         default_model: str = "",
         timeout: float = 300.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        fast: Callable[[], bool] = lambda: True,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._default_model = default_model
         self._timeout = timeout
         self._transport = transport
+        self._fast = fast
 
     async def list_models(self) -> tuple[str, ...]:
         """Ask the local runtime which models it is serving."""
@@ -309,8 +325,18 @@ class LocalOpenAILLM:
         max_tokens: int = 1024,
         model: str | None = None,
     ) -> LLMReply:
+        fast = self._fast()
+        # Tool instructions never change between turns and the system prompt
+        # ends with this turn's memory, so this order keeps the longest part
+        # identical and the runtime reuses its cached reading of it.
         prelude = "\n\n".join(
-            part for part in (system, tool_protocol_instructions(tools)) if part
+            part
+            for part in (
+                tool_protocol_instructions(tools),
+                system,
+                NO_THINK_SWITCH if fast else "",
+            )
+            if part
         )
         wire: list[JsonObject] = []
         if prelude:
@@ -322,7 +348,12 @@ class LocalOpenAILLM:
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": False,
+            "cache_prompt": True,
         }
+        if fast:
+            # Reasoning models (Qwen3, DeepSeek-R1 distills) otherwise write a
+            # long hidden "thinking" pass before every answer.
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         headers = {"content-type": "application/json"}
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
@@ -593,7 +624,7 @@ def _openai_reply(body: JsonObject) -> LLMReply:
     content = message.get("content")
     usage = body.get("usage")
     return LLMReply(
-        text=content.strip() if isinstance(content, str) else "",
+        text=strip_thinking(content) if isinstance(content, str) else "",
         tool_calls=tuple(calls),
         model=str(body.get("model", "")),
         stop_reason=str(first.get("finish_reason") or "")

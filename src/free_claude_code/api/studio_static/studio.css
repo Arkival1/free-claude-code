@@ -1,35 +1,26 @@
-/* iOS-first layout: safe areas, thumb-reachable tabs, large tap targets. */
+/* iOS-first layout: safe areas, thumb-reachable tabs, large tap targets.
+   One look everywhere: the HUD's dark console, cyan lines, and gold accents. */
 :root {
-  --bg: #0b0d12;
-  --surface: #151923;
-  --surface-2: #1d2230;
-  --line: #2a3142;
-  --text: #eef1f7;
-  --muted: #9aa4bb;
-  --accent: #6ea8ff;
-  --accent-ink: #06101f;
-  --good: #57d9a3;
-  --warn: #ffcc66;
-  --bad: #ff7a7a;
-  --radius: 16px;
+  --bg: #02070d;
+  --surface: #071722;
+  --surface-2: #0c2231;
+  --line: rgba(64, 214, 255, 0.24);
+  --text: #d9f6ff;
+  --muted: #7fa9ba;
+  --accent: #ffc861;
+  --accent-ink: #1a1000;
+  --good: #4dffa6;
+  --warn: #ffb547;
+  --bad: #ff5d6c;
+  --cyan: #40d6ff;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --radius: 4px;
   --tap: 44px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f4f6fb;
-    --surface: #ffffff;
-    --surface-2: #eef1f8;
-    --line: #d7dded;
-    --text: #131722;
-    --muted: #5d6479;
-    --accent: #2f6fe4;
-    --accent-ink: #ffffff;
-  }
+  color-scheme: dark;
 }
 
 * {
@@ -683,8 +674,8 @@ body[data-ui="hud"] .view {
     "core"
     "log"
     "cmd"
-    "room"
     "team"
+    "room"
     "commands"
     "feed"
     "timeline"
@@ -1736,11 +1727,11 @@ button.hud-item {
       "core room"
       "log room"
       "cmd cmd"
-      "team commands"
-      "feed timeline"
+      "team team"
+      "commands feed"
+      "timeline memory"
       "monitor insights"
-      "llm memory"
-      "overview overview";
+      "llm overview";
   }
 
   .hud-pills {
@@ -1756,12 +1747,13 @@ button.hud-item {
 @media (min-width: 1200px) {
   .hud {
     grid-template-columns: 210px minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr) 360px;
-    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto auto;
     grid-template-areas:
       "nav top top top top"
       "nav overview core core room"
       "nav overview log log room"
-      "nav team timeline commands feed"
+      "nav team team commands feed"
+      "nav team team timeline feed"
       "nav monitor insights llm memory"
       "nav cmd cmd cmd cmd";
     padding-left: calc(var(--safe-left) + 10px);
@@ -1832,23 +1824,14 @@ button.hud-item {
     max-height: 520px;
   }
 
-  .hud-agents {
-    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  .hud-area-team {
+    grid-row: 4 / 6;
   }
 
-  .hud-agent {
-    flex-direction: column;
-    justify-content: center;
-    gap: 4px;
-    padding: 8px 6px;
-    text-align: center;
-    border-left-width: 1px;
-    border-color: var(--hud-line);
+  .hud-area-team > .hud-panel {
+    height: 100%;
   }
 
-  .hud-agent .grow {
-    width: 100%;
-  }
 
   .hud-quicks {
     grid-template-columns: minmax(0, 1fr);
@@ -2014,4 +1997,302 @@ label.check input {
   display: grid;
   gap: 6px;
   font-size: 15px;
+}
+
+/* ------------------------------------------------------ HUD-styled pages */
+/* Every screen besides the command center wears the same console look. */
+
+body[data-ui="page"] {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(64, 214, 255, 0.08), transparent 60%),
+    linear-gradient(rgba(64, 214, 255, 0.03) 1px, transparent 1px) 0 0 / 100% 28px,
+    linear-gradient(90deg, rgba(64, 214, 255, 0.025) 1px, transparent 1px) 0 0 / 28px 100%,
+    var(--bg);
+}
+
+body[data-ui="page"] .app-bar {
+  background: rgba(2, 10, 18, 0.9);
+  border-bottom-color: var(--line);
+}
+
+body[data-ui="page"] .app-bar h1 {
+  font-family: var(--mono);
+  font-size: 15px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(64, 214, 255, 0.5);
+}
+
+body[data-ui="page"] .ghost-button {
+  color: var(--accent);
+}
+
+body[data-ui="page"] .card {
+  background: rgba(6, 22, 34, 0.78);
+  border-color: var(--line);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+
+body[data-ui="page"] .card > h2,
+body[data-ui="page"] .card > h3,
+body[data-ui="page"] .card-head h2 {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+body[data-ui="page"] .card > h2::before,
+body[data-ui="page"] .card-head h2::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 8px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  vertical-align: middle;
+}
+
+body[data-ui="page"] .list-item {
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--cyan);
+  border-radius: 2px;
+  background: rgba(64, 214, 255, 0.04);
+}
+
+body[data-ui="page"] input[type="text"],
+body[data-ui="page"] input[type="url"],
+body[data-ui="page"] input[type="number"],
+body[data-ui="page"] textarea,
+body[data-ui="page"] select,
+.sheet-panel input[type="text"],
+.sheet-panel textarea,
+.sheet-panel select {
+  border-radius: 2px;
+  background: rgba(2, 12, 20, 0.9);
+}
+
+body[data-ui="page"] input:focus-visible,
+body[data-ui="page"] textarea:focus-visible,
+body[data-ui="page"] select:focus-visible {
+  outline: 1px solid var(--cyan);
+  border-color: var(--cyan);
+}
+
+button.primary,
+button.secondary,
+button.danger {
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}
+
+button.primary {
+  box-shadow: 0 0 14px rgba(255, 200, 97, 0.25);
+}
+
+button.secondary {
+  background: rgba(64, 214, 255, 0.08);
+  color: var(--cyan);
+}
+
+body[data-ui="page"] .tab-bar {
+  background: rgba(2, 10, 18, 0.94);
+  border-top-color: var(--line);
+}
+
+body[data-ui="page"] .tab {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  border-radius: 2px;
+}
+
+body[data-ui="page"] .tab[aria-current="page"] {
+  color: var(--cyan);
+  background: rgba(64, 214, 255, 0.1);
+  box-shadow: inset 0 2px 0 var(--cyan);
+}
+
+.sheet-panel {
+  border-radius: 6px 6px 0 0;
+  border-top: 1px solid var(--cyan);
+  box-shadow: 0 -10px 40px rgba(64, 214, 255, 0.12);
+}
+
+.sheet-panel h2 {
+  font-family: var(--mono);
+  letter-spacing: 0.12em;
+  color: var(--cyan);
+}
+
+/* Agents at work: the team on the left, the watched agent's steps beside it. */
+.hud-work {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.hud-agent.watched {
+  border-color: var(--hud-gold);
+  border-left-color: var(--hud-gold);
+  background: var(--hud-gold-soft);
+  box-shadow: 0 0 12px rgba(255, 190, 90, 0.18);
+}
+
+.hud-process {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--hud-line);
+  background: rgba(2, 10, 18, 0.7);
+}
+
+.hud-process-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hud-process-title strong {
+  display: block;
+  font: 600 0.95rem/1.2 var(--hud-sans);
+  color: var(--hud-gold);
+}
+
+.hud-process-title small {
+  display: block;
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  color: var(--hud-muted);
+}
+
+.hud-process-title.busy small {
+  color: var(--hud-amber);
+}
+
+.hud-process-title.busy .hud-agent-icon {
+  animation: hud-blink 1.1s ease-in-out infinite;
+}
+
+.hud-process-goal {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--hud-amber);
+  background: rgba(255, 181, 71, 0.06);
+  font: 0.85rem/1.4 var(--hud-sans);
+  overflow-wrap: anywhere;
+}
+
+.hud-process-goal small {
+  display: block;
+  font: 0.6rem/1.4 var(--hud-mono);
+  letter-spacing: 0.16em;
+  color: var(--hud-amber);
+}
+
+.hud-process-log {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 140px;
+  max-height: 46dvh;
+  overflow-y: auto;
+}
+
+.hud-process-log > * {
+  flex-shrink: 0;
+}
+
+.hud-step {
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid var(--hud-line);
+  font: 0.82rem/1.4 var(--hud-sans);
+  color: var(--hud-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hud-step-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hud-step-meta .hud-tag {
+  display: inline;
+}
+
+.hud-step time {
+  font: 0.58rem var(--hud-mono);
+  color: var(--hud-muted);
+}
+
+.hud-step.task {
+  border-left-color: var(--hud-muted);
+}
+
+.hud-step.tool {
+  border-left-color: var(--hud-cyan);
+  color: var(--hud-muted);
+}
+
+.hud-step.tool.bad {
+  border-left-color: var(--hud-bad);
+}
+
+.hud-step.tool.bad .hud-tag {
+  color: var(--hud-bad);
+}
+
+.hud-step.think {
+  border-left-color: var(--hud-amber);
+  font-style: italic;
+}
+
+.hud-step.done {
+  border-left-color: var(--hud-gold);
+}
+
+.hud-step.done .hud-tag {
+  color: var(--hud-gold);
+}
+
+@media (min-width: 720px) {
+  .hud-work {
+    grid-template-columns: minmax(180px, 0.75fr) minmax(0, 1.35fr);
+    align-items: start;
+  }
+
+  .hud-work .hud-agents {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+  }
+
+  .hud-process {
+    align-self: stretch;
+  }
+}
+
+@media (min-width: 1200px) {
+  .hud-process-log {
+    max-height: 440px;
+  }
+}
+
+input.page-search {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 10px 12px;
+  border: 1px solid var(--cyan);
+  border-radius: 2px;
+  background: rgba(2, 12, 20, 0.9);
+  color: var(--text);
+  font: 16px/1.3 var(--mono);
+  letter-spacing: 0.04em;
+  box-shadow: 0 0 14px rgba(64, 214, 255, 0.12);
 }

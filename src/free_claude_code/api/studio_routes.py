@@ -36,7 +36,6 @@ router = APIRouter()
 
 STATIC_DIR = Path(__file__).resolve().parent / "studio_static"
 _ASSET_VERSION_PLACEHOLDER = "__FCC_VERSION__"
-_UI_THEME_PLACEHOLDER = "__FCC_UI_THEME__"
 _ASSET_FILENAMES = frozenset(
     {
         "studio.css",
@@ -239,15 +238,10 @@ def _asset_path(filename: str) -> Path:
 
 
 @router.get("/studio", include_in_schema=False)
-def studio_page(
-    settings: Settings = Depends(get_settings), _: None = Access
-) -> HTMLResponse:
+def studio_page(_: None = Access) -> HTMLResponse:
     """Serve the installable Studio app shell."""
     template = _asset_path("index.html").read_text(encoding="utf-8")
-    page = template.replace(_ASSET_VERSION_PLACEHOLDER, package_version()).replace(
-        _UI_THEME_PLACEHOLDER, settings.studio_ui_theme
-    )
-    return HTMLResponse(page)
+    return HTMLResponse(template.replace(_ASSET_VERSION_PLACEHOLDER, package_version()))
 
 
 @router.get("/studio/manifest.webmanifest", include_in_schema=False)
@@ -260,8 +254,8 @@ def studio_manifest() -> JSONResponse:
             "start_url": "/studio",
             "scope": "/studio",
             "display": "standalone",
-            "background_color": "#0b0d12",
-            "theme_color": "#0b0d12",
+            "background_color": "#02070d",
+            "theme_color": "#02070d",
             "orientation": "portrait",
             "id": "/studio",
             "icons": [
@@ -963,6 +957,17 @@ async def available_models(
         "server": server,
         "local": await studio.local_models(),
     }
+
+
+@router.get("/studio/api/agents/{agent_id}/activity")
+async def agent_activity(
+    agent_id: str,
+    after: int = 0,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """One agent's current task and its newest steps, for the HUD."""
+    return await studio.agent_activity(agent_id, after=after)
 
 
 @router.post("/studio/api/models/pick-file")

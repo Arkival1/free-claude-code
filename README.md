@@ -397,10 +397,11 @@ the `.cmd` file above already bypasses that for this one script.
 <details>
 <summary><strong>The HUD and your main AI</strong></summary>
 
-Studio has two looks. **Classic** is the tabbed app. **HUD** turns Home into a
-command center for your main AI (named **Jarvis** by default,
-`STUDIO_MAIN_AGENT_NAME`). Switch under **More → Appearance**; each device
-remembers its choice, and `STUDIO_UI_THEME=hud` makes the HUD the default.
+Home is a command center for your main AI (named **Jarvis** by default,
+`STUDIO_MAIN_AGENT_NAME`), and every other page (Agents, Chats, Classroom,
+Models, Tuning, More) uses the same dark console look. **More** has a search
+box for its settings, and the admin page has one search box that looks
+through every settings page at once.
 
 In the middle of the HUD is his core: a gold sphere of glowing particles and
 filaments that floats, turns, and reacts. It swirls while he works, swells
@@ -411,14 +412,18 @@ the server drops. Tap it to start a spoken conversation. Around it:
   **START TEAM ROOM**, then talk to all the agents at once.
 - **AI core overview** and **brain status**: which model he runs on, whether
   your local models are reachable, web search, voice, and ears.
-- **Active agents** (tap **+** to add one), **mission timeline** (tasks, rooms,
-  classes, and training), and the **live intelligence feed** (running jobs and
-  commands waiting for **Run it**).
+- **Agents at work** (bottom left): every agent with a READY or ACTIVE light.
+  Tap one to watch it work live: its task, each tool it uses (searches, files,
+  commands), what it is thinking, and its report. The first agent that starts
+  working is shown until you pick one; **OPEN ›** opens its full chat. Tap
+  **+** to add an agent.
+- **Mission timeline** (tasks, rooms, classes, and training) and the **live
+  intelligence feed** (running jobs and commands waiting for **Run it**).
 - **Quick commands**: voice chat, an executive briefing, and shortcuts to give
   Builder, Researcher, or Helper a job.
 - **System monitor** (CPU, RAM, and disk of the PC running Studio) and
   **memory insights**.
-- The sidebar goes to the rest of Studio; **CLASSIC UI** switches back.
+- The sidebar goes to the rest of Studio; **ASK THE GUIDE** explains anything.
 
 On an iPhone the same panels stack into one column, with the talk bar pinned
 to the bottom of the screen.
@@ -435,6 +440,15 @@ The choice is saved as the Main AI Model and Studio Default Model settings.
 If the Studio default is a server model whose provider has no key, or a local
 model this PC doesn't have, Studio uses the model loaded in LM Studio instead
 of failing, and the HUD shows which one.
+
+**Speed on a small GPU.** Studio keeps the start of every prompt the same
+between turns (tool list and instructions first, this turn's memories last),
+so LM Studio reuses what it already read instead of re-reading thousands of
+words before each reply. **Fast Local Replies** (`STUDIO_LOCAL_FAST_REPLIES`,
+on by default) also switches off the hidden "thinking" pass that reasoning
+models such as Qwen3 write before every answer; turn it off for hard problems.
+In LM Studio, load the model with GPU Offload at maximum and a Context Length
+of 8192; a larger context can spill out of an 8 GB card and slow every reply.
 
 You talk to the main AI in the HUD by typing or with the mic button (when the
 browser supports speech recognition), and it can read its replies aloud

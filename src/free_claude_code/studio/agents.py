@@ -108,7 +108,13 @@ class AgentRunner:
     async def system_prompt(
         self, agent: Agent, *, query: str, site_id: str | None
     ) -> str:
-        """Compose the agent's identity, tuning, memory, and site guidance."""
+        """Compose the agent's identity, tuning, memory, and site guidance.
+
+        What stays the same from turn to turn comes first and the memory
+        recalled for this message comes last, so a local runtime can reuse
+        its cached reading of the start of the prompt instead of re-reading
+        all of it before every reply.
+        """
         parts = [AGENT_BASE_PROMPT]
         if agent.role == MAIN_ROLE:
             parts.append(
@@ -125,10 +131,12 @@ class AgentRunner:
             parts.append(
                 f"Skills the user taught you (use them when they fit):\n{lines}"
             )
-        if agent.memory_enabled:
-            if self._toolbox.shared_memory and "remember" in agent.tools:
-                parts.append(SHARED_MEMORY_PROMPT)
-            parts.append(await self._memory.context_block(agent.id, query))
+        if (
+            agent.memory_enabled
+            and self._toolbox.shared_memory
+            and "remember" in agent.tools
+        ):
+            parts.append(SHARED_MEMORY_PROMPT)
         if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):
             parts.append(WEB_PROMPT)
         elif self._toolbox.web_paused(agent.tools, role=agent.role):
@@ -137,6 +145,8 @@ class AgentRunner:
             parts.append(SITE_PROMPT)
             if self._toolbox.commands_enabled and COMMAND_TOOL in agent.tools:
                 parts.append(COMMAND_PROMPT)
+        if agent.memory_enabled:
+            parts.append(await self._memory.context_block(agent.id, query))
         return "\n\n".join(part for part in parts if part.strip())
 
     async def roster(self, main: Agent) -> str:

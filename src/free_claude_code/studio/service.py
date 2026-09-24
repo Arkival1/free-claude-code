@@ -3,7 +3,7 @@
 import asyncio
 import contextlib
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -201,6 +201,7 @@ class StudioService:
         self._main_error: str | None = None
         self._local_probe: tuple[float, JsonObject] | None = None
         self._loaded_probe: tuple[float, tuple[str, ...] | None] | None = None
+        self._agent_busy: dict[str, int] = {}
         self._stand_in_note = ""
         self._router.use_stand_in(self._stand_in_model)
 
@@ -235,6 +236,7 @@ class StudioService:
         local = LocalOpenAILLM(
             base_url=settings.studio_local_base_url,
             api_key=settings.studio_local_api_key or "",
+            fast=lambda: self.settings.studio_local_fast_replies,
         )
         return StudioModelRouter(proxy=proxy, local=local)
 
@@ -837,7 +839,8 @@ class StudioService:
         agent = await self._store.require(Agent, chat.agent_id)
         if agent.role == "guide":
             return await self._guide_turn(chat, agent, text)
-        result = await self._runner().reply(agent, chat, text)
+        async with self._working(agent.id):
+            result = await self._runner().reply(agent, chat, text)
         await self._after_memory_change([agent.id])
         if chat.title in {"New chat", f"{agent.name} chat"}:
             await self._store.put(
@@ -1146,7 +1149,8 @@ class StudioService:
             agent = await self._store.require(Agent, agent_id)
             chat = await self._store.require(Chat, chat_id)
             run = await self._store.require(AgentRun, run_id)
-            finished = await self._runner().run_task(agent, chat, run)
+            async with self._working(agent.id):
+                finished = await self._runner().run_task(agent, chat, run)
             await self._refresh_site_count(finished.site_id)
             await self._after_memory_change([agent.id])
             if chat.parent_chat_id:
@@ -1224,7 +1228,8 @@ class StudioService:
             }
         )
         await self._store.put(run)
-        finished = await self._runner().run_task(agent, chat, run)
+        async with self._working(agent.id):
+            finished = await self._runner().run_task(agent, chat, run)
         await self._refresh_site_count(site_id)
         await self._after_memory_change([agent.id])
         return finished, chat
@@ -1368,6 +1373,80 @@ class StudioService:
             if chat is not None:
                 await self._store.put(chat.model_copy(update={"updated_at": now_ms()}))
 
+    @contextlib.asynccontextmanager
+    async def _working(self, agent_id: str) -> AsyncIterator[None]:
+        """Mark an agent busy while one of its turns runs."""
+        self._agent_busy[agent_id] = self._agent_busy.get(agent_id, 0) + 1
+        try:
+            yield
+        finally:
+            self._agent_busy[agent_id] -= 1
+            if self._agent_busy[agent_id] <= 0:
+                del self._agent_busy[agent_id]
+
+    async def _busy_agents(self, runs: Sequence[AgentRun]) -> set[str]:
+        """Agents with a running task, an active turn, or a room that is talking."""
+        running = {run.agent_id for run in runs if run.status == "running"}
+        running.update(self._agent_busy)
+        for room_id, count in self._room_activity.items():
+            if count > 0:
+                room = await self._store.get(Chat, room_id)
+                if room is not None:
+                    running.update(room.member_ids)
+        return running
+
+    async def agent_activity(self, agent_id: str, *, after: int = 0) -> JsonObject:
+        """What one agent is doing: its latest task and its newest steps."""
+        agent = await self.agent(agent_id)
+        runs = await self.runs()
+        busy = agent_id in await self._busy_agents(runs)
+        own_runs = [run for run in runs if run.agent_id == agent_id]
+        chats = await self._store.find(
+            Chat, where={"agent_id": agent_id}, order_by="updated_at DESC", limit=1
+        )
+        chat = chats[0] if chats else None
+        messages: Sequence[Message] = ()
+        if chat is not None:
+            messages = (
+                await self._store.transcript(chat.id, after=after)
+                if after
+                else await self._store.transcript(chat.id, limit=40)
+            )
+        run = own_runs[0] if own_runs else None
+        return {
+            "agent": {
+                "id": agent.id,
+                "name": agent.name,
+                "role": agent.role,
+                "model": await self.effective_model(agent.model or self.default_model),
+                "busy": busy,
+            },
+            "chat": {"id": chat.id, "title": chat.title} if chat else None,
+            "run": {
+                "id": run.id,
+                "goal": run.goal,
+                "status": run.status,
+                "step": run.step,
+                "updated_at": run.updated_at,
+            }
+            if run
+            else None,
+            "messages": [
+                {
+                    "sequence": message.sequence,
+                    "role": message.role,
+                    "author": message.author,
+                    "text": message.text[:1500],
+                    "tool": message.data.get("tool")
+                    or (message.author if message.role == "tool" else None),
+                    "failed": bool(message.data.get("failed")),
+                    "partial": bool(message.data.get("partial")),
+                    "at": message.created_at,
+                }
+                for message in messages
+            ],
+        }
+
     async def main_console(self, *, after: int = 0) -> JsonObject:
         """Return what the HUD shows: the conversation, the team, and systems."""
         await self._connectivity.check()
@@ -1379,12 +1458,7 @@ class StudioService:
             else await self._store.transcript(chat.id, limit=80)
         )
         runs = await self.runs()
-        running = {run.agent_id for run in runs if run.status == "running"}
-        for room_id, count in self._room_activity.items():
-            if count > 0:
-                room = await self._store.get(Chat, room_id)
-                if room is not None:
-                    running.update(room.member_ids)
+        running = await self._busy_agents(runs)
         team = [
             {
                 "id": member.id,
@@ -2210,7 +2284,6 @@ class StudioService:
                 "obsidian_configured": bool(settings.studio_obsidian_vault),
                 "class_pass_mark": settings.studio_class_pass_mark,
                 "shared_memory": settings.studio_shared_memory,
-                "ui_theme": settings.studio_ui_theme,
                 "main_agent_name": settings.studio_main_agent_name,
                 "web": self.web_status(),
             },

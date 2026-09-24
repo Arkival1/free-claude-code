@@ -775,6 +775,9 @@ class Settings(BaseModel):
     studio_helper_pipeline: bool = Field(
         default=True, validation_alias="STUDIO_HELPER_PIPELINE"
     )
+    studio_local_fast_replies: bool = Field(
+        default=True, validation_alias="STUDIO_LOCAL_FAST_REPLIES"
+    )
     studio_web_access: NonEmptyString = Field(
         default="all", validation_alias="STUDIO_WEB_ACCESS"
     )

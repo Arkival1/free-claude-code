@@ -988,3 +988,50 @@ button.startup-busy, .startup-spinner { display: inline-flex; align-items: cente
   color: var(--accent);
   font-weight: 600;
 }
+
+/* Settings search: one box that looks through every settings page. */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+
+.settings-search {
+  flex: 1 1 280px;
+  max-width: 460px;
+}
+
+.settings-search input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--input);
+  color: inherit;
+  font: inherit;
+}
+
+.settings-search input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.search-summary {
+  margin: 6px 2px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.field.search-miss,
+.settings-section.search-empty,
+body.settings-searching #providerGroups,
+body.settings-searching .advanced-toggle {
+  display: none;
+}
+
+.settings-section .field.advanced-field.search-hit {
+  display: flex;
+}

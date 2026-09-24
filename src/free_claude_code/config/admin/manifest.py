@@ -807,21 +807,6 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
-        "STUDIO_UI_THEME",
-        "Studio Look",
-        "studio",
-        "select",
-        settings_attr="studio_ui_theme",
-        options=(
-            ConfigOptionSpec("classic", "Classic app"),
-            ConfigOptionSpec("hud", "HUD (main AI console)"),
-        ),
-        description=(
-            "Which interface Studio opens with. Each device can still switch "
-            "in the app under More > Appearance."
-        ),
-    ),
-    ConfigFieldSpec(
         "STUDIO_VOICE_ENGINE",
         "Main AI Voice Engine",
         "studio",
@@ -966,6 +951,18 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         settings_attr="studio_voice_language",
         advanced=True,
         description="Language you speak, as a code such as en; empty detects it.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LOCAL_FAST_REPLIES",
+        "Fast Local Replies",
+        "studio",
+        "boolean",
+        settings_attr="studio_local_fast_replies",
+        description=(
+            "Skip the long hidden 'thinking' pass that reasoning models such as "
+            "Qwen3 write before every answer on this PC, so replies start "
+            "sooner. Turn off for harder problems where thinking helps."
+        ),
     ),
     ConfigFieldSpec(
         "STUDIO_HELPER_PIPELINE",

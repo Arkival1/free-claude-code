@@ -252,156 +252,6 @@
 
   /* ------------------------------------------------------------------ views */
 
-  async function renderHome() {
-    const generation = renderGeneration;
-    let data = await api("/studio/api/overview");
-    const waiting = (await refreshPending()).pending;
-    if (!data.agents.length) {
-      await post("/studio/api/bootstrap");
-      data = await api("/studio/api/overview");
-    }
-    const settings = data.settings || {};
-    const readyModels = (data.assets || []).filter(
-      (asset) => asset.status === "ready"
-    ).length;
-    const nodes = [];
-
-    nodes.push(
-      card("Welcome", [
-        el("p", {
-          class: "muted",
-          text: "Agents that search the web and build sites, local models you own, very light tuning, and a classroom where one AI teaches another.",
-        }),
-        el("div", { class: "row" }, [
-          el("button", {
-            class: "primary",
-            text: "Ask the guide",
-            onclick: openGuide,
-          }),
-          el("button", {
-            class: "secondary",
-            text: "New chat",
-            onclick: () => go("chats"),
-          }),
-        ]),
-      ])
-    );
-
-    if (!readyModels && settings.guide_model.startsWith("local/")) {
-      nodes.push(
-        card("Preload the guide model", [
-          el("p", {
-            class: "muted",
-            text: "The guide answers from built-in help until its small model is on this device. Downloading it also gives you an offline model to chat with and to tune.",
-          }),
-          el("button", {
-            class: "primary",
-            text: "Download the guide model",
-            onclick: async () => {
-              const result = await post("/studio/api/bootstrap", {
-                download_guide: true,
-              });
-              notify(
-                result.guide_download
-                  ? "Downloading the guide model."
-                  : "A local model is already available."
-              );
-              go("models");
-            },
-          }),
-        ])
-      );
-    }
-
-    if (waiting.length) {
-      nodes.push(
-        card(
-          `${waiting.length} command${waiting.length === 1 ? "" : "s"} waiting for you`,
-          waiting.map((item) => {
-            const actions = el("div", { class: "row" });
-            actions.append(...approvalButtons(item.id, actions));
-            return el("div", { class: "card" }, [
-              el("code", { class: "command", text: item.command }),
-              actions,
-            ]);
-          }),
-          "An agent paused until you decide."
-        )
-      );
-    }
-
-    const active = [
-      ...(data.jobs || []).filter((job) => ["queued", "running"].includes(job.status)),
-      ...(data.courses || []).filter((course) =>
-        ["planning", "teaching", "examining"].includes(course.status)
-      ),
-      ...(data.assets || []).filter((asset) =>
-        ["queued", "downloading", "extracting"].includes(asset.status)
-      ),
-    ];
-    if (active.length) {
-      nodes.push(
-        card(
-          "In progress",
-          active.map((item) =>
-            el("div", { class: "card" }, [
-              el("div", { class: "row-between" }, [
-                el("strong", {
-                  text: item.topic || item.name || item.message || "Working",
-                }),
-                statusPill(item.status),
-              ]),
-              meter(item.progress || 0),
-            ])
-          )
-        )
-      );
-    }
-
-    nodes.push(
-      card(
-        "Recent chats",
-        (data.chats || []).length
-          ? (data.chats || [])
-              .slice(0, 6)
-              .map((chat) =>
-                el(
-                  "button",
-                  { class: "list-item", onclick: () => go(`chat/${chat.id}`) },
-                  [
-                    el("span", { class: "grow" }, [
-                      el("strong", { text: chat.title }),
-                      el("span", { text: `${chat.kind} · ${when(chat.updated_at)}` }),
-                    ]),
-                    el("span", { class: "pill", text: "open" }),
-                  ]
-                )
-              )
-          : empty("No chats yet. Start one from the Chats tab.")
-      )
-    );
-
-    nodes.push(
-      card("This install", [
-        el("div", { class: "kv" }, [
-          el("span", { text: "Default model" }),
-          el("span", { text: settings.default_model || "—" }),
-          el("span", { text: "Guide model" }),
-          el("span", { text: settings.guide_model || "—" }),
-          el("span", { text: "Light tuning" }),
-          el("span", { text: settings.light_tuning_enabled ? "on" : "off" }),
-          el("span", { text: "AI teacher" }),
-          el("span", { text: settings.teacher_enabled ? "on" : "off" }),
-          el("span", { text: "Obsidian" }),
-          el("span", { text: settings.obsidian_configured ? "configured" : "not set" }),
-        ]),
-      ])
-    );
-
-    if (generation !== renderGeneration) return;
-    view.replaceChildren(...nodes);
-  }
-
   async function renderChats() {
     const generation = renderGeneration;
     const [{ chats }, { agents }, { sites }] = await Promise.all([
@@ -2384,8 +2234,27 @@
       ...agents.map((agent) => el("option", { value: agent.id, text: agent.name })),
     ]);
     if (generation !== renderGeneration) return;
+    const finder = el("input", {
+      type: "search",
+      class: "page-search",
+      autocomplete: "off",
+      "aria-label": "Search settings",
+      placeholder: "Search settings…",
+    });
+    const nothing = el("p", { class: "muted", hidden: true, text: "Nothing here matches. Admin settings on the PC have the rest." });
+    finder.addEventListener("input", () => {
+      const query = finder.value.trim().toLowerCase();
+      let shown = 0;
+      for (const node of view.querySelectorAll(":scope > .card")) {
+        const hit = !query || node.textContent.toLowerCase().includes(query);
+        node.hidden = !hit;
+        if (hit) shown += 1;
+      }
+      nothing.hidden = shown > 0;
+    });
     view.replaceChildren(
-      appearanceCard(),
+      finder,
+      nothing,
       voiceCard(voiceInfo),
       webCard(overview.settings.web),
       connectCard(connect),
@@ -2488,7 +2357,6 @@
 
   /* -------------------------------------------------------------------- hud */
 
-  const UI_KEY = "fcc.studio.ui";
   const VOICE_KEY = "fcc.studio.voice";
   /* A living gold core: a sphere of glowing filaments that breathes, swirls,
      and answers to voice. Pure canvas, so it runs on phones and old GPUs. */
@@ -2762,18 +2630,6 @@
       /* private mode: the choice lasts for this visit only */
     }
   };
-
-  function uiMode() {
-    const chosen = storedGet(UI_KEY);
-    if (chosen === "hud" || chosen === "classic") return chosen;
-    return document.body.dataset.uiDefault === "hud" ? "hud" : "classic";
-  }
-
-  function setUiMode(mode) {
-    storedSet(UI_KEY, mode);
-    if (route().name === "home") render();
-    else go("home");
-  }
 
   const voiceOn = () => storedGet(VOICE_KEY) !== "off";
   const speechSupported = () => "speechSynthesis" in window;
@@ -3445,19 +3301,33 @@
       );
     }
 
-    // Active agents.
-    if (changed("team", data.team)) {
+    // Agents at work: pick one to watch its steps. Until you pick, the
+    // first agent that starts working is shown.
+    if (!hud.watch && hud.watchAuto) {
+      const working = data.team.find((member) => member.busy);
+      if (working) refs.watchAgent(working.id, true);
+    }
+    if (changed("team", [data.team, hud.watch])) {
       refs.team.replaceChildren(
         ...(data.team.length
           ? data.team.map((member) =>
-              el("button", { class: `hud-agent${member.busy ? " busy" : ""}`, onclick: () => go(`agent/${member.id}`) }, [
+              el(
+                "button",
+                {
+                  class: `hud-agent${member.busy ? " busy" : ""}${member.id === hud.watch ? " watched" : ""}`,
+                  "aria-pressed": String(member.id === hud.watch),
+                  "data-agent-id": member.id,
+                  onclick: () => refs.watchAgent(member.id),
+                },
+                [
                 el("span", { class: "hud-agent-icon", "aria-hidden": "true", text: agentGlyph(member.role) }),
                 el("span", { class: "grow" }, [
                   el("strong", { text: member.name }),
                   el("small", { text: `${member.role} · ${member.local ? "local" : "server"} · ${shortModel(member.model)}` }),
                 ]),
                 el("span", { class: "hud-agent-state" }, [el("span", { class: "hud-dot" }), member.busy ? "ACTIVE" : "READY"]),
-              ])
+                ]
+              )
             )
           : [el("p", { class: "hud-empty", text: "No agents yet." })])
       );
@@ -3598,6 +3468,26 @@
     hudState(refs);
   }
 
+  function processLine(step) {
+    const tool = (step.tool || "tool").replace(/_/g, " ").toUpperCase();
+    const [tag, kind] =
+      step.role === "user"
+        ? ["TASK", "task"]
+        : step.role === "tool"
+          ? [tool, step.failed ? "tool bad" : "tool"]
+          : step.role === "assistant"
+            ? step.partial
+              ? ["THINKING", "think"]
+              : ["REPORT", "done"]
+            : ["SYS", "event"];
+    const when = new Date(step.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const text = step.text.split("\n").slice(0, 8).join("\n");
+    return el("div", { class: `hud-step ${kind}` }, [
+      el("span", { class: "hud-step-meta" }, [el("span", { class: "hud-tag", text: tag }), el("time", { text: when })]),
+      text.length > 700 ? `${text.slice(0, 700)}…` : text,
+    ]);
+  }
+
   function constellation(count) {
     // A little star map whose size follows how much the team remembers.
     const stars = Math.max(6, Math.min(26, 6 + Math.round(Math.sqrt(count) * 2)));
@@ -3635,6 +3525,9 @@
     hud.chatId = null;
     hud.optimistic = null;
     hud.roomId = null;
+    hud.watch = null;
+    hud.watchAuto = true;
+    hud.watchSeq = 0;
     const last = data.messages[data.messages.length - 1];
     hud.spokenSeq = last ? last.sequence : 0;
 
@@ -3673,6 +3566,8 @@
       overview: el("div", { class: "hud-overview" }),
       log: el("div", { class: "hud-log", "aria-live": "polite" }),
       team: el("div", { class: "hud-agents" }),
+      processHead: el("div", { class: "hud-process-head" }),
+      processLog: el("div", { class: "hud-process-log", "aria-live": "polite" }),
       timeline: el("div", { class: "hud-list" }),
       monitor: el("div", { class: "hud-gauges" }),
       insights: el("div", { class: "hud-insights" }),
@@ -3695,12 +3590,80 @@
     tick();
     hud.clockTimer = setInterval(tick, 1000);
 
+    const watchWork = async () => {
+      const id = hud.watch;
+      if (!id) {
+        refs.processHead.replaceChildren(
+          el("p", { class: "hud-empty", text: "Pick an agent to watch its work live: each search, file, and step as it happens." })
+        );
+        refs.processLog.replaceChildren();
+        return;
+      }
+      let work;
+      try {
+        work = await api(`/studio/api/agents/${id}/activity?after=${hud.watchSeq}`);
+      } catch {
+        return;
+      }
+      if (generation !== renderGeneration || hud.watch !== id) return;
+      const who = work.agent;
+      const run = work.run;
+      const header = [
+        el("div", { class: `hud-process-title${who.busy ? " busy" : ""}` }, [
+          el("span", { class: "hud-agent-icon", "aria-hidden": "true", text: agentGlyph(who.role) }),
+          el("span", { class: "grow" }, [
+            el("strong", { text: who.name }),
+            el("small", { text: `${who.busy ? "WORKING NOW" : "IDLE"} · ${shortModel(who.model)}` }),
+          ]),
+          work.chat
+            ? el("button", { class: "hud-link", type: "button", text: "OPEN ›", onclick: () => go(`chat/${work.chat.id}`) })
+            : null,
+        ]),
+      ];
+      if (run) {
+        header.push(
+          el("p", { class: "hud-process-goal" }, [
+            el("small", { text: `TASK · ${run.status}${run.status === "running" ? ` · STEP ${run.step}` : ""}` }),
+            run.goal.slice(0, 240),
+          ])
+        );
+      }
+      refs.processHead.replaceChildren(...header);
+      const log = refs.processLog;
+      if (work.messages.length) {
+        log.querySelector(".hud-empty")?.remove();
+        log.append(...work.messages.map(processLine));
+        hud.watchSeq = work.messages[work.messages.length - 1].sequence;
+        while (log.childElementCount > 120) log.firstElementChild.remove();
+        log.scrollTop = log.scrollHeight;
+      }
+      if (!log.childElementCount) {
+        log.append(el("p", { class: "hud-empty", text: `${who.name} hasn't worked on anything yet.` }));
+      }
+    };
+
+    refs.watchAgent = (id, automatic = false) => {
+      if (!automatic) hud.watchAuto = false;
+      if (hud.watch === id) return;
+      hud.watch = id;
+      hud.watchSeq = 0;
+      refs.processLog.replaceChildren();
+      hud.keys.team = "";
+      for (const button of refs.team.querySelectorAll(".hud-agent")) {
+        const picked = button.dataset.agentId === id;
+        button.classList.toggle("watched", picked);
+        button.setAttribute("aria-pressed", String(picked));
+      }
+      watchWork();
+    };
+
     const poll = async () => {
       if (generation !== renderGeneration) return stopPolling();
       try {
         const next = await api(`/studio/api/main?after=${hud.lastSeq}`);
         if (generation !== renderGeneration) return;
         updateHud(refs, next);
+        await watchWork();
       } catch {
         if (generation !== renderGeneration) return;
         hud.offline = true;
@@ -3932,8 +3895,8 @@
       el("button", {
         class: "hud-button",
         type: "button",
-        text: "CLASSIC UI",
-        onclick: () => setUiMode("classic"),
+        text: "ASK THE GUIDE",
+        onclick: () => openGuide(),
       }),
     ]);
 
@@ -4047,8 +4010,11 @@
       el("div", { class: "hud-area-feed" }, [hudPanel("LIVE INTELLIGENCE FEED", refs.activity)]),
       el("div", { class: "hud-area-team" }, [
         hudPanel(
-          "ACTIVE AGENTS",
-          refs.team,
+          "AGENTS AT WORK",
+          el("div", { class: "hud-work" }, [
+            refs.team,
+            el("div", { class: "hud-process" }, [refs.processHead, refs.processLog]),
+          ]),
           el("button", {
             class: "hud-add",
             type: "button",
@@ -4115,6 +4081,7 @@
     view.replaceChildren(root);
     hud.orb = createCoreOrb(canvas);
     updateHud(refs, data);
+    watchWork();
     startPolling(poll);
   }
 
@@ -4185,30 +4152,6 @@
     );
   }
 
-  function appearanceCard() {
-    const mode = uiMode();
-    return card(
-      "Appearance",
-      [
-        el("div", { class: "row" }, [
-          el("button", {
-            class: mode === "classic" ? "primary" : "secondary",
-            text: "Classic app",
-            "aria-pressed": String(mode === "classic"),
-            onclick: () => setUiMode("classic"),
-          }),
-          el("button", {
-            class: mode === "hud" ? "primary" : "secondary",
-            text: "HUD console",
-            "aria-pressed": String(mode === "hud"),
-            onclick: () => setUiMode("hud"),
-          }),
-        ]),
-      ],
-      "HUD turns Home into a console for your main AI, which runs the other agents for you. All agents share one team memory. This choice is saved on this device."
-    );
-  }
-
   /* ----------------------------------------------------------------- render */
 
   async function render() {
@@ -4218,19 +4161,19 @@
     stopListening();
     teardownHud();
     const { name, id } = route();
-    const hudView = name === "hud" || (name === "home" && uiMode() === "hud");
+    const hudView = name === "hud" || name === "home";
     if (!hudView) {
       voice.talk = false;
       releaseMicrophone();
       stopSpeaking(null);
     }
-    document.body.dataset.ui = hudView ? "hud" : "classic";
+    document.body.dataset.ui = hudView ? "hud" : "page";
     setChrome(name, headingFor(name));
     if (generation !== renderGeneration) return;
     view.replaceChildren(el("p", { class: "muted", text: "Loading…" }));
     try {
       switch (name) {
-        case "home": return hudView ? await renderHud() : await renderHome();
+        case "home":
         case "hud": return await renderHud();
         case "chats": return await renderChats();
         case "chat": return await renderChat(id);
