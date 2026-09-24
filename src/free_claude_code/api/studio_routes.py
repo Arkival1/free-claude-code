@@ -25,10 +25,11 @@ from free_claude_code.studio.lora import (
     LoraAuthError,
     LoraError,
 )
-from free_claude_code.studio.models import Agent, LoraJob
+from free_claude_code.studio.models import Agent, LoraJob, VideoNote
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.tuning import TuningError
+from free_claude_code.studio.videos import clock, render_note
 from free_claude_code.studio.voice import MAX_AUDIO_BYTES, VoiceError
 
 from .dependencies import get_services, get_settings
@@ -73,6 +74,11 @@ class AgentPayload(BaseModel):
     tools: list[str] | None = None
     memory_enabled: bool = True
     description: str = ""
+
+
+class VideoPayload(BaseModel):
+    url: str = Field(min_length=1, max_length=500)
+    focus: str = Field(default="", max_length=300)
 
 
 class TeachPayload(BaseModel):
@@ -585,6 +591,60 @@ async def delete_agent(
 ) -> JsonObject:
     """Delete one agent and its memories."""
     return {"deleted": await studio.delete_agent(agent_id)}
+
+
+def _video_json(note: VideoNote, *, full: bool = False) -> JsonObject:
+    data = note.model_dump(exclude={"segments"})
+    data["length"] = clock(note.segments[-1][0]) if note.segments else ""
+    data["lines"] = len(note.segments)
+    if full:
+        data["notes"] = render_note(note)
+        data["transcript"] = [
+            {"at": clock(start), "seconds": start, "text": text}
+            for start, text in note.segments
+        ]
+    return data
+
+
+@router.get("/studio/api/videos")
+async def list_videos(
+    q: str = "",
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Videos the team studied, best match first when searching."""
+    return {"videos": [_video_json(note) for note in await studio.video_notes(q)]}
+
+
+@router.post("/studio/api/videos")
+async def study_video(
+    payload: VideoPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Study a YouTube video into notes for the agents."""
+    note = await studio.study_video(payload.url, focus=payload.focus)
+    return _video_json(note, full=True)
+
+
+@router.get("/studio/api/videos/{note_id}")
+async def video_note(
+    note_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """One studied video: its notes and its transcript with times."""
+    return _video_json(await studio.video_note(note_id), full=True)
+
+
+@router.delete("/studio/api/videos/{note_id}")
+async def delete_video(
+    note_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Forget a studied video and its memory entry."""
+    return {"deleted": await studio.delete_video_note(note_id)}
 
 
 @router.get("/studio/api/chats")

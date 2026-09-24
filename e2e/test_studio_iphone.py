@@ -738,3 +738,15 @@ def test_the_guide_knows_where_everything_is(page: Page, admin_base_url: str) ->
 
     expect(page.locator(".sheet-panel")).to_be_hidden()
     assert page.evaluate("location.hash") == "#models"
+
+
+def test_video_notes_have_a_place_to_paste_a_link(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url, "more")
+
+    videos = page.locator(".card", has=page.get_by_role("heading", name="Video notes"))
+    expect(videos).to_be_visible()
+    expect(videos.get_by_label("YouTube link")).to_be_visible()
+    expect(videos.get_by_role("button", name="Study it")).to_be_visible()
+    expect(videos).to_contain_text("Research saves every video it reads here")

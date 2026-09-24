@@ -372,3 +372,27 @@ class CommandRequest(Record):
     output: str = ""
     created_at: int = Field(default_factory=now_ms)
     decided_at: int | None = None
+
+
+type VideoSource = Literal["research", "user", "agent"]
+
+
+class VideoNote(Record):
+    """A YouTube video turned into notes the agents can use and look back at."""
+
+    id: str = Field(default_factory=lambda: new_id("vid"))
+    video_id: str
+    url: str
+    title: str
+    summary: str = ""
+    points: tuple[str, ...] = ()
+    steps: tuple[str, ...] = ()
+    names: tuple[str, ...] = ()
+    cautions: tuple[str, ...] = ()
+    focus: str = ""
+    source: VideoSource = "agent"
+    studied_by: str = ""
+    segments: tuple[tuple[int, str], ...] = ()
+    memory_id: str = ""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)

@@ -586,6 +586,36 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Video notes",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Video notes card: paste a YouTube link "
+            "and press Study it, or Open a studied video."
+        ),
+        terms=(
+            "video",
+            "videos",
+            "youtube",
+            "transcript",
+            "transcribe",
+            "watch",
+            "video notes",
+            "study video",
+        ),
+        body=(
+            "Every YouTube video research reads, and any video you give Studio, "
+            "is turned into video notes: a summary, key points, steps, names, and "
+            "warnings, plus the full transcript with times. The notes go into the "
+            "team's memory with the link, so every agent can use them, and agents "
+            "look back at the exact parts with the video_notes tool, each with a "
+            "link to that moment. Give Jarvis or the Researcher a link, or paste "
+            "it on the Video notes card; add what the team should learn from it "
+            "to focus the notes. Open a note to read it, search the transcript, "
+            "jump to a moment, or forget the video."
+        ),
+        asks=("How does deep research work?", "Where is memory?"),
+    ),
+    GuideTopic(
         title="Memory",
         route="/studio#agents",
         where=(

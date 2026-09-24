@@ -2389,3 +2389,42 @@ body[data-page="settings"] .view {
 .app-bar #guide-button {
   grid-column: 3;
 }
+
+.video-study {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.video-summary {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+.video-transcript {
+  display: grid;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+
+.video-line {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+}
+
+.video-line .pill {
+  flex: none;
+  text-decoration: none;
+}
+
+.video-details summary {
+  cursor: pointer;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+}

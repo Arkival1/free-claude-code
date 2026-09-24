@@ -72,10 +72,17 @@ from .models import (
     TuneJob,
     TunePack,
     TuneSample,
+    VideoNote,
     now_ms,
 )
 from .obsidian import ObsidianVault, VaultStatus
-from .platforms import PlatformError, PlatformReader, platform_of
+from .platforms import (
+    PlatformError,
+    PlatformPage,
+    PlatformReader,
+    platform_of,
+    youtube_id,
+)
 from .presets import (
     BUILDER_PROMPT,
     HELPER_PROMPT,
@@ -99,6 +106,7 @@ from .tools import (
     AgentToolbox,
 )
 from .tuning import CloudTuner, LightTuner, TuningError
+from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
 from .voice import SpeechAudio, VoiceError, VoiceService, speakable
 
 GUIDE_AGENT_NAME = "Guide"
@@ -117,6 +125,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "update_plan",
         "ask_helper",
         "check_project",
+        "video_notes",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
@@ -219,6 +228,8 @@ class StudioService:
         self._live_text: dict[str, str] = {}
         self._console_extras: tuple[float, JsonObject] | None = None
         self._stand_in_note = ""
+        self._video_lock = asyncio.Lock()
+        self._studying: set[str] = set()
         self._router.use_stand_in(self._stand_in_model)
 
     # ---------------------------------------------------------------- wiring
@@ -462,6 +473,83 @@ class StudioService:
             transport=self._search_transport,
         )
 
+    def _videos(self) -> VideoStudy:
+        return VideoStudy(
+            store=self._store,
+            reader=self._reader(),
+            router=self._router,
+            model=self._video_model,
+            remember=self._remember_video,
+            lock=self._video_lock,
+        )
+
+    async def _video_model(self) -> str:
+        """Videos are studied with the Researcher's model, like its research."""
+        researcher = await self.agent_by_name(RESEARCHER_AGENT_NAME)
+        chosen = (researcher.model if researcher else "") or self.default_model
+        return await self.effective_model(chosen)
+
+    async def _remember_video(self, note: VideoNote) -> str:
+        """Put a studied video in the team's memory, replacing an older entry."""
+        memory = self._memory()
+        if note.memory_id:
+            await self._store.delete(MemoryEntry, note.memory_id)
+        owner = SHARED_MEMORY_ID
+        if not memory.shared_enabled:
+            researcher = await self.agent_by_name(RESEARCHER_AGENT_NAME)
+            owner = researcher.id if researcher else SHARED_MEMORY_ID
+        entry = await memory.remember(
+            owner,
+            memory_line(note),
+            tags=(*VIDEO_TAGS, "verified"),
+            source=note.url,
+            author=note.studied_by or "Researcher",
+        )
+        return entry.id if entry else ""
+
+    def _study_later(self, page: PlatformPage) -> None:
+        """Turn a video research just read into notes, without holding anyone up."""
+        video = youtube_id(page.url) or page.url
+        if video in self._studying:
+            return
+        self._studying.add(video)
+
+        async def study() -> None:
+            try:
+                await self._videos().study(page.url, page=page, source="research")
+                await self._after_memory_change([], wait=False)
+            except (VideoError, StudioError, OSError) as error:
+                logger.info("Studio: could not study {}: {}", page.url, error)
+            finally:
+                self._studying.discard(video)
+
+        self.spawn(study())
+
+    async def study_video(self, url: str, *, focus: str = "") -> VideoNote:
+        """Study a video the user gives Studio."""
+        try:
+            note = await self._videos().study(url, focus=focus, source="user")
+        except (VideoError, PlatformError, httpx.HTTPError) as error:
+            raise StudioError(str(error)) from error
+        await self._after_memory_change([], wait=False)
+        return note
+
+    async def video_notes(self, query: str = "") -> tuple[VideoNote, ...]:
+        """Studied videos, best match first when there is a query."""
+        return tuple(await self._videos().notes(query, limit=50))
+
+    async def video_note(self, note_id: str) -> VideoNote:
+        return await self._store.require(VideoNote, note_id)
+
+    async def delete_video_note(self, note_id: str) -> bool:
+        """Forget a studied video and its memory entry."""
+        note = await self._store.get(VideoNote, note_id)
+        if note is None:
+            return False
+        if note.memory_id:
+            await self._store.delete(MemoryEntry, note.memory_id)
+        return await self._store.delete(VideoNote, note_id)
+
     def _egress(self) -> WebFetchEgressPolicy:
         settings = self.settings
         return WebFetchEgressPolicy(
@@ -497,6 +585,8 @@ class StudioService:
             ),
             connectivity=self._connectivity,
             app_help=self.app_help,
+            videos=self._videos(),
+            study_later=self._study_later,
         )
 
     def _runner(self) -> AgentRunner:

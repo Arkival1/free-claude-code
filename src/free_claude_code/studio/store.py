@@ -25,6 +25,7 @@ from .models import (
     TuneJob,
     TunePack,
     TuneSample,
+    VideoNote,
     now_ms,
 )
 
@@ -40,6 +41,11 @@ _JSON_FIELDS = frozenset(
         "member_ids",
         "sources",
         "topics",
+        "points",
+        "steps",
+        "names",
+        "cautions",
+        "segments",
     }
 )
 
@@ -59,6 +65,7 @@ TABLES: Mapping[type[Record], str] = {
     ExamQuestion: "studio_exam_questions",
     LoraJob: "studio_lora_jobs",
     CommandRequest: "studio_commands",
+    VideoNote: "studio_videos",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (
@@ -69,6 +76,7 @@ _INDEXES: tuple[tuple[str, str, str], ...] = (
     ("studio_lessons_course", "studio_lessons", "course_id, ordinal"),
     ("studio_exam_questions_course", "studio_exam_questions", "course_id, ordinal"),
     ("studio_chats_kind", "studio_chats", "kind, updated_at"),
+    ("studio_videos_video", "studio_videos", "video_id"),
 )
 
 

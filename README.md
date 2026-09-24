@@ -682,6 +682,28 @@ numbers them `[1]`, `[2]`, and so on so the agent can cite them. The
 Researcher answers with a short answer, the findings, what Reddit and the
 videos add, and a list of every link it used.
 
+**Video notes.** Every YouTube video research reads, and every video you give
+Studio, is turned into notes the agents can work from: a summary, key points,
+the steps in order, the tools and names it mentions, and its warnings, written
+by the Researcher's model from the transcript (long videos are read in parts).
+The full transcript is kept with its times. Each video also goes into the
+team's memory as a short entry with its link and notes id, so any agent's
+recall finds it. Agents use two tools:
+
+- `study_video` (Researcher and Jarvis): give it a link and, optionally, what
+  the team should learn from it. Give Jarvis or the Researcher a YouTube link
+  in chat and they study it.
+- `video_notes` (every starter agent): search the studied videos; it returns
+  the best match's notes and the exact transcript parts about the question,
+  each with a link that starts the video at that moment.
+
+In the app, **Knowledge & Memory → Video notes** has a box to paste a link
+(plus an optional focus) and lists every studied video; open one to read its
+notes, search the transcript, jump to any moment, or forget it. Research
+studies its videos in the background, one at a time, so it never waits on
+them; with no model running, notes are built from the transcript's most
+telling sentences instead.
+
 The **Researcher** tests code before recommending it: `test_code` saves a
 snippet in its **Research lab** project and runs it (Python or JavaScript), then
 reports PASSED or FAILED. Findings go into team memory tagged `verified` or

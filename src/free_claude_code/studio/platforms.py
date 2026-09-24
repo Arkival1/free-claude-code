@@ -23,6 +23,8 @@ BROWSER_HEADERS = {
 }
 MAX_COMMENTS = 12
 MAX_TRANSCRIPT_CHARS = 20_000
+MAX_VIDEO_TRANSCRIPT_CHARS = 120_000
+"""A study copy keeps up to about two hours of speech; reports use less."""
 _REDDIT_HOSTS = frozenset(
     {
         "reddit.com",
@@ -40,7 +42,9 @@ _CAPTIONS = re.compile(r'"captionTracks":(\[.*?\])')
 _DESCRIPTION = re.compile(r'"shortDescription":"((?:[^"\\]|\\.)*)"')
 _TITLE = re.compile(r'<meta name="title" content="([^"]*)"')
 _INITIAL_DATA = re.compile(r"var ytInitialData = (\{.*?\});</script>", re.S)
-_XML_CAPTION = re.compile(r"<text[^>]*>(.*?)</text>", re.S)
+_XML_CAPTION = re.compile(
+    r'<text(?:[^>]*?\sstart="([0-9.]+)")?[^>]*>(.*?)</text>', re.S
+)
 _CLOCK = re.compile(r"^(?:(\d+):)?(\d{1,2}):(\d{2})$")
 # The Android app's player answer carries caption links that YouTube hands
 # over even when the watch page is behind a consent or bot check.
@@ -68,6 +72,7 @@ class PlatformPage:
     score: int = 0
     comments: int = 0
     transcript: bool = False
+    segments: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,24 +190,38 @@ def parse_youtube_results(page: str, *, limit: int = 10) -> tuple[VideoResult, .
     return tuple(videos)
 
 
-def caption_text(body: str) -> str:
-    """Turn YouTube caption data (json3 or XML) into plain text."""
+def caption_segments(body: str) -> tuple[tuple[int, str], ...]:
+    """Turn YouTube caption data (json3 or XML) into (second, words) lines."""
+    lines: list[tuple[int, str]] = []
     try:
         events = json.loads(body).get("events") or []
     except ValueError, AttributeError:
-        pieces = [
-            html_lib.unescape(re.sub(r"<[^>]+>", "", piece))
-            for piece in _XML_CAPTION.findall(body)
-        ]
-        return " ".join(" ".join(pieces).split())
-    words = [
-        str(segment.get("utf8", ""))
-        for event in events
-        if isinstance(event, dict)
-        for segment in event.get("segs") or []
-        if isinstance(segment, dict)
-    ]
-    return " ".join("".join(words).split())
+        for start, piece in _XML_CAPTION.findall(body):
+            words = " ".join(html_lib.unescape(re.sub(r"<[^>]+>", "", piece)).split())
+            if words:
+                lines.append((int(float(start or 0)), words))
+        return tuple(lines)
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        words = " ".join(
+            "".join(
+                str(segment.get("utf8", ""))
+                for segment in event.get("segs") or []
+                if isinstance(segment, dict)
+            ).split()
+        )
+        if words:
+            start = event.get("tStartMs")
+            lines.append(
+                (int(start) // 1000 if isinstance(start, int | float) else 0, words)
+            )
+    return tuple(lines)
+
+
+def caption_text(body: str) -> str:
+    """Turn YouTube caption data (json3 or XML) into plain text."""
+    return " ".join(words for _, words in caption_segments(body))
 
 
 def platform_of(url: str) -> str:
@@ -513,15 +532,16 @@ class PlatformReader:
                     description = ""
             if not title_match:
                 title = await self._oembed_title(client, watch) or title
-            transcript, note = await self._transcript(client, html)
-            if not transcript:
+            segments, note = await self._transcript(client, html)
+            if not segments:
                 player = await self._player(client, video)
                 if player is not None:
                     details = player.get("videoDetails")
                     description = description or _field(details, "shortDescription")
                     found, _ = await self._read_tracks(client, _caption_tracks(player))
                     if found:
-                        transcript, note = found, ""
+                        segments, note = found, ""
+        transcript = " ".join(words for _, words in segments)[:MAX_TRANSCRIPT_CHARS]
         parts = [title]
         if description:
             parts.extend(["", "Description:", description[:2_000]])
@@ -534,6 +554,7 @@ class PlatformReader:
             text="\n".join(parts),
             note=note,
             transcript=bool(transcript),
+            segments=segments,
         )
 
     @staticmethod
@@ -568,22 +589,22 @@ class PlatformReader:
 
     async def _transcript(
         self, client: httpx.AsyncClient, html: str
-    ) -> tuple[str, str]:
+    ) -> tuple[tuple[tuple[int, str], ...], str]:
         found = _CAPTIONS.search(html)
         if not found:
-            return "", "This video has no captions YouTube would share."
+            return (), "This video has no captions YouTube would share."
         try:
             tracks = json.loads(found.group(1))
         except ValueError:
-            return "", "Could not read this video's caption list."
+            return (), "Could not read this video's caption list."
         return await self._read_tracks(client, tracks)
 
     @staticmethod
     async def _read_tracks(
         client: httpx.AsyncClient, tracks: object
-    ) -> tuple[str, str]:
+    ) -> tuple[tuple[tuple[int, str], ...], str]:
         if not isinstance(tracks, list) or not tracks:
-            return "", "This video has no captions."
+            return (), "This video has no captions."
         english = [
             track
             for track in tracks
@@ -592,21 +613,35 @@ class PlatformReader:
         ]
         usable = english or [track for track in tracks if isinstance(track, dict)]
         if not usable:
-            return "", "This video has no captions."
+            return (), "This video has no captions."
         track: JsonObject = usable[0]
         base = str(track.get("baseUrl") or "")
         if not base.startswith("https://www.youtube.com/"):
-            return "", "This video's captions are not readable."
+            return (), "This video's captions are not readable."
         base = re.sub(r"&fmt=[^&]*", "", base)
         try:
             response = await client.get(f"{base}&fmt=json3")
             response.raise_for_status()
-            text = caption_text(response.text)
+            segments = caption_segments(response.text)
         except httpx.HTTPError:
-            return "", "YouTube would not hand over this video's captions."
-        if not text:
-            return "", "This video's captions were empty."
-        return text[:MAX_TRANSCRIPT_CHARS], ""
+            return (), "YouTube would not hand over this video's captions."
+        if not segments:
+            return (), "This video's captions were empty."
+        return _cap_segments(segments), ""
+
+
+def _cap_segments(
+    segments: tuple[tuple[int, str], ...],
+) -> tuple[tuple[int, str], ...]:
+    """Keep a long video's lines up to the transcript size limit."""
+    kept: list[tuple[int, str]] = []
+    used = 0
+    for start, words in segments:
+        used += len(words) + 1
+        if used > MAX_VIDEO_TRANSCRIPT_CHARS:
+            break
+        kept.append((start, words))
+    return tuple(kept)
 
 
 def _caption_tracks(player: JsonObject) -> object:

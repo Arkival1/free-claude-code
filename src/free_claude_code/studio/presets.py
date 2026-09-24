@@ -7,6 +7,8 @@ from .tools import DEFAULT_TOOL_NAMES, TOOL_SPEC_BY_NAME
 
 RESEARCHER_TOOLS: tuple[str, ...] = (
     "research",
+    "study_video",
+    "video_notes",
     "web_search",
     "web_fetch",
     "test_code",
@@ -30,7 +32,9 @@ RESEARCHER_PROMPT = (
     "first, then the key findings cited as [n], what Reddit users and the "
     "videos add, and finally a Links list with every source you used. Save the "
     "key findings with remember, tagged verified or unverified, so the other "
-    "agents can use them."
+    "agents can use them. Every video research reads is turned into video "
+    "notes for the team; when the user gives you a video, study it with "
+    "study_video, and look back at studied videos with video_notes."
 )
 BUILDER_PROMPT = (
     "Build complete, working websites, apps, and games on your own. Plan the "
@@ -79,6 +83,7 @@ TESTER_PROMPT = (
 HELPER_TOOLS: tuple[str, ...] = (
     "recall",
     "remember",
+    "video_notes",
     "read_file",
     "list_files",
     "search_files",
@@ -103,7 +108,7 @@ ASSISTANT_PROMPT = (
 )
 
 TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Internet", ("web_search", "web_fetch", "research")),
+    ("Internet", ("web_search", "web_fetch", "research", "study_video")),
     (
         "Code and files",
         (
@@ -118,7 +123,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     ("Run and test code", ("run_command", "test_code", "check_project")),
     ("Ask teammates", ("ask_researcher", "ask_helper")),
-    ("Memory", ("remember", "recall")),
+    ("Memory", ("remember", "recall", "video_notes")),
 )
 _BUILD = (
     "write_file",
@@ -130,7 +135,7 @@ _BUILD = (
     "update_plan",
 )
 _WEB = ("web_search", "web_fetch", "research")
-_MEMORY = ("remember", "recall")
+_MEMORY = ("remember", "recall", "video_notes")
 PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("Builder", "builder", BUILDER_PROMPT, DEFAULT_TOOL_NAMES),
     ("Researcher", "researcher", RESEARCHER_PROMPT, RESEARCHER_TOOLS),
@@ -205,7 +210,9 @@ def agent_options() -> JsonObject:
     }
 
 
+_OLD_RESEARCHER_PROMPT_V2 = RESEARCHER_PROMPT.split(" Every video research")[0]
 PROMPT_UPGRADES: dict[str, str] = {
     _OLD_RESEARCHER_PROMPT_V1: RESEARCHER_PROMPT,
+    _OLD_RESEARCHER_PROMPT_V2: RESEARCHER_PROMPT,
     _OLD_BUILDER_PROMPT_V1: BUILDER_PROMPT,
 }

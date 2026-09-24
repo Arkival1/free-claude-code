@@ -162,6 +162,8 @@ class ResearchReport:
     sources: tuple[Source, ...]
     wanted: int
     notes: tuple[str, ...] = ()
+    videos: tuple[PlatformPage, ...] = ()
+    """Videos whose transcripts were read, kept so they can be studied."""
 
     def render(self) -> str:
         """Format the report for a model, numbered so it can cite [n]."""
@@ -321,6 +323,7 @@ class DeepResearch:
         self._fetch = fetch
         self._wanted = max(3, wanted)
         self._mix = mix or ResearchMix()
+        self._videos: list[PlatformPage] = []
 
     async def run(
         self,
@@ -395,6 +398,7 @@ class DeepResearch:
             sources=tuple(sources),
             wanted=self._wanted,
             notes=tuple(dict.fromkeys(notes)),
+            videos=tuple(self._videos),
         )
 
     # ------------------------------------------------------------------ web
@@ -521,6 +525,8 @@ class DeepResearch:
             for hit, page in zip(batch, pages, strict=True):
                 if page is None or not good(page) or len(kept) >= need:
                     continue
+                if page.platform == "youtube" and page.transcript:
+                    self._videos.append(page)
                 kept.append(
                     Source(
                         number=0,

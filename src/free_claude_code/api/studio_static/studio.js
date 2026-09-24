@@ -2365,14 +2365,136 @@
     }
   }
 
+  // Videos the Researcher turned into notes for the team. Paste a link to
+  // study one; open a note to read it and jump to any moment of the video.
+  function videoCard(videos) {
+    const link = el("input", { type: "url", placeholder: "Paste a YouTube link", "aria-label": "YouTube link" });
+    const focus = el("input", { type: "text", placeholder: "What should the team learn from it? (optional)", "aria-label": "Focus" });
+    const status = el("p", { class: "muted", hidden: true });
+    const study = el("button", {
+      class: "primary",
+      type: "submit",
+      text: "Study it",
+    });
+    const form = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!link.value.trim()) return;
+        study.disabled = true;
+        status.hidden = false;
+        status.textContent = "Reading the transcript and writing notes… a local model can take a minute.";
+        try {
+          const note = await post("/studio/api/videos", { url: link.value.trim(), focus: focus.value.trim() });
+          link.value = "";
+          focus.value = "";
+          status.hidden = true;
+          await render();
+          openVideo(note);
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          study.disabled = false;
+        }
+      },
+    }, [link, focus, el("div", { class: "row" }, [study]), status]);
+    const rows = videos.length
+      ? videos.map((video) =>
+          el("div", { class: "list-item video-row" }, [
+            el("span", { class: "grow" }, [
+              el("strong", { text: video.title }),
+              el("br"),
+              el("span", { class: "muted", text: `${video.length ? `${video.length} · ` : ""}${video.source === "research" ? "from research" : video.source === "user" ? "from you" : "studied by an agent"}` }),
+              video.summary ? el("p", { class: "muted video-summary", text: video.summary }) : null,
+            ]),
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Open",
+              onclick: async () => {
+                try {
+                  openVideo(await api(`/studio/api/videos/${video.id}`));
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ])
+        )
+      : [empty("No videos yet. Research saves every video it reads here, or paste one above.")];
+    return card(
+      "Video notes",
+      [form, ...rows],
+      "Videos turned into notes the agents use: summary, key points, steps, and the transcript with times. Every note is also in the team's memory."
+    );
+  }
+
+  function openVideo(note) {
+    const list = (label, items, numbered) =>
+      items && items.length
+        ? [
+            el("h3", { text: label }),
+            el(numbered ? "ol" : "ul", {}, items.map((item) => el("li", { text: item }))),
+          ]
+        : [];
+    const moment = (line) =>
+      el("div", { class: "video-line" }, [
+        el("a", {
+          class: "pill",
+          href: `${note.url}&t=${line.seconds}s`,
+          target: "_blank",
+          rel: "noopener",
+          text: line.at,
+        }),
+        el("span", { text: line.text }),
+      ]);
+    const find = el("input", { type: "search", placeholder: "Find in the transcript", "aria-label": "Find in the transcript" });
+    const lines = el("div", { class: "video-transcript" }, (note.transcript || []).map(moment));
+    find.addEventListener("input", () => {
+      const query = find.value.trim().toLowerCase();
+      for (const row of lines.children) {
+        row.hidden = Boolean(query) && !row.textContent.toLowerCase().includes(query);
+      }
+    });
+    openSheet(note.title, [
+      el("p", {}, [el("a", { href: note.url, target: "_blank", rel: "noopener", text: "Watch on YouTube" })]),
+      note.focus ? el("p", { class: "muted", text: `Studied for: ${note.focus}` }) : null,
+      note.summary ? el("p", { text: note.summary }) : null,
+      ...list("Key points", note.points),
+      ...list("Steps", note.steps, true),
+      ...list("Names", note.names),
+      ...list("Watch out", note.cautions),
+      el("details", { class: "video-details" }, [
+        el("summary", { text: `Transcript (${note.lines} lines${note.length ? `, ${note.length}` : ""})` }),
+        find,
+        lines,
+      ]),
+      el("button", {
+        class: "danger",
+        type: "button",
+        text: "Forget this video",
+        onclick: async () => {
+          try {
+            await remove(`/studio/api/videos/${note.id}`);
+            closeSheet();
+            render();
+          } catch (error) {
+            notify(error.message);
+          }
+        },
+      }),
+    ]);
+  }
+
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
       api("/studio/api/connect"),
       api("/studio/api/voice"),
+      api("/studio/api/videos").catch(() => ({ videos: [] })),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -2409,6 +2531,7 @@
         }),
         el("button", { class: "primary", type: "button", text: "Open settings", onclick: () => go("settings") }),
       ]),
+      videoCard(videos.videos || []),
       voiceCard(voiceInfo),
       webCard(overview.settings.web),
       connectCard(connect),

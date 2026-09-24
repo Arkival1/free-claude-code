@@ -22,11 +22,12 @@ from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
-from .platforms import PlatformError, PlatformReader, platform_of
+from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
 from .project_check import CHECKED_FILES, check_project
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
 from .sites import SiteError, SiteWorkspace
+from .videos import VideoStudy, at, clock, passages, render_note, studied
 
 FINISH_TOOL = "finish"
 COMMAND_TOOL = "run_command"
@@ -40,10 +41,12 @@ ASK_RESEARCHER_TOOL = "ask_researcher"
 ASK_HELPER_TOOL = "ask_helper"
 APP_HELP_TOOL = "app_help"
 CHECK_PROJECT_TOOL = "check_project"
+STUDY_VIDEO_TOOL = "study_video"
+VIDEO_NOTES_TOOL = "video_notes"
 HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
 MAX_READ_LINES = 400
-NETWORK_TOOLS = frozenset({*WEB_TOOLS, RESEARCH_TOOL})
+NETWORK_TOOLS = frozenset({*WEB_TOOLS, RESEARCH_TOOL, "study_video"})
 # Look-ups that change nothing, so several asked for at once run together.
 PARALLEL_TOOLS = frozenset(
     {
@@ -57,6 +60,7 @@ PARALLEL_TOOLS = frozenset(
         ASK_HELPER_TOOL,
         APP_HELP_TOOL,
         CHECK_PROJECT_TOOL,
+        VIDEO_NOTES_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -279,6 +283,43 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         parameters={"type": "object", "properties": {}},
     ),
     ToolSpec(
+        name=STUDY_VIDEO_TOOL,
+        description=(
+            "Study a YouTube video: read its transcript and turn it into notes "
+            "the team can use (summary, key points, steps, names, warnings), "
+            "saved in video notes and in memory with its link. Use it when the "
+            "user gives you a video, or a video matters for the task. Say what "
+            "to focus on when only part of it matters."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The YouTube link."},
+                "focus": {
+                    "type": "string",
+                    "description": "Optional: what the team wants from it.",
+                },
+            },
+            "required": ["url"],
+        },
+    ),
+    ToolSpec(
+        name=VIDEO_NOTES_TOOL,
+        description=(
+            "Look at videos the team already studied. With a query, finds the "
+            "matching videos and the exact transcript parts about it, each with "
+            "a link to that moment. With an id (from memory or a list), reads "
+            "that video's full notes. With neither, lists the latest videos."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to look for."},
+                "id": {"type": "string", "description": "A video notes id."},
+            },
+        },
+    ),
+    ToolSpec(
         name=TEST_CODE_TOOL,
         description=(
             "Try out a code snippet before relying on it: saves it in the "
@@ -454,6 +495,8 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     "web_fetch",
     "remember",
     "recall",
+    STUDY_VIDEO_TOOL,
+    VIDEO_NOTES_TOOL,
     APP_HELP_TOOL,
     FINISH_TOOL,
 )
@@ -585,6 +628,8 @@ class AgentToolbox:
         research_mix: ResearchMix | None = None,
         connectivity: Connectivity | None = None,
         app_help: Callable[[str], Awaitable[str]] | None = None,
+        videos: VideoStudy | None = None,
+        study_later: Callable[[PlatformPage], None] | None = None,
     ) -> None:
         self._web = web_tools
         self._sites = sites
@@ -601,6 +646,8 @@ class AgentToolbox:
         self._research_mix = research_mix or ResearchMix()
         self._connectivity = connectivity
         self._app_help = app_help
+        self._videos = videos
+        self._study_later = study_later
 
     @property
     def commands_enabled(self) -> bool:
@@ -697,6 +744,10 @@ class AgentToolbox:
                     return await self._app_help_call(call)
                 case "check_project":
                     return await self._check_project(context)
+                case "study_video":
+                    return await self._study_video(call, context)
+                case "video_notes":
+                    return await self._video_notes(call)
                 case _:
                     return ToolOutcome(
                         text=f"Unknown tool '{call.name}'.",
@@ -765,6 +816,8 @@ class AgentToolbox:
             raise ValueError("A URL is required.")
         if platform_of(url) != "web":
             page = await self._reader.read(url)
+            if page.transcript and self._study_later is not None:
+                self._study_later(page)
             body = page.text[:MAX_FETCH_CHARS]
             note = f"\n\n({page.note})" if page.note else ""
             return ToolOutcome(
@@ -963,6 +1016,58 @@ class AgentToolbox:
         material = str(call.arguments.get("material") or "").strip()
         return await self._delegate.help(context, request=request, material=material)
 
+    async def _study_video(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        if self._videos is None:
+            raise ValueError("Video notes are not available here.")
+        url = str(call.arguments.get("url", "")).strip()
+        focus = str(call.arguments.get("focus") or "").strip()
+        note = await self._videos.study(
+            url, focus=focus, source="agent", studied_by=context.agent_name
+        )
+        return ToolOutcome(
+            text=render_note(note),
+            data={
+                "tool": STUDY_VIDEO_TOOL,
+                "video": note.id,
+                "url": note.url,
+                "title": note.title,
+            },
+        )
+
+    async def _video_notes(self, call: ToolCall) -> ToolOutcome:
+        if self._videos is None:
+            raise ValueError("Video notes are not available here.")
+        query = str(call.arguments.get("query") or "").strip()
+        wanted = str(call.arguments.get("id") or "").strip()
+        if wanted:
+            note = await self._videos.note(wanted)
+            if note is None:
+                raise ValueError(f"No video notes with id {wanted}.")
+            found = [note]
+        else:
+            found = await self._videos.notes(query)
+        if not found or not (wanted or query):
+            return ToolOutcome(
+                text=studied(found),
+                data={"tool": VIDEO_NOTES_TOOL, "videos": [n.id for n in found]},
+            )
+        best = found[0]
+        parts = [render_note(best)]
+        if query:
+            moments = passages(best, query)
+            if moments:
+                parts.append(f"Transcript parts about '{query}':")
+                parts.extend(
+                    f"[{clock(start)}] {at(best.url, start)}\n{text}"
+                    for start, text in moments
+                )
+        if len(found) > 1:
+            parts.append("Other videos that match:\n" + studied(found[1:]))
+        return ToolOutcome(
+            text="\n\n".join(parts),
+            data={"tool": VIDEO_NOTES_TOOL, "videos": [n.id for n in found]},
+        )
+
     async def _check_project(self, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)
         contents: dict[str, str] = {}
@@ -1134,8 +1239,16 @@ class AgentToolbox:
             mix=mix,
         )
         report = await engine.run(question, platforms=platforms)
+        text = report.render()
+        if self._study_later is not None and report.videos:
+            for page in report.videos:
+                self._study_later(page)
+            text += (
+                f"\n{len(report.videos)} video(s) are being turned into video notes "
+                "for the team; look at them later with video_notes."
+            )
         return ToolOutcome(
-            text=report.render(),
+            text=text,
             data={
                 "tool": RESEARCH_TOOL,
                 "question": report.question,
