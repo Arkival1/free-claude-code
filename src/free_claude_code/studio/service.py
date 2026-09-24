@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,7 @@ from free_claude_code.core.json_types import JsonObject
 
 from .agents import AgentRunner, TurnResult
 from .commands import CommandBroker, CommandError
+from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
 from .guide import GuideAnswer, GuideAssistant, GuideState
 from .llm import (
@@ -28,7 +30,7 @@ from .llm import (
     StudioModelRouter,
 )
 from .lora import LoraTrainer
-from .memory import MemoryService
+from .memory import SHARED_MEMORY_ID, MemoryService
 from .models import (
     Agent,
     AgentRun,
@@ -51,13 +53,20 @@ from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
 from .sites import SiteWorkspace, slugify
 from .store import StudioNotFoundError, StudioStore
-from .tools import DEFAULT_TOOL_NAMES, AgentToolbox
+from .tools import DEFAULT_TOOL_NAMES, MAIN_ROLE, MAIN_TOOL_NAMES, AgentToolbox
 from .tuning import CloudTuner, LightTuner, TuningError
 
 GUIDE_AGENT_NAME = "Guide"
 BUILDER_AGENT_NAME = "Builder"
 TEACHER_AGENT_NAME = "Teacher"
 STUDENT_AGENT_NAME = "Student"
+SHARED_MEMORY_NAME = "Team memory"
+MAIN_CONSOLE_SETTING = "console"
+MAIN_PROMPT_NOTE = (
+    "Run the team for the user: answer directly when you can, and hand work "
+    "that needs building, research, or commands to the right agents."
+)
+_LOCAL_PROBE_SECONDS = 15.0
 
 
 class StudioError(RuntimeError):
@@ -75,6 +84,18 @@ class ChatSettingsResult:
 
 def _default_tools() -> tuple[str, ...]:
     return DEFAULT_TOOL_NAMES
+
+
+def _shared_memory_owner() -> Agent:
+    """Stand in for the team when its memory is written to Obsidian."""
+    return Agent.model_validate(
+        {
+            "id": SHARED_MEMORY_ID,
+            "name": SHARED_MEMORY_NAME,
+            "role": "assistant",
+            "model": "shared by every agent",
+        }
+    )
 
 
 class StudioService:
@@ -108,6 +129,9 @@ class StudioService:
         )
         self._room_activity: dict[str, int] = {}
         self._memory_sync_lock = asyncio.Lock()
+        self._main_busy = 0
+        self._main_error: str | None = None
+        self._local_probe: tuple[float, JsonObject] | None = None
 
     # ---------------------------------------------------------------- wiring
 
@@ -154,6 +178,7 @@ class StudioService:
             self._store,
             working_limit=settings.studio_memory_working_limit,
             recall_limit=settings.studio_memory_recall_limit,
+            shared=settings.studio_shared_memory,
         )
 
     def _toolbox(self) -> AgentToolbox:
@@ -173,6 +198,7 @@ class StudioService:
             commands=self._commands,
             command_policy=settings.studio_agent_commands,
             command_timeout=float(settings.studio_command_timeout),
+            delegate=Crew(store=self._store, host=self),
         )
 
     def _runner(self) -> AgentRunner:
@@ -292,6 +318,22 @@ class StudioService:
             ),
         )
         created: list[Agent] = []
+        if all(agent.role != MAIN_ROLE for agent in existing):
+            main = Agent.model_validate(
+                {
+                    "name": settings.studio_main_agent_name,
+                    "role": MAIN_ROLE,
+                    "model": settings.studio_main_agent_model or self.default_model,
+                    "system_prompt": MAIN_PROMPT_NOTE,
+                    "description": "Your main AI. Talks with you and runs the team.",
+                    "tools": MAIN_TOOL_NAMES,
+                    "local_only": (settings.studio_main_agent_model or "").startswith(
+                        LOCAL_MODEL_PREFIX
+                    ),
+                }
+            )
+            await self._store.put(main)
+            created.append(main)
         for name, role, model, prompt, tools in wanted:
             if name in by_name:
                 continue
@@ -759,6 +801,206 @@ class StudioService:
         """Return one agent task."""
         return await self._store.require(AgentRun, run_id)
 
+    async def run_agent_task(
+        self,
+        agent: Agent,
+        goal: str,
+        *,
+        site_id: str | None,
+        parent_chat_id: str | None,
+    ) -> tuple[AgentRun, Chat]:
+        """Run one task on an agent and wait for it; the main agent uses this."""
+        chat = await self.create_chat(
+            agent_id=agent.id,
+            title=goal.strip()[:48],
+            kind="agent",
+            site_id=site_id,
+            parent_chat_id=parent_chat_id,
+        )
+        run = AgentRun.model_validate(
+            {
+                "agent_id": agent.id,
+                "chat_id": chat.id,
+                "goal": goal.strip(),
+                "site_id": site_id,
+                "max_steps": self.settings.studio_agent_max_steps,
+            }
+        )
+        await self._store.put(run)
+        finished = await self._runner().run_task(agent, chat, run)
+        await self._refresh_site_count(site_id)
+        await self._after_memory_change([agent.id])
+        return finished, chat
+
+    async def run_team_task(
+        self, agents: Sequence[Agent], goal: str, *, site_id: str | None
+    ) -> tuple[Chat, RoomOutcome]:
+        """Open a room for a goal and let the agents work until they settle."""
+        room = await self.create_room(
+            title=goal.strip()[:48],
+            member_ids=[agent.id for agent in agents],
+            site_id=site_id,
+        )
+        outcome = await self.room_start_task(room.id, goal, background=False)
+        await self._refresh_site_count(site_id)
+        room = await self._store.require(Chat, room.id)
+        return room, outcome or RoomOutcome(turns=0, speakers=())
+
+    async def _refresh_site_count(self, site_id: str | None) -> None:
+        if not site_id:
+            return
+        site = await self._store.get(SiteProject, site_id)
+        if site is None:
+            return
+        files = await self._sites.files(site_id)
+        if len(files) != site.file_count:
+            await self._store.put(
+                site.model_copy(
+                    update={"file_count": len(files), "updated_at": now_ms()}
+                )
+            )
+
+    # ------------------------------------------------------------- main agent
+
+    async def main_agent(self) -> Agent:
+        """Return the main AI, creating the starter team on first use."""
+        for agent in await self.agents():
+            if agent.role == MAIN_ROLE and not agent.archived:
+                return agent
+        await self.ensure_defaults()
+        for agent in await self.agents():
+            if agent.role == MAIN_ROLE:
+                if agent.archived:
+                    agent = agent.model_copy(update={"archived": False})
+                    await self._store.put(agent)
+                return agent
+        raise StudioError("The main AI is missing.")
+
+    async def main_chat(self, *, fresh: bool = False) -> Chat:
+        """Return the main AI's console conversation, opening one if needed."""
+        agent = await self.main_agent()
+        if not fresh:
+            for chat in await self._store.find(
+                Chat, where={"agent_id": agent.id}, order_by="updated_at DESC"
+            ):
+                if chat.settings.get(MAIN_CONSOLE_SETTING):
+                    return chat
+        return await self.create_chat(
+            agent_id=agent.id,
+            title=agent.name,
+            settings={MAIN_CONSOLE_SETTING: True},
+        )
+
+    async def main_say(self, text: str, *, background: bool = True) -> Chat:
+        """Talk to the main AI; it answers and may run the team meanwhile."""
+        if not text.strip():
+            raise StudioError("Say something first.")
+        chat = await self.main_chat()
+        self._main_busy += 1
+        self._main_error = None
+        if background:
+            self.spawn(self._main_turn(chat.id, text))
+        else:
+            await self._main_turn(chat.id, text)
+        return chat
+
+    async def _main_turn(self, chat_id: str, text: str) -> None:
+        try:
+            result = await self.send(chat_id, text)
+            if result.failed:
+                self._main_error = result.error or "The main AI did not finish."
+        except (StudioError, StudioNotFoundError) as error:
+            self._main_error = str(error)
+            await self._store.append_message(
+                chat_id=chat_id,
+                role="event",
+                text=f"Could not answer: {error}",
+                author="studio",
+                data={"kind": "error"},
+            )
+        finally:
+            self._main_busy = max(0, self._main_busy - 1)
+            # Keep the console chat at the top so it is the one reopened.
+            chat = await self._store.get(Chat, chat_id)
+            if chat is not None:
+                await self._store.put(chat.model_copy(update={"updated_at": now_ms()}))
+
+    async def main_console(self, *, after: int = 0) -> JsonObject:
+        """Return what the HUD shows: the conversation, the team, and systems."""
+        agent = await self.main_agent()
+        chat = await self.main_chat()
+        messages = (
+            await self._store.transcript(chat.id, after=after)
+            if after
+            else await self._store.transcript(chat.id, limit=80)
+        )
+        runs = await self.runs()
+        running = {run.agent_id for run in runs if run.status == "running"}
+        for room_id, count in self._room_activity.items():
+            if count > 0:
+                room = await self._store.get(Chat, room_id)
+                if room is not None:
+                    running.update(room.member_ids)
+        team = [
+            {
+                "id": member.id,
+                "name": member.name,
+                "role": member.role,
+                "model": member.model,
+                "busy": member.id in running,
+                "local": member.model.startswith(LOCAL_MODEL_PREFIX),
+            }
+            for member in await self.agents()
+            if member.id != agent.id and not member.archived
+        ]
+        shared = await self._store.find(
+            MemoryEntry,
+            where={"agent_id": SHARED_MEMORY_ID},
+            order_by="used_at DESC",
+        )
+        pending = await self._commands.pending()
+        return {
+            "agent": agent.model_dump(),
+            "chat": chat.model_dump(),
+            "messages": [message.model_dump() for message in messages],
+            "thinking": self._main_busy > 0,
+            "error": self._main_error,
+            "team": team,
+            "runs": [
+                {
+                    "id": run.id,
+                    "agent_id": run.agent_id,
+                    "chat_id": run.chat_id,
+                    "goal": run.goal,
+                    "status": run.status,
+                    "step": run.step,
+                    "updated_at": run.updated_at,
+                }
+                for run in runs[:6]
+            ],
+            "approvals": [request.model_dump() for request in pending],
+            "memory": {
+                "enabled": self.settings.studio_shared_memory,
+                "count": len(shared),
+                "recent": [entry.model_dump() for entry in shared[:8]],
+            },
+            "systems": {
+                "main_model": agent.model,
+                "local": await self._local_status(),
+                "server_model": self.default_model,
+                "commands": self.settings.studio_agent_commands,
+            },
+        }
+
+    async def _local_status(self) -> JsonObject:
+        cached = self._local_probe
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < _LOCAL_PROBE_SECONDS:
+            return cached[1]
+        status = await self.local_models()
+        self._local_probe = (now, status)
+        return status
+
     # ----------------------------------------------------------------- sites
 
     async def create_site(
@@ -1089,10 +1331,17 @@ class StudioService:
     async def remember(
         self, agent_id: str, text: str, *, scope: str = "long_term"
     ) -> MemoryEntry | None:
-        """Write one memory by hand."""
-        await self._store.require(Agent, agent_id)
+        """Write one memory by hand; ``shared`` writes to the team memory."""
+        if agent_id == SHARED_MEMORY_ID:
+            scope = "long_term"
+        else:
+            await self._store.require(Agent, agent_id)
         entry = await self._memory().remember(
-            agent_id, text, scope=scope, source="user"
+            agent_id,
+            text,
+            scope=scope,
+            source="user",
+            author="you" if agent_id == SHARED_MEMORY_ID else "",
         )
         await self._after_memory_change([agent_id])
         return entry
@@ -1151,7 +1400,11 @@ class StudioService:
 
     async def sync_memory(self, agent_id: str) -> str:
         """Write one agent's memory into the vault and return the note path."""
-        agent = await self._store.require(Agent, agent_id)
+        agent = (
+            _shared_memory_owner()
+            if agent_id == SHARED_MEMORY_ID
+            else await self._store.require(Agent, agent_id)
+        )
         entries = await self._memory().entries(agent_id)
         path = await self._vault().export_memory(agent, entries)
         return str(path)
@@ -1176,10 +1429,12 @@ class StudioService:
 
     async def _sync_memory_structure(self) -> JsonObject:
         pulled = await self.pull_memory_edits()
-        agents = await self.agents()
+        agents = list(await self.agents())
         entries: dict[str, list[MemoryEntry]] = {agent.id: [] for agent in agents}
         for entry in await self._store.find(MemoryEntry, order_by="created_at ASC"):
             entries.setdefault(entry.agent_id, []).append(entry)
+        if entries.get(SHARED_MEMORY_ID):
+            agents.insert(0, _shared_memory_owner())
         result = await self._vault().mirror_memory(agents, entries)
         return {
             "pulled": pulled,
@@ -1189,8 +1444,12 @@ class StudioService:
         }
 
     async def import_vault_notes(self, agent_id: str) -> int:
-        """Read the vault Inbox into one agent's long-term memory."""
-        agent = await self._store.require(Agent, agent_id)
+        """Read the vault Inbox into one agent's (or the team's) memory."""
+        agent = (
+            _shared_memory_owner()
+            if agent_id == SHARED_MEMORY_ID
+            else await self._store.require(Agent, agent_id)
+        )
         notes = await self._vault().import_notes()
         memory = self._memory()
         stored = 0
@@ -1260,5 +1519,8 @@ class StudioService:
                 "teacher_enabled": settings.studio_teacher_enabled,
                 "obsidian_configured": bool(settings.studio_obsidian_vault),
                 "class_pass_mark": settings.studio_class_pass_mark,
+                "shared_memory": settings.studio_shared_memory,
+                "ui_theme": settings.studio_ui_theme,
+                "main_agent_name": settings.studio_main_agent_name,
             },
         }

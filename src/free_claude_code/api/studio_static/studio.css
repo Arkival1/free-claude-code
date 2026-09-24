@@ -617,3 +617,630 @@ code.command {
   border-style: solid;
   border-color: var(--warn);
 }
+
+/* ------------------------------------------------------------------ HUD */
+/* A console for the main AI: always dark, glowing cyan, iPhone first. */
+
+body[data-ui="hud"] {
+  --hud-bg: #02070d;
+  --hud-panel: rgba(6, 22, 34, 0.72);
+  --hud-line: rgba(64, 214, 255, 0.28);
+  --hud-cyan: #40d6ff;
+  --hud-cyan-soft: rgba(64, 214, 255, 0.14);
+  --hud-text: #d9f6ff;
+  --hud-muted: #7fa9ba;
+  --hud-amber: #ffb547;
+  --hud-good: #4dffa6;
+  --hud-bad: #ff5d6c;
+  --hud-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  background:
+    radial-gradient(ellipse at 50% 18%, rgba(64, 214, 255, 0.12), transparent 60%),
+    repeating-linear-gradient(0deg, rgba(64, 214, 255, 0.035) 0 1px, transparent 1px 4px),
+    var(--hud-bg);
+  color: var(--hud-text);
+}
+
+html:has(body[data-ui="hud"]) {
+  background: #02070d;
+  color-scheme: dark;
+}
+
+body[data-ui="hud"] .app-bar,
+body[data-ui="hud"] .tab-bar {
+  display: none;
+}
+
+body[data-ui="hud"] .view {
+  max-width: none;
+  padding: 0;
+}
+
+.hud {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "top" "core" "log" "cmd" "team" "side" "foot";
+  padding: calc(var(--safe-top) + 10px) calc(var(--safe-right) + 14px)
+    calc(var(--safe-bottom) + 14px) calc(var(--safe-left) + 14px);
+  min-height: 100dvh;
+  width: 100%;
+  background:
+    radial-gradient(ellipse at 50% 12%, rgba(64, 214, 255, 0.12), transparent 55%),
+    repeating-linear-gradient(0deg, rgba(64, 214, 255, 0.035) 0 1px, transparent 1px 4px),
+    #02070d;
+  font-family: var(--hud-mono);
+  letter-spacing: 0.02em;
+}
+
+.hud-top {
+  grid-area: top;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--hud-line);
+  padding-bottom: 8px;
+}
+
+.hud-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.hud-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  color: var(--hud-cyan);
+  text-shadow: 0 0 12px rgba(64, 214, 255, 0.6);
+}
+
+.hud-clock {
+  color: var(--hud-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hud-pill {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  padding: 3px 8px;
+  border: 1px solid var(--hud-line);
+  color: var(--hud-muted);
+  white-space: nowrap;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-pill.good {
+  color: var(--hud-good);
+  border-color: rgba(77, 255, 166, 0.35);
+}
+
+.hud-pill.bad {
+  color: var(--hud-bad);
+  border-color: rgba(255, 93, 108, 0.4);
+}
+
+.hud-pill.warn {
+  color: var(--hud-amber);
+  border-color: rgba(255, 181, 71, 0.5);
+  animation: hud-blink 1.2s steps(2, jump-none) infinite;
+}
+
+.hud-core {
+  grid-area: core;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.hud-orb {
+  width: min(46vw, 210px);
+  aspect-ratio: 1;
+  color: var(--hud-cyan);
+  filter: drop-shadow(0 0 18px rgba(64, 214, 255, 0.45));
+}
+
+.hud-orb svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.orb-ring {
+  fill: none;
+  stroke: currentColor;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.orb-outer {
+  stroke-width: 1;
+  stroke-opacity: 0.35;
+  stroke-dasharray: 3 7;
+  animation: hud-spin 60s linear infinite;
+}
+
+.orb-ticks {
+  stroke-width: 6;
+  stroke-opacity: 0.5;
+  stroke-dasharray: 1.5 7.3;
+  animation: hud-spin 40s linear infinite reverse;
+}
+
+.orb-arc {
+  stroke-width: 3;
+  stroke-dasharray: 150 302;
+  stroke-linecap: round;
+  animation: hud-spin 9s linear infinite;
+}
+
+.orb-arc-2 {
+  stroke-width: 2;
+  stroke-opacity: 0.7;
+  stroke-dasharray: 70 307;
+  stroke-linecap: round;
+  animation: hud-spin 6s linear infinite reverse;
+}
+
+.orb-inner {
+  stroke-width: 1;
+  stroke-opacity: 0.6;
+}
+
+.orb-core {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hud-breathe 4s ease-in-out infinite;
+}
+
+.hud[data-state="thinking"] .orb-arc,
+.hud[data-state="thinking"] .orb-arc-2 {
+  animation-duration: 1.4s;
+}
+
+.hud[data-state="thinking"] .orb-core {
+  animation-duration: 1.2s;
+}
+
+.hud[data-state="speaking"] .orb-core {
+  animation: hud-speak 0.45s ease-in-out infinite alternate;
+}
+
+.hud[data-state="listening"] .hud-orb {
+  color: var(--hud-good);
+}
+
+.hud[data-state="offline"] .hud-orb {
+  color: var(--hud-bad);
+  filter: none;
+}
+
+.hud[data-state="offline"] .orb-ring,
+.hud[data-state="offline"] .orb-core {
+  animation-play-state: paused;
+}
+
+.hud-status {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.4em;
+  color: var(--hud-cyan);
+}
+
+.hud[data-state="offline"] .hud-status {
+  color: var(--hud-bad);
+}
+
+.hud-log {
+  grid-area: log;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 140px;
+  max-height: 44dvh;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--hud-line);
+  background: var(--hud-panel);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+  scroll-behavior: smooth;
+}
+
+.hud-log > * {
+  flex-shrink: 0;
+}
+
+.hud-line {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: var(--hud-text);
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--hud-line);
+  padding: 2px 0 2px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hud-line.you {
+  border-left-color: var(--hud-muted);
+  color: #f3fbff;
+}
+
+.hud-line.you.pending {
+  opacity: 0.6;
+}
+
+.hud-line.ai {
+  border-left-color: var(--hud-cyan);
+}
+
+.hud-line.partial,
+.hud-line.tool,
+.hud-line.event {
+  color: var(--hud-muted);
+  font-size: 0.82rem;
+}
+
+.hud-line.bad {
+  border-left-color: var(--hud-bad);
+}
+
+.hud-line.handoff {
+  cursor: pointer;
+  background: var(--hud-cyan-soft);
+  border-left-color: var(--hud-amber);
+  min-height: var(--tap);
+}
+
+.hud-line.handoff.bad {
+  border-left-color: var(--hud-bad);
+}
+
+.hud-line.approval code,
+.hud-item code {
+  display: block;
+  margin: 4px 0;
+  color: var(--hud-amber);
+  font-family: var(--hud-mono);
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hud-tag {
+  display: block;
+  font-family: var(--hud-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.24em;
+  color: var(--hud-cyan);
+  opacity: 0.85;
+}
+
+.hud-line.you .hud-tag {
+  color: var(--hud-muted);
+}
+
+.hud-line.handoff .hud-tag {
+  color: var(--hud-amber);
+}
+
+.hud-empty {
+  margin: 0;
+  color: var(--hud-muted);
+  font-size: 0.85rem;
+}
+
+.hud-command {
+  grid-area: cmd;
+  position: sticky;
+  bottom: calc(var(--safe-bottom) + 6px);
+  z-index: 3;
+  display: flex;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--hud-cyan);
+  background: rgba(2, 10, 18, 0.94);
+  box-shadow: 0 0 22px rgba(64, 214, 255, 0.22);
+}
+
+.hud-command input,
+.hud-remember input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  border: 0;
+  background: transparent;
+  color: var(--hud-text);
+  font: 16px/1.3 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  padding: 0 6px;
+}
+
+.hud-command input:focus-visible,
+.hud-remember input:focus-visible {
+  outline: 1px solid var(--hud-cyan);
+}
+
+.hud-mic,
+.hud-send,
+.hud-button {
+  min-height: var(--tap);
+  min-width: var(--tap);
+  padding: 0 12px;
+  border: 1px solid var(--hud-line);
+  background: var(--hud-cyan-soft);
+  color: var(--hud-cyan);
+  font: 600 0.72rem/1 var(--hud-mono);
+  letter-spacing: 0.18em;
+  cursor: pointer;
+}
+
+.hud-mic {
+  border-radius: 50%;
+  padding: 0;
+  font-size: 1.1rem;
+}
+
+.hud[data-state="listening"] .hud-mic {
+  color: var(--hud-bg);
+  background: var(--hud-good);
+  box-shadow: 0 0 16px var(--hud-good);
+}
+
+.hud-send {
+  background: var(--hud-cyan);
+  color: var(--hud-bg);
+  border-color: var(--hud-cyan);
+}
+
+.hud-mic:focus-visible,
+.hud-send:focus-visible,
+.hud-button:focus-visible,
+.hud-agent:focus-visible,
+.hud-item:focus-visible,
+.hud-line.handoff:focus-visible {
+  outline: 2px solid var(--hud-cyan);
+  outline-offset: 2px;
+}
+
+.hud-team {
+  grid-area: team;
+}
+
+.hud-side {
+  grid-area: side;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.hud-panel {
+  border: 1px solid var(--hud-line);
+  background: var(--hud-panel);
+  padding: 10px;
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+
+.hud-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.hud-panel h2 {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.32em;
+  color: var(--hud-cyan);
+}
+
+.hud-list {
+  display: grid;
+  gap: 6px;
+}
+
+.hud-agent,
+.hud-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 6px 8px;
+  text-align: left;
+  border: 1px solid transparent;
+  border-left: 2px solid var(--hud-line);
+  background: rgba(64, 214, 255, 0.05);
+  color: var(--hud-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.hud-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  cursor: default;
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+button.hud-item {
+  cursor: pointer;
+}
+
+.hud-item small,
+.hud-agent small {
+  display: block;
+  color: var(--hud-muted);
+  font-family: var(--hud-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+}
+
+.hud-item.run.running {
+  border-left-color: var(--hud-amber);
+}
+
+.hud-item.run.succeeded {
+  border-left-color: var(--hud-good);
+}
+
+.hud-item.run.failed {
+  border-left-color: var(--hud-bad);
+}
+
+.hud-item.approval {
+  border-left-color: var(--hud-amber);
+}
+
+.hud-agent strong {
+  display: block;
+  font-size: 0.9rem;
+  letter-spacing: 0.06em;
+}
+
+.hud-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--hud-good);
+  box-shadow: 0 0 8px var(--hud-good);
+  flex: none;
+}
+
+.hud-agent.busy {
+  border-left-color: var(--hud-amber);
+}
+
+.hud-agent.busy .hud-dot {
+  background: var(--hud-amber);
+  box-shadow: 0 0 10px var(--hud-amber);
+  animation: hud-blink 0.9s ease-in-out infinite;
+}
+
+.hud-agent-state {
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  color: var(--hud-muted);
+}
+
+.hud-agent.busy .hud-agent-state {
+  color: var(--hud-amber);
+}
+
+.hud-remember {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  border-top: 1px solid var(--hud-line);
+  padding-top: 8px;
+}
+
+.hud-foot {
+  grid-area: foot;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.hud .row button.primary,
+.hud .row button.danger {
+  min-height: 36px;
+  font-size: 0.8rem;
+}
+
+@media (min-width: 960px) {
+  .hud {
+    height: 100dvh;
+    grid-template-columns: 270px minmax(0, 1fr) 320px;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "top top top"
+      "team core side"
+      "team log side"
+      "team cmd side"
+      "foot foot foot";
+  }
+
+  .hud-log {
+    max-height: none;
+  }
+
+  .hud-team,
+  .hud-side {
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .hud-team {
+    grid-row: 2 / 5;
+  }
+
+  .hud-side {
+    grid-row: 2 / 5;
+  }
+
+  .hud-command {
+    position: static;
+  }
+}
+
+@keyframes hud-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes hud-breathe {
+  0%,
+  100% {
+    transform: scale(0.92);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 1;
+  }
+}
+
+@keyframes hud-speak {
+  from {
+    transform: scale(0.9);
+  }
+  to {
+    transform: scale(1.12);
+  }
+}
+
+@keyframes hud-blink {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud *,
+  .hud *::before,
+  .hud *::after {
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

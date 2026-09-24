@@ -718,6 +718,18 @@ class Settings(BaseModel):
     studio_obsidian_auto_sync: bool = Field(
         default=False, validation_alias="STUDIO_OBSIDIAN_AUTO_SYNC"
     )
+    studio_shared_memory: bool = Field(
+        default=True, validation_alias="STUDIO_SHARED_MEMORY"
+    )
+    studio_main_agent_name: NonEmptyString = Field(
+        default="Jarvis", validation_alias="STUDIO_MAIN_AGENT_NAME"
+    )
+    studio_main_agent_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_MAIN_AGENT_MODEL"
+    )
+    studio_ui_theme: NonEmptyString = Field(
+        default="classic", validation_alias="STUDIO_UI_THEME"
+    )
 
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
     # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).
@@ -823,6 +835,15 @@ class Settings(BaseModel):
         if value not in ("off", "ask", "auto"):
             raise ValueError(
                 f"STUDIO_AGENT_COMMANDS must be 'off', 'ask', or 'auto', got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_ui_theme")
+    @classmethod
+    def validate_studio_ui_theme(cls, value: str) -> str:
+        if value not in ("classic", "hud"):
+            raise ValueError(
+                f"STUDIO_UI_THEME must be 'classic' or 'hud', got {value!r}"
             )
         return value
 

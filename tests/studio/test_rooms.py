@@ -156,12 +156,12 @@ async def test_agents_hand_off_and_finish_a_task(make_studio):
     assert stored.settings["task_status"] == "done"
     assert stored.settings["goal"] == "Find today's tides"
 
+    shared = await studio.memories("shared")
+    finished = [entry for entry in shared if "Finished a team task" in entry.text]
+    assert len(finished) == 1, "the team should learn the outcome exactly once"
+    assert finished[0].author == "Lead, Scout"
     for agent in team:
-        long_term = [
-            entry.text for entry in await studio.memories(agent.id, scope="long_term")
-        ]
         working = await studio.memories(agent.id, scope="working")
-        assert any("Finished a team task" in text for text in long_term)
         assert working, f"{agent.name} kept no working memory of the room"
 
 

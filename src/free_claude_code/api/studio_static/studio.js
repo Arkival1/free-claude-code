@@ -2072,13 +2072,15 @@
       api("/studio/api/agents"),
       api("/studio/api/connect"),
     ]);
-    const picker = el(
-      "select",
-      {},
-      agents.map((agent) => el("option", { value: agent.id, text: agent.name }))
-    );
+    const picker = el("select", {}, [
+      overview.settings.shared_memory
+        ? el("option", { value: "shared", text: "Team memory (shared)" })
+        : null,
+      ...agents.map((agent) => el("option", { value: agent.id, text: agent.name })),
+    ]);
     if (generation !== renderGeneration) return;
     view.replaceChildren(
+      appearanceCard(),
       connectCard(connect),
       card("Tuning", [
         el("p", { class: "muted", text: "Very light tuning, on device or in the cloud." }),
@@ -2177,19 +2179,578 @@
     );
   }
 
+  /* -------------------------------------------------------------------- hud */
+
+  const UI_KEY = "fcc.studio.ui";
+  const VOICE_KEY = "fcc.studio.voice";
+  const ORB_SVG = `
+    <svg viewBox="0 0 200 200" aria-hidden="true" focusable="false">
+      <defs>
+        <radialGradient id="hud-glow">
+          <stop offset="0" stop-color="#ffffff" stop-opacity="0.95" />
+          <stop offset="0.35" stop-color="currentColor" stop-opacity="0.9" />
+          <stop offset="1" stop-color="currentColor" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+      <circle class="orb-ring orb-outer" cx="100" cy="100" r="94" />
+      <circle class="orb-ring orb-ticks" cx="100" cy="100" r="84" />
+      <circle class="orb-ring orb-arc" cx="100" cy="100" r="72" />
+      <circle class="orb-ring orb-arc-2" cx="100" cy="100" r="60" />
+      <circle class="orb-ring orb-inner" cx="100" cy="100" r="48" />
+      <circle class="orb-core" cx="100" cy="100" r="40" fill="url(#hud-glow)" />
+    </svg>`;
+
+  const hud = {
+    lastSeq: 0,
+    spokenSeq: 0,
+    chatId: null,
+    name: "Jarvis",
+    thinking: false,
+    speaking: false,
+    listening: false,
+    offline: false,
+    unlocked: false,
+    recognizer: null,
+    optimistic: null,
+    keys: {},
+  };
+
+  const storedGet = (key) => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const storedSet = (key, value) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* private mode: the choice lasts for this visit only */
+    }
+  };
+
+  function uiMode() {
+    const chosen = storedGet(UI_KEY);
+    if (chosen === "hud" || chosen === "classic") return chosen;
+    return document.body.dataset.uiDefault === "hud" ? "hud" : "classic";
+  }
+
+  function setUiMode(mode) {
+    storedSet(UI_KEY, mode);
+    if (route().name === "home") render();
+    else go("home");
+  }
+
+  const voiceOn = () => storedGet(VOICE_KEY) !== "off";
+  const speechSupported = () => "speechSynthesis" in window;
+  const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  function pickVoice() {
+    const voices = speechSynthesis.getVoices();
+    const english = voices.filter((voice) => /^en[-_]GB/i.test(voice.lang));
+    return (
+      english.find((voice) => /daniel|arthur|george|male/i.test(voice.name)) ||
+      english[0] ||
+      voices.find((voice) => /^en/i.test(voice.lang)) ||
+      null
+    );
+  }
+
+  function unlockSpeech() {
+    // iOS only lets a page speak after a tap has started speech once.
+    if (hud.unlocked || !speechSupported()) return;
+    hud.unlocked = true;
+    const silent = new SpeechSynthesisUtterance(" ");
+    silent.volume = 0;
+    speechSynthesis.speak(silent);
+  }
+
+  function speak(text, refs) {
+    if (!voiceOn() || !hud.unlocked || !speechSupported() || !text) return;
+    const utterance = new SpeechSynthesisUtterance(text.replace(/[*_`#>]/g, "").slice(0, 600));
+    const voice = pickVoice();
+    if (voice) utterance.voice = voice;
+    utterance.rate = 1.02;
+    utterance.onstart = () => {
+      hud.speaking = true;
+      hudState(refs);
+    };
+    utterance.onend = utterance.onerror = () => {
+      hud.speaking = false;
+      hudState(refs);
+    };
+    speechSynthesis.speak(utterance);
+  }
+
+  function stopListening() {
+    if (hud.recognizer) {
+      try {
+        hud.recognizer.abort();
+      } catch {
+        /* already stopped */
+      }
+    }
+    hud.recognizer = null;
+    hud.listening = false;
+  }
+
+  function hudState(refs) {
+    const state = hud.offline
+      ? "offline"
+      : hud.listening
+        ? "listening"
+        : hud.speaking
+          ? "speaking"
+          : hud.thinking
+            ? "thinking"
+            : "idle";
+    refs.root.dataset.state = state;
+    refs.status.textContent = {
+      offline: "LINK LOST — RETRYING",
+      listening: "LISTENING",
+      speaking: "SPEAKING",
+      thinking: "WORKING",
+      idle: "STANDING BY",
+    }[state];
+  }
+
+  const shortModel = (model) => (model || "").replace(/^local\//, "").split("/").pop();
+
+  function hudTag(text) {
+    return el("span", { class: "hud-tag", text });
+  }
+
+  function hudLine(message) {
+    const data = message.data || {};
+    if (data.kind === "approval") {
+      const actions = el("div", { class: "row" });
+      if (pendingCommands.has(data.request_id)) {
+        actions.append(...approvalButtons(data.request_id, actions));
+      }
+      return el("div", { class: "hud-line approval" }, [
+        hudTag("APPROVE?"),
+        el("code", { text: data.command || message.text }),
+        actions,
+      ]);
+    }
+    if (message.role === "user") {
+      return el("div", { class: "hud-line you" }, [hudTag("YOU"), message.text]);
+    }
+    if (message.role === "assistant") {
+      return el("div", { class: `hud-line ai${data.partial ? " partial" : ""}` }, [
+        hudTag((message.author || hud.name).toUpperCase()),
+        message.text,
+      ]);
+    }
+    if (message.role === "tool") {
+      const team = data.tool === "team_task";
+      const target = team && data.room_id ? `room/${data.room_id}` : data.chat_id ? `chat/${data.chat_id}` : "";
+      const summary = message.text.split("\n")[0].slice(0, 220);
+      if ((data.tool === "ask_agent" || team) && target) {
+        return el(
+          "button",
+          { class: `hud-line handoff ${data.failed ? "bad" : "good"}`, onclick: () => go(target) },
+          [hudTag(team ? "TEAM" : "AGENT"), summary]
+        );
+      }
+      return el("div", { class: `hud-line tool${data.failed ? " bad" : ""}` }, [
+        hudTag((message.author || "tool").toUpperCase()),
+        summary,
+      ]);
+    }
+    return el("div", { class: "hud-line event" }, [hudTag("SYS"), message.text]);
+  }
+
+  function hudPanel(heading, body, extra) {
+    return el("section", { class: "hud-panel" }, [
+      el("header", {}, [el("h2", { text: heading }), extra || null]),
+      body,
+    ]);
+  }
+
+  function changed(key, value) {
+    const serial = JSON.stringify(value);
+    if (hud.keys[key] === serial) return false;
+    hud.keys[key] = serial;
+    return true;
+  }
+
+  function updateHud(refs, data) {
+    hud.name = data.agent.name;
+    hud.thinking = Boolean(data.thinking);
+    hud.offline = false;
+    refs.name.textContent = data.agent.name.toUpperCase();
+    refs.clock.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    const local = data.systems.local || {};
+    if (changed("pills", [local.reachable, data.systems.main_model, data.memory, data.approvals.length, data.systems.commands])) {
+      refs.pills.replaceChildren(
+        el("span", { class: `hud-pill ${local.reachable ? "good" : "bad"}`, title: local.base_url || "" }, [
+          `LOCAL ${local.reachable ? `ONLINE · ${(local.models || []).length}` : "OFFLINE"}`,
+        ]),
+        el("span", { class: "hud-pill", title: data.systems.main_model }, [`CORE ${shortModel(data.systems.main_model)}`]),
+        el("span", { class: `hud-pill ${data.memory.enabled ? "good" : ""}` }, [
+          data.memory.enabled ? `SHARED MEM ${data.memory.count}` : "SHARED MEM OFF",
+        ]),
+        data.approvals.length
+          ? el("span", { class: "hud-pill warn" }, [`APPROVALS ${data.approvals.length}`])
+          : el("span", { class: "hud-pill" }, [`CMD ${data.systems.commands.toUpperCase()}`])
+      );
+    }
+
+    if (data.chat.id !== hud.chatId) {
+      hud.chatId = data.chat.id;
+      hud.lastSeq = 0;
+      refs.log.replaceChildren();
+    }
+    const fresh = data.messages.filter((message) => message.sequence > hud.lastSeq);
+    if (fresh.length) {
+      if (hud.optimistic && fresh.some((message) => message.role === "user")) {
+        hud.optimistic.remove();
+        hud.optimistic = null;
+      }
+      refs.log.querySelector(".hud-empty")?.remove();
+      refs.log.append(...fresh.map(hudLine));
+      hud.lastSeq = fresh[fresh.length - 1].sequence;
+      refs.log.scrollTop = refs.log.scrollHeight;
+      for (const message of fresh) {
+        const meta = message.data || {};
+        if (message.role === "assistant" && !meta.partial && message.sequence > hud.spokenSeq) {
+          hud.spokenSeq = message.sequence;
+          speak(message.text, refs);
+        }
+      }
+    }
+    if (!refs.log.childElementCount) {
+      refs.log.append(
+        el("p", {
+          class: "hud-empty",
+          text: `${data.agent.name} is online. Ask a question, or give the team a job: “Have Builder make a landing page for my bakery.”`,
+        })
+      );
+    }
+
+    if (changed("team", data.team)) {
+      refs.team.replaceChildren(
+        ...(data.team.length
+          ? data.team.map((member) =>
+              el("button", { class: `hud-agent${member.busy ? " busy" : ""}`, onclick: () => go(`agent/${member.id}`) }, [
+                el("span", { class: "hud-dot" }),
+                el("span", { class: "grow" }, [
+                  el("strong", { text: member.name }),
+                  el("small", { text: `${member.role} · ${member.local ? "local" : "server"} · ${shortModel(member.model)}` }),
+                ]),
+                el("span", { class: "hud-agent-state", text: member.busy ? "ACTIVE" : "READY" }),
+              ])
+            )
+          : [el("p", { class: "hud-empty", text: "No agents yet." })])
+      );
+    }
+
+    if (changed("activity", [data.runs, data.approvals])) {
+      pendingCommands = new Set(data.approvals.map((request) => request.id));
+      const names = Object.fromEntries(data.team.map((member) => [member.id, member.name]));
+      const rows = [
+        ...data.approvals.map((request) => {
+          const actions = el("div", { class: "row" });
+          actions.append(...approvalButtons(request.id, actions));
+          return el("div", { class: "hud-item approval" }, [
+            el("small", { text: `${request.agent_id ? names[request.agent_id] || "Agent" : "Agent"} wants to run` }),
+            el("code", { text: request.command }),
+            actions,
+          ]);
+        }),
+        ...data.runs.map((run) =>
+          el("button", { class: `hud-item run ${run.status}`, onclick: () => go(`task/${run.id}`) }, [
+            el("small", { text: `${names[run.agent_id] || "Agent"} · ${run.status}${run.status === "running" ? ` · step ${run.step}` : ""}` }),
+            el("span", { text: run.goal.slice(0, 120) }),
+          ])
+        ),
+      ];
+      refs.activity.replaceChildren(...(rows.length ? rows : [el("p", { class: "hud-empty", text: "No jobs yet." })]));
+    }
+
+    if (changed("memory", data.memory)) {
+      refs.memory.replaceChildren(
+        ...(data.memory.recent.length
+          ? data.memory.recent.map((entry) =>
+              el("div", { class: "hud-item" }, [
+                el("span", { text: entry.text }),
+                entry.author ? el("small", { text: `— ${entry.author}` }) : null,
+              ])
+            )
+          : [
+              el("p", {
+                class: "hud-empty",
+                text: data.memory.enabled
+                  ? "Nothing shared yet. Agents add what they learn here."
+                  : "Shared memory is off in Studio settings.",
+              }),
+            ])
+      );
+    }
+    hudState(refs);
+  }
+
+  async function renderHud() {
+    const generation = renderGeneration;
+    const data = await api("/studio/api/main");
+    if (generation !== renderGeneration) return;
+    document.body.dataset.ui = "hud";
+    hud.keys = {};
+    hud.chatId = null;
+    hud.optimistic = null;
+    const last = data.messages[data.messages.length - 1];
+    hud.spokenSeq = last ? last.sequence : 0;
+
+    const input = el("input", {
+      type: "text",
+      id: "hud-input",
+      autocomplete: "off",
+      enterkeyhint: "send",
+      "aria-label": `Talk to ${data.agent.name}`,
+      placeholder: `Talk to ${data.agent.name}…`,
+    });
+    const refs = {
+      name: el("span", { class: "hud-name" }),
+      clock: el("span", { class: "hud-clock" }),
+      pills: el("div", { class: "hud-pills" }),
+      status: el("p", { class: "hud-status", role: "status" }),
+      log: el("div", { class: "hud-log", "aria-live": "polite" }),
+      team: el("div", { class: "hud-list" }),
+      activity: el("div", { class: "hud-list" }),
+      memory: el("div", { class: "hud-list" }),
+    };
+
+    const poll = async () => {
+      if (generation !== renderGeneration) return stopPolling();
+      try {
+        const next = await api(`/studio/api/main?after=${hud.lastSeq}`);
+        if (generation !== renderGeneration) return;
+        updateHud(refs, next);
+      } catch {
+        if (generation !== renderGeneration) return;
+        hud.offline = true;
+        hudState(refs);
+      }
+    };
+
+    const send = async (raw) => {
+      const text = raw.trim();
+      if (!text) return;
+      input.value = "";
+      unlockSpeech();
+      if (speechSupported()) speechSynthesis.cancel();
+      hud.optimistic?.remove();
+      hud.optimistic = el("div", { class: "hud-line you pending" }, [hudTag("YOU"), text]);
+      refs.log.querySelector(".hud-empty")?.remove();
+      refs.log.append(hud.optimistic);
+      refs.log.scrollTop = refs.log.scrollHeight;
+      hud.thinking = true;
+      hudState(refs);
+      try {
+        await post("/studio/api/main/messages", { text });
+      } catch (error) {
+        hud.thinking = false;
+        hudState(refs);
+        notify(error.message);
+        return;
+      }
+      poll();
+    };
+
+    const listen = () => {
+      const Engine = Recognition();
+      if (!Engine) return;
+      if (hud.listening) {
+        stopListening();
+        hudState(refs);
+        return;
+      }
+      unlockSpeech();
+      const recognizer = new Engine();
+      let heard = "";
+      recognizer.lang = navigator.language || "en-US";
+      recognizer.interimResults = true;
+      recognizer.continuous = false;
+      recognizer.onresult = (event) => {
+        heard = Array.from(event.results)
+          .map((result) => result[0].transcript)
+          .join("");
+        input.value = heard;
+      };
+      recognizer.onerror = (event) => {
+        if (event.error !== "aborted") notify(`Microphone: ${event.error}`);
+      };
+      recognizer.onend = () => {
+        const finished = hud.recognizer === recognizer;
+        hud.recognizer = null;
+        hud.listening = false;
+        hudState(refs);
+        if (finished && heard.trim()) send(heard);
+      };
+      hud.recognizer = recognizer;
+      hud.listening = true;
+      hudState(refs);
+      recognizer.start();
+    };
+
+    const voiceButton = el("button", {
+      class: "hud-button",
+      type: "button",
+      text: voiceOn() ? "VOICE ON" : "VOICE OFF",
+      "aria-pressed": String(voiceOn()),
+      hidden: !speechSupported(),
+      onclick: () => {
+        const next = !voiceOn();
+        storedSet(VOICE_KEY, next ? "on" : "off");
+        if (!next && speechSupported()) speechSynthesis.cancel();
+        voiceButton.textContent = next ? "VOICE ON" : "VOICE OFF";
+        voiceButton.setAttribute("aria-pressed", String(next));
+      },
+    });
+
+    const memoryInput = el("input", {
+      type: "text",
+      autocomplete: "off",
+      "aria-label": "Tell the team to remember",
+      placeholder: "Tell the team to remember…",
+    });
+
+    const root = el("div", { class: "hud", "data-state": "idle" }, [
+      el("header", { class: "hud-top" }, [
+        el("div", { class: "hud-brand" }, [refs.name, refs.clock]),
+        refs.pills,
+      ]),
+      el("section", { class: "hud-core" }, [
+        el("div", { class: "hud-orb", html: ORB_SVG }),
+        refs.status,
+      ]),
+      refs.log,
+      el(
+        "form",
+        {
+          class: "hud-command",
+          onsubmit: (event) => {
+            event.preventDefault();
+            send(input.value);
+          },
+        },
+        [
+          el("button", {
+            class: "hud-mic",
+            type: "button",
+            "aria-label": "Speak",
+            text: "●",
+            hidden: !Recognition(),
+            onclick: listen,
+          }),
+          input,
+          el("button", { class: "hud-send", type: "submit", text: "SEND" }),
+        ]
+      ),
+      el("div", { class: "hud-team" }, [hudPanel("TEAM", refs.team)]),
+      el("div", { class: "hud-side" }, [
+        hudPanel("ACTIVITY", refs.activity),
+        hudPanel(
+          "SHARED MEMORY",
+          el("div", {}, [
+            refs.memory,
+            el(
+              "form",
+              {
+                class: "hud-remember",
+                onsubmit: async (event) => {
+                  event.preventDefault();
+                  const text = memoryInput.value.trim();
+                  if (!text) return;
+                  try {
+                    await post("/studio/api/memory/shared", { text });
+                    memoryInput.value = "";
+                    notify("The team will remember that.");
+                    poll();
+                  } catch (error) {
+                    notify(error.message);
+                  }
+                },
+              },
+              [memoryInput, el("button", { class: "hud-button", type: "submit", text: "SAVE" })]
+            ),
+          ])
+        ),
+      ]),
+      el("footer", { class: "hud-foot" }, [
+        el("button", {
+          class: "hud-button",
+          type: "button",
+          text: "NEW TALK",
+          onclick: async () => {
+            try {
+              await post("/studio/api/main/new");
+              render();
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+        voiceButton,
+        el("button", { class: "hud-button", type: "button", text: "MENU", onclick: () => go("more") }),
+        el("button", {
+          class: "hud-button",
+          type: "button",
+          text: "CLASSIC UI",
+          onclick: () => setUiMode("classic"),
+        }),
+      ]),
+    ]);
+    refs.root = root;
+    view.replaceChildren(root);
+    updateHud(refs, data);
+    startPolling(poll);
+  }
+
+  function appearanceCard() {
+    const mode = uiMode();
+    return card(
+      "Appearance",
+      [
+        el("div", { class: "row" }, [
+          el("button", {
+            class: mode === "classic" ? "primary" : "secondary",
+            text: "Classic app",
+            "aria-pressed": String(mode === "classic"),
+            onclick: () => setUiMode("classic"),
+          }),
+          el("button", {
+            class: mode === "hud" ? "primary" : "secondary",
+            text: "HUD console",
+            "aria-pressed": String(mode === "hud"),
+            onclick: () => setUiMode("hud"),
+          }),
+        ]),
+      ],
+      "HUD turns Home into a console for your main AI, which runs the other agents for you. All agents share one team memory. This choice is saved on this device."
+    );
+  }
+
   /* ----------------------------------------------------------------- render */
 
   async function render() {
     renderGeneration += 1;
     const generation = renderGeneration;
     stopPolling();
+    stopListening();
     const { name, id } = route();
+    const hudView = name === "hud" || (name === "home" && uiMode() === "hud");
+    document.body.dataset.ui = hudView ? "hud" : "classic";
     setChrome(name, headingFor(name));
     if (generation !== renderGeneration) return;
     view.replaceChildren(el("p", { class: "muted", text: "Loading…" }));
     try {
       switch (name) {
-        case "home": return await renderHome();
+        case "home": return hudView ? await renderHud() : await renderHome();
+        case "hud": return await renderHud();
         case "chats": return await renderChats();
         case "chat": return await renderChat(id);
         case "room": return await renderRoom(id);
@@ -2329,6 +2890,7 @@
     return (
       {
         home: "Studio",
+        hud: "HUD",
         chats: "Chats",
         chat: "Chat",
         room: "Room",

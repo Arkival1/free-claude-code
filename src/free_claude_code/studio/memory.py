@@ -1,4 +1,4 @@
-"""Per-agent working and long-term memory with keyword recall."""
+"""Per-agent working and long-term memory, plus one shared team memory."""
 
 import math
 import re
@@ -73,6 +73,9 @@ _STOPWORDS = frozenset(
 )
 _DAY_MS = 86_400_000
 
+SHARED_MEMORY_ID = "shared"
+"""The owner id of the memory every agent reads and writes together."""
+
 
 def keywords(text: str, *, limit: int = 12) -> tuple[str, ...]:
     """Return the distinctive lowercase terms used for recall matching."""
@@ -98,7 +101,7 @@ def _score(entry: MemoryEntry, terms: Sequence[str], *, now: int) -> float:
 
 
 class MemoryService:
-    """Give each agent a memory it writes to and recalls from by itself."""
+    """Give each agent its own memory and, when enabled, a team memory."""
 
     def __init__(
         self,
@@ -106,10 +109,17 @@ class MemoryService:
         *,
         working_limit: int = 20,
         recall_limit: int = 6,
+        shared: bool = False,
     ) -> None:
         self._store = store
         self._working_limit = max(1, working_limit)
         self._recall_limit = max(1, recall_limit)
+        self._shared = shared
+
+    @property
+    def shared_enabled(self) -> bool:
+        """Whether agents read and write the shared team memory."""
+        return self._shared
 
     async def remember(
         self,
@@ -120,6 +130,7 @@ class MemoryService:
         tags: Iterable[str] = (),
         source: str = "",
         chat_id: str | None = None,
+        author: str = "",
     ) -> MemoryEntry | None:
         """Store one memory, ignoring blank text and exact duplicates."""
         cleaned = text.strip()
@@ -146,6 +157,7 @@ class MemoryService:
                 ),
                 "source": source,
                 "chat_id": chat_id,
+                "author": author,
             }
         )
         await self._store.put(entry)
@@ -172,17 +184,75 @@ class MemoryService:
         )
         return tuple(reversed(entries))
 
+    async def share(
+        self,
+        text: str,
+        *,
+        author: str,
+        tags: Iterable[str] = (),
+        source: str = "",
+        chat_id: str | None = None,
+    ) -> MemoryEntry | None:
+        """Write one fact into the team memory, or nothing when it is off."""
+        if not self._shared:
+            return None
+        return await self.remember(
+            SHARED_MEMORY_ID,
+            text,
+            tags=tags,
+            source=source,
+            chat_id=chat_id,
+            author=author,
+        )
+
+    async def note_outcome(
+        self,
+        agent_id: str,
+        text: str,
+        *,
+        author: str,
+        tags: Iterable[str] = (),
+        source: str = "",
+        chat_id: str | None = None,
+    ) -> MemoryEntry | None:
+        """Record finished work where the team will find it.
+
+        With shared memory on, the whole team learns it once; otherwise it
+        stays in the agent's own long-term memory.
+        """
+        if self._shared:
+            return await self.share(
+                text, author=author, tags=tags, source=source, chat_id=chat_id
+            )
+        return await self.remember(
+            agent_id, text, tags=tags, source=source, chat_id=chat_id
+        )
+
+    def _owners(self, agent_id: str) -> tuple[str, ...]:
+        if self._shared and agent_id != SHARED_MEMORY_ID:
+            return (agent_id, SHARED_MEMORY_ID)
+        return (agent_id,)
+
     async def recall(
         self, agent_id: str, query: str, *, limit: int | None = None
     ) -> tuple[MemoryEntry, ...]:
-        """Return the long-term memories most relevant to a query."""
+        """Return the long-term memories most relevant to a query.
+
+        Agents recall from their own memory and, when it is on, the team's.
+        """
         terms = keywords(query)
         if not terms:
             return ()
-        candidates = await self._store.search_memory(agent_id, terms, limit=40)
+        candidates = await self._store.search_memory(
+            self._owners(agent_id), terms, limit=40
+        )
         now = now_ms()
         ranked = sorted(
-            ((entry, _score(entry, terms, now=now)) for entry in candidates),
+            (
+                (entry, _score(entry, terms, now=now))
+                for entry in candidates
+                if entry.scope == "long_term" or entry.agent_id == agent_id
+            ),
             key=lambda pair: pair[1],
             reverse=True,
         )
@@ -198,10 +268,18 @@ class MemoryService:
         """Return recalled memory formatted for a system prompt, or empty text."""
         working = await self.working(agent_id)
         recalled = await self.recall(agent_id, query)
+        own = [entry for entry in recalled if entry.agent_id == agent_id]
+        team = [entry for entry in recalled if entry.agent_id != agent_id]
         sections: list[str] = []
-        if recalled:
-            lines = "\n".join(f"- {entry.text}" for entry in recalled)
+        if own:
+            lines = "\n".join(f"- {entry.text}" for entry in own)
             sections.append(f"What you remember about this:\n{lines}")
+        if team:
+            lines = "\n".join(
+                f"- {entry.text}" + (f" (from {entry.author})" if entry.author else "")
+                for entry in team
+            )
+            sections.append(f"What the team knows (shared memory):\n{lines}")
         if working:
             lines = "\n".join(f"- {entry.text}" for entry in working)
             sections.append(f"Your working notes right now:\n{lines}")

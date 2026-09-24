@@ -96,6 +96,7 @@ async def test_bootstrap_creates_the_starter_agents(studio_api):
     created = await client.post("/studio/api/bootstrap")
     assert created.status_code == 200
     assert set(created.json()["created_agents"]) == {
+        "Jarvis",
         "Guide",
         "Builder",
         "Teacher",
@@ -103,7 +104,7 @@ async def test_bootstrap_creates_the_starter_agents(studio_api):
     }
 
     listed = await client.get("/studio/api/agents")
-    assert len(listed.json()["agents"]) == 4
+    assert len(listed.json()["agents"]) == 5
 
 
 @pytest.mark.asyncio
@@ -343,3 +344,47 @@ async def test_rooms_run_in_the_background_and_report_progress(make_studio):
         assert [item["id"] for item in listed] == [room["id"]]
     await studio.shutdown()
     await app.state.services.admin.close()
+
+
+@pytest.mark.asyncio
+async def test_the_hud_talks_to_the_main_ai_in_the_background(make_studio):
+    studio, _ = make_studio(["Good evening. The team is standing by."])
+    app = create_test_app(studio=studio)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        try:
+            console = (await client.get("/studio/api/main")).json()
+            assert console["agent"]["name"] == "Jarvis"
+            assert console["messages"] == []
+
+            sent = await client.post("/studio/api/main/messages", json={"text": "hi"})
+            assert sent.status_code == 202
+            assert sent.json()["chat_id"] == console["chat"]["id"]
+            await studio.wait_for_background()
+
+            after = (await client.get("/studio/api/main")).json()
+            assert [m["text"] for m in after["messages"]] == [
+                "hi",
+                "Good evening. The team is standing by.",
+            ]
+            assert after["thinking"] is False
+
+            empty = await client.post("/studio/api/main/messages", json={"text": " "})
+            assert empty.status_code == 400
+
+            fresh = (await client.post("/studio/api/main/new")).json()
+            assert fresh["id"] != console["chat"]["id"]
+
+            shared = await client.post(
+                "/studio/api/memory/shared", json={"text": "The user likes dark mode"}
+            )
+            assert shared.json()["author"] == "you"
+            listed = (await client.get("/studio/api/memory/shared")).json()
+            assert [m["text"] for m in listed["memories"]] == [
+                "The user likes dark mode"
+            ]
+            assert (await client.get("/studio/api/main")).json()["memory"]["count"] == 1
+        finally:
+            await studio.shutdown()
+            await app.state.services.admin.close()

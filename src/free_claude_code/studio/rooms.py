@@ -315,11 +315,22 @@ class RoomService:
             author="studio",
             data={"kind": "task_complete", "summary": summary},
         )
+        text = f"Finished a team task: {goal[:120]} — {summary[:160]}"
+        if self._memory.shared_enabled:
+            names = ", ".join(member.name for member in members)
+            await self._memory.share(
+                text,
+                author=names or "room",
+                tags=("room", "task"),
+                source=f"room:{room.id}",
+                chat_id=room.id,
+            )
+            return
         for member in members:
             if member.memory_enabled:
                 await self._memory.remember(
                     member.id,
-                    f"Finished a team task: {goal[:120]} — {summary[:160]}",
+                    text,
                     tags=("room", "task"),
                     source=f"room:{room.id}",
                     chat_id=room.id,

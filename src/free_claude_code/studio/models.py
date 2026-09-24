@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from free_claude_code.core.json_types import JsonObject
 
-type AgentRole = Literal["assistant", "agent", "teacher", "student", "guide"]
+type AgentRole = Literal["assistant", "agent", "teacher", "student", "guide", "main"]
 type ChatKind = Literal["chat", "agent", "classroom", "guide", "room"]
 type MessageRole = Literal["user", "assistant", "system", "tool", "event"]
 type MemoryScope = Literal["working", "long_term"]
@@ -97,7 +97,7 @@ class Message(Record):
 
 
 class MemoryEntry(Record):
-    """A single remembered fact owned by one agent."""
+    """A single remembered fact owned by one agent, or by the whole team."""
 
     id: str = Field(default_factory=lambda: new_id("mem"))
     agent_id: str
@@ -105,6 +105,7 @@ class MemoryEntry(Record):
     text: str
     tags: tuple[str, ...] = ()
     source: str = ""
+    author: str = ""
     chat_id: str | None = None
     hits: int = 0
     created_at: int = Field(default_factory=now_ms)

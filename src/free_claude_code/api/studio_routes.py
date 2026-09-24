@@ -34,6 +34,7 @@ router = APIRouter()
 
 STATIC_DIR = Path(__file__).resolve().parent / "studio_static"
 _ASSET_VERSION_PLACEHOLDER = "__FCC_VERSION__"
+_UI_THEME_PLACEHOLDER = "__FCC_UI_THEME__"
 _ASSET_FILENAMES = frozenset(
     {
         "studio.css",
@@ -223,10 +224,15 @@ def _asset_path(filename: str) -> Path:
 
 
 @router.get("/studio", include_in_schema=False)
-def studio_page(_: None = Access) -> HTMLResponse:
+def studio_page(
+    settings: Settings = Depends(get_settings), _: None = Access
+) -> HTMLResponse:
     """Serve the installable Studio app shell."""
     template = _asset_path("index.html").read_text(encoding="utf-8")
-    return HTMLResponse(template.replace(_ASSET_VERSION_PLACEHOLDER, package_version()))
+    page = template.replace(_ASSET_VERSION_PLACEHOLDER, package_version()).replace(
+        _UI_THEME_PLACEHOLDER, settings.studio_ui_theme
+    )
+    return HTMLResponse(page)
 
 
 @router.get("/studio/manifest.webmanifest", include_in_schema=False)
@@ -371,6 +377,37 @@ async def bootstrap(
         "created_agents": [agent.name for agent in created],
         "guide_download": asset.model_dump() if asset else None,
     }
+
+
+@router.get("/studio/api/main")
+async def main_console(
+    after: int = 0,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Return the HUD: the main AI's conversation, its team, and systems."""
+    return await studio.main_console(after=after)
+
+
+@router.post("/studio/api/main/messages", status_code=202)
+async def main_say(
+    payload: MessagePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Talk to the main AI; it answers in the background while the HUD polls."""
+    chat = await studio.main_say(payload.text)
+    return {"accepted": True, "chat_id": chat.id}
+
+
+@router.post("/studio/api/main/new")
+async def main_new_conversation(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Start a fresh conversation with the main AI."""
+    chat = await studio.main_chat(fresh=True)
+    return chat.model_dump()
 
 
 @router.get("/studio/api/agents")

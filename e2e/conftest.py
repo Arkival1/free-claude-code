@@ -59,7 +59,9 @@ class _StudioEchoModel:
         model=None,
     ) -> LLMReply:
         del messages, tools, temperature, max_tokens
-        match = re.search(r"You are (\w+), one of several AI agents", system)
+        match = re.search(
+            r"You are (\w+), (?:one of several AI agents|the user's main AI)", system
+        )
         name = match.group(1) if match else "Agent"
         return LLMReply(text=f"{name} ({model}) is on it.")
 

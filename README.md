@@ -395,6 +395,40 @@ the `.cmd` file above already bypasses that for this one script.
 </details>
 
 <details>
+<summary><strong>The HUD and your main AI</strong></summary>
+
+Studio has two looks. **Classic** is the tabbed app. **HUD** turns Home into a
+full-screen console for your main AI (named **Jarvis** by default,
+`STUDIO_MAIN_AGENT_NAME`). Switch under **More → Appearance**; each device
+remembers its choice, and `STUDIO_UI_THEME=hud` makes the HUD the default.
+
+You talk to the main AI in the HUD by typing or with the mic button (when the
+browser supports speech recognition), and it can read its replies aloud
+(**VOICE ON/OFF**). It answers simple questions itself and runs the rest of
+the team:
+
+- `ask_agent` gives one agent a task and waits for its report, for example
+  "Have Builder make a landing page for my bakery". Build work lands in a
+  project; the main AI names one, and Studio creates it when it doesn't exist.
+- `team_task` puts several agents in a room to work on one goal together.
+
+The HUD shows which agents are working, recent jobs, commands waiting for
+**Run it**, and the team's shared memory. Tap a hand-off to open that agent's
+own chat. Only the main AI can hand work off, so agents can't start loops of
+delegation. Give it a local model to keep everything on your machine:
+`STUDIO_MAIN_AGENT_MODEL=local/qwen2.5-coder:7b`. Without that setting it uses
+the Studio default model.
+
+**Shared memory.** With `STUDIO_SHARED_MEMORY` on (the default), every agent's
+`remember` goes into one team memory that all agents recall from, tagged with
+who wrote it, unless the agent marks it `private`. Finished tasks and room
+outcomes go there too, so the main AI and the team build on each other's work.
+Each agent still keeps its own working notes. You can add to it from the HUD,
+and it mirrors into Obsidian as a **Team memory** hub.
+
+</details>
+
+<details>
 <summary><strong>Agents that search the web and build sites</strong></summary>
 
 An agent is a name, a model, a set of tools, its own memory, and optionally its
@@ -419,8 +453,8 @@ that looks like a credential removed, a time limit (`STUDIO_COMMAND_TIMEOUT`),
 and the whole process tree stopped when it expires. It is off by default.
 Rooms can be given a project too, so a team of agents builds in one folder.
 
-The first run creates four starter agents: **Guide**, **Builder**, **Teacher**,
-and **Student**.
+The first run creates the main AI (**Jarvis**) and four starter agents:
+**Guide**, **Builder**, **Teacher**, and **Student**.
 
 </details>
 
@@ -437,7 +471,8 @@ parts off, and the room keeps going until an agent replies `TASK COMPLETE:`
 with a summary. A room pauses after eight turns so agents cannot loop forever
 (press **Continue** to let them carry on) and **Stop** halts it after the turn
 in progress. Every agent keeps working notes of what it said, and a finished
-task goes into each member's long-term memory.
+task goes into the team's shared memory (or into each member's long-term memory
+when shared memory is off).
 
 </details>
 

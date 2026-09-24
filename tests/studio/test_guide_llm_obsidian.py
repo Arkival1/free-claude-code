@@ -1,5 +1,6 @@
 """The guide, the wire formats, and the Obsidian mirror."""
 
+import json
 from pathlib import Path
 
 import httpx
@@ -137,6 +138,54 @@ async def test_local_client_falls_back_to_the_text_protocol():
 
     assert reply.stop_reason == "tool_use"
     assert reply.tool_calls[0].name == "web_search"
+
+
+@pytest.mark.asyncio
+async def test_local_client_sends_tool_history_as_plain_turns():
+    sent: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "model": "tiny",
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": '{"final": "ok"}'},
+                    }
+                ],
+            },
+        )
+
+    client = LocalOpenAILLM(
+        base_url="http://127.0.0.1:1234/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    call = ToolCall(id="t1", name="web_search", arguments={"query": "tides"})
+    reply = await client.complete(
+        [
+            ChatMessage.user("find tides"),
+            ChatMessage(role="assistant", content="", tool_calls=(call,)),
+            ChatMessage(role="tool", content="High tide 06:12", tool_call_id="t1"),
+            ChatMessage.user("and the low tide?"),
+        ],
+        system="Be brief.",
+        tools=TOOLS,
+    )
+
+    assert reply.text == "ok"
+    wire = sent[0]["messages"]
+    assert isinstance(wire, list)
+    assert [turn["role"] for turn in wire] == ["system", "user", "assistant", "user"]
+    assert wire[2]["content"] == (
+        '{"tool": "web_search", "arguments": {"query": "tides"}}'
+    )
+    assert wire[3]["content"] == (
+        "Result of web_search:\nHigh tide 06:12\n\nand the low tide?"
+    )
+    assert all("tool_calls" not in turn for turn in wire)
 
 
 @pytest.mark.asyncio

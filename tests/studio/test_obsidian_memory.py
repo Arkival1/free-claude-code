@@ -130,3 +130,25 @@ async def test_an_edit_made_mid_sync_is_never_overwritten(make_studio, tmp_path)
     assert (await studio.store.require(MemoryEntry, kept.id)).text == (
         "Tides follow the Moon, per me."
     )
+
+
+@pytest.mark.asyncio
+async def test_team_memory_gets_its_own_hub_and_edits_come_back(make_studio, tmp_path):
+    studio, _agent, _kept, _note, root = await seeded(make_studio, tmp_path)
+    shared = await studio.remember("shared", "Ship on Fridays.")
+    assert shared is not None
+
+    result = await studio.sync_memory_structure()
+
+    assert result["agents"] == 2
+    hub = root / "Team memory" / "Team memory.md"
+    assert hub.is_file()
+    path = next((root / "Team memory" / "Long-term memory").glob("*.md"))
+    assert "Ship on Fridays." in path.read_text(encoding="utf-8")
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("Fridays", "Thursdays"),
+        encoding="utf-8",
+    )
+    assert await studio.pull_memory_edits() == 1
+    updated = await studio.store.require(MemoryEntry, shared.id)
+    assert updated.text == "Ship on Thursdays."

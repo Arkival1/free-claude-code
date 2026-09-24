@@ -9,7 +9,14 @@ from .llm import ChatMessage, LLMReply, StudioLLMError, StudioModelRouter, ToolC
 from .memory import MemoryService
 from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
 from .store import StudioStore
-from .tools import COMMAND_TOOL, FINISH_TOOL, AgentToolbox, ToolContext, tool_specs
+from .tools import (
+    COMMAND_TOOL,
+    FINISH_TOOL,
+    MAIN_ROLE,
+    AgentToolbox,
+    ToolContext,
+    tool_specs,
+)
 from .tuning import pack_exemplars, pack_system_text
 
 AGENT_BASE_PROMPT = (
@@ -28,6 +35,26 @@ COMMAND_PROMPT = (
     "packages, build, and run tests or scripts, then read the output and fix "
     "what fails. Commands must finish on their own; never start dev servers or "
     "watchers. The user may have to approve each command."
+)
+MAIN_PROMPT = (
+    "You are {name}, the user's main AI. You run a team of agents on this "
+    "machine and talk with the user through a voice-friendly console, so keep "
+    "replies short, clear, and easy to read aloud. Answer simple questions "
+    "yourself. Hand real work to the team: ask_agent gives one agent a task "
+    "and waits for its report; team_task puts several agents in a room to "
+    "work on a goal together. Pass a project name when the work builds a "
+    "website or app. Give each agent everything it needs in the task text, "
+    "then tell the user what was done and where to find it.\n\nYour team:\n"
+    "{roster}"
+)
+SHARED_MEMORY_PROMPT = (
+    "Your team shares one memory. Save what the whole team should know with "
+    "remember; it is private only when you say so."
+)
+_TOOL_ABILITIES = (
+    ("write_file", "builds websites and apps"),
+    (COMMAND_TOOL, "runs commands"),
+    ("web_search", "searches the web"),
 )
 
 
@@ -66,18 +93,58 @@ class AgentRunner:
         self, agent: Agent, *, query: str, site_id: str | None
     ) -> str:
         """Compose the agent's identity, tuning, memory, and site guidance."""
-        parts = [AGENT_BASE_PROMPT, agent.system_prompt.strip()]
+        parts = [AGENT_BASE_PROMPT]
+        if agent.role == MAIN_ROLE:
+            parts.append(
+                MAIN_PROMPT.format(name=agent.name, roster=await self.roster(agent))
+            )
+        parts.append(agent.system_prompt.strip())
         if agent.tune_pack_id:
             pack = await self._store.get(TunePack, agent.tune_pack_id)
             if pack is not None and pack.active:
                 parts.append(pack_system_text(pack))
         if agent.memory_enabled:
+            if self._toolbox.shared_memory and "remember" in agent.tools:
+                parts.append(SHARED_MEMORY_PROMPT)
             parts.append(await self._memory.context_block(agent.id, query))
         if site_id:
             parts.append(SITE_PROMPT)
             if self._toolbox.commands_enabled and COMMAND_TOOL in agent.tools:
                 parts.append(COMMAND_PROMPT)
         return "\n\n".join(part for part in parts if part.strip())
+
+    async def roster(self, main: Agent) -> str:
+        """Describe the agents the main agent can hand work to."""
+        lines: list[str] = []
+        for member in await self._store.find(Agent, order_by="created_at ASC"):
+            if (
+                member.id == main.id
+                or member.archived
+                or member.role
+                in {
+                    MAIN_ROLE,
+                    "guide",
+                }
+            ):
+                continue
+            abilities = [
+                label for tool, label in _TOOL_ABILITIES if tool in member.tools
+            ]
+            about = member.description or member.system_prompt or member.role
+            line = f"- {member.name} ({member.role}, {member.model}): {about[:140]}"
+            if abilities:
+                line += f" It {', '.join(abilities)}."
+            lines.append(line)
+        return "\n".join(lines) or "- nobody yet; the user can add agents."
+
+    def _context(self, agent: Agent, chat: Chat, *, site_id: str | None) -> ToolContext:
+        return ToolContext(
+            agent_id=agent.id,
+            chat_id=chat.id,
+            site_id=site_id,
+            agent_name=agent.name,
+            agent_role=agent.role,
+        )
 
     async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:
         transcript = await self._store.transcript(chat.id, limit=40)
@@ -101,12 +168,7 @@ class AgentRunner:
         history = await self._history(agent, chat)
         if not history or history[-1].content != user_text:
             history.append(ChatMessage.user(user_text))
-        context = ToolContext(
-            agent_id=agent.id,
-            chat_id=chat.id,
-            site_id=chat.site_id,
-            agent_name=agent.name,
-        )
+        context = self._context(agent, chat, site_id=chat.site_id)
         result = await self._loop(
             agent,
             chat,
@@ -136,12 +198,7 @@ class AgentRunner:
             author=agent.name,
             data={"kind": "run_started", "run_id": run.id},
         )
-        context = ToolContext(
-            agent_id=agent.id,
-            chat_id=chat.id,
-            site_id=run.site_id or chat.site_id,
-            agent_name=agent.name,
-        )
+        context = self._context(agent, chat, site_id=run.site_id or chat.site_id)
         history = [ChatMessage.user(run.goal)]
         result = await self._loop(
             agent,
@@ -169,9 +226,13 @@ class AgentRunner:
             data={"kind": "run_finished", "run_id": run.id, "status": finished.status},
         )
         if agent.memory_enabled and not result.failed:
-            await self._memory.remember(
+            outcome = f"{agent.name} completed: {run.goal.strip()[:200]}"
+            if result.text:
+                outcome += f" — {result.text.strip()[:240]}"
+            await self._memory.note_outcome(
                 agent.id,
-                f"Completed task: {run.goal.strip()[:200]}",
+                outcome,
+                author=agent.name,
                 tags=("task",),
                 source="agent_run",
                 chat_id=chat.id,
@@ -189,12 +250,7 @@ class AgentRunner:
         max_steps: int | None = None,
     ) -> TurnResult:
         """Take one turn in an existing conversation someone else is driving."""
-        context = ToolContext(
-            agent_id=agent.id,
-            chat_id=chat.id,
-            site_id=chat.site_id,
-            agent_name=agent.name,
-        )
+        context = self._context(agent, chat, site_id=chat.site_id)
         return await self._loop(
             agent,
             chat,
@@ -216,7 +272,12 @@ class AgentRunner:
         max_steps: int,
         extra_system: str = "",
     ) -> TurnResult:
-        specs = tool_specs(agent.tools, commands_enabled=self._toolbox.commands_enabled)
+        specs = tool_specs(
+            agent.tools,
+            commands_enabled=self._toolbox.commands_enabled,
+            shared_memory=self._toolbox.shared_memory and agent.memory_enabled,
+            delegation=self._toolbox.delegation_allowed(agent.role),
+        )
         system = await self.system_prompt(agent, query=query, site_id=context.site_id)
         if extra_system:
             system = f"{system}\n\n{extra_system}"

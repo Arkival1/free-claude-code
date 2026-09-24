@@ -285,7 +285,7 @@ class LocalOpenAILLM:
         wire: list[JsonObject] = []
         if prelude:
             wire.append({"role": "system", "content": prelude})
-        wire.extend(_openai_messages(messages))
+        wire.extend(_text_protocol_messages(messages))
         payload: JsonObject = {
             "model": model or self._default_model,
             "messages": wire,
@@ -431,6 +431,39 @@ def _anthropic_messages(messages: Sequence[ChatMessage]) -> list[JsonObject]:
         if not blocks:
             blocks.append({"type": "text", "text": ""})
         wire.append({"role": message.role, "content": blocks})
+    return wire
+
+
+def _text_protocol_messages(messages: Sequence[ChatMessage]) -> list[JsonObject]:
+    """Render tool use as plain turns that any local chat template accepts.
+
+    Local runtimes get tools through the text protocol, and many chat
+    templates reject ``tool`` roles or two turns in a row from one side, so
+    calls become the JSON the model wrote and results become user turns.
+    """
+    names: dict[str, str] = {}
+    wire: list[JsonObject] = []
+
+    def add(role: str, content: str) -> None:
+        if wire and wire[-1]["role"] == role:
+            wire[-1]["content"] = f"{wire[-1]['content']}\n\n{content}"
+        else:
+            wire.append({"role": role, "content": content})
+
+    for message in messages:
+        if message.role == "system":
+            continue
+        if message.role == "tool":
+            name = names.get(message.tool_call_id or "", "the tool")
+            add("user", f"Result of {name}:\n{message.content}")
+            continue
+        parts = [message.content] if message.content else []
+        for call in message.tool_calls:
+            names[call.id] = call.name
+            parts.append(
+                json.dumps({"tool": call.name, "arguments": dict(call.arguments)})
+            )
+        add(message.role, "\n".join(parts))
     return wire
 
 

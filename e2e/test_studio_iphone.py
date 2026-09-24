@@ -213,3 +213,50 @@ def test_lora_job_page_shows_live_training(page: Page, admin_base_url: str) -> N
     )
     assert overflow <= 0
     page.screenshot(path="/tmp/claude-0/shots/lora.png", full_page=True)
+
+
+def test_the_hud_runs_the_main_ai_and_survives_a_reload(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url)
+    page.locator('.tab[data-route="more"]').click()
+    page.get_by_role("button", name="HUD console").click()
+
+    hud = page.locator(".hud")
+    expect(hud).to_be_visible()
+    expect(page.locator(".tab-bar")).to_be_hidden()
+    expect(page.locator(".hud-name")).to_have_text("JARVIS")
+    expect(page.locator(".hud-status")).to_have_text("STANDING BY")
+    expect(page.locator(".hud-agent", has_text="Builder")).to_be_visible()
+
+    page.get_by_label("Talk to Jarvis").fill("status report")
+    page.get_by_role("button", name="SEND").click()
+    expect(page.locator(".hud-line.you", has_text="status report")).to_have_count(1)
+    expect(page.locator(".hud-line.ai", has_text="Jarvis")).to_contain_text("is on it")
+
+    page.get_by_label("Tell the team to remember").fill("The user prefers dark UIs")
+    page.get_by_role("button", name="SAVE").click()
+    expect(
+        page.locator(".hud-item", has_text="The user prefers dark UIs")
+    ).to_be_visible()
+    expect(page.locator(".hud-pill", has_text="SHARED MEM 1")).to_be_visible()
+
+    overflow = page.evaluate(
+        "() => document.documentElement.scrollWidth - window.innerWidth"
+    )
+    assert overflow <= 0, "the HUD scrolls sideways on an iPhone"
+    heights = page.evaluate(
+        """() =>
+            [...document.querySelectorAll('.hud-button, .hud-send, .hud-agent')]
+                .filter((node) => node.offsetParent !== null)
+                .map((node) => node.getBoundingClientRect().height)"""
+    )
+    assert heights and min(heights) >= MIN_TAP_TARGET
+
+    page.reload()
+    expect(page.locator(".hud")).to_be_visible()
+    expect(page.locator(".hud-line.you", has_text="status report")).to_be_visible()
+
+    page.get_by_role("button", name="CLASSIC UI").click()
+    expect(page.locator(".tab-bar")).to_be_visible()
+    expect(page.locator(".card", has_text="Welcome")).to_be_visible()

@@ -776,6 +776,52 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_SHARED_MEMORY",
+        "Shared Team Memory",
+        "studio",
+        "boolean",
+        settings_attr="studio_shared_memory",
+        description=(
+            "Agents save what they learn into one memory the whole team reads, "
+            "so the main AI and every agent build on each other's work. Each "
+            "agent keeps its own working notes."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MAIN_AGENT_NAME",
+        "Main AI Name",
+        "studio",
+        "text",
+        settings_attr="studio_main_agent_name",
+        description="Name of the main AI that runs the other agents from the HUD.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MAIN_AGENT_MODEL",
+        "Main AI Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_main_agent_model",
+        description=(
+            "Model the main AI thinks with, e.g. local/qwen2.5-coder:7b. "
+            "Defaults to the Studio Default Model."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_UI_THEME",
+        "Studio Look",
+        "studio",
+        "select",
+        settings_attr="studio_ui_theme",
+        options=(
+            ConfigOptionSpec("classic", "Classic app"),
+            ConfigOptionSpec("hud", "HUD (main AI console)"),
+        ),
+        description=(
+            "Which interface Studio opens with. Each device can still switch "
+            "in the app under More > Appearance."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_AGENT_COMMANDS",
         "Agents Can Run Commands",
         "studio",

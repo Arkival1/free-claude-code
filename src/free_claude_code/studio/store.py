@@ -350,20 +350,22 @@ class StudioStore:
         return await self._call(work)
 
     async def search_memory(
-        self, agent_id: str, terms: Iterable[str], *, limit: int = 8
+        self, agent_ids: Sequence[str], terms: Iterable[str], *, limit: int = 8
     ) -> tuple[MemoryEntry, ...]:
-        """Return long-lived memories whose text matches any search term."""
+        """Return memories owned by any of the given ids that match a term."""
+        owners = list(dict.fromkeys(agent_ids))
         patterns = [f"%{term.lower()}%" for term in terms if term.strip()]
-        if not patterns:
+        if not patterns or not owners:
             return ()
+        owner_clause = ", ".join("?" for _ in owners)
         clause = " OR ".join("LOWER(text) LIKE ?" for _ in patterns)
 
         def work(connection: sqlite3.Connection) -> tuple[MemoryEntry, ...]:
             rows = connection.execute(
                 "SELECT * FROM studio_memories"
-                f" WHERE agent_id = ? AND ({clause})"
+                f" WHERE agent_id IN ({owner_clause}) AND ({clause})"
                 " ORDER BY hits DESC, used_at DESC LIMIT ?",
-                (agent_id, *patterns, int(limit)),
+                (*owners, *patterns, int(limit)),
             ).fetchall()
             return tuple(_decode(MemoryEntry, row) for row in rows)
 
