@@ -1873,6 +1873,34 @@
       el("option", { value: "local", text: "This computer" }),
       el("option", { value: "remote", text: "Rented GPU or VPS (run a worker there)" }),
     ]);
+    const exportKind = el("select", {}, [
+      el("option", { value: "merged", text: "A full model with the new weights (LM Studio or Ollama)" }),
+      el("option", { value: "adapter", text: "A small adapter on top of the base model (Ollama only)" }),
+    ]);
+    const quant = el("select", {}, [
+      el("option", { value: "Q4_K_M", text: "Q4_K_M: smallest, fits 8 GB GPUs like the RX 580 (recommended)" }),
+      el("option", { value: "Q5_K_M", text: "Q5_K_M: a little sharper, needs about 6 GB" }),
+      el("option", { value: "Q8_0", text: "Q8_0: near-original quality, about 8 GB for a 7B model" }),
+    ]);
+    const quantRow = el("label", {}, ["Model file size", quant]);
+    exportKind.addEventListener("change", () => {
+      quantRow.hidden = exportKind.value !== "merged";
+    });
+    const rentGuide = el("details", { class: "guide", open: true }, [
+      el("summary", { text: "How training on a rented GPU works" }),
+      el("ol", {}, [
+        el("li", { text: "Install Tailscale (free) on this PC and sign in. Copy this PC's Tailscale address, like 100.x.y.z." }),
+        el("li", { text: "In admin settings → Studio, set Address For Remote Trainers to http://100.x.y.z:8082 (your Tailscale address)." }),
+        el("li", { text: "Rent a GPU with 24 GB or more (for example an RTX 4090 or A5000 on RunPod or Vast.ai) using a PyTorch template. A 7B model trains in well under an hour." }),
+        el("li", { text: "Press Start below. The job page shows commands: open the rented machine's terminal and paste them. On RunPod or Vast, run the Tailscale block first with an auth key from the Tailscale admin page." }),
+        el("li", { text: "Watch the loss drop here. When it finishes, the new model downloads to this PC, installs into LM Studio and Ollama, and the student switches to it." }),
+        el("li", { text: "Stop the rented machine so it stops billing." }),
+      ]),
+    ]);
+    const syncGuide = () => {
+      rentGuide.hidden = where.value !== "remote";
+    };
+    where.addEventListener("change", syncGuide);
     const env = el("p", { class: "muted", text: "Checking what this computer can train with…" });
     api("/studio/api/lora/environment")
       .then((info) => {
@@ -1883,6 +1911,7 @@
         const gguf = info.llama_cpp_ready ? "" : " Set the llama.cpp folder in settings to make Ollama-ready files.";
         env.textContent = `${trains} ${serves}${gguf}`;
         if (!info.ready) where.value = "remote";
+        syncGuide();
       })
       .catch(() => {
         env.textContent = "Could not check this computer.";
@@ -1913,7 +1942,7 @@
       [
         el("p", {
           class: "muted",
-          text: "Real training: server teachers write lessons, and a LoRA adapter changes the student model's weights. Train here if this computer has a GPU, or on a rented GPU or VPS; the result installs into Ollama and the student switches to it.",
+          text: "Real training that changes the model's weights: server teachers write lessons, a LoRA is trained on them, then merged into the model. Train here if this computer has an NVIDIA GPU, or on a rented GPU. The new model installs into LM Studio and Ollama, and the student switches to it.",
         }),
         env,
         el("label", {}, ["Student", student]),
@@ -1922,6 +1951,9 @@
         otherRepo,
         otherOllama,
         el("label", {}, ["Where to train", where]),
+        rentGuide,
+        el("label", {}, ["What to make", exportKind]),
+        quantRow,
         ...sources.map((item) => item.row),
         el("label", {}, ["Topics, one per line", topics]),
         el("label", {}, ["Lessons per topic", perTopic]),
@@ -1945,6 +1977,8 @@
                 base_model: other ? otherRepo.value.trim() : base.value,
                 ollama_base: other ? otherOllama.value.trim() : "",
                 runner: where.value,
+                export: exportKind.value,
+                gguf_quant: quant.value,
                 sources: chosen,
                 topics: topicList,
                 examples_per_topic: Number(perTopic.value) || 12,
@@ -1982,7 +2016,7 @@
     const job = await api(`/studio/api/lora/jobs/${jobId}`);
     setChrome("lora", "LoRA training");
     const active = ["queued", "running"].includes(job.status);
-    const busy = /^(Trained\. Installing|Downloading the base|Creating the tuned)/.test(job.message);
+    const busy = /^(Trained\. Installing|Downloading the base|Creating the (tuned )?model|Adding the model)/.test(job.message);
     const nodes = [
       card(job.base_model, [
         el("div", { class: "row-between" }, [
@@ -2030,10 +2064,63 @@
             text: `On the GPU machine, run these. It must be able to reach ${job.commands.studio_url} (Tailscale on both machines is the easy way). For gated models, set HF_TOKEN there first.`,
           }),
           job.commands.warning ? el("p", { class: "error-text", text: job.commands.warning }) : null,
-          block("Linux or macOS", job.commands.bash),
+          block("Linux (RunPod, Vast.ai, most rented GPUs)", job.commands.bash),
+          el("p", {
+            class: "muted",
+            text: "Rented containers can't reach your PC directly. Run this first, after setting TS_AUTHKEY to a key from login.tailscale.com (Settings, Keys; tick Ephemeral):",
+          }),
+          block("Tailscale for containers (run first)", job.commands.tailscale),
           block("Windows PowerShell", job.commands.powershell),
         ])
       );
+    }
+    if (job.status === "succeeded") {
+      const hasModel = job.files.includes("model.gguf");
+      const quantUsed = job.metrics.model_quant || job.gguf_quant;
+      const rows = [
+        el("p", {
+          text: hasModel
+            ? `model.gguf: ${job.base_model} with the training merged into its weights (${quantUsed}${job.metrics.model_gb ? `, ${job.metrics.model_gb} GB` : ""}).`
+            : "This run made an adapter, not a full model.",
+        }),
+        job.metrics.model_error
+          ? el("p", { class: "error-text", text: `The full model couldn't be made: ${job.metrics.model_error}` })
+          : null,
+        job.lmstudio_path ? el("p", { class: "muted", text: `In LM Studio: ${job.lmstudio_path}` }) : null,
+        job.served_model ? el("p", { class: "muted", text: `In Ollama as: ${job.served_model}` }) : null,
+        el("p", {
+          class: "muted",
+          text: job.agent_model ? `${job.agent_name} runs ${job.agent_model} right now.` : "",
+        }),
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "primary",
+            text: `Switch ${job.agent_name || "the student"} to it`,
+            onclick: async () => {
+              try {
+                const updated = await post(`/studio/api/lora/jobs/${jobId}/switch`);
+                notify(updated.message);
+                render();
+              } catch (error) {
+                notify(error.message);
+              }
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "Install again",
+            onclick: async () => {
+              await post(`/studio/api/lora/jobs/${jobId}/install`);
+              render();
+            },
+          }),
+        ]),
+        el("p", {
+          class: "muted",
+          text: "To use it by hand: in LM Studio open My Models and load it; in Ollama run the model named above. Any agent can use it: set its model to local/ plus the name LM Studio or Ollama shows.",
+        }),
+      ];
+      nodes.splice(1, 0, card(job.in_use ? "Your new model (in use)" : "Your new model", rows));
     }
     const actions = [];
     if (active) {
@@ -2042,16 +2129,6 @@
         text: "Stop",
         onclick: async () => {
           await post(`/studio/api/lora/jobs/${jobId}/cancel`);
-          render();
-        },
-      }));
-    }
-    if (job.status === "succeeded" && !job.served_model && !busy) {
-      actions.push(el("button", {
-        class: "secondary",
-        text: "Try installing into Ollama again",
-        onclick: async () => {
-          await post(`/studio/api/lora/jobs/${jobId}/install`);
           render();
         },
       }));

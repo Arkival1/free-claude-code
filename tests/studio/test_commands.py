@@ -211,3 +211,36 @@ async def test_a_room_can_work_inside_a_project(make_studio):
 
     tool_rows = [m for m in await studio.transcript(room.id) if m.role == "tool"]
     assert tool_rows and "index.html" in tool_rows[0].text
+
+
+@pytest.mark.asyncio
+async def test_a_poll_while_the_request_is_posted_does_not_expire_it(make_studio):
+    studio, _ = make_studio(
+        [
+            tool_reply("run_command", {"command": f"{PYTHON} -c \"print('hi')\""}),
+            tool_reply("finish", {"summary": "Ran it."}),
+        ],
+        STUDIO_AGENT_COMMANDS="ask",
+    )
+    _, _, chat = await builder_in_project(studio)
+    original = studio.store.append_message
+    seen_mid_post: list[int] = []
+
+    async def poll_first(**kwargs):
+        # The phone's approval list refreshes while the request is being posted.
+        if (kwargs.get("data") or {}).get("kind") == "approval":
+            seen_mid_post.append(len(await studio.pending_commands()))
+        return await original(**kwargs)
+
+    studio.store.append_message = poll_first
+    turn = asyncio.create_task(studio.send(chat.id, "say hi"))
+    for _ in range(100):
+        pending = await studio.pending_commands()
+        if pending:
+            break
+        await asyncio.sleep(0.02)
+
+    assert seen_mid_post == [1]
+    assert len(pending) == 1
+    await studio.decide_command(pending[0].id, approve=True)
+    assert (await turn).text == "Ran it."

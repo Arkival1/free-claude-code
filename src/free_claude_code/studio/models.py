@@ -37,6 +37,8 @@ type CourseStatus = Literal[
 type SampleSplit = Literal["train", "eval"]
 type LoraRunner = Literal["local", "remote"]
 type Quantize = Literal["auto", "4bit", "none"]
+type LoraExport = Literal["merged", "adapter"]
+type GgufQuant = Literal["Q4_K_M", "Q5_K_M", "Q8_0"]
 type CommandStatus = Literal["pending", "approved", "denied", "ran", "expired"]
 
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running"})
@@ -317,6 +319,9 @@ class LoraJob(Record):
     batch_size: int = 1
     grad_accum: int = 4
     quantize: Quantize = "auto"
+    export: LoraExport = "merged"
+    gguf_quant: GgufQuant = "Q4_K_M"
+    lmstudio_path: str = ""
     dataset_ready: bool = False
     train_examples: int = 0
     eval_examples: int = 0

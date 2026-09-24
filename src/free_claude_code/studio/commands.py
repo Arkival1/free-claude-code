@@ -131,18 +131,25 @@ class CommandBroker:
                 "status": "pending" if policy == "ask" else "approved",
             }
         )
-        await self._store.put(request)
         if policy == "ask":
-            await self._store.append_message(
-                chat_id=chat_id,
-                role="event",
-                text=f"{agent_name} wants to run: {cleaned}",
-                author="studio",
-                data={"kind": "approval", "request_id": request.id, "command": cleaned},
-            )
+            # Register the wait before the request is visible: pending() expires
+            # any stored request nobody is waiting on, so a poll landing between
+            # the two would otherwise expire this one.
             future: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
             self._waiting[request.id] = future
             try:
+                await self._store.put(request)
+                await self._store.append_message(
+                    chat_id=chat_id,
+                    role="event",
+                    text=f"{agent_name} wants to run: {cleaned}",
+                    author="studio",
+                    data={
+                        "kind": "approval",
+                        "request_id": request.id,
+                        "command": cleaned,
+                    },
+                )
                 approved = await asyncio.wait_for(future, APPROVAL_TIMEOUT_SECONDS)
             except TimeoutError:
                 expired = await self._set(request, status="expired")
@@ -156,6 +163,8 @@ class CommandBroker:
                 return CommandResult(
                     denied, "The user denied this command. Try another approach or ask."
                 )
+        else:
+            await self._store.put(request)
         cwd.mkdir(parents=True, exist_ok=True)
         code, output, timed_out = await execute(cleaned, cwd=cwd, timeout=timeout)
         ran = await self._set(

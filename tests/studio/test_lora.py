@@ -360,3 +360,207 @@ def test_an_answer_longer_than_the_limit_keeps_its_beginning():
 
     assert encoded is not None and len(encoded["input_ids"]) == 100
     assert encoded["labels"].count(-100) == 25  # a quarter kept as context
+
+
+def fake_program(path: Path, body: str) -> Path:
+    path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    return path
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake ollama is a shell script")
+@pytest.mark.asyncio
+async def test_a_merged_model_installs_into_lm_studio_and_ollama(make_studio, tmp_path):
+    calls = tmp_path / "calls.log"
+    ollama = fake_program(tmp_path / "ollama", f'echo "$@" >> "{calls}"')
+    lmstudio = tmp_path / "lmstudio-models"
+    studio, _ = make_studio(
+        teacher,
+        STUDIO_LORA_OLLAMA=str(ollama),
+        STUDIO_LMSTUDIO_MODELS_DIR=str(lmstudio),
+    )
+    student, job = await lora_job(studio)
+    assert job.export == "merged" and job.gguf_quant == "Q4_K_M"
+    name = f"studio-pocket-{job.id[-6:]}"
+
+    class LmStudio(ScriptedLLM):
+        async def list_models(self):
+            return (f"fcc-studio/{name}",)
+
+    studio._router = StudioModelRouter(proxy=ScriptedLLM([]), local=LmStudio([]))
+    studio.lora._router = studio._router
+    folder = studio.lora.job_dir(job.id)
+    (folder / "model.gguf").write_bytes(b"GGUF" + b"\x01" * 64)
+
+    installed = await studio.lora.install(job.id)
+
+    copy = lmstudio / "fcc-studio" / name / f"{name}-Q4_K_M.gguf"
+    assert copy.read_bytes() == (folder / "model.gguf").read_bytes()
+    assert installed.lmstudio_path == str(copy)
+    assert installed.served_model == name
+    assert calls.read_text().splitlines() == [
+        f"create {name} -f {folder / 'Modelfile'}"
+    ]
+    assert (folder / "Modelfile").read_text() == f"FROM {folder / 'model.gguf'}\n"
+    agent = await studio.store.require(Agent, student.id)
+    assert agent.model == f"local/fcc-studio/{name}"
+    assert "now runs the tuned weights" in installed.message
+
+    again = await studio.lora.install(job.id)
+    assert copy.is_file() and again.lmstudio_path == str(copy)
+
+
+@pytest.mark.asyncio
+async def test_a_merged_model_waits_to_be_served_before_switching(
+    make_studio, tmp_path
+):
+    lmstudio = tmp_path / "models"
+    studio, _ = make_studio(
+        teacher,
+        STUDIO_LORA_OLLAMA=str(tmp_path / "no-ollama"),
+        STUDIO_LMSTUDIO_MODELS_DIR=str(lmstudio),
+    )
+    student, job = await lora_job(studio)
+    (studio.lora.job_dir(job.id) / "model.gguf").write_bytes(b"GGUF")
+    studio.lora._ollama = lambda: None
+    served: list[str] = []
+
+    class LmStudio(ScriptedLLM):
+        async def list_models(self):
+            return tuple(served)
+
+    studio._router = StudioModelRouter(proxy=ScriptedLLM([]), local=LmStudio([]))
+    studio.lora._router = studio._router
+
+    waiting = await studio.lora.install(job.id)
+    assert "isn't offering it yet" in waiting.message
+    assert "Just-in-Time" in waiting.message
+    assert (await studio.store.require(Agent, student.id)).model == "local/tiny"
+
+    with pytest.raises(Exception, match="not finished"):
+        await studio.lora.switch(job.id)
+    await studio.store.put(waiting.model_copy(update={"status": "succeeded"}))
+    served.append(f"fcc-studio/studio-pocket-{job.id[-6:]}")
+    switched = await studio.lora.switch(job.id)
+    assert "now runs the tuned weights" in switched.message
+    assert (await studio.store.require(Agent, student.id)).model.startswith(
+        "local/fcc-studio/"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_merged_model_without_lm_studio_or_ollama_is_offered_for_download(
+    make_studio, tmp_path
+):
+    studio, _ = make_studio(
+        teacher, STUDIO_LMSTUDIO_MODELS_DIR=str(tmp_path / "missing")
+    )
+    _, job = await lora_job(studio)
+    (studio.lora.job_dir(job.id) / "model.gguf").write_bytes(b"GGUF")
+    studio.lora._ollama = lambda: None
+    studio.lora.lmstudio_dir = lambda: None
+
+    result = await studio.lora.install(job.id)
+
+    assert "Download it below" in result.message
+    assert result.served_model == "" and result.lmstudio_path == ""
+
+
+@pytest.mark.asyncio
+async def test_worker_commands_build_the_quantizer_only_when_needed(make_studio):
+    studio, _ = make_studio(teacher)
+    _, merged = await lora_job(studio)
+    _, eight = await lora_job(studio, hyper={"gguf_quant": "Q8_0"})
+    _, adapter = await lora_job(studio, hyper={"export": "adapter"})
+
+    commands = studio.lora.worker_commands(merged, "http://100.64.0.2:8082")
+    assert "--target llama-quantize" in commands["bash"]
+    assert commands["bash"].index("git clone") < commands["bash"].index("cmake -S")
+    assert "sentencepiece" in commands["bash"]
+    assert 'tailscale up --authkey "$TS_AUTHKEY"' in commands["tailscale"]
+    assert "export http_proxy=http://localhost:1055" in commands["tailscale"]
+    assert "https_proxy" not in commands["tailscale"]
+    for other in (eight, adapter):
+        assert "cmake" not in studio.lora.worker_commands(other, "http://x:1")["bash"]
+    spec = studio.lora.spec(eight)
+    assert (spec["export"], spec["gguf_quant"]) == ("merged", "Q8_0")
+    assert studio.lora.spec(adapter)["export"] == "adapter"
+
+    with pytest.raises(Exception, match="gguf_quant"):
+        await studio.lora.create(
+            agent_id=merged.agent_id,
+            base_model="Qwen/Qwen2.5-0.5B-Instruct",
+            runner="remote",
+            sources=["classes"],
+            hyper={"gguf_quant": "Q2"},
+        )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="fake llama.cpp tools are shell scripts")
+def test_the_worker_quantizes_the_merged_model(tmp_path):
+    llama_cpp = tmp_path / "llama.cpp"
+    llama_cpp.mkdir()
+    (llama_cpp / "convert_hf_to_gguf.py").write_text(
+        "import sys\n"
+        "args = sys.argv[1:]\n"
+        "out = args[args.index('--outfile') + 1]\n"
+        "kind = args[args.index('--outtype') + 1]\n"
+        "open(out, 'w').write('gguf ' + kind)\n",
+        encoding="utf-8",
+    )
+    merged = tmp_path / "merged"
+    merged.mkdir()
+
+    model, used = lora_worker.export_model(merged, llama_cpp, "Q4_K_M", tmp_path)
+    assert (model.read_text(), used) == ("gguf q8_0", "Q8_0"), "no quantizer yet"
+
+    bin_dir = llama_cpp / "build" / "bin"
+    bin_dir.mkdir(parents=True)
+    fake_program(bin_dir / "llama-quantize", 'echo "$(cat "$1") -> $3" > "$2"')
+    assert lora_worker.find_quantizer(llama_cpp) == bin_dir / "llama-quantize"
+
+    model, used = lora_worker.export_model(merged, llama_cpp, "Q4_K_M", tmp_path)
+    assert (model.read_text().strip(), used) == ("gguf f16 -> Q4_K_M", "Q4_K_M")
+    assert not (tmp_path / "model-f16.gguf").exists()
+
+
+@pytest.mark.asyncio
+async def test_the_worker_uploads_a_merged_model(make_studio):
+    studio, _ = make_studio(teacher)
+    _, job = await lora_job(studio)
+    studio.lora._ollama = lambda: None
+    studio.lora.lmstudio_dir = lambda: None
+    app = create_test_app(studio=studio)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        headers = {"x-lora-token": job.worker_token}
+        base = f"/studio/api/lora/worker/{job.id}"
+        await client.put(
+            f"{base}/files/adapter.zip", headers=headers, content=adapter_zip()
+        )
+        model = await client.put(
+            f"{base}/files/model.gguf", headers=headers, content=b"GGUF" * 64
+        )
+        assert model.json()["bytes"] == 256
+        done = await client.post(
+            f"{base}/finish",
+            headers=headers,
+            json={"steps": 2, "model_quant": "Q4_K_M", "model_gb": 0.0},
+        )
+        assert done.json()["message"] == "Trained. Installing the new model"
+        await studio.wait_for_background()
+
+        view = (await client.get(f"/studio/api/lora/jobs/{job.id}")).json()
+        assert "model.gguf" in view["files"]
+        assert view["agent_name"] == "Pocket"
+        assert view["in_use"] is False
+        assert "Download it below" in view["message"]
+        download = await client.get(f"/studio/api/lora/jobs/{job.id}/files/model.gguf")
+        assert download.content == b"GGUF" * 64
+        switch = await client.post(f"/studio/api/lora/jobs/{job.id}/switch")
+        assert switch.status_code == 200
+        models = await studio.store.find(ModelAsset, where={"kind": "gguf"})
+        assert [asset.bytes_total for asset in models] == [256]
+    await studio.shutdown()
+    await app.state.services.admin.close()

@@ -969,6 +969,18 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         description="A llama.cpp checkout; lets training also produce a GGUF adapter Ollama can load.",
     ),
     ConfigFieldSpec(
+        "STUDIO_LMSTUDIO_MODELS_DIR",
+        "LM Studio Models Folder",
+        "studio",
+        "text",
+        settings_attr="studio_lmstudio_models_dir",
+        description=(
+            "Where LM Studio keeps models, so trained models install there. "
+            "Leave empty to use LM Studio's usual folder (.lmstudio/models in "
+            "your user folder)."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LORA_OLLAMA",
         "Ollama Program",
         "studio",

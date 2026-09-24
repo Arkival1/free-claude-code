@@ -22,7 +22,7 @@ from free_claude_code.studio.lora import (
     LoraAuthError,
     LoraError,
 )
-from free_claude_code.studio.models import LoraJob
+from free_claude_code.studio.models import Agent, LoraJob
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.tuning import TuningError
@@ -157,6 +157,8 @@ class LoraPayload(BaseModel):
     learning_rate: float | None = None
     max_seq_len: int | None = None
     quantize: str | None = None
+    export: str | None = None
+    gguf_quant: str | None = None
 
 
 class WorkerFailure(BaseModel):
@@ -1091,7 +1093,16 @@ async def create_lora_job(
 ) -> JsonObject:
     """Start a LoRA job: build the data, then train here or on a worker."""
     hyper = payload.model_dump(
-        include={"rank", "alpha", "epochs", "learning_rate", "max_seq_len", "quantize"}
+        include={
+            "rank",
+            "alpha",
+            "epochs",
+            "learning_rate",
+            "max_seq_len",
+            "quantize",
+            "export",
+            "gguf_quant",
+        }
     )
     job = await studio.lora.create(
         agent_id=payload.agent_id,
@@ -1123,6 +1134,7 @@ async def read_lora_job(
         for name in (
             "train.jsonl",
             "eval.jsonl",
+            "model.gguf",
             "adapter.zip",
             "adapter.gguf",
             "Modelfile",
@@ -1132,6 +1144,16 @@ async def read_lora_job(
     ]
     view = _lora_view(job)
     view["files"] = files
+    agent = await studio.store.get(Agent, job.agent_id)
+    view["agent_name"] = agent.name if agent else ""
+    view["agent_model"] = agent.model if agent else ""
+    view["in_use"] = bool(
+        agent
+        and job.status == "succeeded"
+        and studio.lora.ollama_name(job, agent) in agent.model
+    )
+    lmstudio = studio.lora.lmstudio_dir()
+    view["lmstudio_dir"] = str(lmstudio) if lmstudio else ""
     if job.status not in {"succeeded", "failed", "cancelled"}:
         url = _worker_url(request, settings)
         commands = studio.lora.worker_commands(job, url)
@@ -1163,6 +1185,16 @@ async def install_lora_job(
 ) -> JsonObject:
     """Try installing a finished adapter into Ollama again."""
     return _lora_view(await studio.lora.install(job_id))
+
+
+@router.post("/studio/api/lora/jobs/{job_id}/switch")
+async def switch_lora_job(
+    job_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Point the student at the trained model once LM Studio or Ollama serves it."""
+    return _lora_view(await studio.lora.switch(job_id))
 
 
 @router.post("/studio/api/lora/jobs/{job_id}/revert")

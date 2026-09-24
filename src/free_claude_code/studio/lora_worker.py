@@ -5,9 +5,12 @@ script runs on the machine serving Studio, on a rented GPU, or on a VPS. It
 pulls the job's settings and training data from Studio over HTTP with a
 per-job token, reports every optimizer step back, and uploads the finished
 adapter (and a GGUF copy for Ollama/llama.cpp when llama.cpp is available).
+For a "merged" job it also bakes the adapter into the base weights and
+uploads one quantized GGUF model that LM Studio, Ollama, or llama.cpp run.
 
-    pip install torch transformers peft accelerate
-    python lora_worker.py --studio http://HOST:8082 --job lora_x --token T
+    pip install torch transformers peft accelerate sentencepiece protobuf
+    python lora_worker.py --studio http://HOST:8082 --job lora_x --token T \
+        --llama-cpp llama.cpp
 
 Heavy libraries are imported inside functions so ``--probe`` can report what
 is missing instead of crashing.
@@ -15,10 +18,12 @@ is missing instead of crashing.
 
 import argparse
 import contextlib
+import gc
 import json
 import math
 import os
 import random
+import shutil
 import subprocess
 import sys
 import time
@@ -444,6 +449,128 @@ def convert_to_gguf(adapter_dir: Path, base: str, llama_cpp: Path, out: Path) ->
     return out
 
 
+def merge_adapter(base: str, adapter_dir: Path, out_dir: Path) -> Path:
+    """Fold the LoRA into full-precision base weights: a new model, not a patch."""
+    import torch
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    token = os.environ.get("HF_TOKEN") or None
+    # Merge on the CPU in half precision: exact, and it never competes with
+    # training for GPU memory. A 7B model needs about 16 GB of RAM here.
+    model = AutoModelForCausalLM.from_pretrained(
+        base, dtype=torch.float16, low_cpu_mem_usage=True, token=token
+    )
+    merged = PeftModel.from_pretrained(model, str(adapter_dir)).merge_and_unload()
+    merged.save_pretrained(out_dir, safe_serialization=True)
+    AutoTokenizer.from_pretrained(base, token=token).save_pretrained(out_dir)
+    del model, merged
+    gc.collect()
+    return out_dir
+
+
+def find_quantizer(llama_cpp: Path) -> Path | None:
+    """Locate a built llama-quantize, if this machine has one."""
+    names = ("llama-quantize.exe", "llama-quantize")
+    for folder in (
+        llama_cpp / "build" / "bin",
+        llama_cpp / "build" / "bin" / "Release",
+        llama_cpp,
+    ):
+        for name in names:
+            candidate = folder / name
+            if candidate.is_file():
+                return candidate
+    found = shutil.which("llama-quantize")
+    return Path(found) if found else None
+
+
+def _convert(llama_cpp: Path, model_dir: Path, out: Path, outtype: str) -> None:
+    converter = llama_cpp / "convert_hf_to_gguf.py"
+    if not converter.is_file():
+        raise RuntimeError(
+            f"{converter} not found; point --llama-cpp at a llama.cpp checkout."
+        )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(converter),
+            str(model_dir),
+            "--outfile",
+            str(out),
+            "--outtype",
+            outtype,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0 or not out.is_file():
+        raise RuntimeError(f"GGUF conversion failed: {completed.stderr[-800:]}")
+
+
+def export_model(
+    model_dir: Path, llama_cpp: Path, quant: str, workdir: Path
+) -> tuple[Path, str]:
+    """Write the merged model as one GGUF file, quantized when possible."""
+    out = workdir / "model.gguf"
+    quantizer = find_quantizer(llama_cpp)
+    if quant == "Q8_0" or quantizer is None:
+        # convert_hf_to_gguf writes Q8_0 itself; smaller types need llama-quantize.
+        _convert(llama_cpp, model_dir, out, "q8_0")
+        return out, "Q8_0"
+    full = workdir / "model-f16.gguf"
+    _convert(llama_cpp, model_dir, full, "f16")
+    completed = subprocess.run(
+        [str(quantizer), str(full), str(out), quant],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    full.unlink(missing_ok=True)
+    if completed.returncode != 0 or not out.is_file():
+        raise RuntimeError(f"Quantizing failed: {completed.stderr[-800:]}")
+    return out, quant
+
+
+def _gb(path: Path) -> str:
+    return f"{path.stat().st_size / 1024**3:.1f} GB"
+
+
+def export_merged(
+    spec: dict, workdir: Path, llama_cpp: str | None, studio: Studio, metrics: dict
+) -> dict:
+    """Merge, convert, quantize, and upload the new model; return its facts."""
+    if not llama_cpp:
+        raise RuntimeError("A merged model needs llama.cpp; rerun with --llama-cpp.")
+    gc.collect()
+    with contextlib.suppress(Exception):
+        import torch
+
+        torch.cuda.empty_cache()
+    step = metrics["steps"]
+    studio.post_json(
+        "progress",
+        {"step": step, "message": "Merging the training into the model's weights"},
+    )
+    merged = merge_adapter(spec["base_model"], workdir / "adapter", workdir / "merged")
+    quant = str(spec.get("gguf_quant") or "Q4_K_M")
+    studio.post_json(
+        "progress", {"step": step, "message": f"Converting to GGUF ({quant})"}
+    )
+    model_file, used = export_model(merged, Path(llama_cpp), quant, workdir)
+    shutil.rmtree(merged, ignore_errors=True)
+    studio.post_json(
+        "progress",
+        {"step": step, "message": f"Uploading the new model ({_gb(model_file)})"},
+    )
+    studio.upload("model.gguf", model_file)
+    return {
+        "model_quant": used,
+        "model_gb": round(model_file.stat().st_size / 1024**3, 2),
+    }
+
+
 def run(args: argparse.Namespace) -> int:
     studio = Studio(args.studio, args.job, args.token)
     workdir = Path(args.workdir or f"lora-{args.job}").resolve()
@@ -475,6 +602,12 @@ def run(args: argparse.Namespace) -> int:
                 metrics["gguf"] = True
             except Exception as error:  # the adapter itself is still useful
                 metrics["gguf_error"] = str(error)[:400]
+        if spec.get("export") == "merged":
+            try:
+                metrics.update(export_merged(spec, workdir, llama_cpp, studio, metrics))
+            except Exception as error:  # the adapter is uploaded; say what failed
+                print(traceback.format_exc(), file=sys.stderr, flush=True)
+                metrics["model_error"] = f"{type(error).__name__}: {error}"[:600]
         studio.post_json("finish", metrics)
         print("LoRA training finished.", flush=True)
         return 0

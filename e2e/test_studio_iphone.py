@@ -212,11 +212,67 @@ def test_lora_job_page_shows_live_training(page: Page, admin_base_url: str) -> N
     page.locator(".chart-table summary").click()
     expect(page.locator(".chart-table tbody tr")).to_have_count(5)
     expect(page.locator("pre.command-block").first).to_contain_text("lora_worker.py")
+    expect(page.locator("pre.command-block").first).to_contain_text("llama-quantize")
+    expect(page.locator("pre.command-block").nth(1)).to_contain_text("tailscale up")
     overflow = page.evaluate(
         "() => document.documentElement.scrollWidth - window.innerWidth"
     )
     assert overflow <= 0
     page.screenshot(path="/tmp/claude-0/shots/lora.png", full_page=True)
+
+    api.put(
+        f"{worker}/files/adapter.zip",
+        headers={"x-lora-token": token, "content-type": "application/octet-stream"},
+        data=_tiny_adapter_zip(),
+    )
+    api.put(
+        f"{worker}/files/model.gguf",
+        headers={"x-lora-token": token, "content-type": "application/octet-stream"},
+        data=b"GGUF" + b"\x00" * 60,
+    )
+    api.post(
+        f"{worker}/finish",
+        headers={"x-lora-token": token},
+        data={
+            "steps": 10,
+            "eval_loss_after": 0.7,
+            "model_quant": "Q4_K_M",
+            "model_gb": 0.4,
+        },
+    )
+    page.reload()
+    new_model = page.locator(".card", has_text="Your new model")
+    expect(new_model).to_contain_text("merged into its weights (Q4_K_M, 0.4 GB)")
+    expect(new_model.get_by_role("button", name="Switch Pocket to it")).to_be_visible()
+    expect(page.locator(".list-item", has_text="model.gguf")).to_be_visible()
+
+
+def _tiny_adapter_zip() -> bytes:
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        bundle.writestr("adapter_config.json", "{}")
+    return buffer.getvalue()
+
+
+def test_the_lora_card_offers_new_weights_for_lm_studio(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url)
+    page.goto(f"{admin_base_url}/studio#tune")
+    card = page.locator(".card", has_text="LoRA: train the weights")
+    expect(card).to_be_visible()
+    make = card.get_by_label("What to make")
+    expect(make).to_have_value("merged")
+    expect(card.get_by_label("Model file size")).to_have_value("Q4_K_M")
+    card.get_by_label("Where to train").select_option("remote")
+    guide = card.locator("details.guide")
+    expect(guide).to_be_visible()
+    expect(guide).to_contain_text("Tailscale")
+    make.select_option("adapter")
+    expect(card.get_by_label("Model file size")).to_be_hidden()
 
 
 def test_the_hud_runs_the_main_ai_and_survives_a_reload(

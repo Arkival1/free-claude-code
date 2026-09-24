@@ -688,6 +688,9 @@ class Settings(BaseModel):
     studio_lora_ollama: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_LORA_OLLAMA"
     )
+    studio_lmstudio_models_dir: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LMSTUDIO_MODELS_DIR"
+    )
     studio_lora_public_url: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_LORA_PUBLIC_URL"
     )

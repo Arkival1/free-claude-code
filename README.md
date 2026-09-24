@@ -650,10 +650,44 @@ Then choose where to train:
   model you chat with stay on your own PC.
 
 The job page shows live progress, the loss per step as a chart, and held-out
-loss before and after. With `STUDIO_LORA_LLAMA_CPP` pointing at a llama.cpp
-checkout, the adapter is also converted to GGUF; if Ollama is installed, Studio
-creates a model from it (`ollama create`), switches the student to it, and
-remembers the old model so you can switch back.
+loss before and after.
+
+**What you get back.** Choose under **What to make**:
+
+- **A full model with the new weights** (the default). After training, the
+  worker merges the LoRA into the base model's weights, converts the result to
+  GGUF with llama.cpp, and quantizes it: `Q4_K_M` (about 4.7 GB for a 7B model,
+  fits an 8 GB GPU such as an RX 580), `Q5_K_M`, or `Q8_0`. That one
+  `model.gguf` is uploaded to Studio. Studio puts it in LM Studio's models
+  folder (`~/.lmstudio/models/fcc-studio/…`, or `STUDIO_LMSTUDIO_MODELS_DIR`),
+  creates it in Ollama if Ollama is installed, and switches the student to it
+  as soon as the local model server offers it. In LM Studio, turn on
+  Just-in-Time model loading, or load the model once from My Models, then press
+  **Switch** on the job page. It is an ordinary GGUF file: download it from the
+  job page and use it anywhere.
+- **A small adapter** on top of the base model. It needs Ollama and
+  `STUDIO_LORA_LLAMA_CPP`; Studio runs `ollama create` with `FROM base` and
+  `ADAPTER`.
+
+Either way Studio remembers the student's old model, so **Switch back** undoes
+it.
+
+**Training on a rented GPU, step by step:**
+
+1. Install Tailscale on the PC running Studio and note its address (100.x.y.z).
+   In admin settings, set **Address For Remote Trainers**
+   (`STUDIO_LORA_PUBLIC_URL`) to `http://100.x.y.z:8082`.
+2. Rent a 24 GB GPU (an RTX 4090 or A5000 on RunPod or Vast.ai) with a
+   PyTorch template. Merging a 7B model also needs about 16 GB of RAM and
+   40 GB of disk on that machine.
+3. Start the job in Studio with **Where to train: Rented GPU**. The job page
+   shows three command blocks. On a container host like RunPod, first run the
+   **Tailscale for containers** block, after setting `TS_AUTHKEY` to an
+   ephemeral auth key from the Tailscale admin console. Then run the Linux
+   block: it downloads the worker, installs the libraries, builds
+   `llama-quantize`, and trains.
+4. Watch the loss here. When it ends, the new model arrives on your PC and is
+   installed, and the student switches to it. Stop the rented machine.
 
 </details>
 

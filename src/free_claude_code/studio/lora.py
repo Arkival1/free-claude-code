@@ -46,8 +46,9 @@ from .tools import TOOL_SPECS
 WORKER_PATH = Path(__file__).with_name("lora_worker.py")
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 SOURCES = frozenset({"examples", "classes", "topics", "tools"})
-UPLOAD_NAMES = frozenset({"adapter.zip", "adapter.gguf"})
-MAX_UPLOAD_BYTES = 8 * 1024**3
+UPLOAD_NAMES = frozenset({"adapter.zip", "adapter.gguf", "model.gguf"})
+MAX_UPLOAD_BYTES = 24 * 1024**3
+LMSTUDIO_PUBLISHER = "fcc-studio"
 MAX_TOPICS = 20
 MAX_PER_TOPIC = 50
 MIN_TRAIN_EXAMPLES = 4
@@ -257,6 +258,8 @@ class LoraTrainer:
             "batch_size",
             "grad_accum",
             "quantize",
+            "export",
+            "gguf_quant",
         ):
             if hyper and hyper.get(key) not in {None, ""}:
                 values[key] = hyper[key]
@@ -504,6 +507,8 @@ class LoraTrainer:
             else "CPU only"
         )
         report["ollama"] = self._ollama() or ""
+        lmstudio = self.lmstudio_dir()
+        report["lmstudio_dir"] = str(lmstudio) if lmstudio else ""
         llama_cpp = settings.studio_lora_llama_cpp or ""
         report["llama_cpp"] = llama_cpp
         report["llama_cpp_ready"] = bool(
@@ -564,10 +569,13 @@ class LoraTrainer:
             log.close()
             raise LoraError(f"Could not start the trainer: {error}") from error
         self._processes[job.id] = process
-        self._spawn(self._watch(job.id, process, log))
-        return await self._update(
+        # Record "running" before watching: a trainer that dies at once must not
+        # have its failure overwritten by this update.
+        running = await self._update(
             job, status="running", message="Trainer starting on this computer"
         )
+        self._spawn(self._watch(job.id, process, log))
+        return running
 
     async def _watch(
         self, job_id: str, process: asyncio.subprocess.Process, log
@@ -622,6 +630,8 @@ class LoraTrainer:
             "batch_size": job.batch_size,
             "grad_accum": job.grad_accum,
             "quantize": job.quantize,
+            "export": job.export,
+            "gguf_quant": job.gguf_quant,
             "train_examples": job.train_examples,
             "eval_examples": job.eval_examples,
         }
@@ -673,7 +683,9 @@ class LoraTrainer:
     ) -> int:
         """Stream one uploaded result file into the job folder."""
         if name not in UPLOAD_NAMES:
-            raise LoraError("Only adapter.zip and adapter.gguf can be uploaded.")
+            raise LoraError(
+                "Only adapter.zip, adapter.gguf, and model.gguf can be uploaded."
+            )
         current = await self._store.require(LoraJob, job.id)
         if current.status in TERMINAL:
             raise LoraError("This job is already finished.")
@@ -686,7 +698,7 @@ class LoraTrainer:
             async for chunk in chunks:
                 written += len(chunk)
                 if written > MAX_UPLOAD_BYTES:
-                    raise LoraError("That upload is larger than the 8 GB limit.")
+                    raise LoraError("That upload is larger than the 24 GB limit.")
                 await anyio.to_thread.run_sync(handle.write, chunk)
         finally:
             await anyio.to_thread.run_sync(handle.close)
@@ -726,10 +738,30 @@ class LoraTrainer:
                 else current.eval_loss_before
             ),
             metrics=merged,
-            message="Trained. Installing the adapter",
+            message=(
+                "Trained. Installing the new model"
+                if (folder / "model.gguf").is_file()
+                else "Trained. Installing the adapter"
+            ),
         )
         gguf = folder / "adapter.gguf"
         agent = await self._store.get(Agent, job.agent_id)
+        model_file = folder / "model.gguf"
+        if model_file.is_file():
+            await self._store.put(
+                ModelAsset.model_validate(
+                    {
+                        "name": f"{agent.name if agent else 'Agent'} tuned "
+                        f"({job.base_model}, {finished.metrics.get('model_quant') or job.gguf_quant})",
+                        "source_url": f"lora://{job.id}/model",
+                        "path": str(model_file),
+                        "kind": "gguf",
+                        "status": "ready",
+                        "bytes_done": model_file.stat().st_size,
+                        "bytes_total": model_file.stat().st_size,
+                    }
+                )
+            )
         await self._store.put(
             ModelAsset.model_validate(
                 {
@@ -781,6 +813,8 @@ class LoraTrainer:
         job = await self._store.require(LoraJob, job_id)
         agent = await self._store.get(Agent, job.agent_id)
         folder = self.job_dir(job.id)
+        if (folder / "model.gguf").is_file():
+            return await self._install_merged(job, agent)
         gguf = folder / "adapter.gguf"
         if not gguf.is_file():
             return await self._update(
@@ -829,7 +863,87 @@ class LoraTrainer:
         job = await self._update(job, served_model=name)
         return await self._switch_agent(job, name)
 
-    async def _switch_agent(self, job: LoraJob, name: str) -> LoraJob:
+    def lmstudio_dir(self) -> Path | None:
+        """Return LM Studio's models folder when there is one."""
+        configured = self._settings().studio_lmstudio_models_dir
+        if configured:
+            return Path(configured).expanduser()
+        home = Path.home()
+        for candidate in (
+            home / ".lmstudio" / "models",
+            home / ".cache" / "lm-studio" / "models",
+        ):
+            if candidate.is_dir():
+                return candidate
+        return None
+
+    async def _install_merged(self, job: LoraJob, agent: Agent | None) -> LoraJob:
+        """Install a model whose weights now include the training."""
+        folder = self.job_dir(job.id)
+        model_file = folder / "model.gguf"
+        name = self.ollama_name(job, agent)
+        quant = str(job.metrics.get("model_quant") or job.gguf_quant)
+        places: list[str] = []
+        problems: list[str] = []
+        lmstudio = self.lmstudio_dir()
+        if lmstudio is not None:
+            target = lmstudio / LMSTUDIO_PUBLISHER / name / f"{name}-{quant}.gguf"
+            job = await self._update(job, message="Adding the model to LM Studio")
+            try:
+                await anyio.to_thread.run_sync(
+                    lambda: _link_or_copy(model_file, target)
+                )
+                job = await self._update(job, lmstudio_path=str(target))
+                places.append("LM Studio")
+            except OSError as error:
+                problems.append(f"LM Studio copy failed: {error}")
+        ollama = self._ollama()
+        if ollama is not None:
+            modelfile = folder / "Modelfile"
+            await anyio.to_thread.run_sync(
+                lambda: modelfile.write_text(f"FROM {model_file}\n", encoding="utf-8")
+            )
+            job = await self._update(job, message="Creating the model in Ollama")
+            code, output = await _run(
+                [ollama, "create", name, "-f", str(modelfile)], timeout=3600, cwd=folder
+            )
+            if code == 0:
+                job = await self._update(job, served_model=name)
+                places.append("Ollama")
+            else:
+                problems.append(f"Ollama refused it: {output[-200:]}")
+        if not places:
+            detail = f" ({'; '.join(problems)})" if problems else ""
+            return await self._update(
+                job,
+                message="Trained: model.gguf has the new weights. Download it below "
+                "and load it in LM Studio or Ollama, or install LM Studio or Ollama "
+                f"on this computer and press Install again{detail}.",
+            )
+        job = await self._update(job, message=f"Installed into {' and '.join(places)}.")
+        return await self._switch_agent(job, name, places=places)
+
+    async def switch(self, job_id: str) -> LoraJob:
+        """Point the student at this job's trained model once it is being served."""
+        job = await self._store.require(LoraJob, job_id)
+        if job.status != "succeeded":
+            raise LoraError("The training has not finished yet.")
+        agent = await self._store.get(Agent, job.agent_id)
+        places = [
+            place
+            for place, present in (
+                ("LM Studio", bool(job.lmstudio_path)),
+                ("Ollama", bool(job.served_model)),
+            )
+            if present
+        ]
+        return await self._switch_agent(
+            job, self.ollama_name(job, agent), places=places or ["Ollama"]
+        )
+
+    async def _switch_agent(
+        self, job: LoraJob, name: str, *, places: Sequence[str] = ("Ollama",)
+    ) -> LoraJob:
         agent = await self._store.get(Agent, job.agent_id)
         if agent is None:
             return job
@@ -837,12 +951,22 @@ class LoraTrainer:
             served = await self._router.local_models()
         except StudioLLMError:
             served = ()
-        match = next((model for model in served if model.split(":")[0] == name), None)
+        match = next(
+            (model for model in served if model.split(":")[0] == name), None
+        ) or next((model for model in served if name in model), None)
         if match is None:
+            where = " and ".join(places)
+            hint = (
+                "In LM Studio, turn on Just-in-Time model loading (Developer, "
+                "Settings) or load the model once, then press Switch."
+                if "LM Studio" in places
+                else "Point Local Model Server at Ollama (http://localhost:11434/v1), "
+                "then press Switch."
+            )
             return await self._update(
                 job,
-                message=f"Installed in Ollama as {name}. Point Local Model Server at "
-                "Ollama (http://localhost:11434/v1) to use it.",
+                message=f"Installed in {where} as {name}, but the local model "
+                f"server isn't offering it yet. {hint}",
             )
         previous = agent.model
         await self._store.put(
@@ -875,7 +999,18 @@ class LoraTrainer:
         """Commands that run this job on another machine, e.g. a rented GPU."""
         url = studio_url.rstrip("/")
         run = f'--studio "{url}" --job {job.id} --token {job.worker_token} --llama-cpp llama.cpp'
-        packages = "torch transformers peft accelerate bitsandbytes"
+        packages = (
+            "torch transformers peft accelerate bitsandbytes sentencepiece protobuf"
+        )
+        build = (
+            [
+                "pip install -q cmake",
+                "cmake -S llama.cpp -B llama.cpp/build -DLLAMA_CURL=OFF "
+                "&& cmake --build llama.cpp/build --target llama-quantize -j",
+            ]
+            if job.export == "merged" and job.gguf_quant != "Q8_0"
+            else []
+        )
         return {
             "studio_url": url,
             "bash": "\n".join(
@@ -883,6 +1018,7 @@ class LoraTrainer:
                     f'curl -fsSL "{url}/studio/lora/worker.py" -o lora_worker.py',
                     f"pip install -q {packages}",
                     "git clone --depth 1 https://github.com/ggml-org/llama.cpp",
+                    *build,
                     f"python lora_worker.py {run}",
                 ]
             ),
@@ -892,6 +1028,16 @@ class LoraTrainer:
                     f"pip install -q {packages}",
                     "git clone --depth 1 https://github.com/ggml-org/llama.cpp",
                     f"python lora_worker.py {run}",
+                ]
+            ),
+            "tailscale": "\n".join(
+                [
+                    "curl -fsSL https://tailscale.com/install.sh | sh",
+                    "(tailscaled --tun=userspace-networking "
+                    "--outbound-http-proxy-listen=localhost:1055 >/dev/null 2>&1 &)",
+                    "sleep 3",
+                    'tailscale up --authkey "$TS_AUTHKEY" --hostname fcc-gpu',
+                    "export http_proxy=http://localhost:1055",
                 ]
             ),
         }
@@ -920,3 +1066,14 @@ async def _run(args: Sequence[str], *, timeout: float, cwd: Path) -> tuple[int, 
         process.kill()
         return 124, f"{args[0]} took longer than {int(timeout)} seconds."
     return process.returncode or 0, stdout.decode("utf-8", "replace")
+
+
+def _link_or_copy(source: Path, target: Path) -> None:
+    """Put a model file in place, hard-linking to save disk when possible."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.unlink()
+    try:
+        os.link(source, target)
+    except OSError:
+        shutil.copy2(source, target)
