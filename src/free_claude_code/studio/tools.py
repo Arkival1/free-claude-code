@@ -14,6 +14,7 @@ from free_claude_code.core.json_types import JsonObject
 from .commands import CommandBroker, CommandError
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
+from .search import SearchError, StudioSearch
 from .sites import SiteError, SiteWorkspace
 
 FINISH_TOOL = "finish"
@@ -21,6 +22,7 @@ COMMAND_TOOL = "run_command"
 ASK_AGENT_TOOL = "ask_agent"
 TEAM_TASK_TOOL = "team_task"
 DELEGATION_TOOLS = frozenset({ASK_AGENT_TOOL, TEAM_TASK_TOOL})
+WEB_TOOLS: tuple[str, ...] = ("web_search", "web_fetch")
 MAIN_ROLE = "main"
 MAX_FETCH_CHARS = 6_000
 MAX_SEARCH_RESULTS = 6
@@ -303,6 +305,8 @@ class AgentToolbox:
         command_policy: str = "off",
         command_timeout: float = 120.0,
         delegate: TeamDelegate | None = None,
+        searcher: StudioSearch | None = None,
+        web_access: str = "all",
     ) -> None:
         self._web = web_tools
         self._sites = sites
@@ -312,6 +316,8 @@ class AgentToolbox:
         self._command_policy = command_policy
         self._command_timeout = command_timeout
         self._delegate = delegate
+        self._searcher = searcher
+        self._web_access = web_access
 
     @property
     def commands_enabled(self) -> bool:
@@ -321,12 +327,29 @@ class AgentToolbox:
     def shared_memory(self) -> bool:
         return self._memory.shared_enabled
 
+    @property
+    def web_enabled(self) -> bool:
+        return self._web_access != "off"
+
+    def tool_names(self, names: Sequence[str], *, role: str) -> tuple[str, ...]:
+        """Apply the web access setting to an agent's own tool list."""
+        chosen = [name for name in names if self.web_enabled or name not in WEB_TOOLS]
+        if self._web_access == "all" and role != "guide":
+            chosen.extend(name for name in WEB_TOOLS if name not in chosen)
+        return tuple(chosen)
+
     def delegation_allowed(self, role: str) -> bool:
         """Only the main agent may hand work to other agents."""
         return self._delegate is not None and role == MAIN_ROLE
 
     async def run(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         """Execute one tool call, converting every failure into tool output."""
+        if call.name in WEB_TOOLS and not self.web_enabled:
+            return ToolOutcome(
+                text="Web access is off in Studio settings.",
+                data={"tool": call.name},
+                failed=True,
+            )
         try:
             match call.name:
                 case "web_search":
@@ -355,7 +378,13 @@ class AgentToolbox:
                         data={"tool": call.name},
                         failed=True,
                     )
-        except (SiteError, WebFetchEgressViolation, CommandError, ValueError) as error:
+        except (
+            SiteError,
+            WebFetchEgressViolation,
+            CommandError,
+            SearchError,
+            ValueError,
+        ) as error:
             return ToolOutcome(
                 text=f"{call.name} failed: {error}",
                 data={"tool": call.name, "error": str(error)},
@@ -366,26 +395,34 @@ class AgentToolbox:
         query = str(call.arguments.get("query", "")).strip()
         if not query:
             raise ValueError("A search query is required.")
-        results = (await self._web.search(query))[:MAX_SEARCH_RESULTS]
-        if not results:
-            return ToolOutcome(
-                text=f"No results for {query!r}.",
-                data={"tool": "web_search", "query": query, "results": []},
-            )
-        rendered = "\n".join(
-            f"{index}. {result.title} — {result.url}"
-            for index, result in enumerate(results, start=1)
-        )
-        return ToolOutcome(
-            text=rendered,
-            data={
-                "tool": "web_search",
-                "query": query,
-                "results": [
-                    {"title": result.title, "url": result.url} for result in results
-                ],
-            },
-        )
+        if self._searcher is not None:
+            report = await self._searcher.search(query, limit=MAX_SEARCH_RESULTS)
+            provider, note = report.provider, report.note
+            hits = [(hit.title, hit.url, hit.snippet) for hit in report.hits]
+        else:
+            results = (await self._web.search(query))[:MAX_SEARCH_RESULTS]
+            provider, note = "web", ""
+            hits = [(result.title, result.url, "") for result in results]
+        data: JsonObject = {
+            "tool": "web_search",
+            "query": query,
+            "provider": provider,
+            "results": [{"title": title, "url": url} for title, url, _ in hits],
+        }
+        if note:
+            data["note"] = note
+        if not hits:
+            text = f"No results for {query!r}."
+            if note:
+                text += f" {note}"
+            return ToolOutcome(text=f"{text} Try a shorter query.", data=data)
+        lines: list[str] = [f"Note: {note}"] if note else []
+        for index, (title, url, snippet) in enumerate(hits, start=1):
+            lines.append(f"{index}. {title} — {url}")
+            if snippet:
+                lines.append(f"   {snippet}")
+        lines.append("Read a page in full with web_fetch.")
+        return ToolOutcome(text="\n".join(lines), data=data)
 
     async def _web_fetch(self, call: ToolCall) -> ToolOutcome:
         url = str(call.arguments.get("url", "")).strip()

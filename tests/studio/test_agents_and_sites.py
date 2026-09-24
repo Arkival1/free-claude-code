@@ -81,7 +81,9 @@ async def test_agent_stops_at_the_step_budget(make_studio):
 
 @pytest.mark.asyncio
 async def test_plain_reply_needs_no_tools(make_studio):
-    studio, model = make_studio([LLMReply(text="Hello there.")])
+    studio, model = make_studio(
+        [LLMReply(text="Hello there.")], STUDIO_WEB_ACCESS="listed"
+    )
     await studio.ensure_defaults()
     agent = await studio.create_agent(name="Plain", tools=[])
     chat = await studio.create_chat(agent_id=agent.id)

@@ -379,6 +379,28 @@ async def bootstrap(
     }
 
 
+class SearchTestPayload(BaseModel):
+    query: str = ""
+
+
+@router.get("/studio/api/web")
+async def web_status(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Say which search service agents use and whether it is ready."""
+    return studio.web_status()
+
+
+@router.post("/studio/api/web/test")
+async def web_test(
+    payload: SearchTestPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Run one search exactly as an agent would."""
+    return await studio.test_search(payload.query)
+
+
 @router.get("/studio/api/main")
 async def main_console(
     after: int = 0,

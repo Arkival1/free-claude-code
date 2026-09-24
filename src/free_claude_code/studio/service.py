@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 from loguru import logger
 
 from free_claude_code.application.web_tools.ports import (
@@ -51,6 +52,7 @@ from .models import (
 from .obsidian import ObsidianVault, VaultStatus
 from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
+from .search import SearchError, StudioSearch
 from .sites import SiteWorkspace, slugify
 from .store import StudioNotFoundError, StudioStore
 from .tools import DEFAULT_TOOL_NAMES, MAIN_ROLE, MAIN_TOOL_NAMES, AgentToolbox
@@ -60,6 +62,14 @@ GUIDE_AGENT_NAME = "Guide"
 BUILDER_AGENT_NAME = "Builder"
 TEACHER_AGENT_NAME = "Teacher"
 STUDENT_AGENT_NAME = "Student"
+RESEARCHER_AGENT_NAME = "Researcher"
+RESEARCHER_TOOLS = ("web_search", "web_fetch", "remember", "recall", "finish")
+RESEARCHER_PROMPT = (
+    "Research questions on the web for the user and the team: search, read "
+    "the best two or three sources with web_fetch, compare them, and answer "
+    "clearly with the source links. Save the key findings with remember so "
+    "the other agents can use them."
+)
 SHARED_MEMORY_NAME = "Team memory"
 MAIN_CONSOLE_SETTING = "console"
 MAIN_PROMPT_NOTE = (
@@ -110,9 +120,11 @@ class StudioService:
         models_dir: Path,
         sites_dir: Path,
         router: StudioModelRouter | None = None,
+        search_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._store = store
         self._web_tools = web_tools
+        self._search_transport = search_transport
         self._settings_provider = settings_provider
         self._sites = SiteWorkspace(sites_dir)
         self._library = ModelLibrary(store=store, models_dir=models_dir)
@@ -181,6 +193,16 @@ class StudioService:
             shared=settings.studio_shared_memory,
         )
 
+    def _search(self) -> StudioSearch:
+        settings = self.settings
+        return StudioSearch(
+            provider=settings.studio_search_provider,
+            api_key=settings.studio_search_api_key or "",
+            base_url=settings.studio_search_base_url or "",
+            fallback=self._web_tools,
+            transport=self._search_transport,
+        )
+
     def _toolbox(self) -> AgentToolbox:
         settings = self.settings
         return AgentToolbox(
@@ -199,6 +221,8 @@ class StudioService:
             command_policy=settings.studio_agent_commands,
             command_timeout=float(settings.studio_command_timeout),
             delegate=Crew(store=self._store, host=self),
+            searcher=self._search(),
+            web_access=settings.studio_web_access,
         )
 
     def _runner(self) -> AgentRunner:
@@ -301,6 +325,13 @@ class StudioService:
                 self.default_model,
                 "Research on the web and build complete, working websites.",
                 _default_tools(),
+            ),
+            (
+                RESEARCHER_AGENT_NAME,
+                "agent",
+                self.default_model,
+                RESEARCHER_PROMPT,
+                RESEARCHER_TOOLS,
             ),
             (
                 TEACHER_AGENT_NAME,
@@ -860,6 +891,29 @@ class StudioService:
                 )
             )
 
+    # ------------------------------------------------------------------- web
+
+    def web_status(self) -> JsonObject:
+        """Say how agents reach the internet, without revealing any key."""
+        return {**self._search().status(), "access": self.settings.studio_web_access}
+
+    async def test_search(self, query: str) -> JsonObject:
+        """Run one search the way agents do, so the user can check the setup."""
+        try:
+            report = await self._search().search(query or "weather today", limit=5)
+        except (SearchError, ValueError) as error:
+            return {"ok": False, "error": str(error), **self.web_status()}
+        return {
+            "ok": True,
+            **self.web_status(),
+            "used": report.provider,
+            "note": report.note,
+            "results": [
+                {"title": hit.title, "url": hit.url, "snippet": hit.snippet}
+                for hit in report.hits
+            ],
+        }
+
     # ------------------------------------------------------------- main agent
 
     async def main_agent(self) -> Agent:
@@ -989,6 +1043,7 @@ class StudioService:
                 "local": await self._local_status(),
                 "server_model": self.default_model,
                 "commands": self.settings.studio_agent_commands,
+                "web": self.web_status(),
             },
         }
 
@@ -1522,5 +1577,6 @@ class StudioService:
                 "shared_memory": settings.studio_shared_memory,
                 "ui_theme": settings.studio_ui_theme,
                 "main_agent_name": settings.studio_main_agent_name,
+                "web": self.web_status(),
             },
         }

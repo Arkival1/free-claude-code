@@ -47,6 +47,12 @@ MAIN_PROMPT = (
     "then tell the user what was done and where to find it.\n\nYour team:\n"
     "{roster}"
 )
+WEB_PROMPT = (
+    "You are connected to the internet through two tools: web_search finds "
+    "pages and web_fetch reads one in full. Use them for anything current, "
+    "factual, or that you are unsure of, instead of guessing, and name your "
+    "sources."
+)
 SHARED_MEMORY_PROMPT = (
     "Your team shares one memory. Save what the whole team should know with "
     "remember; it is private only when you say so."
@@ -107,6 +113,8 @@ class AgentRunner:
             if self._toolbox.shared_memory and "remember" in agent.tools:
                 parts.append(SHARED_MEMORY_PROMPT)
             parts.append(await self._memory.context_block(agent.id, query))
+        if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):
+            parts.append(WEB_PROMPT)
         if site_id:
             parts.append(SITE_PROMPT)
             if self._toolbox.commands_enabled and COMMAND_TOOL in agent.tools:
@@ -127,9 +135,8 @@ class AgentRunner:
                 }
             ):
                 continue
-            abilities = [
-                label for tool, label in _TOOL_ABILITIES if tool in member.tools
-            ]
+            tools = self._toolbox.tool_names(member.tools, role=member.role)
+            abilities = [label for tool, label in _TOOL_ABILITIES if tool in tools]
             about = member.description or member.system_prompt or member.role
             line = f"- {member.name} ({member.role}, {member.model}): {about[:140]}"
             if abilities:
@@ -272,8 +279,9 @@ class AgentRunner:
         max_steps: int,
         extra_system: str = "",
     ) -> TurnResult:
+        names = self._toolbox.tool_names(agent.tools, role=agent.role)
         specs = tool_specs(
-            agent.tools,
+            names,
             commands_enabled=self._toolbox.commands_enabled,
             shared_memory=self._toolbox.shared_memory and agent.memory_enabled,
             delegation=self._toolbox.delegation_allowed(agent.role),
@@ -289,7 +297,7 @@ class AgentRunner:
                     history,
                     model=model,
                     system=system,
-                    tools=specs if agent.tools else (),
+                    tools=specs if names else (),
                     max_tokens=2048,
                 )
             except StudioLLMError as error:

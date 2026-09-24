@@ -2081,6 +2081,7 @@
     if (generation !== renderGeneration) return;
     view.replaceChildren(
       appearanceCard(),
+      webCard(overview.settings.web),
       connectCard(connect),
       card("Tuning", [
         el("p", { class: "muted", text: "Very light tuning, on device or in the cloud." }),
@@ -2362,6 +2363,81 @@
     return el("div", { class: "hud-line event" }, [hudTag("SYS"), message.text]);
   }
 
+  function webPill(web) {
+    if (web.access === "off") return el("span", { class: "hud-pill bad" }, ["WEB OFF"]);
+    const name = (web.provider || "web").toUpperCase();
+    if (web.problem) return el("span", { class: "hud-pill warn", title: web.problem }, [`WEB ${name}?`]);
+    return el("span", { class: `hud-pill ${web.provider === "duckduckgo" ? "" : "good"}`, title: web.label || "" }, [
+      `WEB ${name}`,
+    ]);
+  }
+
+  function webCard(web) {
+    const query = el("input", {
+      type: "text",
+      "aria-label": "Test search",
+      placeholder: "Try a search, e.g. weather in London",
+    });
+    const results = el("div", { class: "stack" });
+    const access = {
+      all: "Every agent can search the web and read pages, local models included. Studio does the browsing for them.",
+      listed: "Only agents that have web_search or web_fetch in their tools can use the internet.",
+      off: "No agent can use the internet.",
+    }[web.access];
+    const service =
+      web.provider === "duckduckgo"
+        ? "DuckDuckGo, no key needed. It often blocks automated searches, so a key is more reliable."
+        : web.problem
+          ? `${web.label}: ${web.problem} Searches use DuckDuckGo until it is set.`
+          : `${web.label}${web.keyed ? ", key set" : ""}. If it fails, searches fall back to DuckDuckGo.`;
+    return card(
+      "Internet access",
+      [
+        el("p", {}, [el("strong", { text: "Agents: " }), access]),
+        el("p", {}, [el("strong", { text: "Search: " }), service]),
+        el("p", {
+          class: "muted",
+          text: "To add a key, open admin settings on the computer running Studio, then Studio → Web Search API Key. Brave Search (key starts with BSA), Tavily (tvly-), and Serper all have free tiers; SearXNG is free if you run it yourself.",
+        }),
+        el("div", { class: "row" }, [
+          el("div", { class: "grow" }, [query]),
+          el("button", {
+            class: "secondary",
+            text: "Test search",
+            onclick: async () => {
+              results.replaceChildren(el("p", { class: "muted", text: "Searching…" }));
+              try {
+                const body = await post("/studio/api/web/test", { query: query.value });
+                if (!body.ok) {
+                  results.replaceChildren(el("p", { class: "muted", text: body.error }));
+                  return;
+                }
+                results.replaceChildren(
+                  el("p", {
+                    class: "muted",
+                    text: `${body.results.length} result(s) from ${body.used}.${body.note ? ` ${body.note}` : ""}`,
+                  }),
+                  ...body.results.map((hit) =>
+                    el("div", { class: "list-item" }, [
+                      el("span", { class: "grow" }, [
+                        el("strong", { text: hit.title }),
+                        el("span", { text: hit.snippet || hit.url }),
+                      ]),
+                    ])
+                  )
+                );
+              } catch (error) {
+                results.replaceChildren(el("p", { class: "muted", text: error.message }));
+              }
+            },
+          }),
+        ]),
+        results,
+      ],
+      "How your agents reach the web."
+    );
+  }
+
   function hudPanel(heading, body, extra) {
     return el("section", { class: "hud-panel" }, [
       el("header", {}, [el("h2", { text: heading }), extra || null]),
@@ -2384,8 +2460,10 @@
     refs.clock.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
     const local = data.systems.local || {};
-    if (changed("pills", [local.reachable, data.systems.main_model, data.memory, data.approvals.length, data.systems.commands])) {
+    const web = data.systems.web || {};
+    if (changed("pills", [local.reachable, data.systems.main_model, data.memory, data.approvals.length, data.systems.commands, web])) {
       refs.pills.replaceChildren(
+        webPill(web),
         el("span", { class: `hud-pill ${local.reachable ? "good" : "bad"}`, title: local.base_url || "" }, [
           `LOCAL ${local.reachable ? `ONLINE · ${(local.models || []).length}` : "OFFLINE"}`,
         ]),

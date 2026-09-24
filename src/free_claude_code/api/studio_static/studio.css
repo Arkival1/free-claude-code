@@ -1244,3 +1244,8 @@ button.hud-item {
     scroll-behavior: auto !important;
   }
 }
+
+.stack {
+  display: grid;
+  gap: 8px;
+}

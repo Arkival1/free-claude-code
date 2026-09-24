@@ -730,6 +730,18 @@ class Settings(BaseModel):
     studio_ui_theme: NonEmptyString = Field(
         default="classic", validation_alias="STUDIO_UI_THEME"
     )
+    studio_web_access: NonEmptyString = Field(
+        default="all", validation_alias="STUDIO_WEB_ACCESS"
+    )
+    studio_search_provider: NonEmptyString = Field(
+        default="auto", validation_alias="STUDIO_SEARCH_PROVIDER"
+    )
+    studio_search_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_SEARCH_API_KEY"
+    )
+    studio_search_base_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_SEARCH_BASE_URL"
+    )
 
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
     # Minimum log level for the JSON file sink (DEBUG, INFO, WARNING, ERROR, CRITICAL).
@@ -835,6 +847,26 @@ class Settings(BaseModel):
         if value not in ("off", "ask", "auto"):
             raise ValueError(
                 f"STUDIO_AGENT_COMMANDS must be 'off', 'ask', or 'auto', got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_web_access")
+    @classmethod
+    def validate_studio_web_access(cls, value: str) -> str:
+        if value not in ("all", "listed", "off"):
+            raise ValueError(
+                f"STUDIO_WEB_ACCESS must be 'all', 'listed', or 'off', got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_search_provider")
+    @classmethod
+    def validate_studio_search_provider(cls, value: str) -> str:
+        allowed = ("auto", "duckduckgo", "brave", "tavily", "serper", "searxng")
+        if value not in allowed:
+            raise ValueError(
+                f"STUDIO_SEARCH_PROVIDER must be one of {', '.join(allowed)}, "
+                f"got {value!r}"
             )
         return value
 

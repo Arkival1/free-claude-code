@@ -822,6 +822,65 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_WEB_ACCESS",
+        "Agents On The Internet",
+        "studio",
+        "select",
+        settings_attr="studio_web_access",
+        options=(
+            ConfigOptionSpec("all", "Every agent"),
+            ConfigOptionSpec("listed", "Only agents given web tools"),
+            ConfigOptionSpec("off", "No agent"),
+        ),
+        description=(
+            "Lets agents search the web and read pages, local models included: "
+            "Studio does the browsing on their behalf."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_PROVIDER",
+        "Web Search Service",
+        "studio",
+        "select",
+        settings_attr="studio_search_provider",
+        options=(
+            ConfigOptionSpec("auto", "Auto (from the key)"),
+            ConfigOptionSpec("duckduckgo", "DuckDuckGo (no key)"),
+            ConfigOptionSpec("brave", "Brave Search API"),
+            ConfigOptionSpec("tavily", "Tavily"),
+            ConfigOptionSpec("serper", "Serper (Google results)"),
+            ConfigOptionSpec("searxng", "SearXNG (self-hosted)"),
+        ),
+        description=(
+            "Where agents' web searches go. DuckDuckGo needs no key but often "
+            "limits automated searches; a key makes search reliable. Auto picks "
+            "the service from the key: tvly- is Tavily, BSA is Brave."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_API_KEY",
+        "Web Search API Key",
+        "studio",
+        "secret",
+        settings_attr="studio_search_api_key",
+        secret=True,
+        description=(
+            "Key or token for Brave Search, Tavily, or Serper. Studio uses it "
+            "for every agent's searches and falls back to DuckDuckGo if it fails."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_BASE_URL",
+        "SearXNG Address",
+        "studio",
+        "text",
+        settings_attr="studio_search_base_url",
+        description=(
+            "Address of your own SearXNG, e.g. http://localhost:8888, with the "
+            "json format enabled. Free and needs no key."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_AGENT_COMMANDS",
         "Agents Can Run Commands",
         "studio",

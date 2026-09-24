@@ -4,6 +4,7 @@ import inspect
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+import httpx
 import pytest
 
 from free_claude_code.application.web_tools.ports import WebFetchEgressPolicy
@@ -19,6 +20,11 @@ from free_claude_code.studio.llm import (
 )
 from free_claude_code.studio.service import StudioService
 from free_claude_code.studio.store import StudioStore
+
+OFFLINE_SEARCH = httpx.MockTransport(
+    lambda request: httpx.Response(503, json={"error": "tests stay offline"})
+)
+"""Answers every search API call, so no Studio test reaches the network."""
 
 
 class ScriptedLLM:
@@ -136,6 +142,7 @@ def make_studio(tmp_path, store, web_tools, studio_settings):
             models_dir=tmp_path / "models",
             sites_dir=tmp_path / "sites",
             router=StudioModelRouter(proxy=model, local=model),
+            search_transport=OFFLINE_SEARCH,
         )
         return service, model
 

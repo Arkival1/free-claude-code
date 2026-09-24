@@ -453,8 +453,38 @@ that looks like a credential removed, a time limit (`STUDIO_COMMAND_TIMEOUT`),
 and the whole process tree stopped when it expires. It is off by default.
 Rooms can be given a project too, so a team of agents builds in one folder.
 
-The first run creates the main AI (**Jarvis**) and four starter agents:
-**Guide**, **Builder**, **Teacher**, and **Student**.
+The first run creates the main AI (**Jarvis**) and five starter agents:
+**Guide**, **Builder**, **Researcher**, **Teacher**, and **Student**.
+
+</details>
+
+<details>
+<summary><strong>Internet access for every agent</strong></summary>
+
+Every agent can search the web and read pages, including agents running on
+local models: Studio does the browsing and gives the model the results.
+`STUDIO_WEB_ACCESS` sets who may: `all` (the default), `listed` (only agents
+with `web_search`/`web_fetch` in their tools), or `off`.
+
+Without a key, searches go to DuckDuckGo. It often blocks automated searches,
+so Studio retries once and then falls back to Wikipedia's search. For reliable
+full-web search, add a key in **admin → Studio → Web Search API Key**:
+
+| Service | Key looks like | Notes |
+| --- | --- | --- |
+| [Brave Search API](https://brave.com/search/api/) | `BSA…` | Free tier, independent index |
+| [Tavily](https://tavily.com/) | `tvly-…` | Free tier, returns page extracts built for AI research |
+| [Serper](https://serper.dev/) | 40 hex characters | Google results, free trial credits |
+| [SearXNG](https://docs.searxng.org/) | no key | Self-hosted and free: set `STUDIO_SEARCH_BASE_URL` and enable its `json` format |
+
+`STUDIO_SEARCH_PROVIDER=auto` (the default) picks the service from the key. If
+the service rejects the key or runs out of quota, the search falls back to
+DuckDuckGo and the agent is told why. **More → Internet access** shows the setup
+and has a **Test search** button. The HUD shows the service as a `WEB` pill.
+
+A **Researcher** agent is created for deep research: it searches, reads the
+best sources, answers with links, and saves what it finds to shared memory.
+Ask the main AI to send it, or write `@Researcher` in a room.
 
 </details>
 

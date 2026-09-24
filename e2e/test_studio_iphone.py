@@ -64,6 +64,10 @@ def test_tabs_navigate_without_leaving_the_app(page: Page, admin_base_url: str) 
     page.locator('.tab[data-route="more"]').click()
     expect(page.locator(".card", has_text="Install on your iPhone")).to_be_visible()
     expect(page.locator(".list-item", has_text="localhost")).to_be_visible()
+    web = page.locator(".card", has_text="Internet access")
+    expect(web).to_contain_text("Every agent can search the web")
+    expect(web).to_contain_text("DuckDuckGo, no key needed")
+    expect(web.get_by_role("button", name="Test search")).to_be_visible()
 
 
 def test_an_unreachable_server_shows_a_readable_screen(
@@ -228,6 +232,8 @@ def test_the_hud_runs_the_main_ai_and_survives_a_reload(
     expect(page.locator(".hud-name")).to_have_text("JARVIS")
     expect(page.locator(".hud-status")).to_have_text("STANDING BY")
     expect(page.locator(".hud-agent", has_text="Builder")).to_be_visible()
+    expect(page.locator(".hud-agent", has_text="Researcher")).to_be_visible()
+    expect(page.locator(".hud-pill", has_text="WEB DUCKDUCKGO")).to_be_visible()
 
     page.get_by_label("Talk to Jarvis").fill("status report")
     page.get_by_role("button", name="SEND").click()

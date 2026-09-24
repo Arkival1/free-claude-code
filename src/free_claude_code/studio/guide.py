@@ -31,6 +31,30 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Internet access",
+        route="/studio#more",
+        terms=(
+            "internet",
+            "web",
+            "search",
+            "online",
+            "research",
+            "key",
+            "token",
+            "brave",
+            "tavily",
+        ),
+        body=(
+            "Every agent can search the web and read pages, local models too: "
+            "Studio does the browsing and hands them the results. Searches use "
+            "DuckDuckGo with no key, which often gets blocked, so add a Brave "
+            "Search, Tavily, or Serper key in admin settings under Studio, Web "
+            "Search API Key, or point it at your own SearXNG. The Researcher "
+            "agent is built for deep research; ask the main AI to send it, or "
+            "mention @Researcher in a room. More, Internet access tests it."
+        ),
+    ),
+    GuideTopic(
         title="Agent tasks",
         route="/studio#agents",
         terms=("task", "autonomous", "run", "goal", "build", "website", "site"),
