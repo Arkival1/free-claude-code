@@ -54,10 +54,10 @@ async def test_agents_share_what_they_learn(make_studio):
 
     other = await studio.create_chat(agent_id=writer.id)
     await studio.send(other.id, "When does the bakery open?")
-    system = model.calls[-1]["system"]
-    assert "What the team knows (shared memory):" in system
-    assert "The bakery opens at 7am (from Scout)" in system
-    assert "scratch idea" not in system
+    memory = model.calls[-1]["memory"]
+    assert "What the team knows (shared memory):" in memory
+    assert "The bakery opens at 7am (from Scout)" in memory
+    assert "scratch idea" not in memory
 
 
 @pytest.mark.asyncio

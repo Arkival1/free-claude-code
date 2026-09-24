@@ -650,3 +650,73 @@ def test_a_phone_is_told_where_settings_live(page: Page, admin_base_url: str) ->
         "on the PC running Studio"
     )
     expect(page.locator("iframe")).to_have_count(0)
+
+
+def test_jarvis_starts_speaking_before_his_reply_is_finished(
+    page: Page, admin_base_url: str
+) -> None:
+    ready = {
+        "speak": "builtin",
+        "listen": "builtin",
+        "speak_ready": True,
+        "listen_ready": True,
+        "setup": {"phase": "ready", "progress": 1.0, "message": "Voice ready"},
+        "builtin": {"voice": "jarvis", "effect": "jarvis", "whisper": "base.en"},
+    }
+    state: dict = {"live": "", "final": None}
+
+    def main(route) -> None:
+        response = route.fetch()
+        body = response.json()
+        if "systems" in body:
+            body["systems"]["voice"] = ready
+            body["live"] = state["live"]
+            if state["final"]:
+                body["messages"] = [*body["messages"], state["final"]]
+        route.fulfill(response=response, json=body)
+
+    spoken: list[str] = []
+
+    def speak(route) -> None:
+        spoken.append(route.request.post_data_json["text"])
+        route.fulfill(
+            status=200, body=_silent_wav(), headers={"content-type": "audio/wav"}
+        )
+
+    def wait_for_speech(count: int) -> None:
+        for _ in range(100):
+            if len(spoken) >= count:
+                return
+            page.wait_for_timeout(100)
+
+    page.route("**/studio/api/main**", main)
+    page.route("**/studio/api/voice/speak", speak)
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{admin_base_url}/studio")
+    expect(page.locator(".hud-pill", has_text="VOICE OFFLINE")).to_be_visible()
+    voice_button = page.get_by_role("button", name="VOICE ON")
+    voice_button.click()  # a tap lets the page play sound
+    page.get_by_role("button", name="VOICE OFF").click()
+
+    state["live"] = "Good evening, sir. All systems are"
+    wait_for_speech(1)
+    assert spoken == ["Good evening, sir."], "the first sentence, while writing"
+    expect(page.locator(".hud-line.ai.live")).to_contain_text("All systems are")
+
+    state["live"] = ""
+    state["final"] = {
+        "id": "msg_final",
+        "chat_id": "chat",
+        "sequence": 100_000,
+        "role": "assistant",
+        "author": "Jarvis",
+        "text": "Good evening, sir. All systems are green.",
+        "data": {},
+        "created_at": 0,
+    }
+    wait_for_speech(2)
+    assert spoken == ["Good evening, sir.", "All systems are green."], "no repeats"
+    expect(page.locator(".hud-line.ai.live")).to_have_count(0)
+    expect(
+        page.locator(".hud-line.ai", has_text="All systems are green.")
+    ).to_be_visible()

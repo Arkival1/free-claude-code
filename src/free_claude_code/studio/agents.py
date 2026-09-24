@@ -1,5 +1,6 @@
 """The bounded tool loop every Studio agent runs."""
 
+import asyncio
 from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 
@@ -13,11 +14,36 @@ from .tools import (
     COMMAND_TOOL,
     FINISH_TOOL,
     MAIN_ROLE,
+    PARALLEL_TOOLS,
     AgentToolbox,
     ToolContext,
+    ToolOutcome,
     tool_specs,
 )
 from .tuning import pack_exemplars, pack_system_text
+
+MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user):"
+
+
+def with_memory_note(history: list[ChatMessage], note: str) -> list[ChatMessage]:
+    """Put this message's recalled memory on the newest user message.
+
+    Keeping it out of the instructions lets the instructions and the earlier
+    conversation stay word-for-word the same between messages.
+    """
+    if not note.strip():
+        return history
+    for index in range(len(history) - 1, -1, -1):
+        message = history[index]
+        if message.role == "user":
+            marked = f"{MEMORY_NOTE_HEADER}\n{note}\n\n---\n{message.content}"
+            return [
+                *history[:index],
+                ChatMessage.user(marked),
+                *history[index + 1 :],
+            ]
+    return history
+
 
 AGENT_BASE_PROMPT = (
     "You are a Studio agent running inside Free Claude Code on the user's own "
@@ -98,6 +124,7 @@ class AgentRunner:
         default_model: str,
         max_steps: int = 12,
         live: MutableMapping[str, str] | None = None,
+        temperature: float = 0.2,
     ) -> None:
         self._store = store
         self._router = router
@@ -107,9 +134,15 @@ class AgentRunner:
         self._max_steps = max(1, max_steps)
         # Chat id -> the reply being written right now, for live display.
         self._live = live
+        self._temperature = temperature
 
     async def system_prompt(
-        self, agent: Agent, *, query: str, site_id: str | None
+        self,
+        agent: Agent,
+        *,
+        query: str,
+        site_id: str | None,
+        with_memory: bool = True,
     ) -> str:
         """Compose the agent's identity, tuning, memory, and site guidance.
 
@@ -148,7 +181,7 @@ class AgentRunner:
             parts.append(SITE_PROMPT)
             if self._toolbox.commands_enabled and COMMAND_TOOL in agent.tools:
                 parts.append(COMMAND_PROMPT)
-        if agent.memory_enabled:
+        if with_memory and agent.memory_enabled:
             parts.append(await self._memory.context_block(agent.id, query))
         return "\n\n".join(part for part in parts if part.strip())
 
@@ -318,9 +351,19 @@ class AgentRunner:
             shared_memory=self._toolbox.shared_memory and agent.memory_enabled,
             delegation=self._toolbox.delegation_allowed(agent.role),
         )
-        system = await self.system_prompt(agent, query=query, site_id=context.site_id)
+        # The instructions stay the same from message to message; what memory
+        # recalls for this message rides on the message itself. A local
+        # runtime then reuses its reading of the instructions and the whole
+        # earlier conversation instead of re-reading them for every reply.
+        system = await self.system_prompt(
+            agent, query=query, site_id=context.site_id, with_memory=False
+        )
         if extra_system:
             system = f"{system}\n\n{extra_system}"
+        if agent.memory_enabled:
+            history = with_memory_note(
+                history, await self._memory.context_block(agent.id, query)
+            )
         model = agent.model or self._default_model
         used: list[str] = []
         for step in range(1, max_steps + 1):
@@ -331,6 +374,7 @@ class AgentRunner:
                     system=system,
                     tools=specs if names else (),
                     max_tokens=2048,
+                    temperature=self._temperature,
                     on_text=self._show_live(chat.id),
                 )
             except StudioLLMError as error:
@@ -374,9 +418,9 @@ class AgentRunner:
                     author=agent.name,
                     data={"partial": True},
                 )
-            for call in reply.tool_calls:
+            outcomes = await self._run_calls(reply.tool_calls, context)
+            for call, outcome in zip(reply.tool_calls, outcomes, strict=True):
                 used.append(call.name)
-                outcome = await self._toolbox.run(call, context)
                 await self._store.append_message(
                     chat_id=chat.id,
                     role="tool",
@@ -409,6 +453,18 @@ class AgentRunner:
             failed=True,
             error="step_limit",
         )
+
+    async def _run_calls(
+        self, calls: Sequence[ToolCall], context: ToolContext
+    ) -> list[ToolOutcome]:
+        """Run tool calls; look-ups that change nothing run at the same time."""
+        if len(calls) > 1 and all(call.name in PARALLEL_TOOLS for call in calls):
+            return list(
+                await asyncio.gather(
+                    *(self._toolbox.run(call, context) for call in calls)
+                )
+            )
+        return [await self._toolbox.run(call, context) for call in calls]
 
     def _show_live(self, chat_id: str) -> Callable[[str], None] | None:
         live = self._live

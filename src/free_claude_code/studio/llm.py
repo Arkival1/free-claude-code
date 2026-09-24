@@ -112,6 +112,8 @@ def tool_protocol_instructions(tools: Sequence[ToolSpec]) -> str:
         "nothing else:",
         '{"tool": "<name>", "arguments": {...}}',
         'When the work is finished, reply with: {"final": "<your answer>"}',
+        "To use several tools that do not depend on each other, reply with a "
+        "JSON array of these objects; they run together, which is faster.",
         "Available tools:",
     ]
     lines.extend(
@@ -120,6 +122,43 @@ def tool_protocol_instructions(tools: Sequence[ToolSpec]) -> str:
         for tool in tools
     )
     return "\n".join(lines)
+
+
+def parse_tool_directives(text: str) -> tuple[tuple[ToolCall, ...], str | None]:
+    """Return every tool call in a text-protocol reply, or its final answer."""
+    stripped = text.strip()
+    fenced = re.fullmatch(r"```(?:json)?\s*(\[.*\])\s*```", stripped, re.DOTALL)
+    if fenced:
+        stripped = fenced.group(1)
+    if stripped.startswith("[") and stripped.endswith("]"):
+        try:
+            items = json.loads(stripped)
+        except json.JSONDecodeError:
+            items = None
+        if isinstance(items, list) and items:
+            calls = tuple(
+                call
+                for index, item in enumerate(items)
+                if (call := _directive_call(item, f"{index}:{stripped}")) is not None
+            )
+            if calls:
+                return calls, None
+    call, final = parse_tool_directive(text)
+    return ((call,) if call is not None else ()), final
+
+
+def _directive_call(payload: object, seed: str) -> ToolCall | None:
+    if not isinstance(payload, dict):
+        return None
+    name = payload.get("tool") or payload.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    arguments = payload.get("arguments") or payload.get("input") or {}
+    return ToolCall(
+        id=f"text_{abs(hash(seed)) % 10**8}",
+        name=name,
+        arguments=arguments if isinstance(arguments, dict) else {},
+    )
 
 
 def parse_tool_directive(text: str) -> tuple[ToolCall | None, str | None]:
@@ -409,6 +448,15 @@ class LocalOpenAILLM:
             model=model,
             stream=True,
         )
+        return await self._stream(payload, headers, tools, on_text)
+
+    async def _stream(
+        self,
+        payload: JsonObject,
+        headers: Mapping[str, str],
+        tools: Sequence[ToolSpec],
+        on_text: Callable[[str], None],
+    ) -> LLMReply:
         text: list[str] = []
         finish = ""
         served = ""
@@ -482,11 +530,11 @@ def _text_protocol_reply(reply: LLMReply, tools: Sequence[ToolSpec]) -> LLMReply
     """Turn a text-protocol directive in a local reply into a tool call."""
     if reply.tool_calls or not tools:
         return reply
-    call, final = parse_tool_directive(reply.text)
-    if call is not None:
+    calls, final = parse_tool_directives(reply.text)
+    if calls:
         return LLMReply(
             text="",
-            tool_calls=(call,),
+            tool_calls=calls,
             model=reply.model,
             stop_reason="tool_use",
             usage=reply.usage,
@@ -530,7 +578,7 @@ def visible_reply(text: str) -> str:
         body = text[opened.end() :]
         body = re.sub(r'"\s*\}?\s*$', "", body)
         return body.replace("\\n", "\n").replace('\\"', '"').strip()
-    if text.lstrip().startswith(("{", "```")):
+    if text.lstrip().startswith(("{", "[", "```")):
         return ""
     return text
 
@@ -698,11 +746,16 @@ def _text_protocol_messages(messages: Sequence[ChatMessage]) -> list[JsonObject]
             add("user", f"Result of {name}:\n{message.content}")
             continue
         parts = [message.content] if message.content else []
+        directives = [
+            {"tool": call.name, "arguments": dict(call.arguments)}
+            for call in message.tool_calls
+        ]
         for call in message.tool_calls:
             names[call.id] = call.name
-            parts.append(
-                json.dumps({"tool": call.name, "arguments": dict(call.arguments)})
-            )
+        if len(directives) == 1:
+            parts.append(json.dumps(directives[0]))
+        elif directives:
+            parts.append(json.dumps(directives))
         add(message.role, "\n".join(parts))
     return wire
 

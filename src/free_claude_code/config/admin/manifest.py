@@ -965,6 +965,17 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_AGENT_TEMPERATURE",
+        "Agent Temperature",
+        "studio",
+        "number",
+        settings_attr="studio_agent_temperature",
+        description=(
+            "How much agents vary their wording, 0 to 2. Low (0.1 to 0.3) keeps "
+            "tool use steady; higher is more creative."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_HELPER_PIPELINE",
         "Helper Reviews Research",
         "studio",

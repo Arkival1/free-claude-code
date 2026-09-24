@@ -778,6 +778,9 @@ class Settings(BaseModel):
     studio_local_fast_replies: bool = Field(
         default=True, validation_alias="STUDIO_LOCAL_FAST_REPLIES"
     )
+    studio_agent_temperature: float = Field(
+        default=0.2, ge=0.0, le=2.0, validation_alias="STUDIO_AGENT_TEMPERATURE"
+    )
     studio_web_access: NonEmptyString = Field(
         default="all", validation_alias="STUDIO_WEB_ACCESS"
     )

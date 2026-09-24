@@ -41,6 +41,19 @@ HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
 MAX_READ_LINES = 400
 NETWORK_TOOLS = frozenset({*WEB_TOOLS, RESEARCH_TOOL})
+# Look-ups that change nothing, so several asked for at once run together.
+PARALLEL_TOOLS = frozenset(
+    {
+        *WEB_TOOLS,
+        RESEARCH_TOOL,
+        "read_file",
+        "list_files",
+        "search_files",
+        "recall",
+        ASK_RESEARCHER_TOOL,
+        ASK_HELPER_TOOL,
+    }
+)
 RESEARCHER_ROLE = "researcher"
 TEST_LANGUAGES = {
     "python": "py",

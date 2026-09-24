@@ -481,6 +481,25 @@ models such as Qwen3 write before every answer; turn it off for hard problems.
 In LM Studio, load the model with GPU Offload at maximum and a Context Length
 of 8192; a larger context can spill out of an 8 GB card and slow every reply.
 
+More speed-ups that keep answers and memory exactly the same:
+
+- **Memory on the message.** What memory recalls for a message is attached to
+  that message instead of the instructions, so the instructions and the whole
+  earlier conversation stay word-for-word the same and LM Studio reuses them
+  instead of re-reading them. Every memory still reaches the agent.
+- **Look-ups together.** Agents may ask for several tools in one reply; web
+  searches, page reads, file reads, recall, research, and questions to the
+  Researcher or Helper then run at the same time. Anything that changes files
+  or runs commands still runs one at a time, in order.
+- **He talks while he writes.** The main AI starts speaking his first finished
+  sentence while the rest of the reply is still being written, instead of
+  waiting for the whole answer.
+- **No waiting on the notes.** When memory is mirrored into Obsidian, that
+  happens in the background after an agent's reply, not before it counts as
+  done. Memory itself is saved first, as before.
+- **Agent Temperature** (`STUDIO_AGENT_TEMPERATURE`, default 0.2) sets how much
+  agents vary their wording; low values keep tool use steady.
+
 You talk to the main AI in the HUD by typing or with the mic button (when the
 browser supports speech recognition), and it can read its replies aloud
 (**VOICE ON/OFF**). It answers simple questions itself and runs the rest of

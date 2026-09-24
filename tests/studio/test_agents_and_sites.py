@@ -103,7 +103,10 @@ async def test_memory_context_reaches_the_prompt(make_studio):
 
     await studio.send(chat.id, "What units should you use?")
 
-    assert "prefers metric units" in str(model.calls[0]["system"])
+    call = model.calls[0]
+    assert "prefers metric units" in str(call["memory"])
+    assert "prefers metric units" not in str(call["system"]), "instructions stay fixed"
+    assert call["prompt"] == "What units should you use?"
 
 
 @pytest.mark.asyncio

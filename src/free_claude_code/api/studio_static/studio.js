@@ -2775,6 +2775,7 @@
 
   function stopSpeaking(refs) {
     voice.token += 1;
+    voice.speech = null;
     if (voice.audio && voice.unlocked) voice.audio.pause();
     if (speechSupported()) speechSynthesis.cancel();
     setSpeaking(false, refs);
@@ -2827,6 +2828,76 @@
     });
   }
 
+  const renderSpeech = (part) =>
+    fetch("/studio/api/voice/speak", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ text: part }),
+    }).then((response) => (response.ok ? response.blob() : Promise.reject(new Error(`voice ${response.status}`))));
+
+  function speakBrowserPart(part, turn) {
+    return new Promise((resolve) => {
+      if (!speechSupported() || !voice.unlocked || turn !== voice.token) return resolve();
+      const utterance = new SpeechSynthesisUtterance(part);
+      const chosen = pickVoice();
+      if (chosen) utterance.voice = chosen;
+      utterance.rate = 1.02;
+      utterance.pitch = 0.95;
+      utterance.onend = utterance.onerror = () => resolve();
+      speechSynthesis.speak(utterance);
+    });
+  }
+
+  // Speak a reply while it is still being written: each finished sentence is
+  // voiced as soon as it appears (rendering the next while one plays), and
+  // finishSpeaking adds the rest once the reply is complete.
+  function speakAhead(text, refs) {
+    if (!voiceOn() || !text.trim()) return;
+    let stream = voice.speech;
+    if (!stream || stream.turn !== voice.token) {
+      stopSpeaking(refs);
+      stream = voice.speech = { turn: voice.token, chain: Promise.resolve() };
+      setSpeaking(true, refs);
+    }
+    const turn = stream.turn;
+    for (const part of spokenParts(text)) {
+      if (renderedVoice() && voice.unlocked) {
+        const blob = renderSpeech(part);
+        blob.catch(() => {});
+        stream.chain = stream.chain.then(async () => {
+          if (turn !== voice.token) return;
+          try {
+            await playBlob(await blob, turn);
+          } catch {
+            await speakBrowserPart(part, turn);
+          }
+        });
+      } else {
+        stream.chain = stream.chain.then(() => speakBrowserPart(part, turn));
+      }
+    }
+  }
+
+  function finishSpeaking(refs, done) {
+    const stream = voice.speech;
+    voice.speech = null;
+    if (!stream) return done?.();
+    stream.chain.then(() => {
+      if (stream.turn !== voice.token) return;
+      setSpeaking(false, refs);
+      done?.();
+    });
+  }
+
+  // Where the last whole sentence of a reply being written ends (0 if none).
+  function sentenceCut(text) {
+    let cut = 0;
+    for (const match of text.matchAll(/[.!?]["')\]]*\s/g)) cut = match.index + match[0].length;
+    const fences = text.slice(0, cut).split("```").length - 1;
+    if (fences % 2 === 1) cut = text.slice(0, cut).lastIndexOf("```");
+    return Math.max(0, cut);
+  }
+
   async function sayAloud(text, refs, done) {
     if (!voiceOn() || !text) return done?.();
     stopSpeaking(refs);
@@ -2834,12 +2905,7 @@
     const turn = voice.token;
     const parts = spokenParts(text);
     if (!parts.length) return done?.();
-    const render = (part) =>
-      fetch("/studio/api/voice/speak", {
-        method: "POST",
-        headers: authHeaders({ "content-type": "application/json" }),
-        body: JSON.stringify({ text: part }),
-      }).then((response) => (response.ok ? response.blob() : Promise.reject(new Error(`voice ${response.status}`))));
+    const render = renderSpeech;
     setSpeaking(true, refs);
     // Render the next sentence while this one plays, so speech flows.
     let next = render(parts[0]);
@@ -3330,7 +3396,14 @@
         if ((fromMain || finishedWork) && message.sequence > hud.spokenSeq) {
           hud.spokenSeq = message.sequence;
           hud.orb?.burst();
-          sayAloud(message.text, refs, () => hud.afterReply?.());
+          const said = hud.liveSpoken;
+          hud.liveSpoken = "";
+          if (fromMain && said && voice.speech && message.text.startsWith(said)) {
+            speakAhead(message.text.slice(said.length), refs);
+            finishSpeaking(refs, () => hud.afterReply?.());
+          } else {
+            sayAloud(message.text, refs, () => hud.afterReply?.());
+          }
         }
       }
     }
@@ -3341,6 +3414,14 @@
         refs.live = el("div", { class: "hud-line ai live" }, [hudTag(hud.name.toUpperCase()), el("span")]);
       }
       refs.live.lastChild.textContent = live;
+      // Start talking at the first finished sentence instead of the last.
+      if (!live.startsWith(hud.liveSpoken)) hud.liveSpoken = "";
+      const cut = sentenceCut(live);
+      if (cut > hud.liveSpoken.length) {
+        const piece = live.slice(hud.liveSpoken.length, cut);
+        hud.liveSpoken = live.slice(0, cut);
+        speakAhead(piece, refs);
+      }
       refs.log.querySelector(".hud-empty")?.remove();
       if (refs.log.lastElementChild !== refs.live) refs.log.append(refs.live);
       refs.log.scrollTop = refs.log.scrollHeight;
@@ -3585,6 +3666,7 @@
     hud.roomId = null;
     hud.watch = null;
     hud.watchAuto = true;
+    hud.liveSpoken = "";
     hud.watchSeq = 0;
     const last = data.messages[data.messages.length - 1];
     hud.spokenSeq = last ? last.sequence : 0;

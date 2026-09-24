@@ -10,6 +10,7 @@ from free_claude_code.studio.llm import (
     ChatMessage,
     LocalOpenAILLM,
     ToolSpec,
+    parse_tool_directives,
     strip_thinking,
     visible_reply,
 )
@@ -166,3 +167,21 @@ def test_what_a_person_sees_while_a_reply_is_written():
     assert visible_reply('{"tool": "web_se') == ""
     assert visible_reply("<think>planning") == ""
     assert visible_reply("Plain words") == "Plain words"
+
+
+def test_several_tool_calls_come_back_from_one_reply():
+    calls, final = parse_tool_directives(
+        '[{"tool": "web_search", "arguments": {"query": "a"}},'
+        ' {"tool": "web_search", "arguments": {"query": "b"}}]'
+    )
+    assert final is None
+    assert [call.arguments["query"] for call in calls] == ["a", "b"]
+    assert len({call.id for call in calls}) == 2
+
+    fenced, _ = parse_tool_directives(
+        '```json\n[{"tool": "recall", "arguments": {"query": "x"}}]\n```'
+    )
+    assert [call.name for call in fenced] == ["recall"]
+    single, _ = parse_tool_directives('{"tool": "recall", "arguments": {}}')
+    assert [call.name for call in single] == ["recall"]
+    assert parse_tool_directives('{"final": "Done."}') == ((), "Done.")

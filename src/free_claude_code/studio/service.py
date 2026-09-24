@@ -203,6 +203,7 @@ class StudioService:
         self._local_probe: tuple[float, JsonObject] | None = None
         self._loaded_probe: tuple[float, tuple[str, ...] | None] | None = None
         self._agent_busy: dict[str, int] = {}
+        self._mirror_queued = False
         self._live_text: dict[str, str] = {}
         self._console_extras: tuple[float, JsonObject] | None = None
         self._stand_in_note = ""
@@ -489,6 +490,7 @@ class StudioService:
             default_model=self.default_model,
             max_steps=self.settings.studio_agent_max_steps,
             live=self._live_text,
+            temperature=self.settings.studio_agent_temperature,
         )
 
     def _tuner(self) -> LightTuner:
@@ -845,7 +847,7 @@ class StudioService:
             return await self._guide_turn(chat, agent, text)
         async with self._working(agent.id):
             result = await self._runner().reply(agent, chat, text)
-        await self._after_memory_change([agent.id])
+        await self._after_memory_change([agent.id], wait=False)
         if chat.title in {"New chat", f"{agent.name} chat"}:
             await self._store.put(
                 chat.model_copy(
@@ -1095,8 +1097,15 @@ class StudioService:
                 self._room_activity.pop(room_id, None)
         return outcome
 
-    async def _after_memory_change(self, agent_ids: Sequence[str]) -> None:
-        """Mirror memory into Obsidian after agents write to it, when enabled."""
+    async def _after_memory_change(
+        self, agent_ids: Sequence[str], *, wait: bool = True
+    ) -> None:
+        """Mirror memory into Obsidian after agents write to it, when enabled.
+
+        After an agent's turn the mirror runs in the background, so the reply
+        is done without waiting for files to be written; memory itself is
+        already saved. Changes made while a mirror runs get one more mirror.
+        """
         settings = self.settings
         if not (
             agent_ids
@@ -1104,6 +1113,15 @@ class StudioService:
             and settings.studio_obsidian_vault
         ):
             return
+        if wait:
+            await self._mirror_memory()
+            return
+        if not self._mirror_queued:
+            self._mirror_queued = True
+            self.spawn(self._mirror_memory())
+
+    async def _mirror_memory(self) -> None:
+        self._mirror_queued = False
         try:
             await self.sync_memory_structure()
         except (OSError, RuntimeError) as error:
@@ -1156,7 +1174,7 @@ class StudioService:
             async with self._working(agent.id):
                 finished = await self._runner().run_task(agent, chat, run)
             await self._refresh_site_count(finished.site_id)
-            await self._after_memory_change([agent.id])
+            await self._after_memory_change([agent.id], wait=False)
             if chat.parent_chat_id:
                 await self._report_to_parent(chat, agent, finished)
         except (StudioNotFoundError, StudioError) as error:
@@ -1235,7 +1253,7 @@ class StudioService:
         async with self._working(agent.id):
             finished = await self._runner().run_task(agent, chat, run)
         await self._refresh_site_count(site_id)
-        await self._after_memory_change([agent.id])
+        await self._after_memory_change([agent.id], wait=False)
         return finished, chat
 
     async def run_team_task(
