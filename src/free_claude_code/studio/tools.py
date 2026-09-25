@@ -274,13 +274,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name=RESEARCH_TOOL,
         description=(
-            "Research a question in depth and read at least ten sources: by "
-            "default at least 3 web pages, 2 on-topic Reddit threads with real "
-            "discussion, and 2 YouTube videos with their transcripts, plus Stack "
-            "Overflow, GitHub, MDN, and dev.to for coding questions. Returns the "
-            "useful parts numbered with their links so you can cite them. Use it "
-            "for how-to, best practice, reviews, and fixing errors. Set web, "
-            "reddit, or youtube only when the user asks for a different number."
+            "Research a question in depth from ten or more sources: at least 3 "
+            "web pages, 2 on-topic Reddit threads, and 2 YouTube transcripts, plus "
+            "Stack Overflow, GitHub, MDN, and dev.to for coding. Returns the "
+            "useful parts, numbered with links to cite. For how-to, best "
+            "practice, reviews, and errors. Set web, reddit, or youtube only when "
+            "the user asks for a different number."
         ),
         parameters={
             "type": "object",
@@ -291,17 +290,14 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                     "items": {"type": "string", "enum": list(PLATFORMS)},
                     "description": "Optional: only these platforms.",
                 },
-                "web": {
-                    "type": "integer",
-                    "description": "Optional: how many web pages (default 3).",
-                },
+                "web": {"type": "integer", "description": "Web pages (default 3)."},
                 "reddit": {
                     "type": "integer",
-                    "description": "Optional: how many Reddit threads (default 2, 0 for none).",
+                    "description": "Reddit threads (default 2; 0 for none).",
                 },
                 "youtube": {
                     "type": "integer",
-                    "description": "Optional: how many YouTube videos (default 2, 0 for none).",
+                    "description": "YouTube videos (default 2; 0 for none).",
                 },
             },
             "required": ["question"],

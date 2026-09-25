@@ -481,6 +481,20 @@ models such as Qwen3 write before every answer; turn it off for hard problems.
 In LM Studio, load the model with GPU Offload at maximum and a Context Length
 of 8192; a larger context can spill out of an 8 GB card and slow every reply.
 
+Replies start sooner in long conversations, with the same context:
+
+- Each agent sees the last 40 to 60 messages, and where that window starts
+  moves in steps of 20 instead of one message at a time. The instructions and
+  the earlier conversation are then word-for-word the same from reply to
+  reply, so LM Studio reuses what it already read and only reads the new
+  messages. Before, once a chat passed 40 messages, the whole history was
+  re-read before every reply.
+- Tool arguments are listed in a compact form (about 10% fewer tokens for
+  the same information), which helps whenever another agent used the model in
+  between and the tool list has to be read again.
+- While a reply is being written, the HUD shows new words every quarter
+  second instead of every half second.
+
 Jarvis's voice starts sooner and flows better, with the same voice:
 
 - The first spoken piece is one short sentence (or its first clause), so the

@@ -117,11 +117,49 @@ def tool_protocol_instructions(tools: Sequence[ToolSpec]) -> str:
         "Available tools:",
     ]
     lines.extend(
-        f"- {tool.name}: {tool.description} "
-        f"arguments={json.dumps(tool.parameters.get('properties', {}))}"
+        f"- {tool.name}: {tool.description}{_arguments_line(tool.parameters)}"
         for tool in tools
     )
     return "\n".join(lines)
+
+
+def _arguments_line(parameters: Mapping[str, object]) -> str:
+    """The arguments in a few words each, e.g. 'path (text, required)'.
+
+    Says what the JSON schema says in about a third fewer tokens, so a local
+    model reads the tool list faster.
+    """
+    properties = parameters.get("properties")
+    if not isinstance(properties, Mapping) or not properties:
+        return " Arguments: none."
+    required = parameters.get("required")
+    needed = set(required) if isinstance(required, list) else set()
+    parts = []
+    for name, spec in properties.items():
+        info = spec if isinstance(spec, Mapping) else {}
+        kind = _kind(info)
+        note = ", required" if name in needed else ""
+        about = str(info.get("description") or "").strip().rstrip(".")
+        parts.append(f"{name} ({kind}{note})" + (f": {about}" if about else ""))
+    return " Arguments: " + "; ".join(parts) + "."
+
+
+def _kind(info: Mapping[str, object]) -> str:
+    choices = info.get("enum")
+    if isinstance(choices, list) and choices:
+        return "one of " + "|".join(str(choice) for choice in choices)
+    kind = info.get("type")
+    if kind == "array":
+        items = info.get("items")
+        inner = _kind(items) if isinstance(items, Mapping) else "value"
+        return f"list of {inner}"
+    return {
+        "string": "text",
+        "integer": "whole number",
+        "number": "number",
+        "boolean": "true/false",
+        "object": "object",
+    }.get(str(kind), "value")
 
 
 def parse_tool_directives(text: str) -> tuple[tuple[ToolCall, ...], str | None]:

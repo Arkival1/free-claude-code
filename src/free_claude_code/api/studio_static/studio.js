@@ -4597,7 +4597,7 @@
     hud.fastTimer = setInterval(() => {
       if (document.hidden && !voice.talk && !hud.thinking) return;
       if (hud.thinking || hud.watchBusy || refs.live) poll();
-    }, 500);
+    }, 250);
   }
 
   function voiceCard(status) {

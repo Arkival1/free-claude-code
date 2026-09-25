@@ -24,6 +24,8 @@ from .tools import (
 )
 from .tuning import pack_exemplars, pack_system_text
 
+HISTORY_MIN = 40
+HISTORY_STEP = 20
 WRITE_TOOLS = frozenset(
     {"write_file", "edit_file", "delete_file", "start_project", "restore_file"}
 )
@@ -272,7 +274,9 @@ class AgentRunner:
         )
 
     async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:
-        transcript = await self._store.transcript(chat.id, limit=40)
+        transcript = await self._store.transcript(
+            chat.id, after=await self._history_start(chat)
+        )
         history: list[ChatMessage] = []
         if agent.tune_pack_id:
             pack = await self._store.get(TunePack, agent.tune_pack_id)
@@ -284,6 +288,20 @@ class AgentRunner:
             elif message.role == "assistant" and message.text:
                 history.append(ChatMessage.assistant(message.text))
         return history
+
+    async def _history_start(self, chat: Chat) -> int:
+        """Where the conversation an agent sees begins.
+
+        The window holds the last 40 to 60 messages and its start moves in
+        steps of 20, not one message at a time. The earlier conversation then
+        reads the same from reply to reply, so a local runtime reuses what it
+        already read instead of re-reading the whole history every time.
+        """
+        newest = await self._store.transcript(chat.id, limit=1)
+        if not newest:
+            return 0
+        last = newest[0].sequence
+        return max(0, (last - HISTORY_MIN) // HISTORY_STEP * HISTORY_STEP)
 
     async def reply(
         self,
