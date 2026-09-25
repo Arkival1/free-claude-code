@@ -2366,6 +2366,118 @@
     }
   }
 
+  // Learn mode: Jarvis teaches himself a subject, lesson by lesson.
+  function learningCard(studies) {
+    const topic = el("input", { type: "text", placeholder: "What should Jarvis learn? (e.g. electrical engineering)", "aria-label": "Topic to learn" });
+    const focus = el("input", { type: "text", placeholder: "Focus (optional, e.g. circuits for home projects)", "aria-label": "Focus" });
+    const depth = el("select", { "aria-label": "Depth" }, [
+      el("option", { value: "quick", text: "Quick: 4 lessons" }),
+      el("option", { value: "normal", text: "Normal: 7 lessons", selected: true }),
+      el("option", { value: "deep", text: "Deep: 10 lessons" }),
+    ]);
+    const status = el("p", { class: "muted", hidden: true });
+    const form = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!topic.value.trim()) return;
+        try {
+          await post("/studio/api/studies", { topic: topic.value.trim(), focus: focus.value.trim(), depth: depth.value });
+          render();
+        } catch (error) {
+          status.hidden = false;
+          status.textContent = error.message;
+        }
+      },
+    }, [topic, focus, el("div", { class: "row" }, [depth, el("button", { class: "primary", type: "submit", text: "Start learning" })]), status]);
+    const rows = studies.length
+      ? studies.map((study) =>
+          el("div", { class: "list-item study-row" }, [
+            el("span", { class: "grow" }, [
+              el("strong", { text: study.topic }),
+              el("br"),
+              el("span", { class: "muted", text: `${study.status} · ${study.done}/${study.plan.length || "?"} lessons${study.understanding != null ? ` · understanding ${Math.round(study.understanding * 100)}%` : ""}` }),
+              meter(study.progress),
+            ]),
+            el("button", { class: "secondary", type: "button", text: "Open", onclick: () => openStudy(study.id) }),
+          ])
+        )
+      : [empty("Nothing learned yet. Tell Jarvis \"learn electrical engineering\", or start one here.")];
+    return card(
+      "Learning",
+      [form, ...rows],
+      "Jarvis plans a course, researches each lesson on the web, Reddit, and YouTube, writes his own notes, and quizzes himself. Everything he learns goes into memory for the whole team."
+    );
+  }
+
+  async function openStudy(studyId) {
+    let data;
+    try {
+      data = await api(`/studio/api/studies/${studyId}`);
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+    const { study, lessons } = data;
+    const running = study.status === "planning" || study.status === "learning";
+    openSheet(`Learning: ${study.topic}`, [
+      el("p", { class: "muted", text: `${study.status} · ${Math.round(study.progress * 100)}% · ${study.step}` }),
+      meter(study.progress),
+      study.summary ? el("pre", { class: "conversation-notes", text: study.summary }) : null,
+      study.plan.length
+        ? el("ol", { class: "study-plan" }, study.plan.map((title, index) =>
+            el("li", { class: index < study.done ? "done" : "", text: title })
+          ))
+        : null,
+      ...lessons.map((lesson) =>
+        el("details", { class: "video-details" }, [
+          el("summary", { text: `Lesson ${lesson.ordinal + 1}: ${lesson.title} · self-check ${Math.round(lesson.score * 100)}%` }),
+          el("pre", { class: "conversation-notes", text: lesson.notes }),
+          lesson.quiz.length
+            ? el("div", { class: "study-quiz" }, lesson.quiz.map(([question, answer]) =>
+                el("p", {}, [el("strong", { text: `Q: ${question}` }), el("br"), `A: ${answer}`])
+              ))
+            : null,
+          lesson.sources.length
+            ? el("ul", { class: "study-sources" }, lesson.sources.map((line) => el("li", { text: line })))
+            : null,
+        ])
+      ),
+      el("div", { class: "row" }, [
+        running
+          ? el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Stop learning",
+              onclick: async () => {
+                try {
+                  await post(`/studio/api/studies/${study.id}/stop`);
+                  closeSheet();
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            })
+          : null,
+        el("button", {
+          class: "danger",
+          type: "button",
+          text: "Forget this study",
+          onclick: async () => {
+            try {
+              await remove(`/studio/api/studies/${study.id}`);
+              closeSheet();
+              render();
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+      ]),
+    ]);
+  }
+
   // The user's to-do list. Jarvis and the Helper add to it too, and Jarvis
   // announces reminders on the HUD when they are due.
   function todoCard(items) {
@@ -2561,7 +2673,7 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos, todos] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
@@ -2569,6 +2681,7 @@
       api("/studio/api/voice"),
       api("/studio/api/videos").catch(() => ({ videos: [] })),
       api("/studio/api/todos").catch(() => ({ todos: [] })),
+      api("/studio/api/studies").catch(() => ({ studies: [] })),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -2605,6 +2718,7 @@
         }),
         el("button", { class: "primary", type: "button", text: "Open settings", onclick: () => go("settings") }),
       ]),
+      learningCard(studies.studies || []),
       todoCard(todos.todos || []),
       videoCard(videos.videos || []),
       voiceCard(voiceInfo),
@@ -3803,6 +3917,32 @@
       );
     }
 
+    // Learning: what Jarvis is teaching himself, and how far along he is.
+    const learning = data.learning || [];
+    if (changed("learning", learning.map((s) => [s.id, s.status, Math.round(s.progress * 1000), s.step]))) {
+      refs.learning.replaceChildren(
+        ...learning.map((study) =>
+          el("button", { class: `hud-study ${study.status}`, type: "button", onclick: () => openStudy(study.id) }, [
+            el("span", { class: "hud-study-head" }, [
+              el("strong", { text: `LEARNING · ${study.topic.toUpperCase()}` }),
+              el("span", { text: `${Math.round(study.progress * 100)}%` }),
+            ]),
+            el("span", { class: "hud-study-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(study.progress * 100)) }, [
+              el("i", { style: `width:${Math.round(study.progress * 100)}%` }),
+            ]),
+            el("small", {
+              text:
+                study.status === "done"
+                  ? `Finished ${study.lessons} lessons · understanding ${Math.round((study.understanding || 0) * 100)}%`
+                  : study.status === "cancelled"
+                    ? "Stopped"
+                    : `${study.step}${study.understanding != null ? ` · understanding ${Math.round(study.understanding * 100)}%` : ""}`,
+            }),
+          ])
+        )
+      );
+    }
+
     // Mission timeline.
     const timeline = data.timeline || [];
     if (changed("timeline", timeline.map((item) => [item.title, item.status, Math.floor(item.at / 60000)]))) {
@@ -4048,6 +4188,7 @@
       processHead: el("div", { class: "hud-process-head" }),
       processLog: el("div", { class: "hud-process-log", "aria-live": "polite" }),
       timeline: el("div", { class: "hud-list" }),
+      learning: el("div", { class: "hud-learning", "aria-live": "polite" }),
       monitor: el("div", { class: "hud-gauges" }),
       insights: el("div", { class: "hud-insights" }),
       llm: el("div", { class: "hud-llms" }),
@@ -4537,7 +4678,9 @@
           })
         ),
       ]),
-      el("div", { class: "hud-area-timeline" }, [hudPanel("MISSION TIMELINE", refs.timeline)]),
+      el("div", { class: "hud-area-timeline" }, [
+        hudPanel("MISSION TIMELINE", el("div", {}, [refs.learning, refs.timeline])),
+      ]),
       el("div", { class: "hud-area-commands" }, [
         hudPanel(
           "QUICK COMMANDS",
@@ -4547,6 +4690,7 @@
             quick("Build", "Give Builder a job", () => prefill("Have Builder ")),
             quick("Research", "10+ sources, checked", () => prefill("Have Researcher look into ")),
             quick("Brainstorm", "Helper turns it into a plan", () => prefill("Ask Helper for ideas on ")),
+            quick("Learn", "Jarvis teaches himself", () => prefill("Learn about ")),
             quick("Team room", "All agents together", () =>
               hud.roomId ? go(`room/${hud.roomId}`) : startRoom()
             ),

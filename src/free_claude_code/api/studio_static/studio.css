@@ -2453,3 +2453,69 @@ body[data-page="settings"] .view {
   padding: 12px 14px;
   margin: 0;
 }
+
+.hud-learning {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hud-learning:empty {
+  display: none;
+}
+
+.hud-study {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--hud-line, rgba(64, 214, 255, 0.26));
+  border-radius: 10px;
+  background: rgba(64, 214, 255, 0.06);
+  color: var(--hud-text, #d9f6ff);
+  font: inherit;
+  cursor: pointer;
+}
+
+.hud-study-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+}
+
+.hud-study-bar {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(64, 214, 255, 0.12);
+  overflow: hidden;
+}
+
+.hud-study-bar > i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ffb547, #ffd78a);
+  box-shadow: 0 0 10px rgba(255, 181, 71, 0.6);
+  transition: width 0.6s ease;
+}
+
+.hud-study small {
+  color: var(--hud-muted, #7fa9ba);
+  font-size: 0.72rem;
+}
+
+.study-plan li.done {
+  color: var(--hud-good, #4dffa6);
+}
+
+.study-quiz p,
+.study-sources li {
+  font-size: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-study-bar > i { transition: none; }
+}

@@ -425,6 +425,8 @@ def test_the_hud_is_a_command_center_on_a_pc(page: Page, admin_base_url: str) ->
     expect(page.get_by_label("Talk to Jarvis")).to_have_value(
         "Ask Helper for ideas on "
     )
+    page.get_by_role("button", name="Learn Jarvis teaches himself").click()
+    expect(page.get_by_label("Talk to Jarvis")).to_have_value("Learn about ")
 
     box = page.locator(".hud-area-room").bounding_box()
     core = page.locator(".hud-core").bounding_box()
@@ -750,6 +752,19 @@ def test_video_notes_have_a_place_to_paste_a_link(
     expect(videos.get_by_label("YouTube link")).to_be_visible()
     expect(videos.get_by_role("button", name="Study it")).to_be_visible()
     expect(videos).to_contain_text("Research saves every video it reads here")
+
+
+def test_jarvis_can_be_given_a_subject_to_learn(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url, "more")
+
+    learning = page.locator(".card", has=page.get_by_role("heading", name="Learning"))
+    expect(learning).to_be_visible()
+    expect(learning.get_by_label("Topic to learn")).to_be_visible()
+    expect(learning.get_by_label("Depth")).to_have_value("normal")
+    expect(learning.get_by_role("button", name="Start learning")).to_be_visible()
+    expect(learning).to_contain_text("Nothing learned yet")
 
 
 def test_to_dos_can_be_added_and_ticked_off(page: Page, admin_base_url: str) -> None:

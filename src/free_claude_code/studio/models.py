@@ -420,3 +420,43 @@ class ChatNotes(Record):
     text: str = ""
     until: int = 0
     updated_at: int = Field(default_factory=now_ms)
+
+
+type StudyStatus = Literal["planning", "learning", "done", "failed", "cancelled"]
+type StudyDepth = Literal["quick", "normal", "deep"]
+
+
+class Study(Record):
+    """A subject the main AI is teaching itself, lesson by lesson."""
+
+    id: str = Field(default_factory=lambda: new_id("stu"))
+    topic: str
+    focus: str = ""
+    depth: StudyDepth = "normal"
+    status: StudyStatus = "planning"
+    plan: tuple[str, ...] = ()
+    done: int = 0
+    progress: float = 0.0
+    step: str = ""
+    understanding: float | None = None
+    summary: str = ""
+    error: str | None = None
+    started_by: str = ""
+    memory_id: str = ""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
+class StudyLesson(Record):
+    """One lesson of a study: the notes written, the self-check, the sources."""
+
+    id: str = Field(default_factory=lambda: new_id("lsn"))
+    study_id: str
+    ordinal: int
+    title: str
+    notes: str = ""
+    quiz: tuple[tuple[str, str], ...] = ()
+    score: float = 0.0
+    sources: tuple[str, ...] = ()
+    memory_id: str = ""
+    created_at: int = Field(default_factory=now_ms)

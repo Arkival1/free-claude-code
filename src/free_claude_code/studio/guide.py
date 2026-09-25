@@ -617,6 +617,46 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Learn mode",
+        route="/studio#more",
+        where=(
+            "Tell Jarvis 'learn electrical engineering' on the HUD, or use "
+            "Knowledge & Memory (MENU), Learning card. The bar shows at the top "
+            "of MISSION TIMELINE; tap it to read the lessons."
+        ),
+        terms=(
+            "learn",
+            "learning",
+            "study",
+            "studying",
+            "teach himself",
+            "teach yourself",
+            "course",
+            "lesson",
+            "lessons",
+            "knowledge",
+            "progress bar",
+            "engineering",
+            "blueprint",
+        ),
+        body=(
+            "Say 'Jarvis, learn electrical engineering' (add 'in depth' for 10 "
+            "lessons or 'quickly' for 4). He plans a course from the basics to "
+            "hands-on skill, then for each lesson researches the web, Reddit, "
+            "and YouTube, writes his own notes (explanation, key concepts, "
+            "formulas with units, steps, a worked example, mistakes and safety, "
+            "sources), and quizzes himself to check he understood. A gold bar at "
+            "the top of MISSION TIMELINE fills as he reads each source and "
+            "finishes each lesson, with what he is doing and his understanding "
+            "score. Everything goes into the team's memory and the knowledge "
+            "library, so any agent can use it; the Builder can draw blueprints "
+            "and diagrams from it. 'Stop learning' stops it and keeps the "
+            "finished lessons. Knowledge & Memory, Learning lists every study; "
+            "open one to read the study guide, notes, self-checks, and sources."
+        ),
+        asks=("How does deep research work?", "Where is memory?"),
+    ),
+    GuideTopic(
         title="To-dos and reminders",
         route="/studio#more",
         where=(

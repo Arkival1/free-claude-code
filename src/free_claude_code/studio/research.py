@@ -317,8 +317,10 @@ class DeepResearch:
         fetch: PageFetcher,
         wanted: int = 10,
         mix: ResearchMix | None = None,
+        on_source: Callable[[str], None] | None = None,
     ) -> None:
         self._search = search
+        self._on_source = on_source
         self._reader = reader
         self._fetch = fetch
         self._wanted = max(3, wanted)
@@ -523,6 +525,7 @@ class DeepResearch:
                 *(self._platform_page(hit) for hit in batch),
             )
             for hit, page in zip(batch, pages, strict=True):
+                self._report(page.title if page is not None else hit.title)
                 if page is None or not good(page) or len(kept) >= need:
                     continue
                 if page.platform == "youtube" and page.transcript:
@@ -611,6 +614,22 @@ class DeepResearch:
         return picked
 
     async def _read(
+        self,
+        number: int,
+        platform: str,
+        hit: SearchHit,
+        terms: Sequence[str],
+        gate: asyncio.Semaphore,
+    ) -> Source:
+        source = await self._read_one(number, platform, hit, terms, gate)
+        self._report(source.title)
+        return source
+
+    def _report(self, title: str) -> None:
+        if self._on_source is not None:
+            self._on_source(title)
+
+    async def _read_one(
         self,
         number: int,
         platform: str,

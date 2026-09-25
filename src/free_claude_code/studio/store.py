@@ -23,6 +23,8 @@ from .models import (
     ModelAsset,
     Record,
     SiteProject,
+    Study,
+    StudyLesson,
     TodoItem,
     TuneJob,
     TunePack,
@@ -48,6 +50,8 @@ _JSON_FIELDS = frozenset(
         "names",
         "cautions",
         "segments",
+        "plan",
+        "quiz",
     }
 )
 
@@ -70,6 +74,8 @@ TABLES: Mapping[type[Record], str] = {
     VideoNote: "studio_videos",
     TodoItem: "studio_todos",
     ChatNotes: "studio_chat_notes",
+    Study: "studio_studies",
+    StudyLesson: "studio_study_lessons",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (
@@ -81,6 +87,7 @@ _INDEXES: tuple[tuple[str, str, str], ...] = (
     ("studio_exam_questions_course", "studio_exam_questions", "course_id, ordinal"),
     ("studio_chats_kind", "studio_chats", "kind, updated_at"),
     ("studio_videos_video", "studio_videos", "video_id"),
+    ("studio_study_lessons_study", "studio_study_lessons", "study_id, ordinal"),
 )
 
 

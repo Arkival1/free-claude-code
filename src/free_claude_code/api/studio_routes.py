@@ -76,6 +76,12 @@ class AgentPayload(BaseModel):
     description: str = ""
 
 
+class StudyPayload(BaseModel):
+    topic: str = Field(min_length=3, max_length=160)
+    focus: str = Field(default="", max_length=300)
+    depth: Literal["quick", "normal", "deep"] = "normal"
+
+
 class TodoPayload(BaseModel):
     text: str = Field(min_length=1, max_length=300)
     due: str = Field(default="", max_length=80)
@@ -596,6 +602,62 @@ async def delete_agent(
 ) -> JsonObject:
     """Delete one agent and its memories."""
     return {"deleted": await studio.delete_agent(agent_id)}
+
+
+@router.get("/studio/api/studies")
+async def list_studies(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Subjects Jarvis taught himself or is learning now."""
+    return {"studies": [study.model_dump() for study in await studio.studies()]}
+
+
+@router.post("/studio/api/studies")
+async def start_study(
+    payload: StudyPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Have Jarvis teach himself a subject in the background."""
+    study = await studio.start_study(
+        payload.topic, focus=payload.focus, depth=payload.depth, started_by="you"
+    )
+    return study.model_dump()
+
+
+@router.get("/studio/api/studies/{study_id}")
+async def study_detail(
+    study_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """A study with its plan, lessons, notes, self-checks, and sources."""
+    study, lessons = await studio.study_detail(study_id)
+    return {
+        "study": study.model_dump(),
+        "lessons": [lesson.model_dump() for lesson in lessons],
+    }
+
+
+@router.post("/studio/api/studies/{study_id}/stop")
+async def stop_study(
+    study_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Stop a study; finished lessons are kept."""
+    return (await studio.stop_study(study_id)).model_dump()
+
+
+@router.delete("/studio/api/studies/{study_id}")
+async def delete_study(
+    study_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Forget a study, its lessons, and their memory entries."""
+    return {"deleted": await studio.delete_study(study_id)}
 
 
 @router.get("/studio/api/todos")

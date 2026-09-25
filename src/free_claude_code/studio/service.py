@@ -41,6 +41,12 @@ from .guide import (
     offline_answer,
     page_name,
 )
+from .learning import (
+    LearnEngine,
+    StudyStopped,
+    parse_learn_request,
+    wants_to_stop_learning,
+)
 from .llm import (
     LOCAL_MODEL_PREFIX,
     ChatMessage,
@@ -57,7 +63,7 @@ from .local_voice import (
     speech_package_ready,
 )
 from .lora import LoraTrainer
-from .memory import SHARED_MEMORY_ID, SKILL_TAG, MemoryService
+from .memory import SHARED_MEMORY_ID, SKILL_TAG, MemoryService, keywords
 from .model_files import (
     ModelFileError,
     check_model_file,
@@ -80,6 +86,8 @@ from .models import (
     Message,
     ModelAsset,
     SiteProject,
+    Study,
+    StudyLesson,
     TodoItem,
     TuneJob,
     TunePack,
@@ -109,7 +117,7 @@ from .presets import (
 )
 from .recall_messages import Found, search
 from .recall_messages import line as message_line
-from .research import ResearchMix
+from .research import DeepResearch, ResearchMix, ResearchReport, relevance
 from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
 from .search import SearchError, StudioSearch
@@ -150,6 +158,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "restore_file",
         "polish_check",
         "conversation",
+        "knowledge",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
@@ -193,6 +202,18 @@ class ChatSettingsResult:
 
 _REMINDER_SECONDS = 10.0
 _RECENT_RUNS = 40
+_RECENT_STUDY_MS = 10 * 60_000
+
+
+def _study_started(study: Study) -> str:
+    lessons = {"quick": 4, "normal": 7, "deep": 10}.get(study.depth, 7)
+    return (
+        f"Started learning {study.topic} ({study.depth}: about {lessons} lessons, "
+        "each researched on the web, Reddit, and YouTube, written up as notes, "
+        "and self-checked). Progress shows on the HUD."
+    )
+
+
 READ_MESSAGES = 40
 
 
@@ -302,6 +323,7 @@ class StudioService:
         self._stand_in_note = ""
         self._video_lock = asyncio.Lock()
         self._run_jobs: dict[str, asyncio.Task[object]] = {}
+        self._study_jobs: dict[str, asyncio.Task[object]] = {}
         self._reminders_checked = -_REMINDER_SECONDS
         self._speech_cache: dict[tuple[object, ...], bytes] = {}
         self._notes_keeper = NotesKeeper(
@@ -1501,7 +1523,54 @@ class StudioService:
     async def _prepare_main_turn(self, main: Agent, chat: Chat, text: str) -> str:
         """The clock, plus any orders handed out, for the main AI's reply."""
         orders = await self._carry_out_orders(main, chat, text)
-        return "\n".join(part for part in (now_line(datetime.now()), orders) if part)
+        learning = await self._carry_out_learning(chat, text, started_by=main.name)
+        return "\n".join(
+            part for part in (now_line(datetime.now()), orders, learning) if part
+        )
+
+    async def _carry_out_learning(
+        self, chat: Chat, text: str, *, started_by: str
+    ) -> str:
+        """'Learn electrical engineering' starts a study at once; 'stop learning' stops it."""
+        if wants_to_stop_learning(text):
+            active = [
+                s for s in await self.studies() if s.status in {"planning", "learning"}
+            ]
+            for study in active:
+                await self.stop_study(study.id)
+            if not active:
+                return "There was no study running to stop."
+            stopped = (
+                f"Stopped learning {active[0].topic}; the finished lessons are kept."
+            )
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="tool",
+                text=stopped,
+                author="learn",
+                data={"tool": "learn", "study_id": active[0].id, "order": True},
+            )
+            return f"{stopped} Tell the user in a sentence."
+        wanted = parse_learn_request(text)
+        if wanted is None:
+            return ""
+        topic, depth = wanted
+        try:
+            study = await self.start_study(topic, depth=depth, started_by=started_by)
+        except StudioError as error:
+            return f"Could not start learning {topic}: {error}"
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=_study_started(study),
+            author="learn",
+            data={"tool": "learn", "study_id": study.id, "order": True},
+        )
+        return (
+            f"{_study_started(study)} Do not start it again; tell the user in a "
+            "sentence that you are on it and that the bar on the HUD shows how far "
+            "you are."
+        )
 
     # ------------------------------------------------------ assistant tools
 
@@ -1516,6 +1585,19 @@ class StudioService:
                 return await self._projects_tool(call)
             case "conversation":
                 return await self._conversation_tool(call, context)
+            case "learn":
+                study = await self.start_study(
+                    str(call.arguments.get("topic") or ""),
+                    focus=str(call.arguments.get("focus") or ""),
+                    depth=str(call.arguments.get("depth") or "normal"),
+                    started_by=context.agent_name,
+                )
+                return ToolOutcome(
+                    text=_study_started(study),
+                    data={"tool": "learn", "study_id": study.id},
+                )
+            case "knowledge":
+                return await self._knowledge_tool(call)
             case _:
                 return await self._system_tool()
 
@@ -1627,6 +1709,225 @@ class StudioService:
         return ToolOutcome(
             text=text, data={"tool": "conversation", "query": query, "hits": len(hits)}
         )
+
+    # ------------------------------------------------------------- learning
+
+    async def start_study(
+        self,
+        topic: str,
+        *,
+        focus: str = "",
+        depth: str = "normal",
+        started_by: str = "you",
+    ) -> Study:
+        """Start teaching the main AI a subject in the background."""
+        cleaned = " ".join(topic.split())[:160]
+        if len(cleaned) < 3:
+            raise StudioError("Say what to learn.")
+        for other in await self.studies():
+            if other.status in {"planning", "learning"}:
+                raise StudioError(
+                    f"Already learning {other.topic} ({round(other.progress * 100)}%). "
+                    "Stop it first, or wait until it finishes."
+                )
+        study = Study(
+            topic=cleaned,
+            focus=" ".join(focus.split())[:300],
+            depth=depth if depth in {"quick", "normal", "deep"} else "normal",
+            started_by=started_by,
+            step="Getting ready",
+        )
+        await self._store.put(study)
+        job = self.spawn(self._run_study(study.id))
+        self._study_jobs[study.id] = job
+        job.add_done_callback(lambda _: self._study_jobs.pop(study.id, None))
+        return study
+
+    async def _run_study(self, study_id: str) -> None:
+        main = await self.main_agent()
+        engine = LearnEngine(
+            store=self._store,
+            router=self._router,
+            model=lambda: self.effective_model(main.model or self.default_model),
+            research=self._study_research,
+            remember=self._remember_learned,
+            name=main.name,
+        )
+        chat = await self.main_chat()
+        try:
+            study = await engine.run(study_id)
+        except StudyStopped:
+            return
+        except (
+            StudioError,
+            StudioLLMError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as error:
+            logger.warning("Studio: study {} failed: {}", study_id, error)
+            current = await self._store.get(Study, study_id)
+            if current is not None:
+                await self._store.put(
+                    current.model_copy(
+                        update={
+                            "status": "failed",
+                            "error": str(error),
+                            "updated_at": now_ms(),
+                        }
+                    )
+                )
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="assistant",
+                text=f"I had to stop learning: {error}",
+                author=main.name,
+                data={"kind": "study", "study_id": study_id},
+            )
+            return
+        understood = round((study.understanding or 0) * 100)
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="assistant",
+            text=(
+                f"I finished learning {study.topic}: {len(study.plan)} lessons, "
+                f"self-check {understood}%. Ask me anything about it, or open "
+                "Knowledge & Memory to read my notes."
+            ),
+            author=main.name,
+            data={"kind": "study", "study_id": study.id},
+        )
+        await self._after_memory_change([main.id], wait=False)
+
+    async def _study_research(
+        self, query: str, wanted: int, on_source: Callable[[str], None]
+    ) -> ResearchReport:
+        settings = self.settings
+        engine = DeepResearch(
+            search=self._search(),
+            reader=self._reader(),
+            fetch=lambda url: self._web_tools.fetch(url, egress=self._egress()),
+            wanted=wanted,
+            mix=ResearchMix(
+                web=min(settings.studio_research_web, wanted),
+                reddit=min(settings.studio_research_reddit, 1),
+                youtube=min(settings.studio_research_youtube, 1),
+            ),
+            on_source=on_source,
+        )
+        report = await engine.run(query)
+        for page in report.videos:
+            self._study_later(page)
+        return report
+
+    async def _remember_learned(
+        self, text: str, tags: tuple[str, ...], source: str
+    ) -> str:
+        memory = self._memory()
+        owner = SHARED_MEMORY_ID
+        if not memory.shared_enabled:
+            owner = (await self.main_agent()).id
+        entry = await memory.remember(
+            owner, text, tags=tags, source=source, author="Learn mode"
+        )
+        return entry.id if entry else ""
+
+    async def stop_study(self, study_id: str) -> Study:
+        """Stop a study; the lessons it finished are kept."""
+        study = await self._store.require(Study, study_id)
+        if study.status in {"planning", "learning"}:
+            study = study.model_copy(
+                update={
+                    "status": "cancelled",
+                    "step": "Stopped by the user",
+                    "updated_at": now_ms(),
+                }
+            )
+            await self._store.put(study)
+        job = self._study_jobs.pop(study_id, None)
+        if job is not None:
+            job.cancel()
+        return study
+
+    async def studies(self) -> tuple[Study, ...]:
+        return await self._store.find(Study, order_by="created_at DESC")
+
+    async def study_detail(
+        self, study_id: str
+    ) -> tuple[Study, tuple[StudyLesson, ...]]:
+        study = await self._store.require(Study, study_id)
+        lessons = await self._store.find(
+            StudyLesson, where={"study_id": study_id}, order_by="ordinal ASC"
+        )
+        return study, lessons
+
+    async def delete_study(self, study_id: str) -> bool:
+        """Forget a study, its lessons, and their memory entries."""
+        await self.stop_study(study_id)
+        study, lessons = await self.study_detail(study_id)
+        for item in (*lessons, study):
+            if item.memory_id:
+                await self._store.delete(MemoryEntry, item.memory_id)
+        await self._store.delete_where(StudyLesson, {"study_id": study_id})
+        return await self._store.delete(Study, study_id)
+
+    async def _knowledge_tool(self, call: ToolCall) -> ToolOutcome:
+        wanted = str(call.arguments.get("id") or "").strip()
+        query = str(call.arguments.get("query") or "").strip()
+        if wanted.startswith("lsn_"):
+            lesson = await self._store.get(StudyLesson, wanted)
+            if lesson is None:
+                raise ValueError(f"No lesson with id {wanted}.")
+            study = await self._store.get(Study, lesson.study_id)
+            quiz = "\n".join(f"Q: {q}\nA: {a}" for q, a in lesson.quiz)
+            text = (
+                f"Lesson {lesson.ordinal + 1} of {study.topic if study else 'a study'}: "
+                f"{lesson.title}\n\n{lesson.notes}"
+                + (f"\n\nSelf-check:\n{quiz}" if quiz else "")
+                + (
+                    "\n\nSources:\n" + "\n".join(lesson.sources)
+                    if lesson.sources
+                    else ""
+                )
+            )
+            return ToolOutcome(text=text, data={"tool": "knowledge", "id": wanted})
+        if wanted.startswith("stu_"):
+            study, lessons = await self.study_detail(wanted)
+            text = (
+                f"Study of {study.topic} ({study.status}, {round(study.progress * 100)}%)\n"
+                f"{study.summary or 'The study guide is written when it finishes.'}\n\nLessons:\n"
+                + "\n".join(f"- {lesson.id}: {lesson.title}" for lesson in lessons)
+            )
+            return ToolOutcome(text=text, data={"tool": "knowledge", "id": wanted})
+        lessons = await self._store.find(StudyLesson, order_by="created_at DESC")
+        terms = keywords(query)
+        if terms:
+            scored = sorted(
+                (
+                    (
+                        relevance(
+                            f"{lesson.title} {lesson.title} {lesson.notes}", terms
+                        ),
+                        lesson,
+                    )
+                    for lesson in lessons
+                ),
+                key=lambda pair: -pair[0],
+            )
+            lessons = tuple(lesson for fit, lesson in scored if fit > 0)
+        topics = {study.id: study.topic for study in await self.studies()}
+        lines = [
+            f"- {lesson.id}: {topics.get(lesson.study_id, '?')} → {lesson.title}"
+            for lesson in lessons[:15]
+        ]
+        text = (
+            "\n".join(lines) + "\nRead one with its id."
+            if lines
+            else "Nothing learned matches that yet."
+            if query
+            else "Nothing has been learned yet; the learn tool starts a study."
+        )
+        return ToolOutcome(text=text, data={"tool": "knowledge", "query": query})
 
     async def _projects_tool(self, call: ToolCall) -> ToolOutcome:
         query = str(call.arguments.get("query") or "").strip().casefold()
@@ -2213,6 +2514,23 @@ class StudioService:
                 "voice": self.voice_status(),
             },
             "live": self._live_text.get(chat.id, ""),
+            "learning": [
+                {
+                    "id": study.id,
+                    "topic": study.topic,
+                    "status": study.status,
+                    "progress": study.progress,
+                    "step": study.step,
+                    "done": study.done,
+                    "lessons": len(study.plan),
+                    "understanding": study.understanding,
+                }
+                for study in await self._store.find(
+                    Study, order_by="updated_at DESC", limit=2
+                )
+                if study.status in {"planning", "learning"}
+                or now_ms() - study.updated_at < _RECENT_STUDY_MS
+            ],
             "room": await self._room_snapshot(),
             **await self._dashboard_extras(
                 runs,

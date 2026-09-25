@@ -814,6 +814,24 @@ studies its videos in the background, one at a time, so it never waits on
 them; with no model running, notes are built from the transcript's most
 telling sentences instead.
 
+**Learn mode.** Jarvis can teach himself a subject. Say *"Jarvis, learn
+electrical engineering"* (or *study*, *teach yourself*, *master*, *become an
+expert in*), or use **Knowledge & Memory → Learning**, or the **Learn** quick
+command on the HUD. He plans a short course (4 lessons for *quickly* / *the
+basics*, 7 by default, 10 for *in depth* / *everything*), then for each lesson
+he researches the web, Reddit, and YouTube, writes his own lesson notes
+(explanation, key concepts, formulas with units, numbered steps, a worked
+example, mistakes and safety, sources), and quizzes himself to check he
+understood. A gold bar under **MISSION TIMELINE** on the HUD fills as he goes,
+moving with every source he reads, and shows the current step and his
+self-check score. Each lesson goes into the team's shared memory, so every
+agent's recall finds it, and every agent has a `knowledge` tool to search the
+lessons and read one in full; the Builder uses it when you ask for a blueprint
+or a build in that subject. When he finishes he writes a study guide and tells
+you in chat. Say *"stop learning"* to stop; the finished lessons are kept. One
+subject is learned at a time. In **Learning**, open a study to read the guide,
+every lesson's notes, quiz, and sources, or to forget it.
+
 The **Researcher** tests code before recommending it: `test_code` saves a
 snippet in its **Research lab** project and runs it (Python or JavaScript), then
 reports PASSED or FAILED. Findings go into team memory tagged `verified` or

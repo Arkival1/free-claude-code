@@ -41,6 +41,8 @@ ASK_AGENT_TOOL = "ask_agent"
 TEAM_TASK_TOOL = "team_task"
 TODO_TOOL = "todo"
 CONVERSATION_TOOL = "conversation"
+LEARN_TOOL = "learn"
+KNOWLEDGE_TOOL = "knowledge"
 CALCULATE_TOOL = "calculate"
 PROJECTS_TOOL = "list_projects"
 SYSTEM_STATUS_TOOL = "system_status"
@@ -85,6 +87,7 @@ PARALLEL_TOOLS = frozenset(
         SYSTEM_STATUS_TOOL,
         POLISH_TOOL,
         CONVERSATION_TOOL,
+        KNOWLEDGE_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -432,6 +435,44 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=LEARN_TOOL,
+        description=(
+            "Teach yourself a subject in the background: plan a course, research "
+            "each lesson on the web, Reddit, and YouTube, write lesson notes, "
+            "quiz yourself, and keep it all in memory and the knowledge library. "
+            "A progress bar fills on the HUD. depth: quick (4 lessons), normal "
+            "(7), or deep (10). Use it when the user wants you to learn something."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "What to learn."},
+                "focus": {
+                    "type": "string",
+                    "description": "Optional: the angle that matters.",
+                },
+                "depth": {"type": "string", "enum": ["quick", "normal", "deep"]},
+            },
+            "required": ["topic"],
+        },
+    ),
+    ToolSpec(
+        name=KNOWLEDGE_TOOL,
+        description=(
+            "The knowledge library of subjects the team taught itself: search "
+            "lessons with query, or read a full lesson (notes, formulas, steps, "
+            "self-check, sources) or a study guide by id. Use it before answering "
+            "or building from something that was learned."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "id": {"type": "string", "description": "A lesson or study id."},
+            },
+        },
+    ),
+    ToolSpec(
         name=CALCULATE_TOOL,
         description=(
             "Work out arithmetic exactly instead of in your head: + - * / // % "
@@ -667,7 +708,8 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
     spec.name
     for spec in TOOL_SPECS
     if spec.name not in DELEGATION_TOOLS
-    and spec.name not in {APP_HELP_TOOL, TODO_TOOL, PROJECTS_TOOL, SYSTEM_STATUS_TOOL}
+    and spec.name
+    not in {APP_HELP_TOOL, TODO_TOOL, PROJECTS_TOOL, SYSTEM_STATUS_TOOL, LEARN_TOOL}
 )
 MAIN_TOOL_NAMES: tuple[str, ...] = (
     ASK_AGENT_TOOL,
@@ -681,6 +723,8 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     "remember",
     "recall",
     CONVERSATION_TOOL,
+    LEARN_TOOL,
+    KNOWLEDGE_TOOL,
     STUDY_VIDEO_TOOL,
     VIDEO_NOTES_TOOL,
     TODO_TOOL,
@@ -953,7 +997,14 @@ class AgentToolbox:
                     return await self._restore_file(call, context)
                 case "calculate":
                     return self._calculate(call)
-                case "todo" | "list_projects" | "system_status" | "conversation":
+                case (
+                    "todo"
+                    | "list_projects"
+                    | "system_status"
+                    | "conversation"
+                    | "learn"
+                    | "knowledge"
+                ):
                     if self._assistant is None:
                         raise ValueError(f"{call.name} is not available here.")
                     return await self._assistant(call, context)
