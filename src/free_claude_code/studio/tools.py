@@ -1,11 +1,14 @@
 """The tools Studio agents can call, and the sandbox that executes them."""
 
+import asyncio
 import fnmatch
 import re
+import shutil
 import sys
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 import aiohttp
@@ -26,7 +29,8 @@ from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
 from .project_check import CHECKED_FILES, check_project
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
-from .sites import SiteError, SiteWorkspace
+from .sites import SiteError, SiteWorkspace, is_starter
+from .templates import template_files
 from .videos import VideoStudy, at, clock, passages, render_note, studied
 
 FINISH_TOOL = "finish"
@@ -46,6 +50,8 @@ ASK_HELPER_TOOL = "ask_helper"
 APP_HELP_TOOL = "app_help"
 CHECK_PROJECT_TOOL = "check_project"
 STUDY_VIDEO_TOOL = "study_video"
+START_PROJECT_TOOL = "start_project"
+RESTORE_FILE_TOOL = "restore_file"
 VIDEO_NOTES_TOOL = "video_notes"
 HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
@@ -84,6 +90,7 @@ OFFLINE_NOTE = (
     "until it is back. Carry on with recall, the project files, and what you know."
 )
 MAX_FETCH_CHARS = 6_000
+OVERVIEW_FILES = 40
 MAX_SEARCH_RESULTS = 6
 
 TOOL_SPECS: tuple[ToolSpec, ...] = (
@@ -145,7 +152,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         description=(
             "Change part of a file without rewriting it: replace old_text, which "
             "must appear exactly once (copy it from read_file), with new_text. "
-            "Set replace_all to change every occurrence."
+            "Set replace_all to change every occurrence. To make several changes "
+            "to one file at once, pass edits: a list of {old_text, new_text}. "
+            "Small indentation differences in old_text are tolerated."
         ),
         parameters={
             "type": "object",
@@ -154,8 +163,20 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "old_text": {"type": "string"},
                 "new_text": {"type": "string"},
                 "replace_all": {"type": "boolean"},
+                "edits": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_text": {"type": "string"},
+                            "new_text": {"type": "string"},
+                            "replace_all": {"type": "boolean"},
+                        },
+                        "required": ["old_text", "new_text"],
+                    },
+                },
             },
-            "required": ["path", "old_text", "new_text"],
+            "required": ["path"],
         },
     ),
     ToolSpec(
@@ -322,6 +343,52 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "query": {"type": "string", "description": "What to look for."},
                 "id": {"type": "string", "description": "A video notes id."},
             },
+        },
+    ),
+    ToolSpec(
+        name=START_PROJECT_TOOL,
+        description=(
+            "Start a new project from a solid, mobile-first starter instead of a "
+            "blank page, then change it to fit the job. Templates: website, "
+            "landing, webapp (single-page app with saved state), game (canvas "
+            "game loop with touch controls), python-tool, python-web (FastAPI), "
+            "node-api. Existing work is never overwritten unless overwrite is set."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "template": {
+                    "type": "string",
+                    "enum": [
+                        "website",
+                        "landing",
+                        "webapp",
+                        "game",
+                        "python-tool",
+                        "python-web",
+                        "node-api",
+                    ],
+                },
+                "title": {"type": "string", "description": "The project's name."},
+                "overwrite": {"type": "boolean"},
+            },
+            "required": ["template", "title"],
+        },
+    ),
+    ToolSpec(
+        name=RESTORE_FILE_TOOL,
+        description=(
+            "Undo changes to a file: put back an earlier version (1 = the version "
+            "before the last change). Every write, edit, and delete keeps the "
+            "last ten versions. Without versions_back, lists the saved versions."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "versions_back": {"type": "integer"},
+            },
+            "required": ["path"],
         },
     ),
     ToolSpec(
@@ -777,6 +844,10 @@ class AgentToolbox:
                     return await self._app_help_call(call)
                 case "check_project":
                     return await self._check_project(context)
+                case "start_project":
+                    return await self._start_project(call, context)
+                case "restore_file":
+                    return await self._restore_file(call, context)
                 case "study_video":
                     return await self._study_video(call, context)
                 case "video_notes":
@@ -921,37 +992,149 @@ class AgentToolbox:
     async def _edit_file(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)
         path = str(call.arguments.get("path", ""))
-        old = call.arguments.get("old_text")
-        new = call.arguments.get("new_text")
-        if not isinstance(old, str) or not old:
-            raise ValueError("Give old_text: the exact text to replace.")
-        if not isinstance(new, str):
-            raise ValueError("Give new_text: what to put in its place.")
-        content = await self._sites.read(site_id, path)
-        found = content.count(old)
-        replace_all = call.arguments.get("replace_all") is True
-        if found == 0:
-            raise ValueError(
-                f"old_text was not found in {path}. Read the file again and copy "
-                "the text exactly, including spaces."
-            )
-        if found > 1 and not replace_all:
-            raise ValueError(
-                f"old_text appears {found} times in {path}. Include more "
-                "surrounding lines so it is unique, or set replace_all."
-            )
-        updated = (
-            content.replace(old, new) if replace_all else content.replace(old, new, 1)
+        raw = call.arguments.get("edits")
+        edits = (
+            [item for item in raw if isinstance(item, dict)]
+            if isinstance(raw, list) and raw
+            else [call.arguments]
         )
-        written = await self._sites.write(site_id, path, updated)
-        changed = found if replace_all else 1
+        content = await self._sites.read(site_id, path)
+        changed = 0
+        loose = 0
+        for number, edit in enumerate(edits, start=1):
+            label = f"Edit {number}: " if len(edits) > 1 else ""
+            old = edit.get("old_text")
+            new = edit.get("new_text")
+            if not isinstance(old, str) or not old:
+                raise ValueError(f"{label}give old_text: the exact text to replace.")
+            if not isinstance(new, str):
+                raise ValueError(f"{label}give new_text: what to put in its place.")
+            found = content.count(old)
+            replace_all = edit.get("replace_all") is True
+            if found == 0:
+                fixed = loose_replace(content, old, new)
+                if fixed is None:
+                    raise ValueError(
+                        f"{label}old_text was not found in {path}. Read the file "
+                        "again and copy the text exactly. No edits were saved."
+                    )
+                content = fixed
+                changed += 1
+                loose += 1
+                continue
+            if found > 1 and not replace_all:
+                raise ValueError(
+                    f"{label}old_text appears {found} times in {path}. Include more "
+                    "surrounding lines so it is unique, or set replace_all. No "
+                    "edits were saved."
+                )
+            content = (
+                content.replace(old, new)
+                if replace_all
+                else content.replace(old, new, 1)
+            )
+            changed += found if replace_all else 1
+        written = await self._sites.write(site_id, path, content)
+        note = f" ({loose} matched after adjusting indentation)" if loose else ""
         return ToolOutcome(
-            text=f"Edited {written.path}: replaced {changed} occurrence(s).",
+            text=f"Edited {written.path}: replaced {changed} occurrence(s){note}.",
             data={
                 "tool": "edit_file",
                 "site_id": site_id,
                 "path": written.path,
                 "replacements": changed,
+                "edits": len(edits),
+            },
+        )
+
+    async def _node_syntax(
+        self,
+        node: str,
+        site_id: str,
+        contents: dict[str, str],
+        problems: list[str],
+    ) -> list[str]:
+        """Let Node parse each script (without running it): its verdict replaces
+        the bracket guess for that file."""
+        for path in contents:
+            if not path.endswith((".js", ".mjs", ".cjs")):
+                continue
+            verdict = await _node_check(node, self._sites.resolve(site_id, path))
+            if verdict is None:
+                continue
+            guesses = (f"{path}: unexpected '", f"{path}: '")
+            problems = [p for p in problems if not p.startswith(guesses)]
+            if verdict:
+                problems.append(f"{path}: {verdict}")
+        return problems
+
+    async def _start_project(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        template = str(call.arguments.get("template", "")).strip()
+        title = str(call.arguments.get("title") or "My project").strip()[:80]
+        overwrite = call.arguments.get("overwrite") is True
+        files = template_files(template, title)
+        existing = {item.path for item in await self._sites.files(site_id)}
+        written: list[str] = []
+        kept: list[str] = []
+        for path, text in files.items():
+            if path in existing and not overwrite:
+                current = await self._sites.read(site_id, path)
+                if not is_starter(path, current):
+                    kept.append(path)
+                    continue
+            await self._sites.write(site_id, path, text)
+            written.append(path)
+        lines = [
+            f"Started a {template} project: wrote {', '.join(written) or 'nothing'}."
+        ]
+        if kept:
+            lines.append(
+                f"Kept your existing {', '.join(kept)} (set overwrite to replace them)."
+            )
+        lines.append(
+            "Now read the files, change them to fit the task, and run check_project."
+        )
+        return ToolOutcome(
+            text=" ".join(lines),
+            data={
+                "tool": START_PROJECT_TOOL,
+                "site_id": site_id,
+                "template": template,
+                "written": written,
+                "kept": kept,
+            },
+        )
+
+    async def _restore_file(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        path = str(call.arguments.get("path", "")).strip()
+        back = _int_arg(call.arguments.get("versions_back"))
+        saved = await self._sites.versions(site_id, path)
+        if back is None:
+            if not saved:
+                text = f"{path} has no earlier versions."
+            else:
+                now = time.time()
+                text = f"{path} has {len(saved)} earlier version(s): " + ", ".join(
+                    f"{index} ({max(0, round((now - stamp / 1_000_000) / 60))} min ago)"
+                    for index, stamp in enumerate(saved, start=1)
+                )
+            return ToolOutcome(
+                text=text,
+                data={"tool": RESTORE_FILE_TOOL, "path": path, "versions": len(saved)},
+            )
+        restored = await self._sites.restore(site_id, path, back=back)
+        return ToolOutcome(
+            text=(
+                f"Restored {restored.path} to the version from {back} change(s) ago. "
+                "The version it replaced is kept, so this can be undone too."
+            ),
+            data={
+                "tool": RESTORE_FILE_TOOL,
+                "site_id": site_id,
+                "path": restored.path,
+                "versions_back": back,
             },
         )
 
@@ -1101,6 +1284,51 @@ class AgentToolbox:
             data={"tool": VIDEO_NOTES_TOOL, "videos": [n.id for n in found]},
         )
 
+    async def project_overview(self, site_id: str) -> str:
+        """What is already in a project, so an agent starts with the lay of the land."""
+        try:
+            files = [
+                item
+                for item in await self._sites.files(site_id)
+                if not item.path.startswith("lab/")
+            ]
+        except SiteError:
+            return ""
+        if not files:
+            return "The project is empty: start it with start_project or write_file."
+        paths = {item.path for item in files}
+        if paths <= {"index.html", "styles.css", "app.js"}:
+            placeholders = True
+            for path in paths:
+                if not is_starter(path, await self._sites.read(site_id, path)):
+                    placeholders = False
+                    break
+            if placeholders:
+                return (
+                    "The project only has placeholder files: start it with "
+                    "start_project (it may replace them) or write_file."
+                )
+        shown = files[:OVERVIEW_FILES]
+        lines = [f"Files already in the project ({len(files)}):"]
+        lines += [f"- {item.path} ({item.size} bytes)" for item in shown]
+        if len(files) > len(shown):
+            lines.append(f"- … and {len(files) - len(shown)} more (list_files)")
+        readme = next(
+            (item.path for item in files if item.path.lower() == "readme.md"), None
+        )
+        if readme:
+            try:
+                text = await self._sites.read(site_id, readme)
+            except SiteError:
+                text = ""
+            if text.strip():
+                lines.append(f"README.md starts:\n{text.strip()[:500]}")
+        lines.append(
+            "Read the files you will change before changing them; build on what "
+            "is here instead of starting over."
+        )
+        return "\n".join(lines)
+
     async def _check_project(self, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)
         contents: dict[str, str] = {}
@@ -1112,6 +1340,9 @@ class AgentToolbox:
             except SiteError, UnicodeDecodeError:
                 continue
         problems = check_project(contents)
+        node = shutil.which("node")
+        if node:
+            problems = await self._node_syntax(node, site_id, contents, problems)
         text = (
             f"Checked {len(contents)} files; found {len(problems)} problem(s):\n"
             + "\n".join(f"- {problem}" for problem in problems)
@@ -1372,6 +1603,80 @@ class AgentToolbox:
                 "This conversation has no project workspace. Attach a project first."
             )
         return context.site_id
+
+
+async def _node_check(node: str, path: Path) -> str | None:
+    """'' when Node parses the file, the syntax error when it does not, and
+    None when Node could not give an answer."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            node,
+            "--check",
+            str(path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, raw = await asyncio.wait_for(process.communicate(), timeout=15)
+    except OSError, TimeoutError:
+        return None
+    if process.returncode == 0:
+        return ""
+    error = raw.decode("utf-8", errors="replace")
+    if "outside a module" in error or "ERR_" in error:
+        return None
+    line = re.search(rf"{re.escape(path.name)}:(\d+)", error)
+    message = next(
+        (row.strip() for row in error.splitlines() if "Error:" in row), "syntax error"
+    )
+    where = f" on line {line.group(1)}" if line else ""
+    return f"syntax error{where}: {message}."
+
+
+def loose_replace(content: str, old: str, new: str) -> str | None:
+    """Replace old with new when they differ only in indentation or trailing
+    spaces, re-indenting new to match; None unless exactly one place fits."""
+    wanted = [line.strip() for line in old.strip("\n").splitlines()]
+    if not any(wanted):
+        return None
+    lines = content.splitlines(keepends=True)
+    bare = [line.strip() for line in lines]
+    size = len(wanted)
+    hits = [
+        start
+        for start in range(len(lines) - size + 1)
+        if bare[start : start + size] == wanted
+    ]
+    if len(hits) != 1:
+        return None
+    start = hits[0]
+    old_lines = old.strip("\n").splitlines()
+    # How each indentation in old_text maps onto the file's real indentation.
+    levels: dict[int, str] = {}
+    for written, actual in zip(old_lines, lines[start : start + size], strict=False):
+        if written.strip():
+            levels.setdefault(len(_indent(written)), _indent(actual))
+    known = sorted(levels)
+    scale = 1.0
+    if len(known) >= 2:
+        low, high = known[0], known[1]
+        scale = (len(levels[high]) - len(levels[low])) / (high - low)
+    replacement: list[str] = []
+    for line in new.strip("\n").splitlines():
+        if not line.strip():
+            replacement.append("")
+            continue
+        width = len(_indent(line))
+        base = max((level for level in known if level <= width), default=known[0])
+        extra = round(max(0, width - base) * scale)
+        pad = "\t" if "\t" in levels[base] else " "
+        replacement.append(levels[base] + pad * extra + line.lstrip())
+    ending = "\n" if lines[start + size - 1].endswith("\n") else ""
+    body = "\n".join(replacement) + ending if replacement else ""
+    return "".join(lines[:start]) + body + "".join(lines[start + size :])
+
+
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
 
 
 def _count_arg(value: object, default: int, *, top: int) -> int:

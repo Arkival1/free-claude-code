@@ -1,6 +1,7 @@
 """The bounded tool loop every Studio agent runs."""
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 
@@ -23,7 +24,20 @@ from .tools import (
 )
 from .tuning import pack_exemplars, pack_system_text
 
-WRITE_TOOLS = frozenset({"write_file", "edit_file", "delete_file"})
+WRITE_TOOLS = frozenset(
+    {"write_file", "edit_file", "delete_file", "start_project", "restore_file"}
+)
+REPEAT_FAILURES = 2
+REPEAT_NOTE = (
+    "This same call has now failed more than once. Do not repeat it: read the "
+    "file or output again, try a different approach, or use ask_researcher "
+    "with the exact error."
+)
+
+
+def _call_key(call: ToolCall) -> str:
+    return f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
+
 
 MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user):"
 
@@ -148,6 +162,7 @@ class AgentRunner:
         memory: MemoryService,
         default_model: str,
         max_steps: int = 12,
+        builder_max_steps: int = 40,
         live: MutableMapping[str, str] | None = None,
         temperature: float = 0.2,
     ) -> None:
@@ -157,9 +172,13 @@ class AgentRunner:
         self._memory = memory
         self._default_model = default_model
         self._max_steps = max(1, max_steps)
+        self._builder_max_steps = max(self._max_steps, builder_max_steps)
         # Chat id -> the reply being written right now, for live display.
         self._live = live
         self._temperature = temperature
+
+    def _steps_for(self, agent: Agent) -> int:
+        return self._builder_max_steps if agent.role == "builder" else self._max_steps
 
     async def system_prompt(
         self,
@@ -204,6 +223,9 @@ class AgentRunner:
             parts.append(OFFLINE_PROMPT)
         if site_id:
             parts.append(SITE_PROMPT)
+            overview = await self._toolbox.project_overview(site_id)
+            if overview:
+                parts.append(overview)
             if self._toolbox.commands_enabled and COMMAND_TOOL in agent.tools:
                 parts.append(COMMAND_PROMPT)
         if with_memory and agent.memory_enabled:
@@ -283,7 +305,7 @@ class AgentRunner:
             history=history,
             context=context,
             query=user_text,
-            max_steps=self._max_steps,
+            max_steps=self._steps_for(agent),
             turn_note=note,
         )
         if agent.memory_enabled and not result.failed and result.text:
@@ -407,6 +429,7 @@ class AgentRunner:
             history = with_memory_note(history, turn_note, header=STUDIO_NOTE_HEADER)
         model = agent.model or self._default_model
         used: list[str] = []
+        failures: dict[str, int] = {}
         checked = False
         for step in range(1, max_steps + 1):
             try:
@@ -495,6 +518,15 @@ class AgentRunner:
             outcomes = await self._run_calls(reply.tool_calls, context)
             for call, outcome in zip(reply.tool_calls, outcomes, strict=True):
                 used.append(call.name)
+                if outcome.failed:
+                    key = _call_key(call)
+                    failures[key] = failures.get(key, 0) + 1
+                    if failures[key] >= REPEAT_FAILURES:
+                        outcome = ToolOutcome(
+                            text=f"{outcome.text}\n\n{REPEAT_NOTE}",
+                            data=outcome.data,
+                            failed=True,
+                        )
                 await self._store.append_message(
                     chat_id=chat.id,
                     role="tool",

@@ -652,6 +652,9 @@ class Settings(BaseModel):
     studio_agent_max_steps: int = Field(
         default=12, ge=1, le=64, validation_alias="STUDIO_AGENT_MAX_STEPS"
     )
+    studio_builder_max_steps: int = Field(
+        default=40, ge=1, le=120, validation_alias="STUDIO_BUILDER_MAX_STEPS"
+    )
     studio_memory_working_limit: int = Field(
         default=20, ge=1, le=200, validation_alias="STUDIO_MEMORY_WORKING_LIMIT"
     )

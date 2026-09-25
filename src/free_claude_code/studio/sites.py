@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import stat
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -144,8 +145,12 @@ SKIP_DIRS = frozenset(
         ".turbo",
         ".parcel-cache",
         "target",
+        ".studio-history",
     }
 )
+HISTORY_DIR = ".studio-history"
+"""Earlier versions of each file, kept so an agent or the user can undo."""
+MAX_VERSIONS = 10
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".htm": "text/html; charset=utf-8",
@@ -220,6 +225,22 @@ body {
 main { padding: 24px; max-width: 42rem; }
 """
 STARTER_SCRIPT = "// Agent-written behavior goes here.\n"
+
+
+def is_starter(path: str, content: str) -> bool:
+    """True for the placeholder files every new project starts with."""
+    if path == "styles.css":
+        return content == STARTER_STYLES
+    if path == "app.js":
+        return content == STARTER_SCRIPT
+    if path == "index.html":
+        head, _, rest = STARTER_PAGE.partition("{title}")
+        return (
+            content.startswith(head)
+            and "This site is empty. Ask an agent" in rest
+            and ("This site is empty. Ask an agent to build it." in content)
+        )
+    return False
 
 
 class SiteError(ValueError):
@@ -318,6 +339,7 @@ class SiteWorkspace:
             directory = self.directory(site_id)
             if not target.exists() and self._count(directory) >= MAX_SITE_FILES:
                 raise SiteError("This site already has the maximum number of files.")
+            self._keep_version(site_id, target, replacing=encoded)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(encoded)
             return SiteFile(
@@ -357,10 +379,64 @@ class SiteWorkspace:
         def work() -> bool:
             if not target.is_file():
                 return False
+            self._keep_version(site_id, target, replacing=b"")
             target.unlink()
             return True
 
         return await anyio.to_thread.run_sync(work)
+
+    async def versions(self, site_id: str, relative_path: str) -> list[int]:
+        """When each kept earlier version of a file was saved, newest first."""
+        target = self.resolve(site_id, relative_path)
+
+        def work() -> list[int]:
+            folder = self._history_folder(site_id, target)
+            if not folder.is_dir():
+                return []
+            return sorted(
+                (int(item.name) for item in folder.iterdir() if item.name.isdigit()),
+                reverse=True,
+            )
+
+        return await anyio.to_thread.run_sync(work)
+
+    async def restore(
+        self, site_id: str, relative_path: str, *, back: int = 1
+    ) -> SiteFile:
+        """Put back an earlier version of a file; the current one is kept too."""
+        target = self.resolve(site_id, relative_path)
+        saved = await self.versions(site_id, relative_path)
+        if not saved:
+            raise SiteError(f"There is no earlier version of {relative_path}.")
+        if back < 1 or back > len(saved):
+            raise SiteError(f"{relative_path} has {len(saved)} earlier version(s).")
+        folder = self._history_folder(site_id, target)
+        content = (folder / str(saved[back - 1])).read_bytes()
+        return await self.write(site_id, relative_path, content.decode("utf-8"))
+
+    def _history_folder(self, site_id: str, target: Path) -> Path:
+        relative = target.relative_to(self.directory(site_id))
+        return self.directory(site_id) / HISTORY_DIR / relative
+
+    def _keep_version(self, site_id: str, target: Path, *, replacing: bytes) -> None:
+        """Save a file's current content before it changes; keep the last ten."""
+        if not target.is_file():
+            return
+        current = target.read_bytes()
+        if current == replacing:
+            return
+        folder = self._history_folder(site_id, target)
+        folder.mkdir(parents=True, exist_ok=True)
+        stamp = time.time_ns() // 1_000
+        while (folder / str(stamp)).exists():
+            stamp += 1
+        (folder / str(stamp)).write_bytes(current)
+        kept = sorted(
+            (item for item in folder.iterdir() if item.name.isdigit()),
+            key=lambda item: int(item.name),
+        )
+        for old in kept[:-MAX_VERSIONS]:
+            old.unlink()
 
     async def files(self, site_id: str) -> tuple[SiteFile, ...]:
         """Return every file in the site, ordered by path."""

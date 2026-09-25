@@ -645,6 +645,17 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         description="Maximum tool steps one agent task may take before stopping.",
     ),
     ConfigFieldSpec(
+        "STUDIO_BUILDER_MAX_STEPS",
+        "Builder Max Steps",
+        "studio",
+        "number",
+        settings_attr="studio_builder_max_steps",
+        description=(
+            "How many steps (tool calls) a builder agent may take on one job, "
+            "1 to 120. Whole apps need more steps than questions do."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LIGHT_TUNING_ENABLED",
         "Light Tuning",
         "studio",

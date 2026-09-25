@@ -479,14 +479,23 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "html",
             "python",
             "game",
+            "template",
+            "undo",
+            "restore",
         ),
         body=(
             "The Builder writes any kind of project: web pages, Python, "
-            "TypeScript, games, configs. It reads, edits, and searches its own "
-            "files, runs code to check it, and asks the Researcher when stuck on "
-            "an error. The finished site has a live preview, Open full screen, "
-            "Edit for any file, and Download .zip. With Agent Commands allowed in "
-            "Settings it can also run npm install, builds, and tests."
+            "TypeScript, games, configs. New projects start from a solid template "
+            "(website, landing page, web app, canvas game, Python tool, Python "
+            "web API, Node API) that it then shapes to the job. It reads, edits, "
+            "and searches its own files, checks the whole project before it says "
+            "it is done, and asks the Researcher when stuck on an error. Every "
+            "file change keeps the last ten versions, so you can say 'Builder, "
+            "undo your last change to index.html'. Builders get 40 steps per job "
+            "(Builder Max Steps in Settings, under Studio). The finished site has "
+            "a live preview, Open full screen, Edit for any file, and Download "
+            ".zip. With Agent Commands allowed in Settings it can also run npm "
+            "install, builds, and tests."
         ),
         asks=(
             "How do I let agents run commands?",

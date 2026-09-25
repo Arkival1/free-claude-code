@@ -66,6 +66,7 @@ async def test_agent_stops_at_the_step_budget(make_studio):
     studio, _ = make_studio(
         lambda system, prompt: tool_reply("list_files", {}),
         STUDIO_AGENT_MAX_STEPS=3,
+        STUDIO_BUILDER_MAX_STEPS=3,
     )
     await studio.ensure_defaults()
     builder = await studio.agent_by_name("Builder")

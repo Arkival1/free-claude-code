@@ -746,6 +746,37 @@ it calls `ask_researcher` with the exact error. The Researcher looks it up,
 tests the fix, and answers, and the Builder applies the fix and tests again.
 Both conversations are visible as linked chats.
 
+**Builder upgrades.**
+
+- **Starter templates.** `start_project` begins a new project from a tested,
+  mobile-first starter instead of a blank page: `website` (sections, phone
+  menu, contact form), `landing` (hero, features, testimonial, pricing,
+  signup), `webapp` (single-page app with saved state), `game` (canvas game
+  loop, score, best score, touch controls), `python-tool` (command line with a
+  test), `python-web` (FastAPI API with a page), and `node-api` (Node server
+  with no dependencies). Every template passes `check_project`. It only
+  replaces a new project's placeholder files, never real work, unless told to.
+- **Undo.** Every write, edit, and delete keeps the file's last ten versions
+  (in a hidden `.studio-history` folder that is never listed or zipped).
+  `restore_file` lists them or puts one back, and the replaced version is kept
+  too. Say "Builder, undo your last change to index.html".
+- **Better edits.** `edit_file` takes several changes to one file at once
+  (`edits`), saves nothing if any of them fails, and still applies a change
+  whose `old_text` only differs in indentation, re-indented to match the file.
+- **Knows the project.** At the start of every job the Builder sees the
+  project's files and the start of its README, so it builds on what is there.
+- **Real JavaScript checks.** When Node is installed, `check_project` has Node
+  parse each script (without running it) and reports the exact line of a
+  syntax error.
+- **More room.** Builders get `STUDIO_BUILDER_MAX_STEPS` steps per job (40 by
+  default) instead of the general 12, so whole apps fit in one job.
+- **No going in circles.** When the same tool call fails twice, the agent is
+  told to stop repeating it and try another way or ask the Researcher.
+- New instructions: start from a template, finished code only, graphics with
+  inline SVG, CSS, or emoji, several edits at once, undo when a change makes
+  things worse. Starter Builders whose instructions were never edited are
+  upgraded in place.
+
 The **Helper** supports the other agents. When the Researcher finishes, the
 Helper reads what it found alongside what the asking agent is working on, drops
 what doesn't matter, and turns the rest into a short plan: the best idea to try

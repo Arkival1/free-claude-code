@@ -128,6 +128,8 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "ask_helper",
         "check_project",
         "video_notes",
+        "start_project",
+        "restore_file",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
@@ -600,6 +602,7 @@ class StudioService:
             memory=self._memory(),
             default_model=self.default_model,
             max_steps=self.settings.studio_agent_max_steps,
+            builder_max_steps=self.settings.studio_builder_max_steps,
             live=self._live_text,
             temperature=self.settings.studio_agent_temperature,
         )
@@ -1279,7 +1282,7 @@ class StudioService:
                 "chat_id": chat.id,
                 "goal": goal.strip(),
                 "site_id": site_id or chat.site_id,
-                "max_steps": self.settings.studio_agent_max_steps,
+                "max_steps": self._steps_for(agent),
             }
         )
         await self._store.put(run)
@@ -1320,6 +1323,15 @@ class StudioService:
                 "status": run.status,
             },
         )
+
+    def _steps_for(self, agent: Agent) -> int:
+        """Builders get room for whole apps; everyone else the usual budget."""
+        settings = self.settings
+        if agent.role == "builder":
+            return max(
+                settings.studio_builder_max_steps, settings.studio_agent_max_steps
+            )
+        return settings.studio_agent_max_steps
 
     async def stop_agent_work(self, agent_id: str) -> list[AgentRun]:
         """Stop an agent's background tasks; returns the tasks that were stopped."""
@@ -1513,7 +1525,7 @@ class StudioService:
                 "chat_id": chat.id,
                 "goal": goal.strip(),
                 "site_id": site_id,
-                "max_steps": self.settings.studio_agent_max_steps,
+                "max_steps": self._steps_for(agent),
             }
         )
         await self._store.put(run)

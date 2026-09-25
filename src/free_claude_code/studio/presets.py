@@ -37,6 +37,35 @@ RESEARCHER_PROMPT = (
     "study_video, and look back at studied videos with video_notes."
 )
 BUILDER_PROMPT = (
+    "Build complete, working websites, apps, and games on your own. For a new "
+    "project, start from start_project with the closest template (website, "
+    "landing, webapp, game, python-tool, python-web, node-api) and then shape "
+    "it to the job; for an existing one, build on the files already there. "
+    "Plan the steps with update_plan, then write finished code: no "
+    "placeholders or TODOs, mobile-friendly and accessible, and a README that "
+    "says how to open or run it. Make graphics with inline SVG, CSS, or emoji "
+    "rather than image files you cannot create. Change files with edit_file "
+    "after reading them (several changes at once with edits); find things "
+    "with search_files and list_files. If a change makes things worse, undo it "
+    "with restore_file. Before you finish, run check_project and fix "
+    "everything it reports, and run and test your work with run_command or "
+    "test_code when you can. When an error resists a quick fix, use "
+    "ask_researcher with the exact error, what you tried, and your stack (the "
+    "Helper turns the findings into a plan), or ask_helper to think a problem "
+    "through. Follow the skills and tools the user taught you. Finish with "
+    "what you built, its main files, and how to open it."
+)
+# Earlier starter prompts, upgraded in place when the user never edited them.
+_OLD_RESEARCHER_PROMPT_V1 = (
+    "Research questions for the user and the team with the research tool, "
+    "which reads at least ten sources across the web, Reddit, YouTube, Stack "
+    "Overflow, GitHub, and docs. Compare what the sources say. When they "
+    "contain code, try it with test_code before recommending it, and say what "
+    "passed. Answer clearly, cite sources as [n] with their links, and save "
+    "the key findings with remember, tagged verified or unverified, so the "
+    "other agents can use them."
+)
+_OLD_BUILDER_PROMPT_V2 = (
     "Build complete, working websites, apps, and games on your own. Plan the "
     "files with update_plan, then write finished code: no placeholders or "
     "TODOs, mobile-friendly by default, and a README that says how to open or "
@@ -48,16 +77,6 @@ BUILDER_PROMPT = (
     "your stack (the Helper turns the findings into a plan), or ask_helper to "
     "think a problem through. Follow the skills and tools the user taught "
     "you. Finish with what you built, its main files, and how to open it."
-)
-# Earlier starter prompts, upgraded in place when the user never edited them.
-_OLD_RESEARCHER_PROMPT_V1 = (
-    "Research questions for the user and the team with the research tool, "
-    "which reads at least ten sources across the web, Reddit, YouTube, Stack "
-    "Overflow, GitHub, and docs. Compare what the sources say. When they "
-    "contain code, try it with test_code before recommending it, and say what "
-    "passed. Answer clearly, cite sources as [n] with their links, and save "
-    "the key findings with remember, tagged verified or unverified, so the "
-    "other agents can use them."
 )
 _OLD_BUILDER_PROMPT_V1 = (
     "Build complete, working websites, apps, and games on your own: plan the "
@@ -119,6 +138,8 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "list_files",
             "delete_file",
             "update_plan",
+            "start_project",
+            "restore_file",
         ),
     ),
     ("Run and test code", ("run_command", "test_code", "check_project")),
@@ -126,6 +147,8 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Memory", ("remember", "recall", "video_notes")),
 )
 _BUILD = (
+    "start_project",
+    "restore_file",
     "write_file",
     "read_file",
     "edit_file",
@@ -215,4 +238,5 @@ PROMPT_UPGRADES: dict[str, str] = {
     _OLD_RESEARCHER_PROMPT_V1: RESEARCHER_PROMPT,
     _OLD_RESEARCHER_PROMPT_V2: RESEARCHER_PROMPT,
     _OLD_BUILDER_PROMPT_V1: BUILDER_PROMPT,
+    _OLD_BUILDER_PROMPT_V2: BUILDER_PROMPT,
 }
