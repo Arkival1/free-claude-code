@@ -86,6 +86,8 @@ class Agent(Record):
     tune_pack_id: str | None = None
     local_only: bool = False
     archived: bool = False
+    model_setting: str = ""
+    """The Main AI Model setting this agent last followed (main AI only)."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 

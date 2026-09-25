@@ -464,13 +464,41 @@ command, or **Choose a model from this PC** on the Models page). It lists the
 models LM Studio has on this PC; press **Use** on one. **Find a model file on
 this PC…** opens a normal file window on the PC running Studio: pick any
 `.gguf` model and Studio adds it to LM Studio's models folder (a hard link, so
-no second copy on the same drive) and switches to it. Leave **Use it for every
-agent too** ticked to move the whole team, or untick it for the main AI only.
-The choice is saved as the Main AI Model and Studio Default Model settings.
+no second copy on the same drive) and switches to it. It changes the main AI
+only; tick **Use it for every agent too** to move the whole team. The choice is
+saved as the Main AI Model (and, for the whole team, Studio Default Model)
+setting.
 
 If the Studio default is a server model whose provider has no key, or a local
 model this PC doesn't have, Studio uses the model loaded in LM Studio instead
 of failing, and the HUD shows which one.
+
+**Team brains: a different model for each agent.** Open **Team brains** (a
+quick command on the HUD, a card on **Agents**, or **Give each agent its own
+brain…** in Choose brain). Every agent has a list of the models in LM Studio,
+plus server models; pick one per agent and **Save**. **Suggest a mix** fills in
+a starting point from the models on this PC: a coding model (one with *coder*
+in its name) for the Builder and Tester, the biggest general model for the
+Researcher, a reasoning model (such as a DeepSeek R1 distill) for the Helper, a
+mid-sized one for Jarvis so he answers quickly, and the smallest for the Guide.
+Or just tell Jarvis: *"give the Builder qwen coder"*, *"switch the Researcher
+to llama 3.1 8b"*, *"use gemma for the Guide"*; he switches it at once, and his
+`agent_model` tool lists who uses what. If an agent's model can't be found,
+the agent borrows the loaded one; Team brains and the HUD say which it is
+really using.
+
+In LM Studio, turn on **Just-in-Time model loading** (Developer → Settings).
+Without it LM Studio lists only the model that is loaded, so every agent ends
+up on that one. With it, every downloaded model is listed and LM Studio loads
+whichever one an agent asks for.
+
+A graphics card with 8 GB holds one mid-sized model at a time. With **Local
+Models Take Turns** on (`STUDIO_LOCAL_MODEL_TURNS`, the default), agents on
+different local models take turns: the model that is working keeps going while
+its agent is busy (and for a few seconds between its steps), then the next one
+loads. Nobody waits more than about a minute before getting a turn, and models
+LM Studio has loaded side by side run together. Turn it off if your card holds
+all your models at once.
 
 **Speed on a small GPU.** Studio keeps the start of every prompt the same
 between turns (tool list and instructions first, this turn's memories last),

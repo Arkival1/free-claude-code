@@ -2519,3 +2519,35 @@ body[data-page="settings"] .view {
 @media (prefers-reduced-motion: reduce) {
   .hud-study-bar > i { transition: none; }
 }
+
+/* Team brains: one model per agent. */
+.brain-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 10rem) minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+.brain-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.brain-row select {
+  width: 100%;
+  min-width: 0;
+}
+.brain-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.85em;
+}
+.brain-advice {
+  margin-top: 0.75rem;
+}
+@media (max-width: 420px) {
+  .brain-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

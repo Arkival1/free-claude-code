@@ -43,6 +43,7 @@ TODO_TOOL = "todo"
 CONVERSATION_TOOL = "conversation"
 LEARN_TOOL = "learn"
 KNOWLEDGE_TOOL = "knowledge"
+AGENT_MODEL_TOOL = "agent_model"
 CALCULATE_TOOL = "calculate"
 PROJECTS_TOOL = "list_projects"
 SYSTEM_STATUS_TOOL = "system_status"
@@ -457,6 +458,29 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=AGENT_MODEL_TOOL,
+        description=(
+            "Team brains: see which AI model each agent thinks with, or give one "
+            "agent a different model. With no agent, lists every agent's model "
+            "and the models on this PC. With agent and model, switches that "
+            "agent (a short name such as 'qwen coder' is enough). Use it when "
+            "the user wants agents on different models."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Agent name, or 'yourself'.",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "The model to switch to.",
+                },
+            },
+        },
+    ),
+    ToolSpec(
         name=KNOWLEDGE_TOOL,
         description=(
             "The knowledge library of subjects the team taught itself: search "
@@ -709,7 +733,14 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
     for spec in TOOL_SPECS
     if spec.name not in DELEGATION_TOOLS
     and spec.name
-    not in {APP_HELP_TOOL, TODO_TOOL, PROJECTS_TOOL, SYSTEM_STATUS_TOOL, LEARN_TOOL}
+    not in {
+        APP_HELP_TOOL,
+        TODO_TOOL,
+        PROJECTS_TOOL,
+        SYSTEM_STATUS_TOOL,
+        LEARN_TOOL,
+        AGENT_MODEL_TOOL,
+    }
 )
 MAIN_TOOL_NAMES: tuple[str, ...] = (
     ASK_AGENT_TOOL,
@@ -725,6 +756,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     CONVERSATION_TOOL,
     LEARN_TOOL,
     KNOWLEDGE_TOOL,
+    AGENT_MODEL_TOOL,
     STUDY_VIDEO_TOOL,
     VIDEO_NOTES_TOOL,
     TODO_TOOL,
@@ -1004,6 +1036,7 @@ class AgentToolbox:
                     | "conversation"
                     | "learn"
                     | "knowledge"
+                    | "agent_model"
                 ):
                     if self._assistant is None:
                         raise ValueError(f"{call.name} is not available here.")

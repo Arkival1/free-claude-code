@@ -21,7 +21,7 @@ from free_claude_code.application.web_tools.ports import (
 from free_claude_code.config.model_refs import parse_provider_type
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.settings import Settings
-from free_claude_code.core.json_types import JsonObject
+from free_claude_code.core.json_types import JsonObject, JsonValue
 
 from . import system_monitor
 from .agents import AgentRunner, TurnResult
@@ -123,6 +123,13 @@ from .school import School
 from .search import SearchError, StudioSearch
 from .sites import SiteWorkspace, slugify
 from .store import StudioNotFoundError, StudioStore
+from .team_models import (
+    find_agent_name,
+    match_model,
+    model_label,
+    parse_model_request,
+    suggest_mix,
+)
 from .tools import (
     DEFAULT_TOOL_NAMES,
     MAIN_ROLE,
@@ -332,6 +339,7 @@ class StudioService:
         self._voice_warmed = False
         self._studying: set[str] = set()
         self._router.use_stand_in(self._stand_in_model)
+        self._router.use_turns(lambda: self.settings.studio_local_model_turns)
 
     # ---------------------------------------------------------------- wiring
 
@@ -852,6 +860,7 @@ class StudioService:
                     "name": settings.studio_main_agent_name,
                     "role": MAIN_ROLE,
                     "model": settings.studio_main_agent_model or self.default_model,
+                    "model_setting": settings.studio_main_agent_model or "",
                     "system_prompt": MAIN_PROMPT_NOTE,
                     "description": "Your main AI. Talks with you and runs the team.",
                     "tools": MAIN_TOOL_NAMES,
@@ -1522,6 +1531,9 @@ class StudioService:
 
     async def _prepare_main_turn(self, main: Agent, chat: Chat, text: str) -> str:
         """The clock, plus any orders handed out, for the main AI's reply."""
+        switched = await self._carry_out_model_change(main, chat, text)
+        if switched:
+            return "\n".join((now_line(datetime.now()), switched))
         orders = await self._carry_out_orders(main, chat, text)
         learning = await self._carry_out_learning(chat, text, started_by=main.name)
         return "\n".join(
@@ -1598,6 +1610,8 @@ class StudioService:
                 )
             case "knowledge":
                 return await self._knowledge_tool(call)
+            case "agent_model":
+                return await self._agent_model_tool(call)
             case _:
                 return await self._system_tool()
 
@@ -1709,6 +1723,174 @@ class StudioService:
         return ToolOutcome(
             text=text, data={"tool": "conversation", "query": query, "hits": len(hits)}
         )
+
+    # ---------------------------------------------------------- team brains
+
+    async def _known_models(self) -> list[str]:
+        """Models on this PC first, then the server models already in use."""
+        local = await self.local_models()
+        listed = local.get("models")
+        known = [
+            str(model)
+            for model in (listed if isinstance(listed, list) else [])
+            if "embed" not in str(model).lower()
+        ]
+        settings = self.settings
+        for model in (
+            settings.studio_default_model,
+            settings.model,
+            *(settings.model_fallbacks or ()),
+            *(agent.model for agent in await self.agents()),
+        ):
+            if model and model not in known:
+                known.append(model)
+        return known
+
+    async def team_models(self) -> JsonObject:
+        """Which model each agent thinks with, and what it actually reaches."""
+        rows: list[JsonValue] = []
+        for agent in await self.agents():
+            if agent.archived:
+                continue
+            model = agent.model or self.default_model
+            using = await self.effective_model(model)
+            rows.append(
+                {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "role": agent.role,
+                    "model": model,
+                    "using": using,
+                    "note": ""
+                    if using == model
+                    else f"{model_label(model)} isn't available, so "
+                    f"{agent.name} is using {model_label(using)} for now.",
+                }
+            )
+        turns = self._router.turns
+        return {
+            "agents": rows,
+            "local": await self.local_models(),
+            "turns": self.settings.studio_local_model_turns,
+            "working": [model_label(m) for m in turns.working],
+            "waiting": [model_label(m) for m in turns.waiting],
+        }
+
+    async def assign_models(self, assignments: Mapping[str, str]) -> tuple[Agent, ...]:
+        """Give each named agent its own model. Returns the agents changed."""
+        changed: list[Agent] = []
+        for agent_id, wanted in assignments.items():
+            model = wanted.strip()
+            if not model:
+                raise StudioError("Pick a model for every agent you change.")
+            agent = await self._store.require(Agent, agent_id)
+            if agent.model == model:
+                continue
+            agent = agent.model_copy(
+                update={
+                    "model": model,
+                    "local_only": model.startswith(LOCAL_MODEL_PREFIX),
+                    "updated_at": now_ms(),
+                }
+            )
+            await self._store.put(agent)
+            changed.append(agent)
+        return tuple(changed)
+
+    async def suggest_team_models(self) -> dict[str, str]:
+        """A starting mix from the models on this PC: agent id to model."""
+        local = await self.local_models()
+        listed = local.get("models")
+        models = [str(m) for m in (listed if isinstance(listed, list) else [])]
+        team = [(a.id, a.role) for a in await self.agents() if not a.archived]
+        return suggest_mix(team, models)
+
+    async def _find_team_member(self, spoken: str) -> Agent:
+        team = [agent for agent in await self.agents() if not agent.archived]
+        main = await self.main_agent()
+        name = find_agent_name(spoken, [a.name for a in team], main=main.name)
+        agent = next((a for a in team if a.name == name), None)
+        if agent is None:
+            raise ValueError(
+                f"No agent called {spoken}. The team: "
+                + ", ".join(a.name for a in team)
+                + "."
+            )
+        return agent
+
+    async def _agent_model_tool(self, call: ToolCall) -> ToolOutcome:
+        spoken = str(call.arguments.get("agent") or "").strip()
+        wanted = str(call.arguments.get("model") or "").strip()
+        if not spoken:
+            brains = await self.team_models()
+            rows = brains["agents"] if isinstance(brains["agents"], list) else []
+            lines = [
+                f"- {row['name']}: {model_label(str(row['model']))}"
+                + (f" ({row['note']})" if row.get("note") else "")
+                for row in rows
+                if isinstance(row, dict)
+            ]
+            local = [
+                model_label(m)
+                for m in await self._known_models()
+                if m.startswith(LOCAL_MODEL_PREFIX)
+            ]
+            text = "\n".join(lines) + (
+                "\nModels on this PC: " + ", ".join(local)
+                if local
+                else "\nLM Studio lists no models right now."
+            )
+            return ToolOutcome(text=text, data={"tool": "agent_model"})
+        agent = await self._find_team_member(spoken)
+        if not wanted:
+            return ToolOutcome(
+                text=f"{agent.name} thinks with {model_label(agent.model)}.",
+                data={"tool": "agent_model", "agent_id": agent.id},
+            )
+        known = await self._known_models()
+        model = match_model(wanted, known)
+        if model is None:
+            local = [model_label(m) for m in known if m.startswith(LOCAL_MODEL_PREFIX)]
+            raise ValueError(
+                f"No model matches '{wanted}'. "
+                + (
+                    "Models on this PC: " + ", ".join(local) + "."
+                    if local
+                    else "LM Studio lists no models right now."
+                )
+            )
+        await self.assign_models({agent.id: model})
+        return ToolOutcome(
+            text=f"{agent.name} now thinks with {model_label(model)}.",
+            data={"tool": "agent_model", "agent_id": agent.id, "model": model},
+        )
+
+    async def _carry_out_model_change(self, main: Agent, chat: Chat, text: str) -> str:
+        """'Give the Builder qwen coder' switches the Builder's model at once."""
+        team = [agent for agent in await self.agents() if not agent.archived]
+        wanted = parse_model_request(text, [a.name for a in team], main=main.name)
+        if wanted is None:
+            return ""
+        spoken, model_text = wanted
+        model = match_model(model_text, await self._known_models())
+        agent = next((a for a in team if a.name == spoken), None)
+        if model is None or agent is None:
+            return ""
+        await self.assign_models({agent.id: model})
+        line = f"{agent.name} now thinks with {model_label(model)}."
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=line,
+            author="agent_model",
+            data={
+                "tool": "agent_model",
+                "agent_id": agent.id,
+                "model": model,
+                "order": True,
+            },
+        )
+        return f"{line} It is done; tell the user in a sentence."
 
     # ------------------------------------------------------------- learning
 
@@ -2297,13 +2479,18 @@ class StudioService:
         raise StudioError("The main AI is missing.")
 
     async def _follow_main_setting(self, agent: Agent) -> Agent:
-        """The admin's Main AI Model setting always decides the main AI's model."""
+        """A new Main AI Model setting moves the main AI to that model.
+
+        The setting applies when it changes; a model picked for the main AI
+        afterwards in Team brains stays until the setting changes again.
+        """
         wanted = self.settings.studio_main_agent_model
-        if not wanted or wanted == agent.model:
+        if not wanted or wanted == agent.model_setting:
             return agent
         agent = agent.model_copy(
             update={
                 "model": wanted,
+                "model_setting": wanted,
                 "local_only": wanted.startswith(LOCAL_MODEL_PREFIX),
                 "updated_at": now_ms(),
             }
@@ -2461,11 +2648,15 @@ class StudioService:
                 "name": member.name,
                 "role": member.role,
                 "model": member.model,
+                "using": using,
                 "busy": member.id in running,
-                "local": member.model.startswith(LOCAL_MODEL_PREFIX),
+                "local": using.startswith(LOCAL_MODEL_PREFIX),
             }
             for member in await self.agents()
             if member.id != agent.id and not member.archived
+            for using in [
+                await self.effective_model(member.model or self.default_model)
+            ]
         ]
         # Only the newest few and a count: the team's memory can hold thousands.
         shared = await self._store.find(

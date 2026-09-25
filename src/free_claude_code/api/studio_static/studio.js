@@ -857,6 +857,13 @@
             )
           : empty("No agents yet.")
       ),
+      card("Team brains", [
+        el("p", {
+          class: "muted",
+          text: "Give each agent its own AI model: a coding model for the Builder, a bigger one for the Researcher, a quick one for Jarvis.",
+        }),
+        el("button", { class: "primary", type: "button", text: "Choose each agent's model", onclick: () => openTeamBrains(() => render()) }),
+      ]),
       card("Add an agent", [
         el("p", {
           class: "muted",
@@ -906,7 +913,7 @@
   // on this PC, or from a .gguf file chosen in a normal file window.
   function openBrainPicker(mainName, onDone) {
     const who = mainName || "the main AI";
-    const everyone = el("input", { type: "checkbox", checked: true });
+    const everyone = el("input", { type: "checkbox" });
     const status = el("p", { class: "muted", role: "status" });
     const list = el("div", { class: "stack" });
     const use = async (model) => {
@@ -995,9 +1002,124 @@
         find,
         el("button", { class: "secondary", type: "button", text: "Refresh", onclick: () => load() }),
       ]),
+      el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Give each agent its own brain…",
+        onclick: () => openTeamBrains(onDone),
+      }),
       status,
     ]);
     load();
+  }
+
+  // Team brains: a different model for each agent.
+  async function openTeamBrains(onDone) {
+    let data;
+    try {
+      data = await api("/studio/api/team-models");
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+    const localModels = (data.local.models || []).filter((model) => !/embed/i.test(model));
+    const serverModels = data.server || [];
+    const label = (model) => model.replace(/^local\//, "");
+    const pickers = new Map();
+    const status = el("p", { class: "muted", role: "status" });
+    const picker = (row) => {
+      const known = new Set([...localModels, ...serverModels]);
+      const groups = [
+        el("optgroup", { label: "On this PC (LM Studio)" }, localModels.map((model) => el("option", { value: model, text: label(model) }))),
+        el("optgroup", { label: "Server (needs a key)" }, serverModels.map((model) => el("option", { value: model, text: model }))),
+      ];
+      if (!known.has(row.model)) groups.unshift(el("option", { value: row.model, text: `${label(row.model)} (not found)` }));
+      const select = el("select", { "aria-label": `Model for ${row.name}` }, groups);
+      select.value = row.model;
+      pickers.set(row.id, select);
+      return select;
+    };
+    const rows = data.agents.map((row) =>
+      el("div", { class: "brain-row" }, [
+        el("div", { class: "brain-who" }, [
+          el("strong", { text: row.name }),
+          el("span", { class: "muted", text: row.role }),
+        ]),
+        picker(row),
+        row.note ? el("p", { class: "muted brain-note", text: row.note }) : null,
+      ])
+    );
+    const distinct = () =>
+      new Set([...pickers.values()].map((select) => select.value).filter((model) => model.startsWith("local/"))).size;
+    const advice = el("p", { class: "muted brain-advice" });
+    const explain = () => {
+      const count = distinct();
+      advice.textContent = !data.local.reachable
+        ? "LM Studio isn't answering, so only server models can be picked. In LM Studio open Developer and set Status to Running."
+        : localModels.length <= 1
+        ? "LM Studio lists only one model. To give agents different ones, download more in LM Studio and turn on Just-in-Time model loading (Developer → Settings); then every downloaded model shows here."
+        : count > 1
+          ? `${count} different models on this PC. ${data.turns ? "They take turns (one works at a time) so an 8 GB card isn't swapping models on every step." : "Local Models Take Turns is off, so they may all try to load at once."} In LM Studio, turn on Just-in-Time model loading (Developer → Settings) so it can load whichever one an agent asks for.`
+          : "Pick a model for each agent. Coding models suit the Builder and Tester; a bigger model suits the Researcher; a quick one suits Jarvis.";
+    };
+    for (const select of pickers.values()) select.addEventListener("change", explain);
+    explain();
+    const suggest = el("button", {
+      class: "secondary",
+      type: "button",
+      text: "Suggest a mix",
+      onclick: async () => {
+        try {
+          const { assignments } = await api("/studio/api/team-models/suggest");
+          const entries = Object.entries(assignments);
+          if (!entries.length) {
+            status.textContent = "No models on this PC to suggest from. Download some in LM Studio first.";
+            return;
+          }
+          for (const [agentId, model] of entries) {
+            const select = pickers.get(agentId);
+            if (select) select.value = model;
+          }
+          explain();
+          status.textContent = "Suggested from the models on this PC. Change any, then Save.";
+        } catch (error) {
+          status.textContent = error.message;
+        }
+      },
+    });
+    const save = el("button", {
+      class: "primary",
+      type: "button",
+      text: "Save",
+      onclick: async () => {
+        const assignments = {};
+        for (const row of data.agents) {
+          const value = pickers.get(row.id).value;
+          if (value && value !== row.model) assignments[row.id] = value;
+        }
+        if (!Object.keys(assignments).length) {
+          closeSheet();
+          return;
+        }
+        save.disabled = true;
+        try {
+          const { changed } = await post("/studio/api/team-models", { assignments });
+          closeSheet();
+          notify(`${changed.length} agent${changed.length === 1 ? "" : "s"} switched model.`);
+          if (onDone) onDone();
+        } catch (error) {
+          status.textContent = error.message;
+          save.disabled = false;
+        }
+      },
+    });
+    openSheet("Team brains", [
+      el("p", { class: "muted", text: "Give each agent its own AI model, so they aren't all the same AI." }),
+      ...rows,
+      advice,
+      el("div", { class: "row" }, [suggest, save]),
+      status,
+    ]);
   }
 
   async function openAddAgent(onCreated) {
@@ -1594,6 +1716,12 @@
         type: "button",
         text: "Choose a model from this PC",
         onclick: () => openBrainPicker("", () => render()),
+      }),
+      el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Give each agent its own model",
+        onclick: () => openTeamBrains(() => render()),
       }),
       ...local.models.map((model) =>
         el("div", { class: "list-item" }, [
@@ -3907,7 +4035,10 @@
                 el("span", { class: "hud-agent-icon", "aria-hidden": "true", text: agentGlyph(member.role) }),
                 el("span", { class: "grow" }, [
                   el("strong", { text: member.name }),
-                  el("small", { text: `${member.role} · ${member.local ? "local" : "server"} · ${shortModel(member.model)}` }),
+                  el("small", {
+                    text: `${member.role} · ${member.local ? "local" : "server"} · ${shortModel(member.using || member.model)}`,
+                    title: member.using && member.using !== member.model ? `Set to ${member.model}; using ${member.using} because it isn't available` : member.model,
+                  }),
                 ]),
                 el("span", { class: "hud-agent-state" }, [el("span", { class: "hud-dot" }), member.busy ? "ACTIVE" : "READY"]),
                 ]
@@ -4695,6 +4826,7 @@
               hud.roomId ? go(`room/${hud.roomId}`) : startRoom()
             ),
             quick("Choose brain", "A model on this PC", () => openBrainPicker(hud.name, rethink)),
+            quick("Team brains", "A model for each agent", () => openTeamBrains(rethink)),
           ])
         ),
       ]),

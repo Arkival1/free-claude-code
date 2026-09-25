@@ -1,5 +1,6 @@
 """One chat surface over the FCC proxy and over local OpenAI-style servers."""
 
+import contextlib
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -9,6 +10,8 @@ from typing import Literal, Protocol
 import httpx
 
 from free_claude_code.core.json_types import JsonObject
+
+from .model_turns import ModelTurns
 
 LOCAL_MODEL_PREFIX = "local/"
 """Model references routed to the configured on-device server."""
@@ -632,6 +635,12 @@ class StudioModelRouter:
         self._proxy = proxy
         self._local = local
         self._stand_in: Callable[[str], Awaitable[str | None]] | None = None
+        self._turns_on: Callable[[], bool] = lambda: False
+        self.turns = ModelTurns(loaded=self.loaded_local_models)
+
+    def use_turns(self, enabled: Callable[[], bool]) -> None:
+        """Make local models take turns when ``enabled()`` says so."""
+        self._turns_on = enabled
 
     def use_stand_in(self, pick: Callable[[str], Awaitable[str | None]]) -> None:
         """Let a local model answer for a server model that cannot be reached."""
@@ -676,25 +685,31 @@ class StudioModelRouter:
         if self._stand_in is not None:
             model = await self._stand_in(model) or model
         client, wire_model = self.client_for(model)
-        streaming = getattr(client, "complete_streaming", None)
-        if on_text is not None and streaming is not None:
-            return await streaming(
+        turn = (
+            self.turns.turn(wire_model)
+            if model.startswith(LOCAL_MODEL_PREFIX) and self._turns_on()
+            else contextlib.nullcontext()
+        )
+        async with turn:
+            streaming = getattr(client, "complete_streaming", None)
+            if on_text is not None and streaming is not None:
+                return await streaming(
+                    messages,
+                    on_text=on_text,
+                    system=system,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    model=wire_model,
+                )
+            return await client.complete(
                 messages,
-                on_text=on_text,
                 system=system,
                 tools=tools,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 model=wire_model,
             )
-        return await client.complete(
-            messages,
-            system=system,
-            tools=tools,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            model=wire_model,
-        )
 
 
 async def _post_json(

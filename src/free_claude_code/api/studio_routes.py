@@ -131,6 +131,10 @@ class UseModelPayload(BaseModel):
     everyone: bool = False
 
 
+class TeamModelsPayload(BaseModel):
+    assignments: dict[str, str] = Field(min_length=1, max_length=50)
+
+
 class PackPayload(BaseModel):
     agent_id: str
     name: str = ""
@@ -1126,6 +1130,14 @@ async def available_models(
     _: None = Access,
 ) -> JsonObject:
     """Return server models FCC can route to and local models being served."""
+    return {
+        "default_model": studio.default_model,
+        "server": await _server_models(services),
+        "local": await studio.local_models(),
+    }
+
+
+async def _server_models(services: ApiServices) -> list[str]:
     # Right after startup the provider catalog is still loading; wait briefly.
     try:
         snapshot = await asyncio.wait_for(services.requests.wait_for_catalog(), 5.0)
@@ -1136,12 +1148,7 @@ async def available_models(
     configured = {settings.model, *(settings.model_fallbacks or ())}
     if settings.studio_default_model:
         configured.add(settings.studio_default_model)
-    server = sorted({info.model_id for info in infos} | configured)
-    return {
-        "default_model": studio.default_model,
-        "server": server,
-        "local": await studio.local_models(),
-    }
+    return sorted({info.model_id for info in infos} | configured)
 
 
 @router.get("/studio/api/agents/{agent_id}/activity")
@@ -1161,6 +1168,36 @@ async def pick_model_file(
 ) -> JsonObject:
     """Open a file picker on this PC and add the chosen model to LM Studio."""
     return await studio.pick_model_file()
+
+
+@router.get("/studio/api/team-models")
+async def team_models(
+    services: ApiServices = Depends(get_services),
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Which model each agent thinks with, and the models to choose from."""
+    return await studio.team_models() | {"server": await _server_models(services)}
+
+
+@router.post("/studio/api/team-models")
+async def assign_team_models(
+    payload: TeamModelsPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Give each agent its own model."""
+    changed = await studio.assign_models(payload.assignments)
+    return {"changed": [agent.id for agent in changed]}
+
+
+@router.get("/studio/api/team-models/suggest")
+async def suggest_team_models(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """A starting mix of models for the team, from the models on this PC."""
+    return {"assignments": await studio.suggest_team_models()}
 
 
 @router.post("/studio/api/models/use")

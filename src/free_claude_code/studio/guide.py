@@ -182,7 +182,7 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         route="/studio#home",
         where=(
             "HUD: CHOOSE BRAIN under the orb, or QUICK COMMANDS, Choose brain. "
-            "Other agents: Agents, tap the agent, Model."
+            "Other agents: QUICK COMMANDS, Team brains, or Agents, Team brains."
         ),
         terms=(
             "brain",
@@ -381,7 +381,8 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "Executive briefing has Jarvis sum up what the team is doing, Build "
             "starts a job for the Builder, Research one for the Researcher, "
             "Brainstorm asks the Helper for a plan, Team room opens a room with "
-            "every agent, and Choose brain switches Jarvis's model."
+            "every agent, Choose brain switches Jarvis's model, and Team brains "
+            "gives each agent its own model."
         ),
     ),
     GuideTopic(
@@ -655,6 +656,45 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "open one to read the study guide, notes, self-checks, and sources."
         ),
         asks=("How does deep research work?", "Where is memory?"),
+    ),
+    GuideTopic(
+        title="Team brains",
+        route="/studio#agents",
+        where=(
+            "HUD quick command Team brains, or Agents, Team brains card, or "
+            "Choose brain, then 'Give each agent its own brain'."
+        ),
+        terms=(
+            "team brains",
+            "different model",
+            "different models",
+            "each agent",
+            "per agent",
+            "own model",
+            "own brain",
+            "same ai",
+            "same model",
+            "which model",
+            "agent model",
+            "mix",
+        ),
+        body=(
+            "Every agent can think with its own AI model. Open Team brains: each "
+            "agent has a list of the models in LM Studio (and server models if "
+            "you have a key). Pick one per agent and press Save, or press "
+            "Suggest a mix for a starting point: a coding model for the Builder "
+            "and Tester, the biggest model for the Researcher, a reasoning model "
+            "for the Helper, a quick one for Jarvis, the smallest for the Guide. "
+            "You can also just say 'give the Builder qwen coder' and Jarvis "
+            "switches it. With more than one model on this PC, Local Models Take "
+            "Turns (on by default) lets one work at a time so an 8 GB card is "
+            "not swapping models on every step; models that fit side by side "
+            "still run together. In LM Studio turn on Just-in-Time model loading "
+            "(Developer, Settings) so it loads whichever model an agent asks for. "
+            "If a chosen model is missing, the agent borrows the loaded one and "
+            "the HUD shows which it is really using."
+        ),
+        asks=("How do I set up LM Studio?", "How do I choose Jarvis's brain?"),
     ),
     GuideTopic(
         title="To-dos and reminders",

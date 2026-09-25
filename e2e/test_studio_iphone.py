@@ -573,12 +573,14 @@ def test_choosing_jarvis_brain_from_this_pc(page: Page, admin_base_url: str) -> 
     sheet = page.locator(".sheet-panel")
     expect(sheet).to_contain_text("Choose Jarvis's brain")
     expect(sheet.get_by_role("button", name="Use nomic-embed-text")).to_have_count(0)
-    sheet.get_by_label("Use it for every agent too").uncheck()
+    # Only Jarvis changes unless asked, so each agent can keep its own brain.
+    expect(sheet.get_by_label("Use it for every agent too")).not_to_be_checked()
     sheet.get_by_role("button", name="Use qwen3.5-4b").click()
     expect(page.locator(".toast, [role=status]").first).to_be_attached()
     assert used == [{"model": "local/qwen3.5-4b", "everyone": False}]
 
     page.get_by_role("button", name="CHOOSE BRAIN", exact=True).click()
+    sheet.get_by_label("Use it for every agent too").check()
     sheet.get_by_role("button", name="Find a model file on this PC…").click()
     expect(sheet).to_be_hidden()
     assert used[-1] == {"model": "local/coder", "everyone": True}
@@ -801,3 +803,29 @@ def test_jarvis_conversation_notes_open_from_the_hud(
     sheet = page.locator(".sheet-panel")
     expect(sheet).to_contain_text("Conversation notes")
     expect(sheet).to_contain_text("No notes yet")
+
+
+def test_each_agent_can_have_its_own_brain(page: Page, admin_base_url: str) -> None:
+    open_hud(page, admin_base_url)
+
+    page.get_by_role("button", name="Team brains A model for each agent").click()
+
+    sheet = page.locator(".sheet-panel")
+    expect(sheet).to_contain_text("Give each agent its own AI model")
+    builder = sheet.get_by_label("Model for Builder")
+    expect(builder).to_be_visible()
+    expect(sheet.get_by_label("Model for Researcher")).to_be_visible()
+    expect(sheet.get_by_role("button", name="Suggest a mix")).to_be_visible()
+    overflow = page.evaluate(
+        "() => document.documentElement.scrollWidth - window.innerWidth"
+    )
+    assert overflow <= 0, "the sheet fits an iPhone screen"
+    sheet.get_by_role("button", name="Save").click()
+    expect(page.locator(".sheet-panel")).to_be_hidden()
+
+    open_studio(page, admin_base_url, "agents")
+    brains = page.locator(".card", has=page.get_by_role("heading", name="Team brains"))
+    brains.get_by_role("button", name="Choose each agent's model").click()
+    expect(
+        page.locator(".sheet-panel").get_by_label("Model for Builder")
+    ).to_be_visible()

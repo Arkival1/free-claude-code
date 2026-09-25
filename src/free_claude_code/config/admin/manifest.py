@@ -976,6 +976,19 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_LOCAL_MODEL_TURNS",
+        "Local Models Take Turns",
+        "studio",
+        "boolean",
+        settings_attr="studio_local_model_turns",
+        description=(
+            "When agents use different models on this PC, let one model work "
+            "at a time so a small graphics card is not swapping models on "
+            "every step. Models already loaded side by side still run "
+            "together. Turn off if your card holds all of them at once."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_AGENT_TEMPERATURE",
         "Agent Temperature",
         "studio",
