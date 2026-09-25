@@ -750,3 +750,27 @@ def test_video_notes_have_a_place_to_paste_a_link(
     expect(videos.get_by_label("YouTube link")).to_be_visible()
     expect(videos.get_by_role("button", name="Study it")).to_be_visible()
     expect(videos).to_contain_text("Research saves every video it reads here")
+
+
+def test_to_dos_can_be_added_and_ticked_off(page: Page, admin_base_url: str) -> None:
+    open_studio(page, admin_base_url, "more")
+
+    todos = page.locator(
+        ".card", has=page.get_by_role("heading", name="To-dos and reminders")
+    )
+    todos.get_by_label("New to-do").fill("Water the tomatoes")
+    todos.get_by_label("Reminder time").fill("tomorrow 8am")
+    todos.get_by_role("button", name="Add").click()
+
+    todos = page.locator(
+        ".card", has=page.get_by_role("heading", name="To-dos and reminders")
+    )
+    expect(todos).to_contain_text("Water the tomatoes")
+    expect(todos.locator(".todo-due")).to_be_visible()
+    # Ticking redraws the card, so click and wait for the item to go.
+    todos.get_by_label("Done: Water the tomatoes").click()
+    expect(
+        page.locator(
+            ".card", has=page.get_by_role("heading", name="To-dos and reminders")
+        )
+    ).not_to_contain_text("Water the tomatoes")

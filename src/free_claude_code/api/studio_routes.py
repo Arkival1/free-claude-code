@@ -76,6 +76,11 @@ class AgentPayload(BaseModel):
     description: str = ""
 
 
+class TodoPayload(BaseModel):
+    text: str = Field(min_length=1, max_length=300)
+    due: str = Field(default="", max_length=80)
+
+
 class VideoPayload(BaseModel):
     url: str = Field(min_length=1, max_length=500)
     focus: str = Field(default="", max_length=300)
@@ -591,6 +596,46 @@ async def delete_agent(
 ) -> JsonObject:
     """Delete one agent and its memories."""
     return {"deleted": await studio.delete_agent(agent_id)}
+
+
+@router.get("/studio/api/todos")
+async def list_todos(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The user's to-do list and reminders."""
+    return {"todos": [item.model_dump() for item in await studio.todos()]}
+
+
+@router.post("/studio/api/todos")
+async def add_todo(
+    payload: TodoPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Add a to-do, with a reminder when due says when."""
+    item = await studio.add_todo(payload.text, due=payload.due, added_by="you")
+    return item.model_dump()
+
+
+@router.post("/studio/api/todos/{todo_id}/done")
+async def finish_todo(
+    todo_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Tick a to-do off."""
+    return (await studio.finish_todo(todo_id)).model_dump()
+
+
+@router.delete("/studio/api/todos/{todo_id}")
+async def remove_todo(
+    todo_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Remove a to-do."""
+    return {"deleted": await studio.remove_todo(todo_id)}
 
 
 def _video_json(note: VideoNote, *, full: bool = False) -> JsonObject:

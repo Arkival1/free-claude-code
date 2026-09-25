@@ -56,6 +56,17 @@ BUILDER_PROMPT = (
     "what you built, its main files, and how to open it."
 )
 # Earlier starter prompts, upgraded in place when the user never edited them.
+_OLD_HELPER_PROMPT_V1 = (
+    "You support the other agents. When an agent brings you a goal and "
+    "material, such as the Researcher's findings, an error log, or notes: "
+    "1) keep only what is relevant, reliable, and doable with this team's "
+    "tools and the user's setup, and drop the rest; 2) brainstorm two or three "
+    "ways to reach the goal; 3) pick the best one and say why in one line; "
+    "4) give numbered, concrete next steps the agent can take now, with "
+    "commands or code patterns when they help; 5) name anything to test or "
+    "verify first. Be brief and practical, fit the plan to the size of the "
+    "task, and save patterns that will help again with remember."
+)
 _OLD_RESEARCHER_PROMPT_V1 = (
     "Research questions for the user and the team with the research tool, "
     "which reads at least ten sources across the web, Reddit, YouTube, Stack "
@@ -103,6 +114,9 @@ HELPER_TOOLS: tuple[str, ...] = (
     "recall",
     "remember",
     "video_notes",
+    "calculate",
+    "todo",
+    "check_project",
     "read_file",
     "list_files",
     "search_files",
@@ -112,15 +126,24 @@ HELPER_TOOLS: tuple[str, ...] = (
     "finish",
 )
 HELPER_PROMPT = (
-    "You support the other agents. When an agent brings you a goal and "
+    "You support the other agents and the user: you turn goals and messy "
+    "material into plans that work. When an agent brings you a goal and "
     "material, such as the Researcher's findings, an error log, or notes: "
     "1) keep only what is relevant, reliable, and doable with this team's "
     "tools and the user's setup, and drop the rest; 2) brainstorm two or three "
-    "ways to reach the goal; 3) pick the best one and say why in one line; "
-    "4) give numbered, concrete next steps the agent can take now, with "
-    "commands or code patterns when they help; 5) name anything to test or "
-    "verify first. Be brief and practical, fit the plan to the size of the "
-    "task, and save patterns that will help again with remember."
+    "ways to reach the goal; 3) pick the best one. Answer in this shape:\n"
+    "Best approach: the choice and why, in one line.\n"
+    "Steps: numbered, concrete actions the agent can take now, with commands "
+    "or code patterns when they help.\n"
+    "Check: what to test or verify first, and how to tell it worked.\n"
+    "Backup: what to try if the best approach fails.\n"
+    "When asked to review work, read the files that matter, run "
+    "check_project, and list what to fix, most important first, with the "
+    "file and the fix. When the user wants a plan for their own life (a week, "
+    "a trip, a budget, a to-do list), make it practical, use calculate for "
+    "every sum, and add the items to their to-do list with todo when they "
+    "ask. Be brief, fit the plan to the size of the task, and save patterns "
+    "that will help again with remember."
 )
 ASSISTANT_PROMPT = (
     "Help the user with questions and everyday tasks, looking things up when needed."
@@ -145,6 +168,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Run and test code", ("run_command", "test_code", "check_project")),
     ("Ask teammates", ("ask_researcher", "ask_helper")),
     ("Memory", ("remember", "recall", "video_notes")),
+    ("Everyday", ("calculate", "todo")),
 )
 _BUILD = (
     "start_project",
@@ -239,4 +263,5 @@ PROMPT_UPGRADES: dict[str, str] = {
     _OLD_RESEARCHER_PROMPT_V2: RESEARCHER_PROMPT,
     _OLD_BUILDER_PROMPT_V1: BUILDER_PROMPT,
     _OLD_BUILDER_PROMPT_V2: BUILDER_PROMPT,
+    _OLD_HELPER_PROMPT_V1: HELPER_PROMPT,
 }

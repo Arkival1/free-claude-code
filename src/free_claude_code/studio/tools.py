@@ -21,6 +21,7 @@ from free_claude_code.application.web_tools.ports import (
 )
 from free_claude_code.core.json_types import JsonObject
 
+from .assistant_tools import calculate
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .llm import ToolCall, ToolSpec
@@ -37,6 +38,10 @@ FINISH_TOOL = "finish"
 COMMAND_TOOL = "run_command"
 ASK_AGENT_TOOL = "ask_agent"
 TEAM_TASK_TOOL = "team_task"
+TODO_TOOL = "todo"
+CALCULATE_TOOL = "calculate"
+PROJECTS_TOOL = "list_projects"
+SYSTEM_STATUS_TOOL = "system_status"
 TEAM_STATUS_TOOL = "team_status"
 STOP_AGENT_TOOL = "stop_agent"
 DELEGATION_TOOLS = frozenset(
@@ -72,6 +77,9 @@ PARALLEL_TOOLS = frozenset(
         CHECK_PROJECT_TOOL,
         VIDEO_NOTES_TOOL,
         TEAM_STATUS_TOOL,
+        CALCULATE_TOOL,
+        PROJECTS_TOOL,
+        SYSTEM_STATUS_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -392,6 +400,58 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=CALCULATE_TOOL,
+        description=(
+            "Work out arithmetic exactly instead of in your head: + - * / // % "
+            "** and brackets, '15% of 80', sqrt, round, min, max, log, pi."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"expression": {"type": "string"}},
+            "required": ["expression"],
+        },
+    ),
+    ToolSpec(
+        name=TODO_TOOL,
+        description=(
+            "The user's to-do list and reminders. action add (text, and due for "
+            "a reminder such as 'in 20 minutes', 'tomorrow 9am', 'at 17:30'), "
+            "list, done (id), or remove (id). Due reminders are announced on the "
+            "HUD."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["add", "list", "done", "remove"]},
+                "text": {"type": "string"},
+                "due": {"type": "string"},
+                "id": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
+        name=PROJECTS_TOOL,
+        description=(
+            "List the user's projects (websites and apps the team built) with "
+            "their file counts, when they last changed, and preview links. Add a "
+            "query to find one."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
+    ),
+    ToolSpec(
+        name=SYSTEM_STATUS_TOOL,
+        description=(
+            "How this PC is doing: CPU, memory, and disk use, whether LM Studio "
+            "is running and which models it serves, the internet connection, "
+            "and the voice."
+        ),
+        parameters={"type": "object", "properties": {}},
+    ),
+    ToolSpec(
         name=TEST_CODE_TOOL,
         description=(
             "Try out a code snippet before relying on it: saves it in the "
@@ -574,7 +634,8 @@ TOOL_SPEC_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
 DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
     spec.name
     for spec in TOOL_SPECS
-    if spec.name not in DELEGATION_TOOLS and spec.name != APP_HELP_TOOL
+    if spec.name not in DELEGATION_TOOLS
+    and spec.name not in {APP_HELP_TOOL, TODO_TOOL, PROJECTS_TOOL, SYSTEM_STATUS_TOOL}
 )
 MAIN_TOOL_NAMES: tuple[str, ...] = (
     ASK_AGENT_TOOL,
@@ -589,6 +650,10 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     "recall",
     STUDY_VIDEO_TOOL,
     VIDEO_NOTES_TOOL,
+    TODO_TOOL,
+    CALCULATE_TOOL,
+    PROJECTS_TOOL,
+    SYSTEM_STATUS_TOOL,
     APP_HELP_TOOL,
     FINISH_TOOL,
 )
@@ -730,6 +795,8 @@ class AgentToolbox:
         app_help: Callable[[str], Awaitable[str]] | None = None,
         videos: VideoStudy | None = None,
         study_later: Callable[[PlatformPage], None] | None = None,
+        assistant: Callable[[ToolCall, ToolContext], Awaitable[ToolOutcome]]
+        | None = None,
     ) -> None:
         self._web = web_tools
         self._sites = sites
@@ -748,6 +815,7 @@ class AgentToolbox:
         self._app_help = app_help
         self._videos = videos
         self._study_later = study_later
+        self._assistant = assistant
 
     @property
     def commands_enabled(self) -> bool:
@@ -848,6 +916,12 @@ class AgentToolbox:
                     return await self._start_project(call, context)
                 case "restore_file":
                     return await self._restore_file(call, context)
+                case "calculate":
+                    return self._calculate(call)
+                case "todo" | "list_projects" | "system_status":
+                    if self._assistant is None:
+                        raise ValueError(f"{call.name} is not available here.")
+                    return await self._assistant(call, context)
                 case "study_video":
                     return await self._study_video(call, context)
                 case "video_notes":
@@ -1231,6 +1305,18 @@ class AgentToolbox:
             raise ValueError("Say what you need help with.")
         material = str(call.arguments.get("material") or "").strip()
         return await self._delegate.help(context, request=request, material=material)
+
+    @staticmethod
+    def _calculate(call: ToolCall) -> ToolOutcome:
+        expression = str(call.arguments.get("expression", "")).strip()
+        if not expression:
+            raise ValueError("Give the expression to work out.")
+        result = calculate(expression)
+        shown = f"{result:,.10g}" if isinstance(result, float) else f"{result:,}"
+        return ToolOutcome(
+            text=f"{expression} = {shown}",
+            data={"tool": CALCULATE_TOOL, "expression": expression, "result": result},
+        )
 
     async def _study_video(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         if self._videos is None:

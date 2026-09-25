@@ -2428,3 +2428,17 @@ body[data-page="settings"] .view {
   align-items: center;
   font-weight: 700;
 }
+
+.todo-row {
+  gap: 12px;
+}
+
+.todo-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+
+.todo-due.overdue {
+  color: var(--hud-amber, #ffb547);
+}

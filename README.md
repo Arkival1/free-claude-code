@@ -588,6 +588,32 @@ with results) and `stop_agent`, and plans bigger goals by splitting them into
 parts for the right agents, running independent parts at the same time. Ask
 "what is everyone doing?" any time.
 
+**Jarvis's own tools.** Besides running the team, Jarvis has:
+
+- `todo`: your to-do list and reminders. "Add milk to my list", "remind me to
+  call Sam in 20 minutes", "what's on my list?", "tick off milk". Reminder
+  times can be "in 20 minutes", "tomorrow 9am", "at 17:30", "tonight", or
+  "2026-10-01 14:00". A due reminder is announced on the HUD (spoken when his
+  voice is on). **Knowledge & Memory → To-dos and reminders** shows the list,
+  adds items with an optional reminder, and ticks them off.
+- `calculate`: exact arithmetic (+ - * / // % **, brackets, "15% of 80",
+  sqrt, round, min, max, log), so sums are never guessed. Only plain maths is
+  evaluated.
+- `list_projects`: finds your projects with their file counts, when they
+  changed, and preview links.
+- `system_status`: CPU, memory, and disk use, whether LM Studio is running and
+  what it serves, the internet connection, and the voice.
+- The date and time ride on every message, so "remind me at 5" and "what day
+  is it?" work.
+
+**The Helper** plans in a fixed shape: *Best approach*, numbered *Steps*,
+*Check* (what to test and how to tell it worked), and *Backup*. Ask it to
+review work and it reads the files, runs `check_project`, and lists what to
+fix, most important first. It plans your own things too (a week, a trip, a
+budget) with `calculate` for every sum, and adds items to your to-do list when
+you ask. Starter Helpers whose instructions were never edited are upgraded in
+place.
+
 The first run creates the main AI (**Jarvis**) and six starter agents:
 **Guide**, **Builder**, **Researcher**, **Helper**, **Teacher**, and
 **Student**.

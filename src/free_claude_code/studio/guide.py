@@ -603,6 +603,39 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="To-dos and reminders",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), To-dos and reminders card. Or just tell "
+            "Jarvis: 'remind me to call Sam at 5pm'."
+        ),
+        terms=(
+            "todo",
+            "to-do",
+            "todos",
+            "reminder",
+            "reminders",
+            "remind",
+            "list",
+            "tasks list",
+            "alarm",
+            "schedule",
+        ),
+        body=(
+            "Jarvis and the Helper keep your to-do list with the todo tool: 'add "
+            "milk to my list', 'remind me to call Sam in 20 minutes', 'what's on "
+            "my list?', 'tick off milk'. Reminders understand 'in 20 minutes', "
+            "'tomorrow 9am', 'at 17:30', and dates like '2026-10-01 14:00'. When "
+            "one is due, Jarvis announces it on the HUD (spoken when his voice is "
+            "on). The To-dos and reminders card on Knowledge & Memory shows the "
+            "list, adds items with an optional reminder, and ticks them off. "
+            "Jarvis also has calculate for exact sums, list_projects to find your "
+            "projects with their links, and system_status for how your PC and LM "
+            "Studio are doing, and he always knows the date and time."
+        ),
+        asks=("What can Jarvis do?", "How do I talk to Jarvis with my voice?"),
+    ),
+    GuideTopic(
         title="Video notes",
         route="/studio#more",
         where=(

@@ -5,6 +5,7 @@ import contextlib
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 
 import anyio.to_thread
@@ -23,6 +24,7 @@ from free_claude_code.core.json_types import JsonObject
 
 from . import system_monitor
 from .agents import AgentRunner, TurnResult
+from .assistant_tools import describe_time, now_line, parse_when
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .crew import Crew
@@ -44,6 +46,7 @@ from .llm import (
     ProxyLLM,
     StudioLLMError,
     StudioModelRouter,
+    ToolCall,
 )
 from .local_voice import LocalVoice, SetupState, speech_package_ready
 from .lora import LoraTrainer
@@ -69,6 +72,7 @@ from .models import (
     Message,
     ModelAsset,
     SiteProject,
+    TodoItem,
     TuneJob,
     TunePack,
     TuneSample,
@@ -106,6 +110,7 @@ from .tools import (
     TOOL_SPEC_BY_NAME,
     AgentToolbox,
     ToolContext,
+    ToolOutcome,
 )
 from .tuning import CloudTuner, LightTuner, TuningError
 from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
@@ -167,6 +172,36 @@ class ChatSettingsResult:
     chat: Chat
     opened_chat: Chat | None = None
     note: str = ""
+
+
+_REMINDER_SECONDS = 10.0
+
+
+def _local(ms: int) -> datetime:
+    return datetime.fromtimestamp(ms / 1000)
+
+
+def _ago(ms: int) -> str:
+    minutes = max(0, ms // 60_000)
+    if minutes < 1:
+        return "just now"
+    if minutes < 60:
+        return f"{minutes} min ago"
+    hours = minutes // 60
+    return f"{hours} h ago" if hours < 48 else f"{hours // 24} days ago"
+
+
+def _todo_lines(items: Sequence[TodoItem], *, now: datetime) -> str:
+    lines = []
+    for item in items:
+        when = (
+            f" — reminder {describe_time(_local(item.due_at), now=now)}"
+            + (" (overdue)" if item.due_at < now.timestamp() * 1000 else "")
+            if item.due_at
+            else ""
+        )
+        lines.append(f"- {item.text}{when} (id {item.id})")
+    return "\n".join(lines)
 
 
 def _default_tools() -> tuple[str, ...]:
@@ -234,6 +269,7 @@ class StudioService:
         self._stand_in_note = ""
         self._video_lock = asyncio.Lock()
         self._run_jobs: dict[str, asyncio.Task[object]] = {}
+        self._reminders_checked = -_REMINDER_SECONDS
         self._studying: set[str] = set()
         self._router.use_stand_in(self._stand_in_model)
 
@@ -592,6 +628,7 @@ class StudioService:
             app_help=self.app_help,
             videos=self._videos(),
             study_later=self._study_later,
+            assistant=self._assistant_tool,
         )
 
     def _runner(self) -> AgentRunner:
@@ -961,7 +998,7 @@ class StudioService:
             return await self._guide_turn(chat, agent, text)
         async with self._working(agent.id):
             prepare = (
-                (lambda: self._carry_out_orders(agent, chat, text))
+                (lambda: self._prepare_main_turn(agent, chat, text))
                 if agent.role == MAIN_ROLE
                 else None
             )
@@ -1395,6 +1432,183 @@ class StudioService:
             )
         return "\n".join(lines) or "The team has no agents yet."
 
+    async def _prepare_main_turn(self, main: Agent, chat: Chat, text: str) -> str:
+        """The clock, plus any orders handed out, for the main AI's reply."""
+        orders = await self._carry_out_orders(main, chat, text)
+        return "\n".join(part for part in (now_line(datetime.now()), orders) if part)
+
+    # ------------------------------------------------------ assistant tools
+
+    async def _assistant_tool(
+        self, call: ToolCall, context: ToolContext
+    ) -> ToolOutcome:
+        """To-dos, projects, and the PC's status, for the main AI and the Helper."""
+        match call.name:
+            case "todo":
+                return await self._todo_tool(call, context)
+            case "list_projects":
+                return await self._projects_tool(call)
+            case _:
+                return await self._system_tool()
+
+    async def _todo_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        action = str(call.arguments.get("action", "")).strip().lower()
+        wanted = str(call.arguments.get("id", "")).strip()
+        now = datetime.now()
+        if action == "add":
+            item = await self.add_todo(
+                str(call.arguments.get("text", "")),
+                due=str(call.arguments.get("due") or ""),
+                added_by=context.agent_name,
+            )
+            when = (
+                f" Reminder {describe_time(_local(item.due_at), now=now)}."
+                if item.due_at
+                else ""
+            )
+            text = f"Added to the to-do list: {item.text}.{when} (id {item.id})"
+        elif action in {"done", "remove"}:
+            item = await self._find_todo(wanted)
+            if action == "done":
+                await self.finish_todo(item.id)
+                text = f"Marked done: {item.text}."
+            else:
+                await self.remove_todo(item.id)
+                text = f"Removed: {item.text}."
+        else:
+            items = await self.todos()
+            text = _todo_lines(items, now=now) or "The to-do list is empty."
+        return ToolOutcome(text=text, data={"tool": "todo", "action": action or "list"})
+
+    async def _find_todo(self, wanted: str) -> TodoItem:
+        if not wanted:
+            raise ValueError("Give the id from the to-do list.")
+        item = await self._store.get(TodoItem, wanted)
+        if item is not None:
+            return item
+        match = [
+            item
+            for item in await self.todos()
+            if wanted.casefold() in item.text.casefold()
+        ]
+        if len(match) == 1:
+            return match[0]
+        raise ValueError(f"No single to-do matches {wanted!r}; list them for the ids.")
+
+    async def _projects_tool(self, call: ToolCall) -> ToolOutcome:
+        query = str(call.arguments.get("query") or "").strip().casefold()
+        sites = [
+            site
+            for site in await self.sites()
+            if not query
+            or query in site.name.casefold()
+            or query in site.description.casefold()
+        ]
+        now = now_ms()
+        lines = [
+            f"- {site.name}: {site.file_count} files, changed "
+            f"{_ago(now - site.updated_at)}. Preview /studio/sites/{site.id}/index.html"
+            f" · open in the app /studio#site/{site.id}"
+            for site in sites[:25]
+        ]
+        text = "\n".join(lines) or (
+            "No project matches that." if query else "There are no projects yet."
+        )
+        return ToolOutcome(
+            text=text, data={"tool": "list_projects", "projects": [s.id for s in sites]}
+        )
+
+    async def _system_tool(self) -> ToolOutcome:
+        reading = await anyio.to_thread.run_sync(
+            lambda: system_monitor.sample(self._models_dir)
+        )
+        local = await self._local_status()
+        voice = self.voice_status()
+        listed = local.get("models")
+        served = ", ".join(
+            str(m) for m in (listed if isinstance(listed, list) else [])[:6]
+        )
+        lines = [
+            f"CPU {reading.get('cpu') if reading.get('cpu') is not None else '?'}% of "
+            f"{reading.get('cores')} cores; memory {reading.get('memory')}% of "
+            f"{reading.get('memory_gb')} GB; disk {reading.get('disk')}% of "
+            f"{reading.get('disk_gb')} GB used.",
+            "LM Studio: "
+            + (
+                f"running, serving {served or 'no models'}."
+                if local.get("reachable")
+                else f"not reachable at {local.get('base_url')}."
+            ),
+            f"Internet: {'online' if self._connectivity.online else 'offline'}.",
+            f"Voice: {voice.get('speak')}"
+            f"{'' if voice.get('speak_ready') else ' (not downloaded yet)'}.",
+        ]
+        return ToolOutcome(
+            text="\n".join(lines), data={"tool": "system_status", **reading}
+        )
+
+    async def todos(self, *, include_done: bool = False) -> tuple[TodoItem, ...]:
+        """The user's to-do list: reminders by time first, then the rest."""
+        items = await self._store.find(TodoItem, order_by="created_at ASC")
+        shown = [item for item in items if include_done or not item.done]
+        return tuple(
+            sorted(
+                shown,
+                key=lambda item: (item.done, item.due_at or 2**62, item.created_at),
+            )
+        )
+
+    async def add_todo(
+        self, text: str, *, due: str = "", added_by: str = "you"
+    ) -> TodoItem:
+        """Add a to-do, with a reminder when due says when."""
+        cleaned = " ".join(text.split())[:300]
+        if not cleaned:
+            raise StudioError("Say what to add.")
+        due_at = None
+        if due.strip():
+            try:
+                due_at = int(parse_when(due, now=datetime.now()).timestamp() * 1000)
+            except ValueError as error:
+                raise StudioError(str(error)) from error
+        item = TodoItem(text=cleaned, due_at=due_at, added_by=added_by)
+        await self._store.put(item)
+        return item
+
+    async def finish_todo(self, todo_id: str) -> TodoItem:
+        item = await self._store.require(TodoItem, todo_id)
+        done = item.model_copy(update={"done": True, "done_at": now_ms()})
+        await self._store.put(done)
+        return done
+
+    async def remove_todo(self, todo_id: str) -> bool:
+        return await self._store.delete(TodoItem, todo_id)
+
+    async def _fire_due_reminders(self) -> None:
+        """Announce reminders that are due in the main AI's conversation."""
+        now = time.monotonic()
+        if now - self._reminders_checked < _REMINDER_SECONDS:
+            return
+        self._reminders_checked = now
+        due = [
+            item
+            for item in await self._store.find(TodoItem, where={"done": False})
+            if item.due_at is not None and not item.reminded and item.due_at <= now_ms()
+        ]
+        if not due:
+            return
+        main = await self.main_agent()
+        chat = await self.main_chat()
+        for item in due:
+            await self._store.put(item.model_copy(update={"reminded": True}))
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="assistant",
+                text=f"Reminder: {item.text}",
+                author=main.name,
+                data={"kind": "reminder", "todo_id": item.id},
+            )
+
     async def _carry_out_orders(self, main: Agent, chat: Chat, text: str) -> str:
         """Hand out the jobs the user told the main AI to give, before it answers.
 
@@ -1766,6 +1980,7 @@ class StudioService:
     async def main_console(self, *, after: int = 0) -> JsonObject:
         """Return what the HUD shows: the conversation, the team, and systems."""
         await self._connectivity.check()
+        await self._fire_due_reminders()
         agent = await self.main_agent()
         chat = await self.main_chat()
         messages = (

@@ -22,6 +22,7 @@ from .models import (
     ModelAsset,
     Record,
     SiteProject,
+    TodoItem,
     TuneJob,
     TunePack,
     TuneSample,
@@ -66,6 +67,7 @@ TABLES: Mapping[type[Record], str] = {
     LoraJob: "studio_lora_jobs",
     CommandRequest: "studio_commands",
     VideoNote: "studio_videos",
+    TodoItem: "studio_todos",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (

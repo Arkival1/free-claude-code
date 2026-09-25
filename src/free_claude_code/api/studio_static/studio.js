@@ -2365,6 +2365,78 @@
     }
   }
 
+  // The user's to-do list. Jarvis and the Helper add to it too, and Jarvis
+  // announces reminders on the HUD when they are due.
+  function todoCard(items) {
+    const text = el("input", { type: "text", placeholder: "Add a to-do", "aria-label": "New to-do" });
+    const due = el("input", { type: "text", placeholder: "Remind me… (in 20 minutes, tomorrow 9am)", "aria-label": "Reminder time" });
+    const status = el("p", { class: "muted", hidden: true });
+    const form = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!text.value.trim()) return;
+        try {
+          await post("/studio/api/todos", { text: text.value.trim(), due: due.value.trim() });
+          render();
+        } catch (error) {
+          status.hidden = false;
+          status.textContent = error.message;
+        }
+      },
+    }, [text, due, el("div", { class: "row" }, [el("button", { class: "primary", type: "submit", text: "Add" })]), status]);
+    const when = (ms) => {
+      const date = new Date(ms);
+      const today = new Date();
+      const sameDay = date.toDateString() === today.toDateString();
+      const clock = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return sameDay ? `today ${clock}` : `${date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${clock}`;
+    };
+    const rows = items.length
+      ? items.map((item) =>
+          el("div", { class: "list-item todo-row" }, [
+            el("input", {
+              type: "checkbox",
+              "aria-label": `Done: ${item.text}`,
+              onchange: async () => {
+                try {
+                  await post(`/studio/api/todos/${item.id}/done`);
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+            el("span", { class: "grow" }, [
+              item.text,
+              item.due_at
+                ? el("span", { class: `muted todo-due${item.due_at < Date.now() ? " overdue" : ""}`, text: ` · ${when(item.due_at)}` })
+                : null,
+            ]),
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Remove",
+              "aria-label": `Remove ${item.text}`,
+              onclick: async () => {
+                try {
+                  await remove(`/studio/api/todos/${item.id}`);
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ])
+        )
+      : [empty("Nothing to do. Add something here, or tell Jarvis \"remind me to call Sam at 5pm\".")];
+    return card(
+      "To-dos and reminders",
+      [form, ...rows],
+      "Jarvis and the Helper add to this list too. Reminders are announced on the HUD when they are due."
+    );
+  }
+
   // Videos the Researcher turned into notes for the team. Paste a link to
   // study one; open a note to read it and jump to any moment of the video.
   function videoCard(videos) {
@@ -2488,13 +2560,14 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
       api("/studio/api/connect"),
       api("/studio/api/voice"),
       api("/studio/api/videos").catch(() => ({ videos: [] })),
+      api("/studio/api/todos").catch(() => ({ todos: [] })),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -2531,6 +2604,7 @@
         }),
         el("button", { class: "primary", type: "button", text: "Open settings", onclick: () => go("settings") }),
       ]),
+      todoCard(todos.todos || []),
       videoCard(videos.videos || []),
       voiceCard(voiceInfo),
       webCard(overview.settings.web),

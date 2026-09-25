@@ -42,7 +42,7 @@ def _call_key(call: ToolCall) -> str:
 MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user):"
 
 
-STUDIO_NOTE_HEADER = "Studio already did this for this message (not from the user):"
+STUDIO_NOTE_HEADER = "Studio's note for this message (not from the user):"
 
 
 def with_memory_note(
@@ -105,6 +105,11 @@ MAIN_PROMPT = (
     "follow up on work you handed out; use stop_agent when the user wants "
     "something stopped. When an agent reports back here, tell the user what "
     "it did and where to find it, and hand out the next step if there is one.\n"
+    "Your own tools: todo keeps the user's to-do list and reminders (you "
+    "announce them when due), calculate does any arithmetic exactly, "
+    "list_projects finds the user's projects with their links, and "
+    "system_status tells how this PC and LM Studio are doing. The note on each "
+    "message tells you the date and time.\n"
     "Use research yourself when you need to understand something first, and "
     "end that reply with the links of the sources you used; they show on "
     "screen. When the user gives you a YouTube link, study it with "

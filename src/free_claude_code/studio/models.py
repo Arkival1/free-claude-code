@@ -396,3 +396,16 @@ class VideoNote(Record):
     memory_id: str = ""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
+
+
+class TodoItem(Record):
+    """Something on the user's to-do list, with an optional reminder time."""
+
+    id: str = Field(default_factory=lambda: new_id("todo"))
+    text: str
+    due_at: int | None = None
+    done: bool = False
+    reminded: bool = False
+    added_by: str = ""
+    created_at: int = Field(default_factory=now_ms)
+    done_at: int | None = None
