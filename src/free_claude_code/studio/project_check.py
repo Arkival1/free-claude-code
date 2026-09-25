@@ -8,6 +8,8 @@ from html.parser import HTMLParser
 from posixpath import dirname, normpath
 from urllib.parse import unquote, urlsplit
 
+from .templates import STARTER_TEXT
+
 MAX_PROBLEMS = 40
 CHECKED_FILES = (".html", ".htm", ".css", ".js", ".mjs", ".py", ".json")
 _CSS_URL = re.compile(r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""")
@@ -201,8 +203,20 @@ def _check_html(path: str, text: str, files: Mapping[str, str]) -> list[str]:
         )
     if "title" not in parser.tags and "html" in parser.tags:
         problems.append(f"{path}: no <title>.")
+    if "html" in parser.tags and not text.lstrip().lower().startswith("<!doctype"):
+        problems.append(
+            f"{path}: no <!doctype html> first, so browsers use quirks mode."
+        )
     if parser.images_without_alt:
         problems.append(
             f"{path}: {parser.images_without_alt} image(s) without alt text."
+        )
+    left = [phrase for phrase in STARTER_TEXT if phrase in text]
+    if left:
+        problems.insert(
+            0,
+            f"{path}: still has the template's placeholder text "
+            f"({'; '.join(repr(p) for p in left[:3])}). Rewrite the page with "
+            "real content for the task.",
         )
     return problems

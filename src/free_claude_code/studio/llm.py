@@ -16,11 +16,6 @@ from .model_turns import ModelTurns
 LOCAL_MODEL_PREFIX = "local/"
 """Model references routed to the configured on-device server."""
 
-_DIRECTIVE_PATTERN = re.compile(
-    r"```(?:json)?\s*(\{.*?\})\s*```|(\{\s*\"(?:tool|final)\".*\})",
-    re.DOTALL,
-)
-
 
 class StudioLLMError(RuntimeError):
     """Raised when a model call cannot produce a usable reply."""
@@ -115,6 +110,12 @@ def tool_protocol_instructions(tools: Sequence[ToolSpec]) -> str:
         "nothing else:",
         '{"tool": "<name>", "arguments": {...}}',
         'When the work is finished, reply with: {"final": "<your answer>"}',
+        "To write a file, leave content out of the JSON and put the whole file "
+        "in a fenced code block right after it, with no escaping:",
+        '{"tool": "write_file", "arguments": {"path": "index.html"}}',
+        "```html",
+        "<!doctype html>...",
+        "```",
         "To use several tools that do not depend on each other, reply with a "
         "JSON array of these objects; they run together, which is faster.",
         "Available tools:",
@@ -165,27 +166,68 @@ def _kind(info: Mapping[str, object]) -> str:
     }.get(str(kind), "value")
 
 
+_OPENING = re.compile(r'\[\s*\{\s*"(?:tool|name)"|\{\s*"(?:tool|final|name)"')
+_FENCE = re.compile(r"```([\w.+#-]*)[ \t]*\n(.*?)\n?[ \t]*```", re.DOTALL)
+_ESCAPE = re.compile(r'\\(["\\/bfnrt]|u[0-9a-fA-F]{4})')
+_ESCAPED = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+# Small models often put real line breaks inside JSON strings; accept them.
+_LENIENT = json.JSONDecoder(strict=False)
+FILE_TOOLS = frozenset({"write_file"})
+"""Tools whose file text may come in a code block after the JSON."""
+
+
 def parse_tool_directives(text: str) -> tuple[tuple[ToolCall, ...], str | None]:
-    """Return every tool call in a text-protocol reply, or its final answer."""
-    stripped = text.strip()
-    fenced = re.fullmatch(r"```(?:json)?\s*(\[.*\])\s*```", stripped, re.DOTALL)
-    if fenced:
-        stripped = fenced.group(1)
-    if stripped.startswith("[") and stripped.endswith("]"):
+    """Return every tool call in a text-protocol reply, or its final answer.
+
+    One JSON value is read exactly where it starts, so code that follows it
+    (a stylesheet's braces, say) never spoils it. A write_file call may leave
+    out "content" and put the file in a fenced code block after the JSON,
+    which spares a small model from escaping a whole web page.
+    """
+    calls, final, end = _first_directive(text)
+    if final is not None:
+        return (), final
+    if not calls:
+        salvaged = _salvaged_write(text)
+        return ((salvaged,) if salvaged is not None else ()), None
+    return _with_fenced_content(calls, text[end:]), None
+
+
+def parse_tool_directive(text: str) -> tuple[ToolCall | None, str | None]:
+    """Return the first text-protocol tool call, a final answer, or neither."""
+    calls, final = parse_tool_directives(text)
+    return (calls[0] if calls else None), final
+
+
+def unreadable_tool_call(text: str) -> bool:
+    """True when a reply tried to call a tool but it could not be read."""
+    stripped = strip_thinking(text).strip()
+    if not stripped:
+        return False
+    calls, final = parse_tool_directives(stripped)
+    if calls or final is not None:
+        return False
+    return bool(re.search(r'"(?:tool|arguments)"\s*:', stripped))
+
+
+def _first_directive(text: str) -> tuple[list[ToolCall], str | None, int]:
+    for match in _OPENING.finditer(text):
         try:
-            items = json.loads(stripped)
-        except json.JSONDecodeError:
-            items = None
-        if isinstance(items, list) and items:
-            calls = tuple(
-                call
-                for index, item in enumerate(items)
-                if (call := _directive_call(item, f"{index}:{stripped}")) is not None
-            )
-            if calls:
-                return calls, None
-    call, final = parse_tool_directive(text)
-    return ((call,) if call is not None else ()), final
+            value, end = _LENIENT.raw_decode(text, match.start())
+        except ValueError:
+            continue
+        if isinstance(value, dict) and isinstance(value.get("final"), str):
+            return [], value["final"], end
+        items = value if isinstance(value, list) else [value]
+        seed = text[match.start() : end]
+        calls = [
+            call
+            for index, item in enumerate(items)
+            if (call := _directive_call(item, f"{index}:{seed}")) is not None
+        ]
+        if calls:
+            return calls, None, end
+    return [], None, -1
 
 
 def _directive_call(payload: object, seed: str) -> ToolCall | None:
@@ -202,38 +244,65 @@ def _directive_call(payload: object, seed: str) -> ToolCall | None:
     )
 
 
-def parse_tool_directive(text: str) -> tuple[ToolCall | None, str | None]:
-    """Return a text-protocol tool call, a final answer, or neither."""
-    candidates: list[str] = []
-    stripped = text.strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        candidates.append(stripped)
-    candidates.extend(
-        group
-        for match in _DIRECTIVE_PATTERN.finditer(text)
-        for group in match.groups()
-        if group
+def _with_fenced_content(calls: list[ToolCall], after: str) -> tuple[ToolCall, ...]:
+    """Fill write_file calls from the code blocks that follow the JSON."""
+    blocks = [
+        body
+        for language, body in _FENCE.findall(after)
+        if language.lower() != "json" and body.strip()
+    ]
+    filled: list[ToolCall] = []
+    for call in calls:
+        content = call.arguments.get("content")
+        wants = call.name in FILE_TOOLS and (
+            not isinstance(content, str)
+            or not content.strip()
+            or (blocks and len(blocks[0]) > len(content))
+        )
+        if wants and blocks:
+            call = ToolCall(
+                id=call.id,
+                name=call.name,
+                arguments={**call.arguments, "content": blocks.pop(0)},
+            )
+        filled.append(call)
+    return tuple(filled)
+
+
+def _salvaged_write(text: str) -> ToolCall | None:
+    """Recover a write_file call whose JSON is broken, when it is complete.
+
+    Small models often leave quotes in HTML unescaped. When the call names
+    the tool and a path and its content runs to the closing braces, the file
+    text is taken as written; a reply cut off part way is not guessed at.
+    """
+    if not re.search(r'"(?:tool|name)"\s*:\s*"write_file"', text):
+        return None
+    path = re.search(r'"path"\s*:\s*"([^"\n]+)"', text)
+    opening = re.search(r'"content"\s*:\s*"', text)
+    if path is None or opening is None:
+        return None
+    body = text[opening.end() :]
+    closing = re.search(
+        r'"\s*(?:,\s*"(?:path|append)"\s*:\s*(?:"[^"\n]*"|true|false)\s*)?\}\s*\}'
+        r"\s*(?:```)?\s*$",
+        body,
     )
-    for candidate in candidates:
-        try:
-            payload = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        if isinstance(payload.get("final"), str):
-            return None, payload["final"]
-        name = payload.get("tool") or payload.get("name")
-        if isinstance(name, str) and name:
-            arguments = payload.get("arguments") or payload.get("input") or {}
-            if not isinstance(arguments, dict):
-                arguments = {}
-            return ToolCall(
-                id=f"text_{abs(hash(candidate)) % 10**8}",
-                name=name,
-                arguments=arguments,
-            ), None
-    return None, None
+    if closing is None:
+        return None
+    content = _ESCAPE.sub(_unescape, body[: closing.start()])
+    return ToolCall(
+        id=f"text_{abs(hash(text)) % 10**8}",
+        name="write_file",
+        arguments={"path": path.group(1), "content": content},
+    )
+
+
+def _unescape(found: re.Match[str]) -> str:
+    code = found.group(1)
+    if code.startswith("u"):
+        return chr(int(code[1:], 16))
+    return _ESCAPED.get(code, code)
 
 
 def _decoded_arguments(raw: object) -> JsonObject:
@@ -320,19 +389,29 @@ class LocalOpenAILLM:
     def __init__(
         self,
         *,
-        base_url: str,
+        base_url: str | Callable[[], str],
         api_key: str = "",
         default_model: str = "",
         timeout: float = 300.0,
         transport: httpx.AsyncBaseTransport | None = None,
         fast: Callable[[], bool] = lambda: True,
     ) -> None:
-        self._base_url = base_url.rstrip("/")
+        # A function lets the address follow settings: LM Studio's, or the
+        # built-in engine's when that is switched on.
+        self._address = base_url
         self._api_key = api_key
+        self.speeds: dict[str, dict[str, float]] = {}
+        """The last reply's speed for each model, when the runtime reports it."""
         self._default_model = default_model
         self._timeout = timeout
         self._transport = transport
         self._fast = fast
+
+    @property
+    def _base_url(self) -> str:
+        address = self._address
+        text = address if isinstance(address, str) else address()
+        return text.rstrip("/")
 
     async def list_models(self) -> tuple[str, ...]:
         """Ask the local runtime which models it is serving."""
@@ -375,25 +454,36 @@ class LocalOpenAILLM:
         headers = {}
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
+        body = None
         try:
             async with httpx.AsyncClient(
                 timeout=5.0, transport=self._transport
             ) as client:
-                response = await client.get(f"{root}/api/v0/models", headers=headers)
-            body = response.json() if response.status_code < 400 else None
+                # LM Studio marks loaded models here; llama.cpp's router mode
+                # gives each model a status on /models instead.
+                for path in ("/api/v0/models", "/models"):
+                    response = await client.get(f"{root}{path}", headers=headers)
+                    if response.status_code < 400:
+                        body = response.json()
+                        break
         except httpx.HTTPError, ValueError:
             return None
         rows = body.get("data") if isinstance(body, dict) else None
         if not isinstance(rows, list):
             return None
-        return tuple(
-            str(row["id"])
-            for row in rows
-            if isinstance(row, dict)
-            and isinstance(row.get("id"), str)
-            and row.get("state") == "loaded"
-            and row.get("type") != "embeddings"
-        )
+        loaded: list[str] = []
+        known = False
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+                continue
+            status = row.get("status")
+            state = row.get("state") or (
+                status.get("value") if isinstance(status, dict) else None
+            )
+            known = known or state is not None
+            if state == "loaded" and row.get("type") != "embeddings":
+                loaded.append(row["id"])
+        return tuple(loaded) if known else None
 
     def _request(
         self,
@@ -466,7 +556,21 @@ class LocalOpenAILLM:
             timeout=self._timeout,
             transport=self._transport,
         )
+        self._note_speed(str(payload.get("model") or ""), body.get("timings"))
         return _text_protocol_reply(_openai_reply(body), tools)
+
+    def _note_speed(self, model: str, timings: object) -> None:
+        """Keep the runtime's own speed report for Model Control."""
+        if not model or not isinstance(timings, dict):
+            return
+        wanted = ("prompt_per_second", "predicted_per_second", "predicted_n")
+        speed = {
+            key: float(value)
+            for key in wanted
+            if isinstance(value := timings.get(key), (int, float))
+        }
+        if speed:
+            self.speeds[model] = speed
 
     async def complete_streaming(
         self,
@@ -530,12 +634,19 @@ class LocalOpenAILLM:
                             ) from error
                         if not isinstance(body, dict):
                             raise StudioLLMError("Model endpoint returned no reply.")
+                        self._note_speed(
+                            str(payload.get("model") or ""), body.get("timings")
+                        )
                         return _text_protocol_reply(_openai_reply(body), tools)
                     async for line in response.aiter_lines():
                         chunk = _stream_chunk(line)
                         if chunk is None:
                             continue
                         served = str(chunk.get("model") or served)
+                        if "timings" in chunk:
+                            self._note_speed(
+                                str(payload.get("model") or served), chunk["timings"]
+                            )
                         choices = chunk.get("choices")
                         first = (
                             choices[0] if isinstance(choices, list) and choices else {}
@@ -636,7 +747,17 @@ class StudioModelRouter:
         self._local = local
         self._stand_in: Callable[[str], Awaitable[str | None]] | None = None
         self._turns_on: Callable[[], bool] = lambda: False
+        self._prepare_local: Callable[[], Awaitable[None]] | None = None
         self.turns = ModelTurns(loaded=self.loaded_local_models)
+
+    def before_local(self, prepare: Callable[[], Awaitable[None]]) -> None:
+        """Run ``prepare`` before every local call, e.g. to start the engine."""
+        self._prepare_local = prepare
+
+    def local_speeds(self) -> dict[str, dict[str, float]]:
+        """The last reply speed of each local model, when the runtime says."""
+        speeds = getattr(self._local, "speeds", None)
+        return dict(speeds) if isinstance(speeds, dict) else {}
 
     def use_turns(self, enabled: Callable[[], bool]) -> None:
         """Make local models take turns when ``enabled()`` says so."""
@@ -685,6 +806,8 @@ class StudioModelRouter:
         if self._stand_in is not None:
             model = await self._stand_in(model) or model
         client, wire_model = self.client_for(model)
+        if self._prepare_local is not None and model.startswith(LOCAL_MODEL_PREFIX):
+            await self._prepare_local()
         turn = (
             self.turns.turn(wire_model)
             if model.startswith(LOCAL_MODEL_PREFIX) and self._turns_on()

@@ -41,7 +41,9 @@ async def test_a_project_starts_from_a_template_over_the_placeholders(make_studi
 
     await studio.send(chat.id, "make a landing page")
 
-    started, checked = tools_used(await studio.transcript(chat.id))
+    started, checked, *finish_check = tools_used(await studio.transcript(chat.id))
+    # Ending in plain words still runs the check before finishing.
+    assert finish_check and finish_check[0].data.get("before_finish")
     assert set(started.data["written"]) == {
         "index.html",
         "styles.css",
@@ -51,7 +53,8 @@ async def test_a_project_starts_from_a_template_over_the_placeholders(make_studi
     assert started.data["kept"] == []
     page = await studio.workspace.read(site.id, "index.html")
     assert "<title>Tomato Club</title>" in page and "$0" in page
-    assert "found no problems" in checked.text
+    # A fresh template is a start, not a finished page.
+    assert "still has the template's placeholder text" in checked.text
     assert "only has placeholder files" in str(model.calls[0]["system"])
 
 

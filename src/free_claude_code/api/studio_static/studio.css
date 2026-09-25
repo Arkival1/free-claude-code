@@ -2554,3 +2554,33 @@ body[data-page="settings"] .view {
 .brain-private {
   color: var(--accent);
 }
+
+/* Model Control: the built-in engine. */
+.engine-state { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.engine-state .hud-dot.on { background: var(--good); box-shadow: 0 0 10px var(--good); }
+.engine-model {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin: 0 0 12px;
+  display: grid;
+  gap: 10px;
+}
+.engine-model.loaded { border-color: var(--good); }
+.engine-model-head { display: flex; gap: 12px; align-items: flex-start; }
+.engine-model-head .chips { margin-top: 6px; }
+.engine-model-head strong { overflow-wrap: anywhere; }
+.engine-memory { display: grid; gap: 4px; }
+.engine-memory.over .meter i { background: var(--bad); }
+.engine-memory.over small { color: var(--bad); }
+.engine-settings { display: grid; gap: 10px; }
+.engine-settings[open] { padding-top: 4px; }
+.engine-settings label { display: grid; gap: 4px; margin: 8px 0; }
+.engine-log {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font: 12px/1.45 var(--mono);
+  margin: 10px 0 0;
+}
+.engine-folder { min-width: 0; overflow-wrap: anywhere; }

@@ -704,6 +704,17 @@ Then open http://localhost:3000.
 """,
 }
 
+STARTER_TEXT: tuple[str, ...] = (
+    "A short line that says what this is and who it is for.",
+    "Tell the story here.",
+    "What it is.",
+    "One sentence on the problem it solves and why it is better.",
+    "A benefit, not a feature.",
+    "It changed how I work.",
+    "A happy customer",
+)
+"""Placeholder copy in the templates, which a finished project replaces."""
+
 TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
     "website": ("A multi-section website with a phone menu and contact form", _WEBSITE),
     "landing": (

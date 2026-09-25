@@ -214,7 +214,127 @@ STARTER_PAGE = """<!doctype html>
   </body>
 </html>
 """
-STARTER_STYLES = """:root { color-scheme: light dark; }
+STARTER_STYLES = """/* Starter styles: plain HTML looks finished before any classes. */
+:root {
+  --bg: #fffaf3;
+  --surface: #ffffff;
+  --text: #2b2118;
+  --muted: #6f6257;
+  --accent: #c2571a;
+  --line: #eadfce;
+  --radius: 16px;
+  --page: 1040px;
+  color-scheme: light;
+  font: 17px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17120e;
+    --surface: #211a14;
+    --text: #f4ece3;
+    --muted: #b3a597;
+    --accent: #f08a4b;
+    --line: #3a2f25;
+    color-scheme: dark;
+  }
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+body > nav, body > main, body > section, body > footer {
+  width: min(var(--page), 100% - 40px);
+  margin-inline: auto;
+}
+body > header {
+  padding: clamp(56px, 10vw, 110px) max(20px, (100% - var(--page)) / 2) 36px;
+  background-color: color-mix(in srgb, var(--accent) 16%, var(--bg));
+  border-bottom: 1px solid var(--line);
+}
+header h1 { font-size: clamp(2.2rem, 7vw, 3.8rem); line-height: 1.05; margin: 0 0 10px; }
+header p { font-size: 1.15rem; color: var(--muted); max-width: 40rem; }
+h1, h2, h3 { line-height: 1.2; }
+h2 { font-size: clamp(1.4rem, 3.5vw, 2rem); margin: 0 0 18px; }
+h2::after {
+  content: "";
+  display: block;
+  width: 48px;
+  height: 4px;
+  margin-top: 10px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+p { margin: 0 0 14px; }
+a { color: var(--accent); transition: opacity 0.2s; }
+a:hover { opacity: 0.8; }
+nav ul { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 0; margin: 18px 0 0; }
+nav a { font-weight: 600; text-decoration: none; }
+main { padding: 12px 0 40px; }
+main > section, body > section, main > article {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: clamp(20px, 4vw, 36px);
+  margin: 24px 0;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 10px 30px rgb(0 0 0 / 0.05);
+}
+section > ul, section > ol {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 14px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+section > ul > li, section > ol > li {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  transition: transform 0.15s, border-color 0.2s;
+}
+section > ul > li:hover, section > ol > li:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+li { margin: 6px 0; }
+img, svg, video { max-width: 100%; height: auto; border-radius: 12px; }
+article, .card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin: 0 0 16px;
+}
+table { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
+th, td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; }
+button, input, select, textarea { font: inherit; }
+button, .button {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 22px;
+  min-height: 44px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: filter 0.2s, transform 0.15s;
+}
+button:hover, .button:hover { filter: brightness(1.08); transform: translateY(-1px); }
+input, select, textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+form { display: grid; gap: 12px; max-width: 520px; }
+footer { padding: 28px 0 44px; color: var(--muted); text-align: center; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+"""
+_OLD_STARTER_STYLES = """:root { color-scheme: light dark; }
 body {
   margin: 0;
   font: 16px/1.5 system-ui, -apple-system, "SF Pro Text", sans-serif;
@@ -227,10 +347,40 @@ main { padding: 24px; max-width: 42rem; }
 STARTER_SCRIPT = "// Agent-written behavior goes here.\n"
 
 
+def tidy_html(content: str) -> tuple[str, list[str]]:
+    """Add what every page needs when a model left it out, and say what."""
+    added: list[str] = []
+    lowered = content.lower()
+    if "<html" not in lowered and "<body" not in lowered:
+        return content, added
+    head = re.search(r"<head[^>]*>", content, re.I)
+    extra = []
+    if "charset" not in lowered:
+        extra.append('<meta charset="utf-8">')
+        added.append("charset")
+    if 'name="viewport"' not in lowered and "name='viewport'" not in lowered:
+        extra.append(
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        )
+        added.append("mobile viewport")
+    if extra:
+        joined = "\n  ".join(extra)
+        if head is not None:
+            content = f"{content[: head.end()]}\n  {joined}{content[head.end() :]}"
+        else:
+            opened = re.search(r"<html[^>]*>", content, re.I)
+            at = opened.end() if opened else 0
+            content = f"{content[:at]}\n<head>\n  {joined}\n</head>{content[at:]}"
+    if not content.lstrip().lower().startswith("<!doctype"):
+        content = "<!doctype html>\n" + content.lstrip()
+        added.append("doctype")
+    return content, added
+
+
 def is_starter(path: str, content: str) -> bool:
     """True for the placeholder files every new project starts with."""
     if path == "styles.css":
-        return content == STARTER_STYLES
+        return content in {STARTER_STYLES, _OLD_STARTER_STYLES}
     if path == "app.js":
         return content == STARTER_SCRIPT
     if path == "index.html":

@@ -500,6 +500,37 @@ loads. Nobody waits more than about a minute before getting a turn, and models
 LM Studio has loaded side by side run together. Turn it off if your card holds
 all your models at once.
 
+**Model Control: LM Studio inside Studio.** Open **Model Control** (the menu,
+or the **Model control** quick command on the HUD). Press **Install engine**
+once: Studio downloads the official llama.cpp server from its GitHub releases,
+the Vulkan build for your graphics card (AMD, NVIDIA, Intel; RX 580 included),
+into its own folder. Tick **Use the built-in engine for local models** and
+agents on `local/…` models run through it instead of LM Studio; it starts by
+itself when an agent first needs a model and stops when Studio closes. It runs
+llama.cpp in router mode, so each model loads when asked for, with its own
+settings, and **Models Loaded At Once** (1 by default) unloads the oldest to
+make room.
+
+Every `.gguf` model in Studio's models folder, LM Studio's models folder, and
+any **Extra Model Folders** you add in settings is listed with its size,
+parameters, quantization, and state (loaded, loading, unloaded). Each shows
+how much graphics memory it needs at its settings, read from the model file
+itself, against your **Graphics Memory (GB)** setting, with a warning when it
+will not fit. **Load** and **Unload** it, and open **Settings** on a model to
+change:
+
+- **Context**: how many tokens it holds at once (8,192 by default).
+- **Graphics card layers**: all of them, or fewer to spill into system memory.
+- **Flash attention**: auto, on, or off.
+- **Memory for context**: full quality, q8 (half the memory), or q4.
+- **CPU threads**: 0 lets llama.cpp choose.
+
+Saving reloads a loaded model with the new settings. The last reply's speed
+shows in tokens per second, and **Engine log** shows what llama.cpp prints.
+Model names follow LM Studio's style (`qwen2.5-coder-7b-instruct`), so agents
+set up for LM Studio keep working. Advanced: **Engine Build** picks Vulkan or
+processor-only, and **Engine Program** points at your own `llama-server`.
+
 **Speed on a small GPU.** Studio keeps the start of every prompt the same
 between turns (tool list and instructions first, this turn's memories last),
 so LM Studio reuses what it already read instead of re-reading thousands of
@@ -904,6 +935,27 @@ internet tools need a connection. When it hits an error it can't fix quickly,
 it calls `ask_researcher` with the exact error. The Researcher looks it up,
 tests the fix, and answers, and the Builder applies the fix and tests again.
 Both conversations are visible as linked chats.
+
+**Builder on small local models.** Local models write tool calls as JSON, and
+small ones often break it with the quotes in HTML or get cut off part way
+through a page. Studio reads what they meant: raw line breaks are accepted, a
+`write_file` may leave `content` out and put the file in a fenced code block
+right after the JSON (no escaping), and a complete call with unescaped quotes
+is recovered. A call it still can't read, or a reply cut off at the length
+limit, is sent back once or twice with how to fix it (write big files in parts
+with `append`) instead of ending the job with nothing written. Reading the
+same file again with no change in between is answered "you already have this,
+write now", four steps without writing get a nudge to write, older file text
+in the conversation shrinks so it never overflows the model's context (and a
+context-full error is retried once after shrinking harder), and the check
+before finishing also runs when the Builder ends in plain words. Pages missing
+a doctype, charset, or mobile viewport get them added as they are written, and
+`check_project` flags template placeholder text still on the page. New
+projects start with a stylesheet that makes plain HTML look designed: a warm
+header band, sections as cards, lists as tiles, buttons and forms, dark mode.
+When the Builder writes its own `styles.css`, that base stays underneath in a
+CSS cascade layer, so every rule it writes wins and whatever it leaves out
+still looks finished.
 
 **Builder upgrades.**
 

@@ -462,3 +462,19 @@ class StudyLesson(Record):
     sources: tuple[str, ...] = ()
     memory_id: str = ""
     created_at: int = Field(default_factory=now_ms)
+
+
+class EngineModelSettings(Record):
+    """How the built-in engine runs one model, set on Model Control."""
+
+    id: str
+    """The model's name in the engine."""
+    context: int = 8192
+    gpu_layers: int = -1
+    """Layers on the graphics card; -1 puts them all there."""
+    flash_attention: str = "auto"
+    kv_cache: str = "f16"
+    threads: int = 0
+    """CPU threads; 0 lets the engine choose."""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)

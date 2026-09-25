@@ -15,6 +15,7 @@ from .models import (
     ChatNotes,
     CommandRequest,
     Course,
+    EngineModelSettings,
     ExamQuestion,
     Lesson,
     LoraJob,
@@ -76,6 +77,7 @@ TABLES: Mapping[type[Record], str] = {
     ChatNotes: "studio_chat_notes",
     Study: "studio_studies",
     StudyLesson: "studio_study_lessons",
+    EngineModelSettings: "studio_engine_models",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (

@@ -1,6 +1,7 @@
 """HTTP adapter for the Studio app: agents, models, tuning, and classes."""
 
 import asyncio
+import contextlib
 import secrets
 import socket
 import sys
@@ -129,6 +130,18 @@ class DownloadPayload(BaseModel):
 class UseModelPayload(BaseModel):
     model: str = Field(min_length=1, max_length=300)
     everyone: bool = False
+
+
+class EngineUsePayload(BaseModel):
+    on: bool
+
+
+class EngineModelPayload(BaseModel):
+    context: int | None = Field(default=None, ge=1024, le=131_072)
+    gpu_layers: int | None = Field(default=None, ge=-1, le=999)
+    flash_attention: Literal["auto", "on", "off"] | None = None
+    kv_cache: Literal["f16", "q8_0", "q4_0"] | None = None
+    threads: int | None = Field(default=None, ge=0, le=256)
 
 
 class TeamModelsPayload(BaseModel):
@@ -1168,6 +1181,104 @@ async def pick_model_file(
 ) -> JsonObject:
     """Open a file picker on this PC and add the chosen model to LM Studio."""
     return await studio.pick_model_file()
+
+
+@router.get("/studio/api/engine")
+async def engine_status(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Model Control: the built-in engine and every model it can run."""
+    return await studio.engine_status()
+
+
+@router.post("/studio/api/engine/install")
+async def engine_install(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Download the llama.cpp engine; progress shows in the status."""
+    return studio.engine_install()
+
+
+@router.post("/studio/api/engine/use")
+async def engine_use(
+    payload: EngineUsePayload,
+    services: ApiServices = Depends(get_services),
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Run local models with the built-in engine, or go back to LM Studio."""
+    result = await services.admin.apply_admin_config(
+        {"STUDIO_ENGINE": "true" if payload.on else "false"}
+    )
+    if not result.get("applied"):
+        errors = result.get("errors")
+        detail = "; ".join(str(e) for e in errors) if isinstance(errors, list) else ""
+        raise HTTPException(status_code=400, detail=detail or "Could not save that.")
+    if payload.on:
+        with contextlib.suppress(StudioError):
+            await studio.engine_start()
+    else:
+        await studio.engine_stop()
+    return await studio.engine_status()
+
+
+@router.post("/studio/api/engine/start")
+async def engine_start(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    await studio.engine_start()
+    return await studio.engine_status()
+
+
+@router.post("/studio/api/engine/stop")
+async def engine_stop(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    await studio.engine_stop()
+    return await studio.engine_status()
+
+
+@router.post("/studio/api/engine/models/{name}/load")
+async def engine_load(
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    await studio.engine_load(name)
+    return {"ok": True}
+
+
+@router.post("/studio/api/engine/models/{name}/unload")
+async def engine_unload(
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    await studio.engine_unload(name)
+    return {"ok": True}
+
+
+@router.put("/studio/api/engine/models/{name}")
+async def engine_model_settings(
+    name: str,
+    payload: EngineModelPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Change how one model runs; a loaded model reloads with the change."""
+    return await studio.engine_settings(name, payload.model_dump(exclude_none=True))
+
+
+@router.get("/studio/api/engine/logs")
+async def engine_logs(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    return {"lines": studio.engine_logs()}
 
 
 @router.get("/studio/api/team-models")

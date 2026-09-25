@@ -697,6 +697,50 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         asks=("How do I set up LM Studio?", "How do I choose Jarvis's brain?"),
     ),
     GuideTopic(
+        title="Model Control",
+        route="/studio#engine",
+        where=(
+            "MENU, Model Control, or the HUD quick command Model control. The "
+            "switch and graphics memory are also in Settings, Studio."
+        ),
+        terms=(
+            "model control",
+            "engine",
+            "built-in engine",
+            "llama.cpp",
+            "llama",
+            "load model",
+            "unload",
+            "context",
+            "gpu layers",
+            "vram",
+            "graphics memory",
+            "flash attention",
+            "kv cache",
+            "tokens per second",
+            "speed",
+            "without lm studio",
+            "instead of lm studio",
+        ),
+        body=(
+            "Model Control is LM Studio inside Studio. Press Install engine once: "
+            "Studio downloads the official llama.cpp server for your graphics "
+            "card (Vulkan works on AMD cards like the RX 580). Tick 'Use the "
+            "built-in engine' and local models run through it instead of LM "
+            "Studio; it starts by itself when an agent needs a model. Every "
+            ".gguf model in Studio's folder, LM Studio's folder, and any Extra "
+            "Model Folders is listed with its size, type, and how much graphics "
+            "memory it needs, with a warning when it will not fit. Load or "
+            "Unload each one, and open Settings on a model to change its "
+            "context (how much it remembers at once), how many layers go on the "
+            "graphics card, flash attention, and memory for context (q8 halves "
+            "it). The last reply's speed shows in tokens per second, and the "
+            "Engine log shows what llama.cpp says. Models Loaded At Once in "
+            "Settings is 1 by default, right for an 8 GB card."
+        ),
+        asks=("How do I give each agent its own model?", "How do I set up LM Studio?"),
+    ),
+    GuideTopic(
         title="Private memory",
         route="/studio#agents",
         where=(

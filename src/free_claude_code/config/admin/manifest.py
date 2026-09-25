@@ -976,6 +976,84 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_ENGINE",
+        "Built-in Engine",
+        "studio",
+        "boolean",
+        settings_attr="studio_engine",
+        description=(
+            "Run local models with Studio's own engine (llama.cpp) instead of "
+            "LM Studio. Install it and control every model on Model Control."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_BUILD",
+        "Engine Build",
+        "studio",
+        "select",
+        settings_attr="studio_engine_build",
+        options=(
+            ConfigOptionSpec("vulkan", "Graphics card (Vulkan: AMD, NVIDIA, Intel)"),
+            ConfigOptionSpec("cpu", "Processor only"),
+        ),
+        description="Which llama.cpp build Install downloads for this PC.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_GPU_GB",
+        "Graphics Memory (GB)",
+        "studio",
+        "number",
+        settings_attr="studio_engine_gpu_gb",
+        description=(
+            "How much memory your graphics card has. Model Control warns when a "
+            "model's settings need more."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_MODELS_AT_ONCE",
+        "Models Loaded At Once",
+        "studio",
+        "number",
+        settings_attr="studio_engine_models_at_once",
+        description=(
+            "How many models the engine keeps loaded; the oldest is unloaded "
+            "to make room. Keep 1 on an 8 GB card."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_FOLDERS",
+        "Extra Model Folders",
+        "studio",
+        "text",
+        settings_attr="studio_engine_folders",
+        description=(
+            "More folders with .gguf models for the engine, separated by ';'. "
+            "Studio's models folder and LM Studio's are always included."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_PORT",
+        "Engine Port",
+        "studio",
+        "number",
+        settings_attr="studio_engine_port",
+        advanced=True,
+        restart_required=True,
+        description="The port the built-in engine listens on, on this PC only.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_PATH",
+        "Engine Program",
+        "studio",
+        "text",
+        settings_attr="studio_engine_path",
+        advanced=True,
+        description=(
+            "Use your own llama-server program instead of the one Install "
+            "downloads. Leave empty normally."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_PRIVATE_MEMORY",
         "Keep Memory on This PC",
         "studio",

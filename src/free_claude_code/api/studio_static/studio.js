@@ -1702,6 +1702,209 @@
     }
   }
 
+  // Model Control: the built-in engine, like LM Studio inside Studio.
+  const CONTEXT_STEPS = [2048, 4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 131072];
+  let engineTimer = 0;
+
+  async function renderEngine() {
+    const generation = renderGeneration;
+    clearTimeout(engineTimer);
+    const data = await api("/studio/api/engine");
+    if (generation !== renderGeneration) return;
+    const status = el("p", { class: "muted", role: "status" });
+    const act = async (label, work) => {
+      status.textContent = `${label}…`;
+      try {
+        await work();
+        status.textContent = "";
+        render();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+    const install = data.install;
+    const installing = ["checking", "downloading", "unpacking"].includes(install.state);
+    const use = el("input", { type: "checkbox", checked: data.on, "aria-label": "Use the built-in engine" });
+    use.addEventListener("change", () =>
+      act(use.checked ? "Switching to the built-in engine" : "Going back to LM Studio", () =>
+        post("/studio/api/engine/use", { on: use.checked })
+      )
+    );
+    const state = !data.installed
+      ? "Not installed"
+      : data.running
+      ? `Running · llama.cpp ${data.version || ""} · ${data.url}`
+      : `Stopped · llama.cpp ${data.version || ""}`;
+    const engineCard = card("Engine", [
+      el("p", { class: "engine-state" }, [
+        el("span", { class: `hud-dot${data.running ? " on" : ""}`, "aria-hidden": "true" }),
+        el("strong", { text: state }),
+      ]),
+      el("label", { class: "check" }, [use, "Use the built-in engine for local models (instead of LM Studio)"]),
+      installing
+        ? el("div", {}, [
+            el("p", { class: "muted", text: `${install.state === "downloading" ? `Downloading llama.cpp ${install.version}` : install.state === "unpacking" ? "Unpacking" : "Finding the latest llama.cpp"}… ${install.total ? `${bytes(install.done)} of ${bytes(install.total)}` : ""}` }),
+            meter(install.total ? install.done / install.total : 0),
+          ])
+        : null,
+      install.state === "failed" ? el("p", { class: "muted", text: `Download failed: ${install.error}` }) : null,
+      el("div", { class: "row" }, [
+        data.version === "your own build" ? null : el("button", {
+          class: data.installed ? "secondary" : "primary",
+          type: "button",
+          text: data.installed ? "Update engine" : "Install engine",
+          disabled: installing,
+          onclick: () => act("Starting the download", () => post("/studio/api/engine/install")),
+        }),
+        data.installed
+          ? el("button", {
+              class: data.running ? "secondary" : "primary",
+              type: "button",
+              text: data.running ? "Stop" : "Start",
+              onclick: () =>
+                act(data.running ? "Stopping" : "Starting the engine", () =>
+                  post(`/studio/api/engine/${data.running ? "stop" : "start"}`)
+                ),
+            })
+          : null,
+        el("button", { class: "secondary", type: "button", text: "Team brains", onclick: () => openTeamBrains(() => render()) }),
+      ]),
+      status,
+    ], `Studio runs your models itself with llama.cpp (${data.build === "cpu" ? "processor build" : "graphics card build, Vulkan"}). Models load when an agent needs them; ${data.models_at_once} at a time.`);
+
+    const models = data.models.length
+      ? data.models.map((model) => engineModelRow(model, data, act))
+      : [empty("No .gguf models found. Download some in LM Studio or on the Models page, or add a folder in Settings (Extra Model Folders).")];
+    const folders = card(
+      "Model folders",
+      data.folders.map((folder) =>
+        el("div", { class: "list-item" }, [
+          el("span", { class: "grow engine-folder" }, [el("strong", { text: folder.source }), el("br"), el("span", { class: "muted", text: folder.path })]),
+          el("span", { class: `pill ${folder.exists ? "good" : "warn"}`, text: folder.exists ? "found" : "missing" }),
+        ])
+      ),
+      "Studio finds models in these folders. Add more in Settings: Extra Model Folders."
+    );
+    const log = el("pre", { class: "engine-log", text: "" });
+    const logs = el("details", { class: "card engine-logs" }, [
+      el("summary", { text: "Engine log" }),
+      log,
+    ]);
+    logs.addEventListener("toggle", async () => {
+      if (!logs.open) return;
+      try {
+        const { lines } = await api("/studio/api/engine/logs");
+        log.textContent = lines.join("\n") || "Nothing yet.";
+        log.scrollTop = log.scrollHeight;
+      } catch (error) {
+        log.textContent = error.message;
+      }
+    });
+    view.replaceChildren(
+      engineCard,
+      card("Models on this PC", models, `Graphics memory: ${data.gpu_budget_gb} GB (change in Settings). Each model shows what its settings need.`),
+      folders,
+      logs
+    );
+    const busy = installing || data.models.some((model) => model.state === "loading");
+    engineTimer = setTimeout(() => {
+      if (generation === renderGeneration && location.hash === "#engine") render();
+    }, busy ? 1500 : 6000);
+  }
+
+  function engineModelRow(model, data, act) {
+    const settings = model.settings;
+    const estimate = model.estimate;
+    const loaded = model.state === "loaded";
+    const tone = { loaded: "good", loading: "warn", failed: "bad" }[model.state] || "";
+    const speed = model.speed && model.speed.predicted_per_second
+      ? `${model.speed.predicted_per_second.toFixed(1)} tokens/s writing · ${Math.round(model.speed.prompt_per_second || 0)} tokens/s reading`
+      : "";
+    const context = el("select", { "aria-label": `Context for ${model.name}` },
+      CONTEXT_STEPS.filter((size) => !model.context_max || size <= model.context_max || size === settings.context).map((size) =>
+        el("option", { value: String(size), text: `${size.toLocaleString()} tokens`, selected: size === settings.context })
+      )
+    );
+    const allLayers = model.layers || 99;
+    const layers = el("input", {
+      type: "range",
+      min: "0",
+      max: String(allLayers),
+      value: String(settings.gpu_layers < 0 ? allLayers : settings.gpu_layers),
+      "aria-label": `Layers on the graphics card for ${model.name}`,
+    });
+    const layersLabel = el("span", { class: "muted" });
+    const showLayers = () => {
+      layersLabel.textContent = Number(layers.value) >= allLayers ? `All ${allLayers} on the graphics card` : `${layers.value} of ${allLayers} on the graphics card`;
+    };
+    layers.addEventListener("input", showLayers);
+    showLayers();
+    const flash = el("select", { "aria-label": `Flash attention for ${model.name}` }, [
+      ["auto", "Auto"], ["on", "On (faster, less memory)"], ["off", "Off"],
+    ].map(([value, text]) => el("option", { value, text, selected: settings.flash_attention === value })));
+    const kv = el("select", { "aria-label": `Memory for context for ${model.name}` }, [
+      ["f16", "Full quality"], ["q8_0", "Half the memory (q8)"], ["q4_0", "Quarter memory (q4)"],
+    ].map(([value, text]) => el("option", { value, text, selected: settings.kv_cache === value })));
+    const threads = el("input", { type: "number", min: "0", max: "256", value: String(settings.threads), "aria-label": `CPU threads for ${model.name}` });
+    const save = el("button", {
+      class: "primary",
+      type: "button",
+      text: loaded ? "Save and reload" : "Save",
+      onclick: () =>
+        act(`Saving ${model.name}`, () =>
+          put(`/studio/api/engine/models/${encodeURIComponent(model.name)}`, {
+            context: Number(context.value),
+            gpu_layers: Number(layers.value) >= allLayers ? -1 : Number(layers.value),
+            flash_attention: flash.value,
+            kv_cache: kv.value,
+            threads: Number(threads.value) || 0,
+          })
+        ),
+    });
+    const used = Math.min(1, estimate.gpu_gb / Math.max(0.1, data.gpu_budget_gb));
+    return el("article", { class: `engine-model${loaded ? " loaded" : ""}` }, [
+      el("div", { class: "engine-model-head" }, [
+        el("div", { class: "grow" }, [
+          el("strong", { text: model.name }),
+          el("div", { class: "chips" }, [
+            model.params ? el("span", { class: "pill", text: model.params }) : null,
+            model.quant ? el("span", { class: "pill", text: model.quant }) : null,
+            el("span", { class: "pill", text: `${model.size_gb} GB` }),
+            el("span", { class: "pill", text: model.source }),
+            el("span", { class: `pill ${tone}`, text: model.state }),
+          ]),
+        ]),
+        el("button", {
+          class: loaded ? "secondary" : "primary",
+          type: "button",
+          text: loaded ? "Unload" : model.state === "loading" ? "Loading…" : "Load",
+          disabled: model.state === "loading",
+          "aria-label": `${loaded ? "Unload" : "Load"} ${model.name}`,
+          onclick: () =>
+            act(loaded ? `Unloading ${model.name}` : `Loading ${model.name}`, () =>
+              post(`/studio/api/engine/models/${encodeURIComponent(model.name)}/${loaded ? "unload" : "load"}`)
+            ),
+        }),
+      ]),
+      el("div", { class: `engine-memory${model.fits ? "" : " over"}` }, [
+        meter(used),
+        el("small", {
+          text: `Needs about ${estimate.gpu_gb} GB of ${data.gpu_budget_gb} GB graphics memory (${estimate.weights_gb} GB model + ${estimate.kv_gb} GB context)${estimate.cpu_gb ? `, ${estimate.cpu_gb} GB in system memory` : ""}.${model.fits ? "" : " Too big: lower the context, use q8 memory for context, or put fewer layers on the card."}`,
+        }),
+      ]),
+      speed ? el("small", { class: "muted", text: `Last reply: ${speed}` }) : null,
+      el("details", { class: "engine-settings" }, [
+        el("summary", { text: "Settings" }),
+        el("label", {}, ["Context (how much it remembers at once)", context]),
+        el("label", {}, ["Graphics card layers", layers, layersLabel]),
+        el("label", {}, ["Flash attention", flash]),
+        el("label", {}, ["Memory for context", kv]),
+        el("label", {}, ["CPU threads (0 = automatic)", threads]),
+        save,
+      ]),
+    ]);
+  }
+
   async function renderModels() {
     const generation = renderGeneration;
     const [data, available] = await Promise.all([
@@ -1728,6 +1931,12 @@
         type: "button",
         text: "Give each agent its own model",
         onclick: () => openTeamBrains(() => render()),
+      }),
+      el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Open Model Control",
+        onclick: () => go("engine"),
       }),
       ...local.models.map((model) =>
         el("div", { class: "list-item" }, [
@@ -3864,6 +4073,7 @@
     ["Chats", "chats", "◌"],
     ["Classroom", "learn", "✎"],
     ["Models", "models", "▣"],
+    ["Model Control", "engine", "⚡"],
     ["Tuning & LoRA", "tune", "⟁"],
     ["Knowledge & Memory", "more", "✦"],
     ["Settings", "settings", "⚙"],
@@ -4833,6 +5043,7 @@
             ),
             quick("Choose brain", "A model on this PC", () => openBrainPicker(hud.name, rethink)),
             quick("Team brains", "A model for each agent", () => openTeamBrains(rethink)),
+            quick("Model control", "Load models, settings, speed", () => go("engine")),
           ])
         ),
       ]),
@@ -5011,6 +5222,7 @@
         case "learn": return await renderLearn();
         case "class": return await renderClass(id);
         case "models": return await renderModels();
+        case "engine": return await renderEngine();
         case "tune": return await renderTuning(id);
         case "job": return await renderJob(id);
         case "lora": return await renderLoraJob(id);
@@ -5152,6 +5364,7 @@
         learn: "Classroom",
         class: "Class",
         models: "Local models",
+        engine: "Model Control",
         tune: "Tuning",
         job: "Tuning run",
         lora: "LoRA training",

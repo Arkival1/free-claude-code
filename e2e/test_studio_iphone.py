@@ -834,3 +834,24 @@ def test_each_agent_can_have_its_own_brain(page: Page, admin_base_url: str) -> N
     expect(
         page.locator(".sheet-panel").get_by_label("Model for Builder")
     ).to_be_visible()
+
+
+def test_model_control_runs_models_inside_studio(
+    page: Page, admin_base_url: str
+) -> None:
+    open_hud(page, admin_base_url)
+    page.get_by_role(
+        "button", name="Model control Load models, settings, speed"
+    ).click()
+
+    engine = page.locator(".card", has=page.get_by_role("heading", name="Engine"))
+    expect(engine).to_contain_text("Not installed")
+    expect(engine.get_by_role("button", name="Install engine")).to_be_visible()
+    expect(engine.get_by_label("Use the built-in engine")).not_to_be_checked()
+    expect(page.get_by_role("heading", name="Models on this PC")).to_be_visible()
+    expect(page.get_by_role("heading", name="Model folders")).to_be_visible()
+    expect(page.locator(".engine-folder").first).to_contain_text("Studio")
+    overflow = page.evaluate(
+        "() => document.documentElement.scrollWidth - window.innerWidth"
+    )
+    assert overflow <= 0, "Model Control fits an iPhone screen"

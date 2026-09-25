@@ -787,6 +787,25 @@ class Settings(BaseModel):
     studio_private_memory: bool = Field(
         default=True, validation_alias="STUDIO_PRIVATE_MEMORY"
     )
+    studio_engine: bool = Field(default=False, validation_alias="STUDIO_ENGINE")
+    studio_engine_port: int = Field(
+        default=39281, ge=1024, le=65535, validation_alias="STUDIO_ENGINE_PORT"
+    )
+    studio_engine_build: NonEmptyString = Field(
+        default="vulkan", validation_alias="STUDIO_ENGINE_BUILD"
+    )
+    studio_engine_path: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_ENGINE_PATH"
+    )
+    studio_engine_folders: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_ENGINE_FOLDERS"
+    )
+    studio_engine_gpu_gb: float = Field(
+        default=8.0, ge=0.0, le=512.0, validation_alias="STUDIO_ENGINE_GPU_GB"
+    )
+    studio_engine_models_at_once: int = Field(
+        default=1, ge=1, le=16, validation_alias="STUDIO_ENGINE_MODELS_AT_ONCE"
+    )
     studio_agent_temperature: float = Field(
         default=0.2, ge=0.0, le=2.0, validation_alias="STUDIO_AGENT_TEMPERATURE"
     )
@@ -967,6 +986,13 @@ class Settings(BaseModel):
                 "STUDIO_VOICE_EARS must be tiny.en, base.en, small.en, or "
                 f"medium.en, got {value!r}"
             )
+        return value
+
+    @field_validator("studio_engine_build")
+    @classmethod
+    def validate_studio_engine_build(cls, value: str) -> str:
+        if value not in ("vulkan", "cpu"):
+            raise ValueError("STUDIO_ENGINE_BUILD must be vulkan or cpu.")
         return value
 
     @field_validator("studio_web_access")

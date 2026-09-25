@@ -31,7 +31,7 @@ from .polish import polish_notes
 from .project_check import CHECKED_FILES, check_project
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
-from .sites import SiteError, SiteWorkspace, is_starter
+from .sites import STARTER_STYLES, SiteError, SiteWorkspace, is_starter, tidy_html
 from .templates import template_files
 from .videos import VideoStudy, at, clock, passages, render_note, studied
 
@@ -137,13 +137,18 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         name="write_file",
         description=(
             "Create or replace one file in the website workspace, "
-            "for example index.html or styles.css."
+            "for example index.html or styles.css. For a long file, write the "
+            "first part, then add the rest with append true."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Site-relative file path."},
                 "content": {"type": "string", "description": "Complete file text."},
+                "append": {
+                    "type": "boolean",
+                    "description": "Add to the end of the file instead of replacing it.",
+                },
             },
             "required": ["path", "content"],
         },
@@ -1144,10 +1149,44 @@ class AgentToolbox:
         path = str(call.arguments.get("path", ""))
         content = call.arguments.get("content")
         if not isinstance(content, str):
-            raise ValueError("File content must be text.")
+            raise ValueError(
+                "File content must be text. Put the file in a fenced code block "
+                "right after the JSON."
+            )
+        appending = call.arguments.get("append") is True
+        if appending:
+            try:
+                before = await self._sites.read(site_id, path)
+            except SiteError:
+                before = ""
+            joiner = "" if not before or before.endswith("\n") else "\n"
+            content = f"{before}{joiner}{content}"
+        added: list[str] = []
+        if not appending and path.lower().endswith((".html", ".htm")):
+            content, added = tidy_html(content)
+        layered = False
+        if not appending and path == "styles.css":
+            try:
+                before = await self._sites.read(site_id, path)
+            except SiteError:
+                before = ""
+            base = f"@layer studio-base {{\n{STARTER_STYLES}}}\n\n"
+            keeps_base = before.startswith(base) and "@layer studio-base" not in content
+            if keeps_base or (
+                before and is_starter(path, before) and not is_starter(path, content)
+            ):
+                # Small models write thin stylesheets; keep the designed base
+                # underneath so whatever they leave out still looks finished.
+                # In a cascade layer, the project's own rules always win.
+                content = f"{base}/* Project styles */\n{content}"
+                layered = True
         written = await self._sites.write(site_id, path, content)
+        note = f" Studio added the missing {', '.join(added)}." if added else ""
+        if layered:
+            note += " Studio kept its base styles underneath yours."
         return ToolOutcome(
-            text=f"Wrote {written.path} ({written.size} bytes).",
+            text=f"{'Added to' if appending else 'Wrote'} {written.path} "
+            f"({written.size} bytes).{note}",
             data={
                 "tool": "write_file",
                 "site_id": site_id,

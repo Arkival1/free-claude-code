@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from loguru import logger
 
 from .convo_notes import NOTES_HEADER, NotesKeeper
-from .llm import ChatMessage, LLMReply, StudioLLMError, StudioModelRouter, ToolCall
+from .llm import (
+    ChatMessage,
+    LLMReply,
+    StudioLLMError,
+    StudioModelRouter,
+    ToolCall,
+    unreadable_tool_call,
+)
 from .memory import MemoryService
 from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
 from .recall_messages import Found, recall_note, search
@@ -50,9 +57,103 @@ REPEAT_NOTE = (
     "with the exact error."
 )
 
+RETRY_UNREADABLE = 2
+"""How many times a garbled tool call is sent back before the reply stands."""
+UNREADABLE_NOTE = (
+    "(Studio) That tool call could not be read, so nothing happened. Reply with "
+    "one valid JSON tool call. For write_file, leave content out of the JSON "
+    "and put the whole file in a fenced code block right after it."
+)
+CUT_OFF_NOTE = (
+    "(Studio) Your reply hit the length limit and was cut off, so nothing was "
+    "written. Write big files in parts: write_file with the first part, then "
+    "write_file with append true for each next part."
+)
+LOOK_TOOLS = frozenset({"read_file", "list_files", "search_files", "polish_check"})
+"""Look-ups that return the same thing until a file changes."""
+SEEN_NOTE = (
+    "(Studio) You already did exactly this and nothing has changed since, so "
+    "the result is the same as before. Do not repeat it: write your changes "
+    "now with write_file or edit_file."
+)
+IDLE_STEPS = 4
+IDLE_NOTE = (
+    "(Studio) You have looked around for {steps} steps without changing any "
+    "file. You have what you need: write the files for the task now. For a "
+    "page, rewrite index.html completely with write_file, with real content "
+    "for this job."
+)
+HISTORY_BUDGET = 36_000
+"""Characters of earlier tool output kept in full before older ones shrink."""
+KEEP_RECENT = 6
+REPLY_TOKENS = 2048
+BUILD_REPLY_TOKENS = 4096
+"""Builders write whole files in one reply, so they get more room."""
+
 
 def _call_key(call: ToolCall) -> str:
     return f"{call.name}:{json.dumps(call.arguments, sort_keys=True, default=str)}"
+
+
+def _context_full(error: StudioLLMError) -> bool:
+    text = str(error).lower()
+    return "context" in text and any(
+        word in text for word in ("exceed", "too long", "overflow", "maximum", "length")
+    )
+
+
+def compact_history(
+    history: list[ChatMessage], *, budget: int = HISTORY_BUDGET
+) -> list[ChatMessage]:
+    """Shrink older tool output and written file text once history grows.
+
+    The newest messages stay whole; older file reads and the text of files
+    already written shrink to a line, so a long build never overflows the
+    model's context. The files themselves are always there to read again.
+    """
+
+    def size(messages: list[ChatMessage]) -> int:
+        return sum(
+            len(m.content)
+            + sum(len(json.dumps(c.arguments, default=str)) for c in m.tool_calls)
+            for m in messages
+        )
+
+    if size(history) <= budget:
+        return history
+    kept = list(history)
+    for index in range(1, max(1, len(kept) - KEEP_RECENT)):
+        message = kept[index]
+        if message.role == "tool" and len(message.content) > 400:
+            kept[index] = ChatMessage(
+                role="tool",
+                content=f"{message.content[:300]}\n[... older result shortened; "
+                "read the file again if you need it]",
+                tool_call_id=message.tool_call_id,
+            )
+        elif message.tool_calls:
+            kept[index] = ChatMessage(
+                role=message.role,
+                content=message.content[:1_000],
+                tool_calls=tuple(
+                    ToolCall(
+                        id=call.id,
+                        name=call.name,
+                        arguments={
+                            key: (
+                                "[written to the file; read it for the text]"
+                                if isinstance(value, str) and len(value) > 400
+                                else value
+                            )
+                            for key, value in call.arguments.items()
+                        },
+                    )
+                    for call in message.tool_calls
+                ),
+            )
+        if size(kept) <= budget:
+            break
+    return kept
 
 
 MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user):"
@@ -602,19 +703,31 @@ class AgentRunner:
         used: list[str] = []
         failures: dict[str, int] = {}
         checked = False
+        retries = 0
+        seen: set[str] = set()
+        idle = 0
+        squeezed = False
         for step in range(1, max_steps + 1):
+            history = compact_history(history)
             try:
                 reply = await self._router.complete(
                     history,
                     model=model,
                     system=system,
                     tools=specs if names else (),
-                    max_tokens=2048,
+                    max_tokens=BUILD_REPLY_TOKENS
+                    if WRITE_TOOLS & set(names)
+                    else REPLY_TOKENS,
                     temperature=self._temperature,
                     on_text=self._show_live(chat.id),
                 )
             except StudioLLMError as error:
                 self._clear_live(chat.id)
+                if not squeezed and _context_full(error) and len(history) > 2:
+                    # Too much for the model's context: shrink hard, try again.
+                    squeezed = True
+                    history = compact_history(history, budget=HISTORY_BUDGET // 3)
+                    continue
                 logger.warning("Studio agent call failed: {}", error)
                 await self._store.append_message(
                     chat_id=chat.id,
@@ -631,6 +744,42 @@ class AgentRunner:
                     error=str(error),
                 )
             self._clear_live(chat.id)
+            if (
+                not reply.tool_calls
+                and names
+                and retries < RETRY_UNREADABLE
+                and step < max_steps
+                and unreadable_tool_call(reply.text)
+            ):
+                # A small model garbled its tool call (or ran out of room);
+                # say so and let it try again instead of ending the job.
+                retries += 1
+                cut_off = reply.stop_reason in {"length", "max_tokens"}
+                history.append(ChatMessage.assistant(reply.text[:1_500]))
+                history.append(
+                    ChatMessage.user(CUT_OFF_NOTE if cut_off else UNREADABLE_NOTE)
+                )
+                continue
+            if (
+                not reply.tool_calls
+                and not checked
+                and step < max_steps
+                and CHECK_PROJECT_TOOL in names
+                and context.site_id
+                and WRITE_TOOLS & set(used)
+            ):
+                # Ending in plain words skips the finish tool, not the check.
+                checked = True
+                problems = await self._check_before_finish(chat, agent, context)
+                if problems:
+                    history.append(ChatMessage.assistant(reply.text[:1_500]))
+                    history.append(
+                        ChatMessage.user(
+                            "(Studio) Not finished yet. check_project found "
+                            f"problems; fix them, then finish:\n{problems}"
+                        )
+                    )
+                    continue
             if not reply.tool_calls:
                 text = reply.text or "(no reply)"
                 await self._record_assistant(chat, agent, text, reply)
@@ -687,8 +836,23 @@ class AgentRunner:
                     data={"partial": True},
                 )
             outcomes = await self._run_calls(reply.tool_calls, context, sealed=sealed)
+            wrote = any(
+                call.name in WRITE_TOOLS and not outcome.failed
+                for call, outcome in zip(reply.tool_calls, outcomes, strict=True)
+            )
+            if wrote:
+                seen.clear()
+                idle = 0
+            elif context.site_id and WRITE_TOOLS & set(names):
+                idle += 1
             for call, outcome in zip(reply.tool_calls, outcomes, strict=True):
                 used.append(call.name)
+                if call.name in LOOK_TOOLS and not outcome.failed:
+                    key = _call_key(call)
+                    if key in seen:
+                        # The same look-up again: the answer has not changed.
+                        outcome = ToolOutcome(text=SEEN_NOTE, data=outcome.data)
+                    seen.add(key)
                 if outcome.failed:
                     key = _call_key(call)
                     failures[key] = failures.get(key, 0) + 1
@@ -711,6 +875,14 @@ class AgentRunner:
                         content=outcome.text[:8_000],
                         tool_call_id=call.id,
                     )
+                )
+            if idle >= IDLE_STEPS and history and history[-1].role == "tool":
+                idle = 0
+                last = history[-1]
+                history[-1] = ChatMessage(
+                    role="tool",
+                    content=f"{last.content}\n\n{IDLE_NOTE.format(steps=IDLE_STEPS)}",
+                    tool_call_id=last.tool_call_id,
                 )
         message = (
             f"Stopped after {max_steps} steps without finishing. "

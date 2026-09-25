@@ -3,8 +3,9 @@
 import asyncio
 import contextlib
 import json
+import re
 import time
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ from .connectivity import Connectivity
 from .convo_notes import NotesKeeper
 from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
+from .engine import Engine, EngineError
 from .guide import (
     GUIDE_TOPICS,
     STARTER_QUESTIONS,
@@ -319,6 +321,15 @@ class StudioService:
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._models_dir = models_dir
         self._voice_setup = SetupState()
+        self._engine = Engine(
+            root=models_dir / "engine",
+            store=store,
+            folders=self._engine_folders,
+            port=lambda: self.settings.studio_engine_port,
+            build=lambda: self.settings.studio_engine_build,
+            binary_override=lambda: self.settings.studio_engine_path or "",
+            models_at_once=lambda: self.settings.studio_engine_models_at_once,
+        )
         self._router = router or self._build_router(settings_provider())
         self._tasks: set[asyncio.Task[object]] = set()
         self._room_locks: dict[str, asyncio.Lock] = {}
@@ -353,6 +364,7 @@ class StudioService:
         self._studying: set[str] = set()
         self._router.use_stand_in(self._stand_in_model)
         self._router.use_turns(lambda: self.settings.studio_local_model_turns)
+        self._router.before_local(self._engine_before_local)
 
     # ---------------------------------------------------------------- wiring
 
@@ -383,7 +395,7 @@ class StudioService:
             default_model=self.default_model,
         )
         local = LocalOpenAILLM(
-            base_url=settings.studio_local_base_url,
+            base_url=self._local_url,
             api_key=settings.studio_local_api_key or "",
             fast=lambda: self.settings.studio_local_fast_replies,
         )
@@ -808,6 +820,99 @@ class StudioService:
         for task in tuple(self._tasks):
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+        await self._engine.stop()
+
+    # ----------------------------------------------------------- the engine
+
+    def _local_url(self) -> str:
+        """Where local models are served: the built-in engine, or LM Studio."""
+        settings = self.settings
+        if settings.studio_engine:
+            return f"{self._engine.url}/v1"
+        return settings.studio_local_base_url
+
+    def _engine_folders(self) -> list[tuple[str, Path]]:
+        folders: list[tuple[str, Path]] = [("Studio", self._models_dir)]
+        lmstudio = self._lora.lmstudio_dir()
+        if lmstudio is not None:
+            folders.append(("LM Studio", lmstudio))
+        extra = self.settings.studio_engine_folders or ""
+        folders.extend(
+            ("Your folder", Path(part.strip()).expanduser())
+            for part in re.split(r"[;\n]", extra)
+            if part.strip()
+        )
+        return folders
+
+    async def _engine_before_local(self) -> None:
+        """Start the built-in engine on the first local call, when it is on."""
+        engine = self._engine
+        if not self.settings.studio_engine or engine.running:
+            return
+        if engine.binary() is None:
+            return
+        try:
+            await engine.start()
+        except EngineError as error:
+            logger.warning("Studio: the built-in engine did not start: {}", error)
+            return
+        self._local_probe = None
+        self._loaded_probe = None
+
+    async def engine_status(self) -> JsonObject:
+        settings = self.settings
+        return await self._engine.status(
+            gpu_budget_gb=settings.studio_engine_gpu_gb,
+            speeds=self._router.local_speeds(),
+            on=settings.studio_engine,
+        )
+
+    def engine_install(self) -> JsonObject:
+        """Download the engine in the background; progress shows in the status."""
+
+        async def install() -> None:
+            try:
+                await self._engine.install()
+            except EngineError as error:
+                logger.warning("Studio: engine install failed: {}", error)
+
+        if self._engine.install_state.state not in {
+            "checking",
+            "downloading",
+            "unpacking",
+        }:
+            self.spawn(install())
+        return {"state": "checking"}
+
+    async def engine_start(self) -> None:
+        await self._engine_call(self._engine.start())
+        self._local_probe = None
+        self._loaded_probe = None
+
+    async def engine_stop(self) -> None:
+        await self._engine.stop()
+        self._local_probe = None
+
+    async def engine_load(self, name: str) -> None:
+        await self._engine_call(self._engine.load(name))
+        self._loaded_probe = None
+
+    async def engine_unload(self, name: str) -> None:
+        await self._engine_call(self._engine.unload(name))
+        self._loaded_probe = None
+
+    async def engine_settings(self, name: str, values: JsonObject) -> JsonObject:
+        saved = await self._engine_call(self._engine.save_settings(name, values))
+        return saved.model_dump()
+
+    def engine_logs(self, limit: int = 200) -> list[str]:
+        return self._engine.logs(limit)
+
+    async def _engine_call[T](self, work: Awaitable[T]) -> T:
+        try:
+            return await work
+        except EngineError as error:
+            raise StudioError(str(error)) from error
 
     # ---------------------------------------------------------------- agents
 
@@ -3072,7 +3177,7 @@ class StudioService:
 
     async def local_models(self) -> JsonObject:
         """Report which models the local runtime is serving right now."""
-        base_url = self.settings.studio_local_base_url
+        base_url = self._local_url()
         try:
             served = await self._router.local_models()
         except StudioLLMError as error:
