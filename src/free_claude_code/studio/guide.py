@@ -384,6 +384,7 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "builder",
             "researcher",
             "helper",
+            "tester",
             "guide",
             "team",
             "who",
@@ -396,7 +397,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "apps into a project folder, and can read, edit, and search its "
             "files. The Researcher digs through the web, Reddit, YouTube, and "
             "code sites and tests code before recommending it. The Helper "
-            "brainstorms and turns messy findings into a clear plan. I am the "
+            "brainstorms and turns messy findings into a clear plan. The Tester "
+            "checks what the team built, like a careful user and a code reviewer, "
+            "and reports bugs with exact fixes for the Builder. I am the "
             "Guide: I explain the app. Add more with + New agent on the Agents "
             "tab."
         ),
@@ -492,7 +495,10 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "it is done, and asks the Researcher when stuck on an error. Every "
             "file change keeps the last ten versions, so you can say 'Builder, "
             "undo your last change to index.html'. Builders get 40 steps per job "
-            "(Builder Max Steps in Settings, under Studio). The finished site has "
+            "(Builder Max Steps in Settings, under Studio). Once it works, the "
+            "Builder runs a polish check and fixes contrast, spacing, hover and "
+            "focus states, and phone layout so it looks finished; say 'have "
+            "Tester check it' for a second opinion. The finished site has "
             "a live preview, Open full screen, Edit for any file, and Download "
             ".zip. With Agent Commands allowed in Settings it can also run npm "
             "install, builds, and tests."

@@ -746,7 +746,7 @@ class Settings(BaseModel):
         default="jarvis", validation_alias="STUDIO_VOICE_EFFECT"
     )
     studio_voice_speed: float = Field(
-        default=1.05, ge=0.6, le=1.6, validation_alias="STUDIO_VOICE_SPEED"
+        default=1.12, ge=0.6, le=1.6, validation_alias="STUDIO_VOICE_SPEED"
     )
     studio_voice_ears: NonEmptyString = Field(
         default="base.en", validation_alias="STUDIO_VOICE_EARS"

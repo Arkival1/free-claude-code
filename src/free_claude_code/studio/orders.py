@@ -26,6 +26,10 @@ _RESEARCH = re.compile(
     r"which|why|how|best|reviews?|sources|video|youtube|reddit|study)\b",
     re.I,
 )
+_TESTS = re.compile(
+    r"\b(test|tests|testing|check|review|bugs?|qa|broken|try out|find problems)\b",
+    re.I,
+)
 _IDEAS = re.compile(r"\b(ideas?|brainstorm|plan|organi[sz]e|think|suggest)\b", re.I)
 
 
@@ -101,6 +105,8 @@ def pick_agent(task: str, team: Sequence[tuple[str, str]]) -> str:
     by_role: dict[str, str] = {}
     for name, role in team:
         by_role.setdefault(role, name)
+    if _TESTS.search(task) and "tester" in by_role:
+        return by_role["tester"]
     if _IDEAS.search(task) and "helper" in by_role:
         return by_role["helper"]
     if _BUILD.search(task) and "builder" in by_role:

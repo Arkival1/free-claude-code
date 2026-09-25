@@ -413,6 +413,11 @@ class Crew:
         owner: Agent,
     ) -> SiteProject | None:
         name = project.strip()
+        if not name:
+            # "Have Tester check the snake game": the task names a project.
+            named = await self._named_project(task)
+            if named is not None:
+                return named
         if not name and owner.role == RESEARCHER_ROLE and not context.site_id:
             return await self._lab(owner)
         if not name:
@@ -429,6 +434,18 @@ class Crew:
         return await self._host.create_site(
             name=name, description=task[:200], agent_id=owner.id
         )
+
+    async def _named_project(self, task: str) -> SiteProject | None:
+        """The project a task mentions by name, longest name first."""
+        lowered = f" {' '.join(re.findall(r'[a-z0-9]+', task.lower()))} "
+        sites = sorted(await self._host.sites(), key=lambda site: -len(site.name))
+        for site in sites:
+            if site.name.casefold() == RESEARCH_LAB.casefold():
+                continue
+            words = " ".join(re.findall(r"[a-z0-9]+", site.name.lower()))
+            if len(words) >= 3 and f" {words} " in lowered:
+                return site
+        return None
 
     async def _latest_words(self, room: Chat) -> str:
         transcript = await self._store.transcript(room.id, limit=6)

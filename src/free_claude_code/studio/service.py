@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import json
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -48,7 +49,12 @@ from .llm import (
     StudioModelRouter,
     ToolCall,
 )
-from .local_voice import LocalVoice, SetupState, speech_package_ready
+from .local_voice import (
+    LocalVoice,
+    LocalVoiceError,
+    SetupState,
+    speech_package_ready,
+)
 from .lora import LoraTrainer
 from .memory import SHARED_MEMORY_ID, SKILL_TAG, MemoryService
 from .model_files import (
@@ -95,6 +101,8 @@ from .presets import (
     PROMPT_UPGRADES,
     RESEARCHER_PROMPT,
     RESEARCHER_TOOLS,
+    TESTER_PROMPT,
+    TESTER_TOOLS,
     agent_options,
 )
 from .research import ResearchMix
@@ -122,6 +130,7 @@ TEACHER_AGENT_NAME = "Teacher"
 STUDENT_AGENT_NAME = "Student"
 RESEARCHER_AGENT_NAME = "Researcher"
 HELPER_AGENT_NAME = "Helper"
+TESTER_AGENT_NAME = "Tester"
 _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     BUILDER_AGENT_NAME: (
         "research",
@@ -135,14 +144,17 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "video_notes",
         "start_project",
         "restore_file",
+        "polish_check",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
+    TESTER_AGENT_NAME: TESTER_TOOLS,
 }
 _DEFAULT_ROLES = {
     BUILDER_AGENT_NAME: "builder",
     RESEARCHER_AGENT_NAME: "researcher",
     HELPER_AGENT_NAME: "helper",
+    TESTER_AGENT_NAME: "tester",
 }
 SHARED_MEMORY_NAME = "Team memory"
 MAIN_CONSOLE_SETTING = "console"
@@ -175,6 +187,9 @@ class ChatSettingsResult:
 
 
 _REMINDER_SECONDS = 10.0
+_RECENT_RUNS = 40
+_SPEECH_CACHE = 48
+"""Recently spoken pieces kept as audio, so repeats play at once."""
 
 
 def _local(ms: int) -> datetime:
@@ -270,6 +285,8 @@ class StudioService:
         self._video_lock = asyncio.Lock()
         self._run_jobs: dict[str, asyncio.Task[object]] = {}
         self._reminders_checked = -_REMINDER_SECONDS
+        self._speech_cache: dict[tuple[object, ...], bytes] = {}
+        self._voice_warmed = False
         self._studying: set[str] = set()
         self._router.use_stand_in(self._stand_in_model)
 
@@ -472,7 +489,21 @@ class StudioService:
         if speak == "builtin":
             if not self.local_voice().speech_ready():
                 raise VoiceError("The built-in voice is still downloading.")
-            audio = await self.local_voice().speak(speakable(text))
+            settings = self.settings
+            spoken = speakable(text)
+            key = (
+                spoken,
+                settings.studio_voice_name,
+                settings.studio_voice_speed,
+                settings.studio_voice_effect,
+                settings.studio_voice_quality,
+            )
+            audio = self._speech_cache.get(key)
+            if audio is None:
+                audio = await self.local_voice().speak(spoken)
+                self._speech_cache[key] = audio
+                while len(self._speech_cache) > _SPEECH_CACHE:
+                    self._speech_cache.pop(next(iter(self._speech_cache)))
             return SpeechAudio(audio=audio, content_type="audio/wav")
         if speak == "server":
             return await self.voice().speak(text)
@@ -746,6 +777,13 @@ class StudioService:
                 self.default_model,
                 HELPER_PROMPT,
                 HELPER_TOOLS,
+            ),
+            (
+                TESTER_AGENT_NAME,
+                "tester",
+                self.default_model,
+                TESTER_PROMPT,
+                TESTER_TOOLS,
             ),
             (
                 TEACHER_AGENT_NAME,
@@ -1403,7 +1441,7 @@ class StudioService:
 
     async def team_report(self) -> str:
         """What every agent is doing and has just done, for the main AI."""
-        runs = await self.runs()
+        runs = (*await self._active_runs(), *await self.runs(limit=_RECENT_RUNS))
         busy = await self._busy_agents(runs)
         now = now_ms()
         lines: list[str] = []
@@ -1609,6 +1647,27 @@ class StudioService:
                 data={"kind": "reminder", "todo_id": item.id},
             )
 
+    def _warm_voice(self) -> None:
+        """Load the built-in voice in the background once the HUD is open."""
+        if self._voice_warmed:
+            return
+        speak, _ = self.voice_engines()
+        if speak != "builtin":
+            return
+        voice = self.local_voice()
+        if not voice.speech_ready():
+            # Still downloading: try again on a later poll, once it is here.
+            return
+        self._voice_warmed = True
+
+        async def warm() -> None:
+            try:
+                await anyio.to_thread.run_sync(voice.warm)
+            except (LocalVoiceError, OSError, RuntimeError, ValueError) as error:
+                logger.info("Studio: voice warm-up skipped: {}", error)
+
+        self.spawn(warm())
+
     async def _carry_out_orders(self, main: Agent, chat: Chat, text: str) -> str:
         """Hand out the jobs the user told the main AI to give, before it answers.
 
@@ -1708,10 +1767,20 @@ class StudioService:
             parent_chat_id=parent_chat_id,
         )
 
-    async def runs(self, *, agent_id: str | None = None) -> tuple[AgentRun, ...]:
+    async def runs(
+        self, *, agent_id: str | None = None, limit: int | None = None
+    ) -> tuple[AgentRun, ...]:
         """Return agent tasks, newest first."""
         where = {"agent_id": agent_id} if agent_id else None
-        return await self._store.find(AgentRun, where=where, order_by="created_at DESC")
+        return await self._store.find(
+            AgentRun, where=where, order_by="created_at DESC", limit=limit
+        )
+
+    async def _active_runs(self) -> tuple[AgentRun, ...]:
+        """Tasks still going, without reading every task ever run."""
+        running = await self._store.find(AgentRun, where={"status": "running"})
+        queued = await self._store.find(AgentRun, where={"status": "queued"})
+        return (*running, *queued)
 
     async def run(self, run_id: str) -> AgentRun:
         """Return one agent task."""
@@ -1920,9 +1989,8 @@ class StudioService:
     async def agent_activity(self, agent_id: str, *, after: int = 0) -> JsonObject:
         """What one agent is doing: its latest task and its newest steps."""
         agent = await self.agent(agent_id)
-        runs = await self.runs()
-        busy = agent_id in await self._busy_agents(runs)
-        own_runs = [run for run in runs if run.agent_id == agent_id]
+        busy = agent_id in await self._busy_agents(await self._active_runs())
+        own_runs = list(await self.runs(agent_id=agent_id, limit=5))
         chats = await self._store.find(
             Chat, where={"agent_id": agent_id}, order_by="updated_at DESC", limit=1
         )
@@ -1981,6 +2049,7 @@ class StudioService:
         """Return what the HUD shows: the conversation, the team, and systems."""
         await self._connectivity.check()
         await self._fire_due_reminders()
+        self._warm_voice()
         agent = await self.main_agent()
         chat = await self.main_chat()
         messages = (
@@ -1988,8 +2057,8 @@ class StudioService:
             if after
             else await self._store.transcript(chat.id, limit=80)
         )
-        runs = await self.runs()
-        running = await self._busy_agents(runs)
+        runs = await self.runs(limit=_RECENT_RUNS)
+        running = await self._busy_agents(await self._active_runs())
         team = [
             {
                 "id": member.id,
@@ -2002,10 +2071,15 @@ class StudioService:
             for member in await self.agents()
             if member.id != agent.id and not member.archived
         ]
+        # Only the newest few and a count: the team's memory can hold thousands.
         shared = await self._store.find(
             MemoryEntry,
             where={"agent_id": SHARED_MEMORY_ID},
             order_by="used_at DESC",
+            limit=8,
+        )
+        shared_count = await self._store.count(
+            MemoryEntry, where={"agent_id": SHARED_MEMORY_ID}
         )
         pending = await self._commands.pending()
         return {
@@ -2030,8 +2104,8 @@ class StudioService:
             "approvals": [request.model_dump() for request in pending],
             "memory": {
                 "enabled": self.settings.studio_shared_memory,
-                "count": len(shared),
-                "recent": [entry.model_dump() for entry in shared[:8]],
+                "count": shared_count,
+                "recent": [entry.model_dump() for entry in shared],
             },
             "systems": {
                 "main_model": await self.effective_model(
@@ -2048,7 +2122,7 @@ class StudioService:
             **await self._dashboard_extras(
                 runs,
                 {str(member["id"]): str(member["name"]) for member in team},
-                len(shared),
+                shared_count,
             ),
         }
 
@@ -2179,17 +2253,16 @@ class StudioService:
 
     async def _insights(self, shared: int) -> JsonObject:
         """Counts for the HUD's memory panel."""
-        entries = await self._store.find(MemoryEntry)
-        agents_with_memory = {
-            entry.agent_id for entry in entries if entry.agent_id != SHARED_MEMORY_ID
-        }
+        owners = await self._store.count(MemoryEntry, distinct="agent_id")
         return {
-            "memories": len(entries),
+            "memories": await self._store.count(MemoryEntry),
             "shared": shared,
-            "skills": sum(1 for entry in entries if SKILL_TAG in entry.tags),
-            "agents": len(agents_with_memory),
-            "conversations": len(await self._store.find(Chat)),
-            "projects": len(await self._store.find(SiteProject)),
+            "skills": await self._store.count(
+                MemoryEntry, contains=("tags", json.dumps(SKILL_TAG))
+            ),
+            "agents": owners - (1 if shared else 0),
+            "conversations": await self._store.count(Chat),
+            "projects": await self._store.count(SiteProject),
         }
 
     async def _local_status(self) -> JsonObject:
@@ -2821,7 +2894,7 @@ class StudioService:
         main_model = await self.effective_model(
             (main.model if main else "") or self.default_model
         )
-        busy = await self._busy_agents(await self.runs())
+        busy = await self._busy_agents(await self._active_runs())
         web = self.web_status()
         voice = self.voice_status()
         online = web.get("online")
@@ -2926,7 +2999,7 @@ class StudioService:
             "agents": [agent.model_dump() for agent in agents],
             "chats": [chat.model_dump() for chat in chats[:20]],
             "sites": [site.model_dump() for site in await self.sites()],
-            "runs": [run.model_dump() for run in (await self.runs())[:10]],
+            "runs": [run.model_dump() for run in await self.runs(limit=10)],
             "jobs": [
                 {**job.model_dump(), "progress": job.progress} for job in jobs[:10]
             ],

@@ -481,6 +481,25 @@ models such as Qwen3 write before every answer; turn it off for hard problems.
 In LM Studio, load the model with GPU Offload at maximum and a Context Length
 of 8192; a larger context can spill out of an 8 GB card and slow every reply.
 
+Jarvis's voice starts sooner and flows better, with the same voice:
+
+- The first spoken piece is one short sentence (or its first clause), so the
+  voice starts as soon as possible; later pieces are longer.
+- Pieces are voiced one at a time, in order, one ahead of playback, instead
+  of all at once, so the first one gets the whole voice engine.
+- The voice model loads in the background when the HUD opens, so the first
+  reply does not wait for it, and recently spoken pieces are kept so repeats
+  play at once.
+- The default speaking rate is 1.12 (was 1.05); change it with Voice Speed in
+  Settings, under Studio.
+
+The HUD also asks the server for less: the team's memory and task history are
+counted in the database instead of being read in full on every update (about
+five times faster with thousands of memories), and a hidden, idle window
+checks in every 10 seconds instead of every 2.5 (talk mode and replies being
+written keep the usual pace). Model downloads write to disk on a worker
+thread, so a big download never makes replies or the HUD stutter.
+
 More speed-ups that keep answers and memory exactly the same:
 
 - **Memory on the message.** What memory recalls for a message is attached to
@@ -614,9 +633,19 @@ budget) with `calculate` for every sum, and adds items to your to-do list when
 you ask. Starter Helpers whose instructions were never edited are upgraded in
 place.
 
-The first run creates the main AI (**Jarvis**) and six starter agents:
-**Guide**, **Builder**, **Researcher**, **Helper**, **Teacher**, and
-**Student**.
+The first run creates the main AI (**Jarvis**) and seven starter agents:
+**Guide**, **Builder**, **Researcher**, **Helper**, **Tester**, **Teacher**,
+and **Student**.
+
+The **Tester** checks what the team built, like a careful user and a code
+reviewer at once: it reads the code, runs `check_project` and `polish_check`,
+runs the project and its tests when commands are allowed, tries what real
+users do (empty and very long input, double clicks, a phone-sized screen,
+reloads, going offline), and reports a *Verdict*, numbered *Bugs* (file and
+line, steps to reproduce, exact fix), and *Polish*. It never edits files, so
+the Builder makes the fixes. Say "have Tester check the snake game"; a project
+named in a task is found by name. Jarvis has the Tester check bigger builds
+and hands its fixes back to the Builder.
 
 </details>
 
@@ -789,6 +818,12 @@ Both conversations are visible as linked chats.
 - **Better edits.** `edit_file` takes several changes to one file at once
   (`edits`), saves nothing if any of them fails, and still applies a change
   whose `old_text` only differs in indentation, re-indented to match the file.
+- **Polish.** `polish_check` gives a designer's once-over once the pages
+  work: text contrast (WCAG 4.5:1), phone layouts, hover and focus states,
+  font sizes, a consistent palette in CSS variables, content width, line
+  height, page structure, transitions, image sizes, and a favicon. The
+  Builder runs it after `check_project` and makes the fixes that fit; every
+  web template already passes it.
 - **Knows the project.** At the start of every job the Builder sees the
   project's files and the start of its README, so it builds on what is there.
 - **Real JavaScript checks.** When Node is installed, `check_project` has Node

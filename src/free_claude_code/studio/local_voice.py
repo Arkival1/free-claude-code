@@ -46,6 +46,9 @@ LISTEN_RATE = 16_000
 MAX_SPEAK_CHARS = 1_500
 _CHUNK = 1 << 16
 _LOCK = threading.Lock()
+_SPEAK_LOCK = threading.Lock()
+"""One sentence at a time: the ONNX voice already uses every CPU core."""
+_STYLES: dict[tuple[str, str], Any] = {}
 _SPEAKERS: dict[str, Any] = {}
 _LISTENERS: dict[str, Any] = {}
 
@@ -365,9 +368,14 @@ class LocalVoice:
     def _style(self, speaker: Any) -> Any:
         if self._voice != "jarvis":
             return self._voice
-        return sum(
-            weight * speaker.get_voice_style(name) for name, weight in JARVIS_BLEND
-        )
+        key = (str(self.model_path), self._voice)
+        style = _STYLES.get(key)
+        if style is None:
+            style = sum(
+                weight * speaker.get_voice_style(name) for name, weight in JARVIS_BLEND
+            )
+            _STYLES[key] = style
+        return style
 
     def synthesize(self, text: str) -> bytes:
         """Speak one piece of text and return it as WAV (runs on a thread)."""
@@ -384,9 +392,10 @@ class LocalVoice:
             if self._voice == "jarvis" or self._voice.startswith("b")
             else "en-us"
         )
-        samples, rate = speaker.create(
-            cleaned, voice=self._style(speaker), speed=self._speed, lang=language
-        )
+        with _SPEAK_LOCK:
+            samples, rate = speaker.create(
+                cleaned, voice=self._style(speaker), speed=self._speed, lang=language
+            )
         audio = np.asarray(samples, dtype=np.float32)
         if self._effect == "jarvis":
             audio = jarvis_effect(audio, rate)
@@ -394,6 +403,12 @@ class LocalVoice:
 
     async def speak(self, text: str) -> bytes:
         return await anyio.to_thread.run_sync(lambda: self.synthesize(text))
+
+    def warm(self) -> None:
+        """Load the voice and speak one word silently, so the first real
+        reply does not wait for the model to load (runs on a thread)."""
+        if self.speech_ready():
+            self.synthesize("Ready.")
 
     # ------------------------------------------------------------------ ears
 

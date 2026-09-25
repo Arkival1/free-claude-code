@@ -27,6 +27,7 @@ from .connectivity import Connectivity
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
 from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
+from .polish import polish_notes
 from .project_check import CHECKED_FILES, check_project
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
@@ -56,6 +57,7 @@ APP_HELP_TOOL = "app_help"
 CHECK_PROJECT_TOOL = "check_project"
 STUDY_VIDEO_TOOL = "study_video"
 START_PROJECT_TOOL = "start_project"
+POLISH_TOOL = "polish_check"
 RESTORE_FILE_TOOL = "restore_file"
 VIDEO_NOTES_TOOL = "video_notes"
 HELPER_ROLE = "helper"
@@ -80,6 +82,7 @@ PARALLEL_TOOLS = frozenset(
         CALCULATE_TOOL,
         PROJECTS_TOOL,
         SYSTEM_STATUS_TOOL,
+        POLISH_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -352,6 +355,17 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "id": {"type": "string", "description": "A video notes id."},
             },
         },
+    ),
+    ToolSpec(
+        name=POLISH_TOOL,
+        description=(
+            "A designer's once-over of the web pages once they work: text "
+            "contrast, phone layouts, hover and focus states, font sizes, a "
+            "consistent color palette, content width, structure, smooth "
+            "transitions, image sizes, and a favicon. Returns what would make "
+            "the project look finished."
+        ),
+        parameters={"type": "object", "properties": {}},
     ),
     ToolSpec(
         name=START_PROJECT_TOOL,
@@ -912,6 +926,8 @@ class AgentToolbox:
                     return await self._app_help_call(call)
                 case "check_project":
                     return await self._check_project(context)
+                case "polish_check":
+                    return await self._polish_check(context)
                 case "start_project":
                     return await self._start_project(call, context)
                 case "restore_file":
@@ -1414,6 +1430,35 @@ class AgentToolbox:
             "is here instead of starting over."
         )
         return "\n".join(lines)
+
+    async def _project_texts(
+        self, site_id: str, suffixes: tuple[str, ...]
+    ) -> dict[str, str]:
+        contents: dict[str, str] = {}
+        for item in await self._sites.files(site_id):
+            if item.path.startswith("lab/") or not item.path.endswith(suffixes):
+                continue
+            try:
+                contents[item.path] = await self._sites.read(site_id, item.path)
+            except SiteError, UnicodeDecodeError:
+                continue
+        return contents
+
+    async def _polish_check(self, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        contents = await self._project_texts(site_id, (".html", ".htm", ".css"))
+        notes = polish_notes(contents)
+        if not contents:
+            text = "There are no web pages to polish in this project."
+        elif notes:
+            text = f"{len(notes)} polish suggestion(s):\n" + "\n".join(
+                f"- {note}" for note in notes
+            )
+        else:
+            text = "The pages look finished: nothing to polish."
+        return ToolOutcome(
+            text=text, data={"tool": POLISH_TOOL, "site_id": site_id, "notes": notes}
+        )
 
     async def _check_project(self, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)

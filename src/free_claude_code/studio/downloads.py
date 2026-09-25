@@ -243,15 +243,20 @@ class ModelLibrary:
                 asset = await self._mark(asset, status="downloading", bytes_total=total)
                 mode = "ab" if resuming else "wb"
                 marker = written
-                with target.open(mode) as handle:
+                # Disk writes run on a worker thread so a multi-gigabyte model
+                # download never stalls replies or the HUD.
+                handle = await anyio.to_thread.run_sync(lambda: target.open(mode))
+                try:
                     async for chunk in response.aiter_bytes(CHUNK_BYTES):
-                        handle.write(chunk)
+                        await anyio.to_thread.run_sync(handle.write, chunk)
                         written += len(chunk)
                         if written - marker >= PROGRESS_INTERVAL_BYTES:
                             marker = written
                             asset = await self._mark(
                                 asset, status="downloading", bytes_done=written
                             )
+                finally:
+                    await anyio.to_thread.run_sync(handle.close)
             return await self._finish(asset, target)
         except (httpx.HTTPError, OSError, DownloadError) as error:
             logger.warning("Studio model download failed: {}", error)

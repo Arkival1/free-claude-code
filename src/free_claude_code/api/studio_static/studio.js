@@ -5,6 +5,7 @@
   const TOKEN_KEY = "fcc.studio.token";
   const TAB_ROUTES = ["home", "chats", "agents", "learn", "more"];
   const POLL_MS = 2500;
+  const HIDDEN_POLL_MS = 10000;
 
   const view = document.getElementById("view");
   const title = document.getElementById("view-title");
@@ -2995,6 +2996,7 @@
   const SILENT_WAV =
     "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
   const SPOKEN_CHUNK = 220;
+  const FIRST_SPOKEN = 90;
   const TURN_SILENCE_SECONDS = 1.1;
   const TURN_MAX_SECONDS = 20;
   const TURN_WAIT_SECONDS = 8;
@@ -3073,7 +3075,16 @@
     const sentences = clean.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [];
     const parts = [];
     let current = "";
-    for (const sentence of sentences.map((item) => item.trim()).filter(Boolean)) {
+    // The first piece is one short sentence (or its first clause), so the
+    // voice starts as soon as possible; later pieces are longer and flow.
+    const pieces = sentences.map((item) => item.trim()).filter(Boolean);
+    if (pieces.length) {
+      const first = pieces[0];
+      const comma = first.length > FIRST_SPOKEN ? first.slice(0, FIRST_SPOKEN).lastIndexOf(", ") : -1;
+      if (comma > 20) pieces.splice(0, 1, first.slice(0, comma + 1), first.slice(comma + 2));
+      parts.push(pieces.shift());
+    }
+    for (const sentence of pieces) {
       if (current && `${current} ${sentence}`.length > SPOKEN_CHUNK) {
         parts.push(current);
         current = sentence;
@@ -3132,7 +3143,7 @@
       const utterance = new SpeechSynthesisUtterance(part);
       const chosen = pickVoice();
       if (chosen) utterance.voice = chosen;
-      utterance.rate = 1.02;
+      utterance.rate = 1.1;
       utterance.pitch = 0.95;
       if (index === parts.length - 1) {
         utterance.onend = utterance.onerror = () => {
@@ -3158,7 +3169,7 @@
       const utterance = new SpeechSynthesisUtterance(part);
       const chosen = pickVoice();
       if (chosen) utterance.voice = chosen;
-      utterance.rate = 1.02;
+      utterance.rate = 1.1;
       utterance.pitch = 0.95;
       utterance.onend = utterance.onerror = () => resolve();
       speechSynthesis.speak(utterance);
@@ -3179,7 +3190,12 @@
     const turn = stream.turn;
     for (const part of spokenParts(text)) {
       if (renderedVoice() && voice.unlocked) {
-        const blob = renderSpeech(part);
+        // Voice one piece at a time, in order: the first piece gets the whole
+        // voice engine instead of sharing it with every later sentence.
+        const blob = (stream.rendering || Promise.resolve())
+          .catch(() => {})
+          .then(() => (turn === voice.token ? renderSpeech(part) : Promise.reject(new Error("stopped"))));
+        stream.rendering = blob;
         blob.catch(() => {});
         stream.chain = stream.chain.then(async () => {
           if (turn !== voice.token) return;
@@ -4568,10 +4584,18 @@
     hud.orb = createCoreOrb(canvas);
     updateHud(refs, data);
     watchWork();
-    startPolling(poll);
+    // A hidden, idle window checks in less often, leaving the processor to
+    // the AI; talk mode and replies being written keep the usual pace.
+    const quiet = () => document.hidden && !voice.talk && !hud.thinking;
+    startPolling(() => {
+      if (quiet() && Date.now() - (hud.lastPoll || 0) < HIDDEN_POLL_MS) return;
+      hud.lastPoll = Date.now();
+      poll();
+    });
     // While someone is working, check more often so replies appear as they
     // are written instead of in jumps.
     hud.fastTimer = setInterval(() => {
+      if (document.hidden && !voice.talk && !hud.thinking) return;
       if (hud.thinking || hud.watchBusy || refs.live) poll();
     }, 500);
   }

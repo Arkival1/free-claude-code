@@ -10,6 +10,7 @@ _HEAD = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$title</title>
   <meta name="description" content="$title">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>">
   <link rel="stylesheet" href="styles.css">
 </head>
 """
@@ -29,14 +30,16 @@ _BASE_CSS = """*, *::before, *::after { box-sizing: border-box; }
 }
 body { margin: 0; background: var(--bg); color: var(--text); }
 img, svg { max-width: 100%; display: block; }
-a { color: var(--accent); }
+a { color: var(--accent); transition: color 0.2s, opacity 0.2s; }
+a:hover { opacity: 0.8; }
 button, input, select, textarea { font: inherit; }
 .container { width: min(1100px, 100% - 2 * var(--gap)); margin-inline: auto; }
 .button {
   display: inline-block; padding: 12px 22px; border: 0; border-radius: 999px;
   background: var(--accent); color: #04121c; font-weight: 700; text-decoration: none;
-  cursor: pointer; min-height: 44px;
+  cursor: pointer; min-height: 44px; transition: transform 0.15s, filter 0.2s;
 }
+.button:hover { filter: brightness(1.1); transform: translateY(-1px); }
 .button:focus-visible, a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 .card { background: var(--surface); border-radius: var(--radius); padding: var(--gap); }
 .grid { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
@@ -570,11 +573,24 @@ def delete_item(item_id: int) -> dict[str, bool]:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$title</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>">
+  <style>
+    body { font-family: system-ui, sans-serif; line-height: 1.6; margin: 0; background: #0f172a; color: #e2e8f0; }
+    main { width: min(720px, 100% - 32px); margin: 40px auto; }
+    button { padding: 10px 18px; border: 0; border-radius: 999px; background: #38bdf8; color: #04121c; font-weight: 700; cursor: pointer; transition: filter 0.2s; }
+    button:hover { filter: brightness(1.1); }
+    input { padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: inherit; }
+    :focus-visible { outline: 3px solid #38bdf8; outline-offset: 2px; }
+    @media (max-width: 480px) { main { margin: 20px auto; } }
+  </style>
 </head>
 <body>
-  <h1>$title</h1>
+  <main>
+  <header><h1>$title</h1></header>
   <form id="form"><input id="text" required aria-label="New item"><button>Add</button></form>
   <ul id="items"></ul>
+  </main>
+  <footer></footer>
   <script>
     async function load() {
       const items = await (await fetch("/api/items")).json();
@@ -650,10 +666,24 @@ server.listen(port, () => console.log(`Listening on http://localhost:${port}`));
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>$title</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✨</text></svg>">
+  <style>
+    body { font-family: system-ui, sans-serif; line-height: 1.6; margin: 0; background: #0f172a; color: #e2e8f0; }
+    main { width: min(720px, 100% - 32px); margin: 40px auto; }
+    button { padding: 10px 18px; border: 0; border-radius: 999px; background: #38bdf8; color: #04121c; font-weight: 700; cursor: pointer; transition: filter 0.2s; }
+    button:hover { filter: brightness(1.1); }
+    input { padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0b1220; color: inherit; }
+    :focus-visible { outline: 3px solid #38bdf8; outline-offset: 2px; }
+    @media (max-width: 480px) { main { margin: 20px auto; } }
+  </style>
 </head>
 <body>
-  <h1>$title</h1>
-  <p>The API is at <code>/api/items</code>.</p>
+  <header></header>
+  <main>
+    <h1>$title</h1>
+    <p>The API is at <code>/api/items</code>.</p>
+  </main>
+  <footer></footer>
 </body>
 </html>
 """,

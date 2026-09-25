@@ -259,6 +259,39 @@ class StudioStore:
 
         return await self._call(work)
 
+    async def count(
+        self,
+        model: type[Record],
+        *,
+        where: Mapping[str, object] | None = None,
+        contains: tuple[str, str] | None = None,
+        distinct: str | None = None,
+    ) -> int:
+        """Count matching records without reading them."""
+        table = _table(model)
+        criteria = dict(where or {})
+        named = [
+            *criteria,
+            *([contains[0]] if contains else []),
+            *([distinct] if distinct else []),
+        ]
+        for key in named:
+            if key not in model.model_fields:
+                raise StudioStoreError(f"Unknown filter column '{key}'.")
+        parts = [f"{key} IS ?" for key in criteria]
+        params: list[object] = list(criteria.values())
+        if contains:
+            parts.append(f"{contains[0]} LIKE ?")
+            params.append(f"%{contains[1]}%")
+        clause = " WHERE " + " AND ".join(parts) if parts else ""
+        what = f"COUNT(DISTINCT {distinct})" if distinct else "COUNT(*)"
+        sql = f"SELECT {what} FROM {table}{clause}"
+
+        def work(connection: sqlite3.Connection) -> int:
+            return int(connection.execute(sql, tuple(params)).fetchone()[0])
+
+        return await self._call(work)
+
     async def delete(self, model: type[Record], record_id: str) -> bool:
         """Delete one record, returning whether a row was removed."""
         table = _table(model)
