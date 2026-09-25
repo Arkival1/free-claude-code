@@ -12,6 +12,7 @@ from .models import (
     Agent,
     AgentRun,
     Chat,
+    ChatNotes,
     CommandRequest,
     Course,
     ExamQuestion,
@@ -68,6 +69,7 @@ TABLES: Mapping[type[Record], str] = {
     CommandRequest: "studio_commands",
     VideoNote: "studio_videos",
     TodoItem: "studio_todos",
+    ChatNotes: "studio_chat_notes",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (

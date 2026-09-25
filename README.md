@@ -481,6 +481,20 @@ models such as Qwen3 write before every answer; turn it off for hard problems.
 In LM Studio, load the model with GPU Offload at maximum and a Context Length
 of 8192; a larger context can spill out of an 8 GB card and slow every reply.
 
+**Conversation notes: no lost context.** When a conversation outgrows an
+agent's view, the messages about to leave it are folded into running notes by
+the agent's own model: the goal, decisions, facts (names, numbers, links,
+files, projects), what each agent was asked and reported, promises made, and
+open questions, in under 250 words. Every reply starts with those notes, then
+the recent messages, so Jarvis keeps the thread of everything you went
+through. Messages only leave the view once the notes hold them; if no model
+is available to write notes, they simply stay in view. Notes are written in
+the background, once every 20 or so messages, so replies are not slowed, and
+they sit in their own record so nothing else can overwrite them. Agents also
+see what tools and teammates reported earlier in the conversation (trimmed),
+and when a teammate finishes in the background, not only your messages and
+their replies. **NOTES** on the HUD shows Jarvis's notes.
+
 Replies start sooner in long conversations, with the same context:
 
 - Each agent sees the last 40 to 60 messages, and where that window starts

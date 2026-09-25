@@ -28,6 +28,7 @@ from .agents import AgentRunner, TurnResult
 from .assistant_tools import describe_time, now_line, parse_when
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
+from .convo_notes import NotesKeeper
 from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
 from .guide import (
@@ -69,6 +70,7 @@ from .models import (
     Agent,
     AgentRun,
     Chat,
+    ChatNotes,
     CommandRequest,
     Course,
     ExamQuestion,
@@ -286,6 +288,9 @@ class StudioService:
         self._run_jobs: dict[str, asyncio.Task[object]] = {}
         self._reminders_checked = -_REMINDER_SECONDS
         self._speech_cache: dict[tuple[object, ...], bytes] = {}
+        self._notes_keeper = NotesKeeper(
+            store=self._store, router=self._router, spawn=self.spawn
+        )
         self._voice_warmed = False
         self._studying: set[str] = set()
         self._router.use_stand_in(self._stand_in_model)
@@ -673,6 +678,7 @@ class StudioService:
             builder_max_steps=self.settings.studio_builder_max_steps,
             live=self._live_text,
             temperature=self.settings.studio_agent_temperature,
+            notes=self._notes_keeper,
         )
 
     def _tuner(self) -> LightTuner:
@@ -1151,9 +1157,15 @@ class StudioService:
         )
 
     async def delete_chat(self, chat_id: str) -> bool:
-        """Delete one chat and its transcript."""
+        """Delete one chat, its transcript, and its notes."""
         await self._store.delete_where(Message, {"chat_id": chat_id})
+        await self._store.delete(ChatNotes, chat_id)
         return await self._store.delete(Chat, chat_id)
+
+    async def chat_notes(self, chat_id: str) -> ChatNotes:
+        """The running notes on a long conversation (empty until it is long)."""
+        await self._store.require(Chat, chat_id)
+        return await self._notes_keeper.get(chat_id)
 
     # -------------------------------------------------------------- commands
 

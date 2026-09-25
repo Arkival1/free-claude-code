@@ -774,3 +774,15 @@ def test_to_dos_can_be_added_and_ticked_off(page: Page, admin_base_url: str) -> 
             ".card", has=page.get_by_role("heading", name="To-dos and reminders")
         )
     ).not_to_contain_text("Water the tomatoes")
+
+
+def test_jarvis_conversation_notes_open_from_the_hud(
+    page: Page, admin_base_url: str
+) -> None:
+    open_hud(page, admin_base_url)
+
+    page.get_by_role("button", name="NOTES").click()
+
+    sheet = page.locator(".sheet-panel")
+    expect(sheet).to_contain_text("Conversation notes")
+    expect(sheet).to_contain_text("No notes yet")

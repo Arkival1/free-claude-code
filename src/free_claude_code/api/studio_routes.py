@@ -770,6 +770,16 @@ async def update_chat_settings(
     }
 
 
+@router.get("/studio/api/chats/{chat_id}/notes")
+async def chat_notes(
+    chat_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The running notes Studio keeps on a long conversation."""
+    return (await studio.chat_notes(chat_id)).model_dump()
+
+
 @router.delete("/studio/api/chats/{chat_id}")
 async def delete_chat(
     chat_id: str,

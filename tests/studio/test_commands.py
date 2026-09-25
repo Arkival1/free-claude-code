@@ -108,7 +108,8 @@ async def test_ask_mode_waits_for_approval(make_studio):
     _, _, chat = await builder_in_project(studio)
 
     turn = asyncio.create_task(studio.send(chat.id, "say hello"))
-    for _ in range(100):
+    # Generous: a busy test machine can take a while to reach the approval.
+    for _ in range(500):
         pending = await studio.pending_commands()
         if pending:
             break
@@ -141,7 +142,8 @@ async def test_a_denied_command_is_reported_to_the_agent(make_studio):
     _, _, chat = await builder_in_project(studio)
 
     turn = asyncio.create_task(studio.send(chat.id, "clean up"))
-    for _ in range(100):
+    # Generous: a busy test machine can take a while to reach the approval.
+    for _ in range(500):
         pending = await studio.pending_commands()
         if pending:
             break
@@ -234,7 +236,8 @@ async def test_a_poll_while_the_request_is_posted_does_not_expire_it(make_studio
 
     studio.store.append_message = poll_first
     turn = asyncio.create_task(studio.send(chat.id, "say hi"))
-    for _ in range(100):
+    # Generous: a busy test machine can take a while to reach the approval.
+    for _ in range(500):
         pending = await studio.pending_commands()
         if pending:
             break

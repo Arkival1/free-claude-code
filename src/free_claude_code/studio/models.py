@@ -411,3 +411,12 @@ class TodoItem(Record):
     added_by: str = ""
     created_at: int = Field(default_factory=now_ms)
     done_at: int | None = None
+
+
+class ChatNotes(Record):
+    """The running notes on one long conversation; the id is the chat's id."""
+
+    id: str
+    text: str = ""
+    until: int = 0
+    updated_at: int = Field(default_factory=now_ms)

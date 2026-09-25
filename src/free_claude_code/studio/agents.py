@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from .convo_notes import NOTES_HEADER, NotesKeeper
 from .llm import ChatMessage, LLMReply, StudioLLMError, StudioModelRouter, ToolCall
 from .memory import MemoryService
 from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
@@ -26,6 +27,16 @@ from .tuning import pack_exemplars, pack_system_text
 
 HISTORY_MIN = 40
 HISTORY_STEP = 20
+MAX_UNNOTED = 60
+"""How far past its usual start the view may reach while notes catch up."""
+TOOL_CONTEXT_CHARS = 300
+
+
+def _trim(text: str) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= TOOL_CONTEXT_CHARS else f"{flat[:TOOL_CONTEXT_CHARS]}…"
+
+
 WRITE_TOOLS = frozenset(
     {"write_file", "edit_file", "delete_file", "start_project", "restore_file"}
 )
@@ -73,7 +84,9 @@ AGENT_BASE_PROMPT = (
     "You are a Studio agent running inside Free Claude Code on the user's own "
     "machine. Work in small, verifiable steps. Prefer calling a tool over "
     "guessing. When you have finished the task, call the finish tool with a "
-    "short report of what you did."
+    "short report of what you did. If the conversation starts with Studio's "
+    "notes on its earlier part, treat them as what was said: keep to the "
+    "decisions and facts in them."
 )
 SITE_PROMPT = (
     "You have a project workspace. Build complete, working websites and apps: "
@@ -172,6 +185,7 @@ class AgentRunner:
         default_model: str,
         max_steps: int = 12,
         builder_max_steps: int = 40,
+        notes: NotesKeeper | None = None,
         live: MutableMapping[str, str] | None = None,
         temperature: float = 0.2,
     ) -> None:
@@ -182,6 +196,7 @@ class AgentRunner:
         self._default_model = default_model
         self._max_steps = max(1, max_steps)
         self._builder_max_steps = max(self._max_steps, builder_max_steps)
+        self._notes = notes
         # Chat id -> the reply being written right now, for live display.
         self._live = live
         self._temperature = temperature
@@ -274,20 +289,64 @@ class AgentRunner:
         )
 
     async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:
-        transcript = await self._store.transcript(
-            chat.id, after=await self._history_start(chat)
-        )
+        start = await self._history_start(chat)
+        notes = ""
+        if self._notes is not None:
+            kept = await self._notes.get(chat.id)
+            # Messages leave the view only once the notes hold what they said.
+            start = max(min(start, kept.until), start - MAX_UNNOTED)
+            notes = kept.text if kept.until else ""
+        transcript = await self._store.transcript(chat.id, after=start)
         history: list[ChatMessage] = []
         if agent.tune_pack_id:
             pack = await self._store.get(TunePack, agent.tune_pack_id)
             if pack is not None and pack.active:
                 history.extend(pack_exemplars(pack))
+        said: list[tuple[str, str]] = []
+        if notes:
+            said.append(("user", f"{NOTES_HEADER}\n{notes}"))
         for message in transcript:
+            text = message.text.strip()
+            if not text:
+                continue
             if message.role == "user":
-                history.append(ChatMessage.user(message.text))
-            elif message.role == "assistant" and message.text:
-                history.append(ChatMessage.assistant(message.text))
+                said.append(("user", text))
+            elif message.role == "assistant":
+                said.append(("assistant", text))
+            elif message.role == "tool":
+                # What tools and teammates reported stays in view as context.
+                said.append(("user", f"(Studio: {message.author} said) {_trim(text)}"))
+            elif message.role == "event" and (message.data or {}).get("kind") in (
+                "background_done",
+            ):
+                said.append(("user", f"(Studio update) {_trim(text)}"))
+        # Some chat templates need turns to alternate, so neighbours merge.
+        for role, text in said:
+            if history and history[-1].role == role and not history[-1].tool_calls:
+                merged = f"{history[-1].content}\n\n{text}"
+                history[-1] = (
+                    ChatMessage.user(merged)
+                    if role == "user"
+                    else ChatMessage.assistant(merged)
+                )
+            else:
+                history.append(
+                    ChatMessage.user(text)
+                    if role == "user"
+                    else ChatMessage.assistant(text)
+                )
         return history
+
+    def _keep_notes(self, agent: Agent, chat: Chat, next_start: int) -> None:
+        """Start the notes on messages that will leave the view next time."""
+        if self._notes is None or next_start <= 0:
+            return
+        self._notes.keep_up(
+            chat.id,
+            next_start,
+            model=agent.model or self._default_model,
+            name=agent.name,
+        )
 
     async def _history_start(self, chat: Chat) -> int:
         """Where the conversation an agent sees begins.
@@ -321,7 +380,7 @@ class AgentRunner:
         )
         note = await prepare() if prepare is not None else ""
         history = await self._history(agent, chat)
-        if not history or history[-1].content != user_text:
+        if not history or not history[-1].content.endswith(user_text):
             history.append(ChatMessage.user(user_text))
         context = self._context(agent, chat, site_id=chat.site_id)
         result = await self._loop(
@@ -333,6 +392,7 @@ class AgentRunner:
             max_steps=self._steps_for(agent),
             turn_note=note,
         )
+        self._keep_notes(agent, chat, await self._history_start(chat))
         if agent.memory_enabled and not result.failed and result.text:
             await self._memory.remember(
                 agent.id,

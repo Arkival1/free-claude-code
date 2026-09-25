@@ -2442,3 +2442,14 @@ body[data-page="settings"] .view {
 .todo-due.overdue {
   color: var(--hud-amber, #ffb547);
 }
+
+.conversation-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 0;
+}

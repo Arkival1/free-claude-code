@@ -31,18 +31,22 @@ async def test_the_history_window_moves_in_steps(make_studio):
     studio, model = make_studio(lambda system, prompt: LLMReply(text="Ok."))
     await studio.ensure_defaults()
     chat = await studio.main_chat()
-    for index in range(70):
+    for index in range(35):
         await studio.store.append_message(
             chat_id=chat.id, role="user", text=f"old {index}", author="user"
+        )
+        await studio.store.append_message(
+            chat_id=chat.id, role="assistant", text=f"reply {index}", author="Jarvis"
         )
 
     firsts = []
     for index in range(6):
         await studio.main_say(f"new {index}", background=False)
+        await studio.wait_for_background()
         messages = jarvis_calls(model)[-1]["messages"]
-        firsts.append(messages[0].content)
-        assert len(messages) >= HISTORY_MIN // 2, "never less context than before"
-    assert len(set(firsts)) <= 2, "the start moves at most once in six replies"
+        firsts.append(messages[0].content[:60])
+        assert len(messages) >= HISTORY_MIN - 2, "never less context than before"
+    assert len(set(firsts)) <= 3, "the start moves only when notes are written"
     assert HISTORY_STEP == 20
 
 

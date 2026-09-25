@@ -4470,6 +4470,13 @@
                 }
               },
             }),
+            el("button", {
+              class: "hud-button",
+              type: "button",
+              text: "NOTES",
+              title: "What Jarvis keeps from earlier in this conversation",
+              onclick: () => openConversationNotes(hud.chatId || data.chat.id),
+            }),
             el("button", { class: "hud-button", type: "button", text: "MENU", onclick: () => go("more") }),
           ]),
         ]
@@ -4598,6 +4605,26 @@
       if (document.hidden && !voice.talk && !hud.thinking) return;
       if (hud.thinking || hud.watchBusy || refs.live) poll();
     }, 250);
+  }
+
+  // The running notes Studio keeps once a conversation outgrows the view.
+  async function openConversationNotes(chatId) {
+    let notes = { text: "", until: 0 };
+    try {
+      notes = await api(`/studio/api/chats/${chatId}/notes`);
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+    openSheet("Conversation notes", [
+      el("p", {
+        class: "muted",
+        text: "Once a conversation is long, older messages are folded into these notes so Jarvis never loses the thread. They update every 20 or so messages.",
+      }),
+      notes.text
+        ? el("pre", { class: "conversation-notes", text: notes.text })
+        : el("p", { class: "empty", text: "No notes yet: the whole conversation still fits in view." }),
+    ]);
   }
 
   function voiceCard(status) {
