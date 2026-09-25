@@ -4619,7 +4619,7 @@
     openSheet("Conversation notes", [
       el("p", {
         class: "muted",
-        text: "Once a conversation is long, older messages are folded into these notes so Jarvis never loses the thread. They update every 20 or so messages.",
+        text: "Every message is kept word for word. Whenever you speak, the earlier messages that match are handed to Jarvis exactly as they were said, and he can search or reread any message himself. These notes are his summary on top, with a timeline, updated every 20 or so messages.",
       }),
       notes.text
         ? el("pre", { class: "conversation-notes", text: notes.text })

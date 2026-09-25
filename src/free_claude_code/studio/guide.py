@@ -126,10 +126,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "timer app', 'tell the Researcher to look into cheap GPUs', '@Helper "
             "plan my week', 'get an agent to ...' (he picks who), several in one "
             "message, or 'stop Builder'. Ask 'what is everyone doing?' for a team "
-            "update. In a long conversation, older messages are folded into "
-            "running notes (goal, decisions, facts, work in progress, open "
-            "questions) so he never loses the thread; NOTES on the HUD shows "
-            "them. NEW TALK clears the conversation but keeps his memory. "
+            "update. Every message is kept word for word: whenever you speak, "
+            "the earlier messages that match (from this conversation and "
+            "earlier ones) are handed to him exactly as said, he can search or "
+            "reread any message with his conversation tool, and running notes "
+            "with a timeline summarise the rest; NOTES on the HUD shows them. "
+            "NEW TALK starts a clean conversation; the old one stays searchable. "
             "You can rename him with Main Agent Name in Settings, under Studio."
         ),
         asks=(

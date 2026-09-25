@@ -481,19 +481,28 @@ models such as Qwen3 write before every answer; turn it off for hard problems.
 In LM Studio, load the model with GPU Offload at maximum and a Context Length
 of 8192; a larger context can spill out of an 8 GB card and slow every reply.
 
-**Conversation notes: no lost context.** When a conversation outgrows an
-agent's view, the messages about to leave it are folded into running notes by
-the agent's own model: the goal, decisions, facts (names, numbers, links,
-files, projects), what each agent was asked and reported, promises made, and
-open questions, in under 250 words. Every reply starts with those notes, then
-the recent messages, so Jarvis keeps the thread of everything you went
-through. Messages only leave the view once the notes hold them; if no model
-is available to write notes, they simply stay in view. Notes are written in
-the background, once every 20 or so messages, so replies are not slowed, and
-they sit in their own record so nothing else can overwrite them. Agents also
-see what tools and teammates reported earlier in the conversation (trimmed),
-and when a teammate finishes in the background, not only your messages and
-their replies. **NOTES** on the HUD shows Jarvis's notes.
+**Every message, word for word.** Nothing an agent was told is ever lost:
+
+- **Automatic recall.** Every time you speak, Studio searches the whole
+  conversation, including the part out of view, and the agent's five most
+  recent earlier conversations. The earlier messages that match what you
+  said are attached to your message exactly as they were said, with their
+  message numbers and how long ago. "What colours did we pick for the bakery
+  site?" brings back the exact message, however long ago it was.
+- **The `conversation` tool.** Every agent can search every message of its
+  conversations (`query`, with `scope: all` for earlier ones) or reread any
+  stretch in full by number (`from`, `to`), and is told to check instead of
+  guessing whenever you mention something from before.
+- **Running notes with a timeline.** When a conversation outgrows the view,
+  the messages about to leave it are also folded into notes by the agent's own
+  model: goal, a timeline with message numbers, decisions, facts (exact
+  names, numbers, links, files), work in progress, and open questions, in
+  under 400 words. Every reply starts with them. Messages leave the view only
+  once the notes hold them, and stay in view if no model can write notes.
+  Notes update in the background about once every 20 messages, so replies are
+  not slowed. **NOTES** on the HUD shows them.
+- Agents also see what tools and teammates reported earlier in the
+  conversation, and when a teammate finishes in the background.
 
 Replies start sooner in long conversations, with the same context:
 

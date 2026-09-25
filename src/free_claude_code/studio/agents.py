@@ -11,6 +11,7 @@ from .convo_notes import NOTES_HEADER, NotesKeeper
 from .llm import ChatMessage, LLMReply, StudioLLMError, StudioModelRouter, ToolCall
 from .memory import MemoryService
 from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
+from .recall_messages import Found, recall_note, search
 from .store import StudioStore
 from .tools import (
     CHECK_PROJECT_TOOL,
@@ -30,6 +31,8 @@ HISTORY_STEP = 20
 MAX_UNNOTED = 60
 """How far past its usual start the view may reach while notes catch up."""
 TOOL_CONTEXT_CHARS = 300
+EARLIER_CHATS = 5
+EARLIER_CHAT_MESSAGES = 400
 
 
 def _trim(text: str) -> str:
@@ -130,7 +133,11 @@ MAIN_PROMPT = (
     "Use research yourself when you need to understand something first, and "
     "end that reply with the links of the sources you used; they show on "
     "screen. When the user gives you a YouTube link, study it with "
-    "study_video; videos the team studied before are in video_notes. When "
+    "study_video; videos the team studied before are in video_notes. "
+    "Every message of your conversations is kept word for word: earlier "
+    "messages that match what the user says are attached to their message, "
+    "and conversation searches or reads any of them, so check it instead of "
+    "guessing whenever the user refers to something from before. When "
     "the user asks how to do something in this app, where something is, or "
     "why something is not working, call app_help and answer with the page and "
     "button names it gives."
@@ -289,13 +296,7 @@ class AgentRunner:
         )
 
     async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:
-        start = await self._history_start(chat)
-        notes = ""
-        if self._notes is not None:
-            kept = await self._notes.get(chat.id)
-            # Messages leave the view only once the notes hold what they said.
-            start = max(min(start, kept.until), start - MAX_UNNOTED)
-            notes = kept.text if kept.until else ""
+        start, notes = await self._view(chat)
         transcript = await self._store.transcript(chat.id, after=start)
         history: list[ChatMessage] = []
         if agent.tune_pack_id:
@@ -336,6 +337,43 @@ class AgentRunner:
                     else ChatMessage.assistant(text)
                 )
         return history
+
+    async def _view(self, chat: Chat) -> tuple[int, str]:
+        """Where the messages in view begin, and the notes on what came before."""
+        start = await self._history_start(chat)
+        if self._notes is None:
+            return start, ""
+        kept = await self._notes.get(chat.id)
+        # Messages leave the view only once the notes hold what they said.
+        start = max(min(start, kept.until), start - MAX_UNNOTED)
+        return start, kept.text if kept.until else ""
+
+    async def _recall_earlier(self, agent: Agent, chat: Chat, text: str) -> str:
+        """Earlier messages out of view that match what the user just said,
+        from this conversation and the agent's earlier ones, word for word."""
+        start, _ = await self._view(chat)
+        found = [
+            Found(message)
+            for message in await self._store.transcript(chat.id)
+            if message.sequence <= start
+        ]
+        if agent.id:
+            earlier = await self._store.find(
+                Chat,
+                where={"agent_id": agent.id},
+                order_by="updated_at DESC",
+                limit=EARLIER_CHATS + 1,
+            )
+            for other in earlier:
+                if other.id == chat.id:
+                    continue
+                found.extend(
+                    Found(message, earlier_chat=True)
+                    for message in await self._store.transcript(
+                        other.id, limit=EARLIER_CHAT_MESSAGES
+                    )
+                )
+        return recall_note(search(found, text))
 
     def _keep_notes(self, agent: Agent, chat: Chat, next_start: int) -> None:
         """Start the notes on messages that will leave the view next time."""
@@ -379,6 +417,8 @@ class AgentRunner:
             chat_id=chat.id, role="user", text=user_text, author="user"
         )
         note = await prepare() if prepare is not None else ""
+        recalled = await self._recall_earlier(agent, chat, user_text)
+        note = "\n\n".join(part for part in (note, recalled) if part)
         history = await self._history(agent, chat)
         if not history or not history[-1].content.endswith(user_text):
             history.append(ChatMessage.user(user_text))

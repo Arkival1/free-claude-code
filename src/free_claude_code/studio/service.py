@@ -107,6 +107,8 @@ from .presets import (
     TESTER_TOOLS,
     agent_options,
 )
+from .recall_messages import Found, search
+from .recall_messages import line as message_line
 from .research import ResearchMix
 from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
@@ -147,6 +149,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "start_project",
         "restore_file",
         "polish_check",
+        "conversation",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
@@ -190,6 +193,19 @@ class ChatSettingsResult:
 
 _REMINDER_SECONDS = 10.0
 _RECENT_RUNS = 40
+READ_MESSAGES = 40
+
+
+def _whole(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return int(value)
+    if isinstance(value, str) and value.strip().lstrip("#").isdigit():
+        return int(value.strip().lstrip("#"))
+    return None
+
+
 _SPEECH_CACHE = 48
 """Recently spoken pieces kept as audio, so repeats play at once."""
 
@@ -1498,6 +1514,8 @@ class StudioService:
                 return await self._todo_tool(call, context)
             case "list_projects":
                 return await self._projects_tool(call)
+            case "conversation":
+                return await self._conversation_tool(call, context)
             case _:
                 return await self._system_tool()
 
@@ -1544,6 +1562,71 @@ class StudioService:
         if len(match) == 1:
             return match[0]
         raise ValueError(f"No single to-do matches {wanted!r}; list them for the ids.")
+
+    async def _conversation_tool(
+        self, call: ToolCall, context: ToolContext
+    ) -> ToolOutcome:
+        """Search or read every message of an agent's conversations."""
+        args = call.arguments
+        query = str(args.get("query") or "").strip()
+        first, last = _whole(args.get("from")), _whole(args.get("to"))
+        if first is not None or last is not None:
+            low = max(1, first or (last or 1) - 10)
+            high = max(low, last or low + 20)
+            high = min(high, low + READ_MESSAGES - 1)
+            messages = [
+                message
+                for message in await self._store.transcript(
+                    context.chat_id, after=low - 1
+                )
+                if message.sequence <= high
+            ]
+            text = "\n".join(message_line(message, limit=2_000) for message in messages)
+            return ToolOutcome(
+                text=text or f"There are no messages #{low} to #{high}.",
+                data={"tool": "conversation", "from": low, "to": high},
+            )
+        found = [
+            Found(message) for message in await self._store.transcript(context.chat_id)
+        ]
+        if str(args.get("scope") or "this") == "all":
+            for other in await self._store.find(
+                Chat,
+                where={"agent_id": context.agent_id},
+                order_by="updated_at DESC",
+                limit=10,
+            ):
+                if other.id != context.chat_id:
+                    found.extend(
+                        Found(message, earlier_chat=True)
+                        for message in await self._store.transcript(other.id)
+                    )
+        if not query:
+            newest = found[-1].message.sequence if found else 0
+            return ToolOutcome(
+                text=(
+                    f"This conversation has {newest} messages (#1 to #{newest}). "
+                    "Search with query, or read with from and to."
+                ),
+                data={"tool": "conversation", "messages": newest},
+            )
+        hits = search(found, query, limit=12)
+        lines = [
+            message_line(
+                item.message,
+                where=" (earlier conversation)" if item.earlier_chat else "",
+            )
+            for item in hits
+        ]
+        text = (
+            "\n".join(lines)
+            + "\nRead around a hit with from and to for the full exchange."
+            if lines
+            else f"Nothing in the conversation matches '{query}'."
+        )
+        return ToolOutcome(
+            text=text, data={"tool": "conversation", "query": query, "hits": len(hits)}
+        )
 
     async def _projects_tool(self, call: ToolCall) -> ToolOutcome:
         query = str(call.arguments.get("query") or "").strip().casefold()

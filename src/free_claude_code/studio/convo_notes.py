@@ -11,7 +11,7 @@ from .models import ChatNotes, Message
 from .store import StudioStore
 
 NOTES_HEADER = "Notes on the earlier part of this conversation (kept by Studio):"
-MAX_NOTES_CHARS = 2_400
+MAX_NOTES_CHARS = 3_600
 MAX_LINE_CHARS = 400
 NOTES_PROMPT = (
     "You keep the running notes of a conversation between the user and {name}, "
@@ -20,10 +20,12 @@ NOTES_PROMPT = (
     "fold in what is new. Keep who the user is and what they want, decisions "
     "made, facts, names, numbers, links, files and projects, what each agent "
     "was asked and what it reported, promises {name} made, and open questions "
-    "and next steps. Drop small talk and anything finished that no longer "
-    "matters. Write short bullet points under these headings, leaving out "
-    "empty ones: Goal, Decisions, Facts, Work in progress, Open questions. Stay "
-    "under 250 words. Write only the notes."
+    "and next steps. Drop small talk. Write short bullet points under these "
+    "headings, leaving out empty ones: Goal, Timeline (one line per thing that "
+    "happened, oldest first, with the message number like #12), Decisions, "
+    "Facts, Work in progress, Open questions. Keep exact names, numbers, "
+    "links, file names, and the user's own words where they matter. Stay under "
+    "400 words. Write only the notes."
 )
 
 type Spawn = Callable[[Coroutine[Any, Any, None]], object]
@@ -36,14 +38,15 @@ def transcript_lines(messages: Sequence[Message]) -> str:
         text = " ".join(message.text.split())[:MAX_LINE_CHARS]
         if not text:
             continue
+        number = f"#{message.sequence} "
         if message.role == "user":
-            lines.append(f"User: {text}")
+            lines.append(f"{number}User: {text}")
         elif message.role == "assistant":
-            lines.append(f"{message.author or 'Assistant'}: {text}")
+            lines.append(f"{number}{message.author or 'Assistant'}: {text}")
         elif message.role == "tool":
-            lines.append(f"(tool {message.author}): {text}")
+            lines.append(f"{number}(tool {message.author}): {text}")
         elif message.role == "event":
-            lines.append(f"(update): {text}")
+            lines.append(f"{number}(update): {text}")
     return "\n".join(lines)
 
 

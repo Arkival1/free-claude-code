@@ -40,6 +40,7 @@ COMMAND_TOOL = "run_command"
 ASK_AGENT_TOOL = "ask_agent"
 TEAM_TASK_TOOL = "team_task"
 TODO_TOOL = "todo"
+CONVERSATION_TOOL = "conversation"
 CALCULATE_TOOL = "calculate"
 PROJECTS_TOOL = "list_projects"
 SYSTEM_STATUS_TOOL = "system_status"
@@ -83,6 +84,7 @@ PARALLEL_TOOLS = frozenset(
         PROJECTS_TOOL,
         SYSTEM_STATUS_TOOL,
         POLISH_TOOL,
+        CONVERSATION_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -410,6 +412,26 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=CONVERSATION_TOOL,
+        description=(
+            "Every message of this conversation and your earlier ones is kept "
+            "word for word. Search it with query (scope all to include earlier "
+            "conversations), or read messages by number with from and to (for "
+            "example the ones around a search hit). Use it whenever you need "
+            "an exact detail from earlier or the user mentions something you "
+            "cannot see."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Words to look for."},
+                "from": {"type": "integer", "description": "First message number."},
+                "to": {"type": "integer", "description": "Last message number."},
+                "scope": {"type": "string", "enum": ["this", "all"]},
+            },
+        },
+    ),
+    ToolSpec(
         name=CALCULATE_TOOL,
         description=(
             "Work out arithmetic exactly instead of in your head: + - * / // % "
@@ -658,6 +680,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     "web_fetch",
     "remember",
     "recall",
+    CONVERSATION_TOOL,
     STUDY_VIDEO_TOOL,
     VIDEO_NOTES_TOOL,
     TODO_TOOL,
@@ -930,7 +953,7 @@ class AgentToolbox:
                     return await self._restore_file(call, context)
                 case "calculate":
                     return self._calculate(call)
-                case "todo" | "list_projects" | "system_status":
+                case "todo" | "list_projects" | "system_status" | "conversation":
                     if self._assistant is None:
                         raise ValueError(f"{call.name} is not available here.")
                     return await self._assistant(call, context)

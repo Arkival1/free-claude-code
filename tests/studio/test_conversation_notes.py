@@ -145,7 +145,7 @@ def test_the_note_keeper_reads_labelled_lines():
         ]
     )
 
-    assert lines.splitlines()[:2] == ["User: hi", "Jarvis: hey"]
-    assert lines.splitlines()[2].startswith("(tool research): xxx")
+    assert lines.splitlines()[:2] == ["#1 User: hi", "#2 Jarvis: hey"]
+    assert lines.splitlines()[2].startswith("#3 (tool research): xxx")
     assert len(lines.splitlines()[2]) < 450
-    assert lines.splitlines()[3] == "(update): done"
+    assert lines.splitlines()[3] == "#4 (update): done"

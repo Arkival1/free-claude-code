@@ -6,6 +6,7 @@ from .models import AGENT_ROLES
 from .tools import DEFAULT_TOOL_NAMES, TOOL_SPEC_BY_NAME
 
 RESEARCHER_TOOLS: tuple[str, ...] = (
+    "conversation",
     "research",
     "study_video",
     "video_notes",
@@ -148,6 +149,7 @@ TESTER_PROMPT = (
     "recurring problems with remember so the team avoids them."
 )
 TESTER_TOOLS: tuple[str, ...] = (
+    "conversation",
     "read_file",
     "list_files",
     "search_files",
@@ -166,6 +168,7 @@ TESTER_TOOLS: tuple[str, ...] = (
     "finish",
 )
 HELPER_TOOLS: tuple[str, ...] = (
+    "conversation",
     "recall",
     "remember",
     "video_notes",
@@ -225,7 +228,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("run_command", "test_code", "check_project", "polish_check"),
     ),
     ("Ask teammates", ("ask_researcher", "ask_helper")),
-    ("Memory", ("remember", "recall", "video_notes")),
+    ("Memory", ("remember", "recall", "video_notes", "conversation")),
     ("Everyday", ("calculate", "todo")),
 )
 _BUILD = (

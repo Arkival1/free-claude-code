@@ -53,6 +53,13 @@ async def test_execute_hides_credentials_from_the_command(tmp_path, monkeypatch)
     assert output.strip() == "None"
 
 
+async def approval_posted(studio, chat_id: str) -> bool:
+    return any(
+        (message.data or {}).get("kind") == "approval"
+        for message in await studio.transcript(chat_id)
+    )
+
+
 async def builder_in_project(studio):
     agent = await studio.create_agent(name="Maker")
     site = await studio.create_site(name="App")
@@ -108,10 +115,11 @@ async def test_ask_mode_waits_for_approval(make_studio):
     _, _, chat = await builder_in_project(studio)
 
     turn = asyncio.create_task(studio.send(chat.id, "say hello"))
-    # Generous: a busy test machine can take a while to reach the approval.
+    # The request is stored just before its chat message is posted; wait
+    # for both, since a busy machine can land a poll between the two.
     for _ in range(500):
         pending = await studio.pending_commands()
-        if pending:
+        if pending and await approval_posted(studio, chat.id):
             break
         await asyncio.sleep(0.02)
     assert len(pending) == 1 and "hello" in pending[0].command
@@ -142,10 +150,11 @@ async def test_a_denied_command_is_reported_to_the_agent(make_studio):
     _, _, chat = await builder_in_project(studio)
 
     turn = asyncio.create_task(studio.send(chat.id, "clean up"))
-    # Generous: a busy test machine can take a while to reach the approval.
+    # The request is stored just before its chat message is posted; wait
+    # for both, since a busy machine can land a poll between the two.
     for _ in range(500):
         pending = await studio.pending_commands()
-        if pending:
+        if pending and await approval_posted(studio, chat.id):
             break
         await asyncio.sleep(0.02)
     await studio.decide_command(pending[0].id, approve=False)
@@ -236,10 +245,11 @@ async def test_a_poll_while_the_request_is_posted_does_not_expire_it(make_studio
 
     studio.store.append_message = poll_first
     turn = asyncio.create_task(studio.send(chat.id, "say hi"))
-    # Generous: a busy test machine can take a while to reach the approval.
+    # The request is stored just before its chat message is posted; wait
+    # for both, since a busy machine can land a poll between the two.
     for _ in range(500):
         pending = await studio.pending_commands()
-        if pending:
+        if pending and await approval_posted(studio, chat.id):
             break
         await asyncio.sleep(0.02)
 
