@@ -627,6 +627,27 @@ outcomes go there too, so the main AI and the team build on each other's work.
 Each agent still keeps its own working notes. You can add to it from the HUD,
 and it mirrors into Obsidian as a **Team memory** hub.
 
+**Memory stays on this PC.** With `STUDIO_PRIVATE_MEMORY` on (the default,
+**Keep Memory on This PC** in settings), only agents whose model runs on this
+PC (`local/…`, LM Studio, Ollama, llama.cpp) can use the memory bank. An agent
+on a server or cloud AI gets no memory notes, no taught skills, no recall of
+earlier conversations, and no `remember`, `recall`, `knowledge`,
+`video_notes`, `conversation`, `todo`, or `learn` tools; Studio refuses those
+calls even if the model tries. The Obsidian vault only reaches agents through
+memory, so it stays private too. If a server agent's model has no key and it
+borrows the model loaded in LM Studio, it counts as local while it does.
+
+When you give a server agent a job through Jarvis (*"have the Builder make a
+landing page for the bakery"*, or Jarvis handing it work himself), Jarvis
+writes it a **briefing** on this PC: what you want done, and the requirements,
+preferences, and facts from the conversation and memory the job needs, leaving
+out personal details it doesn't. The briefing is posted in your chat with
+Jarvis, so you see exactly what was sent, and the server agent gets your words
+plus the briefing. Team brains and the HUD mark server agents "no memory".
+What a local agent says in a team room is seen by every member of that room,
+server agents included. And if you put Jarvis himself on a server AI, he is
+kept out of memory too, and no briefings are written.
+
 </details>
 
 <details>

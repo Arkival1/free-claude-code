@@ -697,6 +697,42 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         asks=("How do I set up LM Studio?", "How do I choose Jarvis's brain?"),
     ),
     GuideTopic(
+        title="Private memory",
+        route="/studio#agents",
+        where=(
+            "Automatic. Team brains marks server agents; the setting is Keep "
+            "Memory on This PC in Settings, Studio."
+        ),
+        terms=(
+            "private",
+            "privacy",
+            "cloud",
+            "server ai",
+            "server agent",
+            "briefing",
+            "brief",
+            "debrief",
+            "obsidian",
+            "memory bank",
+            "who can see",
+            "share",
+        ),
+        body=(
+            "Your memory bank, Obsidian vault, knowledge library, to-dos, and "
+            "earlier conversations stay on this PC. Agents whose AI runs on a "
+            "server or in the cloud cannot read any of it: they get no memory "
+            "notes, no memory tools, and no earlier chats, and Studio blocks "
+            "them if they try. Agents on this PC (LM Studio, Ollama, llama.cpp) "
+            "use memory as before. When you give a server agent a job through "
+            "Jarvis, Jarvis (on this PC) writes it a briefing with only what the "
+            "job needs from the conversation and memory, leaving out personal "
+            "details, and shows you the briefing in chat before it goes. Team "
+            "brains and the HUD mark server agents 'no memory'. Turn it off with "
+            "Keep Memory on This PC in Settings."
+        ),
+        asks=("How do I give each agent its own model?", "Where is memory?"),
+    ),
+    GuideTopic(
         title="To-dos and reminders",
         route="/studio#more",
         where=(

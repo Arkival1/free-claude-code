@@ -212,6 +212,19 @@ _RECENT_RUNS = 40
 _RECENT_STUDY_MS = 10 * 60_000
 
 
+BRIEFING_PROMPT = (
+    "You are {name}, the user's main AI, running on their PC. {agent} is an AI "
+    "on an outside server. It cannot see the user's memory, notes, Obsidian "
+    "vault, or earlier conversations; your briefing is all it gets. Write the "
+    "briefing for this job: what the user wants done and why, the "
+    "requirements, preferences, and facts from the conversation and your "
+    "memory that the job needs, and what to hand back. Leave out anything "
+    "personal the job does not need, such as names, addresses, contact "
+    "details, health, money, passwords, and keys. Write it as direct "
+    "instructions to {agent}, under 220 words. Write only the briefing."
+)
+
+
 def _study_started(study: Study) -> str:
     lessons = {"quick": 4, "normal": 7, "deep": 10}.get(study.depth, 7)
     return (
@@ -725,6 +738,7 @@ class StudioService:
             live=self._live_text,
             temperature=self.settings.studio_agent_temperature,
             notes=self._notes_keeper,
+            sealed=self.is_private_from,
         )
 
     def _tuner(self) -> LightTuner:
@@ -751,6 +765,7 @@ class StudioService:
             memory=self._memory(),
             tuner=self._tuner(),
             default_model=self.default_model,
+            sealed=self.is_private_from,
         )
 
     def _rooms(self) -> RoomService:
@@ -1724,6 +1739,92 @@ class StudioService:
             text=text, data={"tool": "conversation", "query": query, "hits": len(hits)}
         )
 
+    # -------------------------------------------------------- private memory
+
+    def runs_on_this_pc(self, model: str) -> bool:
+        """True for models this PC runs itself (LM Studio, Ollama, llama.cpp)."""
+        if model.startswith(LOCAL_MODEL_PREFIX):
+            return True
+        descriptor = PROVIDER_CATALOG.get(parse_provider_type(model))
+        return descriptor is not None and descriptor.local
+
+    async def is_private_from(self, agent: Agent) -> bool:
+        """True when the agent thinks on a server, so memory stays away from it."""
+        if not self.settings.studio_private_memory:
+            return False
+        model = await self.effective_model(agent.model or self.default_model)
+        return not self.runs_on_this_pc(model)
+
+    async def _briefed(
+        self, worker: Agent, goal: str, parent_chat_id: str | None
+    ) -> str:
+        """The job as a server agent gets it: with the main AI's briefing.
+
+        A server agent cannot see memory, so when the main AI (on this PC)
+        hands it work, the main AI writes what the job needs from the
+        conversation and memory, and the briefing is shown to the user.
+        """
+        if not parent_chat_id or not await self.is_private_from(worker):
+            return goal
+        main = await self.main_agent()
+        parent = await self._store.get(Chat, parent_chat_id)
+        if parent is None or parent.agent_id != main.id:
+            return goal
+        if await self.is_private_from(main):
+            return goal
+        brief = await self._write_briefing(main, worker, goal, parent)
+        await self._store.append_message(
+            chat_id=parent.id,
+            role="tool",
+            text=(
+                f"Briefing for {worker.name} (a server AI, so it can't see your "
+                f"memory):\n{brief}"
+            ),
+            author="briefing",
+            data={"tool": "briefing", "agent": worker.name, "agent_id": worker.id},
+        )
+        return f"The job: {goal.strip()}\n\nBriefing from {main.name}:\n{brief}"
+
+    async def _write_briefing(
+        self, main: Agent, worker: Agent, goal: str, chat: Chat
+    ) -> str:
+        said = [
+            message
+            for message in await self._store.transcript(chat.id, limit=16)
+            if message.role in {"user", "assistant"} and message.text.strip()
+        ][-10:]
+        recent = "\n".join(
+            f"{'User' if m.role == 'user' else main.name}: {' '.join(m.text.split())[:400]}"
+            for m in said
+        )
+        memory = (
+            await self._memory().context_block(main.id, goal)
+            if main.memory_enabled
+            else ""
+        )
+        prompt = "\n\n".join(
+            part
+            for part in (
+                f"The job: {goal.strip()}",
+                f"Recent conversation:\n{recent}" if recent else "",
+                memory,
+            )
+            if part
+        )
+        try:
+            reply = await self._router.complete(
+                [ChatMessage.user(prompt)],
+                model=await self.effective_model(main.model or self.default_model),
+                system=BRIEFING_PROMPT.format(name=main.name, agent=worker.name),
+                temperature=0.2,
+                max_tokens=500,
+            )
+            brief = reply.text.strip()
+        except StudioLLMError as error:
+            logger.info("Studio: briefing fell back to the job itself: {}", error)
+            brief = ""
+        return brief or goal.strip()
+
     # ---------------------------------------------------------- team brains
 
     async def _known_models(self) -> list[str]:
@@ -1761,6 +1862,7 @@ class StudioService:
                     "role": agent.role,
                     "model": model,
                     "using": using,
+                    "private": await self.is_private_from(agent),
                     "note": ""
                     if using == model
                     else f"{model_label(model)} isn't available, so "
@@ -1772,6 +1874,7 @@ class StudioService:
             "agents": rows,
             "local": await self.local_models(),
             "turns": self.settings.studio_local_model_turns,
+            "private_memory": self.settings.studio_private_memory,
             "working": [model_label(m) for m in turns.working],
             "waiting": [model_label(m) for m in turns.waiting],
         }
@@ -2340,7 +2443,7 @@ class StudioService:
         """Start a hand-off in the background; the crew uses this."""
         return await self.start_task(
             agent_id=agent.id,
-            goal=goal,
+            goal=await self._briefed(agent, goal, parent_chat_id),
             site_id=site_id,
             parent_chat_id=parent_chat_id,
         )
@@ -2373,6 +2476,7 @@ class StudioService:
         parent_chat_id: str | None,
     ) -> tuple[AgentRun, Chat]:
         """Run one task on an agent and wait for it; the main agent uses this."""
+        goal = await self._briefed(agent, goal, parent_chat_id)
         chat = await self.create_chat(
             agent_id=agent.id,
             title=goal.strip()[:48],
@@ -2650,7 +2754,8 @@ class StudioService:
                 "model": member.model,
                 "using": using,
                 "busy": member.id in running,
-                "local": using.startswith(LOCAL_MODEL_PREFIX),
+                "local": self.runs_on_this_pc(using),
+                "private": await self.is_private_from(member),
             }
             for member in await self.agents()
             if member.id != agent.id and not member.archived

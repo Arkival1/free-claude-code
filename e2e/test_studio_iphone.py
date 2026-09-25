@@ -816,6 +816,11 @@ def test_each_agent_can_have_its_own_brain(page: Page, admin_base_url: str) -> N
     expect(builder).to_be_visible()
     expect(sheet.get_by_label("Model for Researcher")).to_be_visible()
     expect(sheet.get_by_role("button", name="Suggest a mix")).to_be_visible()
+    # These agents think on a server AI, so the sheet says memory stays home.
+    expect(sheet).to_contain_text("Your memory stays on this PC")
+    expect(sheet.locator(".brain-private").first).to_contain_text(
+        "can't see your memory"
+    )
     overflow = page.evaluate(
         "() => document.documentElement.scrollWidth - window.innerWidth"
     )

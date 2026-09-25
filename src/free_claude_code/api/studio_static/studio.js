@@ -1047,6 +1047,9 @@
         ]),
         picker(row),
         row.note ? el("p", { class: "muted brain-note", text: row.note }) : null,
+        row.private
+          ? el("p", { class: "muted brain-note brain-private", text: "Server AI: can't see your memory or Obsidian. Jarvis briefs it when you give it a job." })
+          : null,
       ])
     );
     const distinct = () =>
@@ -1115,6 +1118,9 @@
     });
     openSheet("Team brains", [
       el("p", { class: "muted", text: "Give each agent its own AI model, so they aren't all the same AI." }),
+      data.private_memory
+        ? el("p", { class: "muted", text: "Your memory stays on this PC: agents on server AIs can't read it. Jarvis writes them a briefing with only what the job needs." })
+        : null,
       ...rows,
       advice,
       el("div", { class: "row" }, [suggest, save]),
@@ -4036,7 +4042,7 @@
                 el("span", { class: "grow" }, [
                   el("strong", { text: member.name }),
                   el("small", {
-                    text: `${member.role} · ${member.local ? "local" : "server"} · ${shortModel(member.using || member.model)}`,
+                    text: `${member.role} · ${member.local ? "local" : member.private ? "server · no memory" : "server"} · ${shortModel(member.using || member.model)}`,
                     title: member.using && member.using !== member.model ? `Set to ${member.model}; using ${member.using} because it isn't available` : member.model,
                   }),
                 ]),

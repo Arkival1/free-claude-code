@@ -1,6 +1,6 @@
 """A teacher agent runs a class for a student agent, then tests it."""
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 from loguru import logger
 
@@ -68,12 +68,15 @@ class School:
         memory: MemoryService,
         tuner: LightTuner,
         default_model: str,
+        sealed: Callable[[Agent], Awaitable[bool]] | None = None,
     ) -> None:
         self._store = store
         self._router = router
         self._memory = memory
         self._tuner = tuner
         self._default_model = default_model
+        # A student on a server AI learns without the user's memory.
+        self._sealed = sealed
 
     async def open_course(
         self,
@@ -438,7 +441,8 @@ class School:
 
     async def _student_system(self, student: Agent, topic: str) -> str:
         parts = [STUDENT_PROMPT, student.system_prompt.strip()]
-        if student.memory_enabled:
+        private = self._sealed is not None and await self._sealed(student)
+        if student.memory_enabled and not private:
             parts.append(await self._memory.context_block(student.id, topic))
         return "\n\n".join(part for part in parts if part.strip())
 

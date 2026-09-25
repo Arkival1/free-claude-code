@@ -56,6 +56,17 @@ def _call_key(call: ToolCall) -> str:
 
 
 MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user):"
+PRIVATE_TOOLS = frozenset(
+    {"remember", "recall", "video_notes", "knowledge", "conversation", "learn", "todo"}
+)
+"""Tools that read the user's memory bank, so agents on server AIs lose them."""
+SEALED_PROMPT = (
+    "You run on an outside server, so the user's memory, notes, Obsidian "
+    "vault, and earlier conversations stay on their PC and are not shared "
+    "with you. The task you are given is your briefing: work from it, the "
+    "project files, and the web. If something you need is missing, say "
+    "exactly what, and the user's main AI will fill it in."
+)
 
 
 STUDIO_NOTE_HEADER = "Studio's note for this message (not from the user):"
@@ -199,8 +210,11 @@ class AgentRunner:
         notes: NotesKeeper | None = None,
         live: MutableMapping[str, str] | None = None,
         temperature: float = 0.2,
+        sealed: Callable[[Agent], Awaitable[bool]] | None = None,
     ) -> None:
         self._store = store
+        # Says which agents think on a server, and so must not see memory.
+        self._sealed = sealed
         self._router = router
         self._toolbox = toolbox
         self._memory = memory
@@ -211,6 +225,20 @@ class AgentRunner:
         # Chat id -> the reply being written right now, for live display.
         self._live = live
         self._temperature = temperature
+
+    async def _private_view(self, agent: Agent) -> tuple[Agent, bool]:
+        """The agent as it may act: without memory when it thinks on a server."""
+        if self._sealed is None or not await self._sealed(agent):
+            return agent, False
+        return (
+            agent.model_copy(
+                update={
+                    "memory_enabled": False,
+                    "tools": tuple(t for t in agent.tools if t not in PRIVATE_TOOLS),
+                }
+            ),
+            True,
+        )
 
     def _steps_for(self, agent: Agent) -> int:
         return self._builder_max_steps if agent.role == "builder" else self._max_steps
@@ -240,7 +268,7 @@ class AgentRunner:
             pack = await self._store.get(TunePack, agent.tune_pack_id)
             if pack is not None and pack.active:
                 parts.append(pack_system_text(pack))
-        skills = await self._memory.skills(agent.id)
+        skills = await self._memory.skills(agent.id) if agent.memory_enabled else ()
         if skills:
             lines = "\n".join(f"- {entry.text[:900]}" for entry in skills)
             parts.append(
@@ -287,6 +315,11 @@ class AgentRunner:
             line = f"- {member.name} ({member.role}, {member.model}): {about[:140]}"
             if abilities:
                 line += f" It {', '.join(abilities)}."
+            if self._sealed is not None and await self._sealed(member):
+                line += (
+                    " It runs on a server AI and cannot see the user's memory; "
+                    "Studio sends it your briefing, so give it the whole job."
+                )
             lines.append(line)
         return "\n".join(lines) or "- nobody yet; the user can add agents."
 
@@ -420,8 +453,9 @@ class AgentRunner:
         await self._store.append_message(
             chat_id=chat.id, role="user", text=user_text, author="user"
         )
+        agent, sealed = await self._private_view(agent)
         note = await prepare() if prepare is not None else ""
-        recalled = await self._recall_earlier(agent, chat, user_text)
+        recalled = "" if sealed else await self._recall_earlier(agent, chat, user_text)
         note = "\n\n".join(part for part in (note, recalled) if part)
         history = await self._history(agent, chat)
         if not history or not history[-1].content.endswith(user_text):
@@ -435,6 +469,7 @@ class AgentRunner:
             query=user_text,
             max_steps=self._steps_for(agent),
             turn_note=note,
+            sealed=sealed,
         )
         self._keep_notes(agent, chat, await self._history_start(chat))
         if agent.memory_enabled and not result.failed and result.text:
@@ -449,6 +484,7 @@ class AgentRunner:
 
     async def run_task(self, agent: Agent, chat: Chat, run: AgentRun) -> AgentRun:
         """Run one autonomous goal to completion and persist its outcome."""
+        agent, sealed = await self._private_view(agent)
         started = run.model_copy(update={"status": "running", "updated_at": now_ms()})
         await self._store.put(started)
         await self._store.append_message(
@@ -467,6 +503,7 @@ class AgentRunner:
             context=context,
             query=run.goal,
             max_steps=run.max_steps or self._max_steps,
+            sealed=sealed,
         )
         finished = started.model_copy(
             update={
@@ -510,6 +547,7 @@ class AgentRunner:
         max_steps: int | None = None,
     ) -> TurnResult:
         """Take one turn in an existing conversation someone else is driving."""
+        agent, sealed = await self._private_view(agent)
         context = self._context(agent, chat, site_id=chat.site_id)
         return await self._loop(
             agent,
@@ -519,6 +557,7 @@ class AgentRunner:
             query=query,
             max_steps=max_steps or self._max_steps,
             extra_system=extra_system,
+            sealed=sealed,
         )
 
     async def _loop(
@@ -532,6 +571,7 @@ class AgentRunner:
         max_steps: int,
         extra_system: str = "",
         turn_note: str = "",
+        sealed: bool = False,
     ) -> TurnResult:
         await self._toolbox.check_online()
         names = self._toolbox.tool_names(agent.tools, role=agent.role)
@@ -548,6 +588,8 @@ class AgentRunner:
         system = await self.system_prompt(
             agent, query=query, site_id=context.site_id, with_memory=False
         )
+        if sealed:
+            system = f"{system}\n\n{SEALED_PROMPT}"
         if extra_system:
             system = f"{system}\n\n{extra_system}"
         if agent.memory_enabled:
@@ -644,7 +686,7 @@ class AgentRunner:
                     author=agent.name,
                     data={"partial": True},
                 )
-            outcomes = await self._run_calls(reply.tool_calls, context)
+            outcomes = await self._run_calls(reply.tool_calls, context, sealed=sealed)
             for call, outcome in zip(reply.tool_calls, outcomes, strict=True):
                 used.append(call.name)
                 if outcome.failed:
@@ -690,16 +732,25 @@ class AgentRunner:
         )
 
     async def _run_calls(
-        self, calls: Sequence[ToolCall], context: ToolContext
+        self, calls: Sequence[ToolCall], context: ToolContext, *, sealed: bool = False
     ) -> list[ToolOutcome]:
         """Run tool calls; look-ups that change nothing run at the same time."""
-        if len(calls) > 1 and all(call.name in PARALLEL_TOOLS for call in calls):
-            return list(
-                await asyncio.gather(
-                    *(self._toolbox.run(call, context) for call in calls)
+
+        async def run(call: ToolCall) -> ToolOutcome:
+            if sealed and call.name in PRIVATE_TOOLS:
+                return ToolOutcome(
+                    text=(
+                        "The user's memory stays on their PC; agents on server AIs "
+                        "can't read it. Work from your briefing, or say what you need."
+                    ),
+                    data={"tool": call.name, "private": True},
+                    failed=True,
                 )
-            )
-        return [await self._toolbox.run(call, context) for call in calls]
+            return await self._toolbox.run(call, context)
+
+        if len(calls) > 1 and all(call.name in PARALLEL_TOOLS for call in calls):
+            return list(await asyncio.gather(*(run(call) for call in calls)))
+        return [await run(call) for call in calls]
 
     def _show_live(self, chat_id: str) -> Callable[[str], None] | None:
         live = self._live

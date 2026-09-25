@@ -976,6 +976,19 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_PRIVATE_MEMORY",
+        "Keep Memory on This PC",
+        "studio",
+        "boolean",
+        settings_attr="studio_private_memory",
+        description=(
+            "Agents that think on a server or cloud AI get no access to the "
+            "memory bank, Obsidian vault, knowledge library, to-dos, or earlier "
+            "conversations. When the main AI hands them work, it writes them a "
+            "briefing with only what the job needs, and shows it to you."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LOCAL_MODEL_TURNS",
         "Local Models Take Turns",
         "studio",

@@ -2551,3 +2551,6 @@ body[data-page="settings"] .view {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.brain-private {
+  color: var(--accent);
+}

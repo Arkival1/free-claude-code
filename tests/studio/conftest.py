@@ -122,6 +122,9 @@ def studio_settings() -> Callable[..., Settings]:
             "MODEL": "nvidia_nim/test-model",
             "STUDIO_ENABLED": True,
             "STUDIO_DEFAULT_MODEL": "nvidia_nim/test-model",
+            # Tests run agents on a server model; the private-memory tests
+            # turn this back on.
+            "STUDIO_PRIVATE_MEMORY": False,
         }
         values.update(overrides)
         return Settings.model_validate(values)
