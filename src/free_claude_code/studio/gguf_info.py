@@ -5,6 +5,7 @@ trained context length, which is enough to estimate how much graphics memory
 a model needs at a given context size.
 """
 
+import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,10 @@ class GGUFInfo:
     key_length: int = 0
     value_length: int = 0
     context_max: int = 0
+    tools: bool = False
+    """The chat template knows how to offer tools and read tool calls."""
+    reasoning: bool = False
+    """The model thinks before answering (a thinking mode in its template)."""
 
 
 def read_gguf_info(path: Path) -> GGUFInfo:
@@ -73,6 +78,8 @@ def read_gguf_info(path: Path) -> GGUFInfo:
             (kind,) = struct.unpack("<I", handle.read(4))
             values[key] = _value(handle, kind, keep=_keeps(key))
     arch = str(values.get("general.architecture") or "")
+    template = values.get("tokenizer.chat_template")
+    template = template if isinstance(template, str) else ""
 
     def number(name: str) -> int:
         value = values.get(f"{arch}.{name}")
@@ -91,11 +98,45 @@ def read_gguf_info(path: Path) -> GGUFInfo:
         key_length=number("attention.key_length"),
         value_length=number("attention.value_length"),
         context_max=number("context_length"),
+        tools=supports_tools(template),
+        reasoning=thinks(
+            template, name=f"{values.get('general.name') or ''} {path.stem}"
+        ),
     )
 
 
 def _keeps(key: str) -> bool:
-    return key.startswith("general.") or key.endswith(_WANTED)
+    return (
+        key.startswith("general.")
+        or key.endswith(_WANTED)
+        or key == "tokenizer.chat_template"
+    )
+
+
+_TOOL_WORD = re.compile(r"\btools\b")
+_TOOL_FORMAT = re.compile(
+    r"tool_call|tool_response|TOOL_CALLS|TOOL_RESULTS|python_tag|ipython|"
+    r"<function|\bfunction\b|tool\u2581call",
+    re.I,
+)
+_THINKING = re.compile(
+    r"<think>|enable_thinking|reasoning_content|reasoning_effort|<\|channel\|>analysis",
+    re.I,
+)
+_REASONING_NAME = re.compile(
+    r"(?:^|[-_ ./])(?:r1|qwq|reasoning|reasoner|thinking|magistral|gpt-oss)(?:$|[-_ .])",
+    re.I,
+)
+
+
+def supports_tools(template: str) -> bool:
+    """True when a chat template takes a tool list and has a way to call them."""
+    return bool(_TOOL_WORD.search(template) and _TOOL_FORMAT.search(template))
+
+
+def thinks(template: str, *, name: str = "") -> bool:
+    """True for models that reason before answering."""
+    return bool(_THINKING.search(template) or _REASONING_NAME.search(name))
 
 
 def _string(handle: BinaryIO) -> str:

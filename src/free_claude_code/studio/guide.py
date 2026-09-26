@@ -733,6 +733,10 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "graphics card",
             "gpu",
             "rx 580",
+            "vision",
+            "reasoning",
+            "which models",
+            "can see images",
             "run ai faster",
             "smoother",
         ),
@@ -744,7 +748,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "Studio; it starts by itself when an agent needs a model. Every "
             ".gguf model in Studio's folder, LM Studio's folder, and any Extra "
             "Model Folders is listed with its size, type, and how much graphics "
-            "memory it needs, with a warning when it will not fit. Load or "
+            "memory it needs, with a warning when it will not fit. Badges show "
+            "which models can use Tools, see images (Vision), and think first "
+            "(Reasoning); the buttons above the list filter by them. Load or "
             "Unload each one, and open Settings on a model to change its "
             "context (how much it remembers at once), how many layers go on the "
             "graphics card, flash attention, and memory for context (q8 halves "

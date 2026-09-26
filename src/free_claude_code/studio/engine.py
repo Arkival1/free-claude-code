@@ -60,6 +60,8 @@ class EngineModel:
     size: int
     info: GGUFInfo
     source: str
+    vision: Path | None = None
+    """The image encoder (mmproj file) beside it, for a model that can see."""
 
 
 @dataclass
@@ -355,6 +357,7 @@ class Engine:
                     size=path.stat().st_size,
                     info=info,
                     source=source,
+                    vision=_image_encoder(path),
                 )
             )
         return models
@@ -758,6 +761,11 @@ class Engine:
                     "fits": estimate["gpu_gb"] <= gpu_budget_gb,
                     "speed": speeds.get(model.name, {}),
                     "benchmark": self.benchmarks.get(model.name, {}),
+                    "capabilities": {
+                        "tools": model.info.tools,
+                        "vision": model.vision is not None,
+                        "reasoning": model.info.reasoning,
+                    },
                     "auto": model.name not in saved,
                     "advice": advice.get(model.name, ""),
                 }
@@ -873,3 +881,24 @@ def _stop_tree(pid: int) -> None:
             killpg(pid, signal.SIGKILL)
     with suppress(ProcessLookupError, PermissionError):
         os.kill(pid, signal.SIGKILL)
+
+
+def _image_encoder(path: Path) -> Path | None:
+    """The mmproj file a vision model keeps beside it, if any.
+
+    LM Studio keeps one model per folder, so an mmproj there is its own. In
+    a folder of several models, the mmproj must also name the model.
+    """
+    with suppress(OSError):
+        files = sorted(path.parent.glob("*.gguf"))
+        encoders = [f for f in files if f.name.lower().startswith("mmproj")]
+        models = [f for f in files if f not in encoders]
+        if len(models) <= 1:
+            return encoders[0] if encoders else None
+        family = re.split(r"[-_.]", model_name(path))[0]
+        name = model_name(path)
+        for encoder in encoders:
+            label = encoder.stem.lower()
+            if name in label or (len(family) > 2 and family in label):
+                return encoder
+    return None

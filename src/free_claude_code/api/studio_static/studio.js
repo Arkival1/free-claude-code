@@ -1705,6 +1705,12 @@
   // Model Control: the built-in engine, like LM Studio inside Studio.
   const CONTEXT_STEPS = [2048, 4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 131072];
   let engineTimer = 0;
+  let engineFilter = "all";
+  const CAPABILITIES = [
+    ["tools", "Tools", "Trained to call tools, so it follows an agent's tool steps better."],
+    ["vision", "Vision", "Can look at images (its image part, an mmproj file, is beside it)."],
+    ["reasoning", "Reasoning", "Thinks before answering. Fast Local Replies skips the thinking for speed."],
+  ];
 
   async function renderEngine() {
     const generation = renderGeneration;
@@ -1779,8 +1785,32 @@
       status,
     ], `Studio runs your models itself with llama.cpp (${data.build === "cpu" ? "processor build" : "graphics card build, Vulkan"}). Models load when an agent needs them; ${data.models_at_once} at a time.`);
 
+    const has = (model, key) => Boolean(model.capabilities && model.capabilities[key]);
+    const shown = data.models.filter((model) => engineFilter === "all" || has(model, engineFilter));
+    const filters = el(
+      "div",
+      { class: "chips engine-filters", role: "group", "aria-label": "Show models that can" },
+      [["all", "All", ""], ...CAPABILITIES].map(([key, label]) => {
+        const count = key === "all" ? data.models.length : data.models.filter((model) => has(model, key)).length;
+        return el("button", {
+          class: `chip${key === "all" ? "" : ` cap-${key}`}`,
+          type: "button",
+          "aria-pressed": String(engineFilter === key),
+          text: `${label} (${count})`,
+          onclick: () => {
+            engineFilter = key;
+            render();
+          },
+        });
+      })
+    );
     const models = data.models.length
-      ? data.models.map((model) => engineModelRow(model, data, act))
+      ? [
+          filters,
+          ...(shown.length
+            ? shown.map((model) => engineModelRow(model, data, act))
+            : [empty("No model here can do that yet.")]),
+        ]
       : [empty("No .gguf models found. Download some in LM Studio or on the Models page, or add a folder in Settings (Extra Model Folders).")];
     const folders = card(
       "Model folders",
@@ -1938,6 +1968,13 @@
       el("div", { class: "engine-model-head" }, [
         el("div", { class: "grow" }, [
           el("strong", { text: model.name }),
+          el(
+            "div",
+            { class: "chips engine-caps" },
+            CAPABILITIES.filter(([key]) => model.capabilities && model.capabilities[key]).map(([key, label, about]) =>
+              el("span", { class: `pill cap cap-${key}`, text: label, title: about })
+            )
+          ),
           el("div", { class: "chips" }, [
             model.auto ? el("span", { class: "pill good", text: "fitted to your PC" }) : null,
             model.params ? el("span", { class: "pill", text: model.params }) : null,

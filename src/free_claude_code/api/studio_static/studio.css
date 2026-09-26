@@ -2601,3 +2601,19 @@ body[data-page="settings"] .view {
 .engine-note.warn .engine-note-icon { background: var(--warn); color: #1a1000; }
 .engine-note.error .engine-note-icon { background: var(--bad); color: #1a0004; }
 .engine-bench { color: var(--good); }
+.engine-filters { margin: 4px 0 14px; }
+.engine-caps:empty { display: none; }
+.engine-caps { margin-top: 6px; }
+.pill.cap { font-weight: 700; }
+.cap-tools { --cap: var(--cyan); }
+.cap-vision { --cap: #c792ff; }
+.cap-reasoning { --cap: var(--accent); }
+.pill.cap, .chip.cap-tools, .chip.cap-vision, .chip.cap-reasoning {
+  color: var(--cap);
+  border-color: color-mix(in srgb, var(--cap) 55%, transparent);
+}
+.chip[aria-pressed="true"].cap-tools,
+.chip[aria-pressed="true"].cap-vision,
+.chip[aria-pressed="true"].cap-reasoning {
+  background: color-mix(in srgb, var(--cap) 18%, transparent);
+}

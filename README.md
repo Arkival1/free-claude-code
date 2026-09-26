@@ -516,7 +516,14 @@ any **Extra Model Folders** you add in settings is listed with its size,
 parameters, quantization, and state (loaded, loading, unloaded). Each shows
 how much graphics memory it needs at its settings, read from the model file
 itself, against your **Graphics Memory (GB)** setting, with a warning when it
-will not fit. **Load** and **Unload** it, and open **Settings** on a model to
+will not fit. Badges show what each model can do, read from its own files: **Tools** (its
+chat template takes a tool list and has a tool-call format, so it follows an
+agent's tool steps better), **Vision** (its image encoder, an `mmproj` file, is
+beside it, as LM Studio stores vision models), and **Reasoning** (its template
+has a thinking mode, or it is a known reasoning model such as an R1 distill or
+QwQ; Fast Local Replies skips the thinking for speed). The **All / Tools /
+Vision / Reasoning** buttons above the list show only the models that can.
+**Load** and **Unload** it, and open **Settings** on a model to
 change:
 
 - **Context**: how many tokens it holds at once (8,192 by default).

@@ -31,7 +31,9 @@ from .conftest import OFFLINE_SEARCH, RecordingWebTools
 FAKE_SERVER = Path(__file__).with_name("fake_llama_server.py")
 
 
-def fake_gguf(path: Path, *, layers: int = 28, pad: int = 0) -> Path:
+def fake_gguf(
+    path: Path, *, layers: int = 28, pad: int = 0, template: str = ""
+) -> Path:
     """Write a GGUF header like a 1.5B Qwen model's, with a tokenizer to skip."""
 
     def text(value: str) -> bytes:
@@ -58,6 +60,8 @@ def fake_gguf(path: Path, *, layers: int = 28, pad: int = 0) -> Path:
             struct.pack("<IQ", 6, 3) + struct.pack("<3f", 0, 0, 0),
         ),
     ]
+    if template:
+        pairs.append(("tokenizer.chat_template", 8, text(template)))
     header = b"GGUF" + struct.pack("<I", 3) + struct.pack("<QQ", 0, len(pairs))
     body = b"".join(
         text(key) + struct.pack("<I", kind) + value for key, kind, value in pairs
