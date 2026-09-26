@@ -18,6 +18,7 @@ from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
 from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.file_text import MAX_UPLOAD, read_file_text
 from free_claude_code.studio.llm import ChatMessage
 from free_claude_code.studio.local_voice import LocalVoiceError
 from free_claude_code.studio.lora import (
@@ -622,7 +623,7 @@ async def delete_agent(
     _: None = Access,
 ) -> JsonObject:
     """Delete one agent and its memories."""
-    return {"deleted": await studio.delete_agent(agent_id)}
+    return await studio.delete_agent(agent_id)
 
 
 @router.get("/studio/api/studies")
@@ -1295,6 +1296,78 @@ async def engine_benchmark(
 ) -> JsonObject:
     """Time a short reply: how fast the model reads and writes on this PC."""
     return dict(await studio.engine_benchmark(name))
+
+
+@router.post("/studio/api/engine/identify")
+async def engine_identify(
+    request: Request,
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """What a file is, from its first bytes, before a big upload starts."""
+    head = bytearray()
+    async for chunk in request.stream():
+        head.extend(chunk)
+        if len(head) >= 4096:
+            break
+    return studio.engine_identify(name, bytes(head[:4096]))
+
+
+@router.post("/studio/api/engine/upload")
+async def engine_upload(
+    request: Request,
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Receive a model file as it streams in, then say what it can do."""
+    length = request.headers.get("content-length")
+    size = int(length) if length and length.isdigit() else None
+    return await studio.engine_upload(name, request.stream(), size=size)
+
+
+@router.post("/studio/api/engine/pick-file")
+async def engine_pick_file(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Choose a model file on this PC in a normal file window."""
+    return await studio.engine_add_from_pc()
+
+
+@router.get("/studio/api/engine/models/{name}/report")
+async def engine_report(
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """What one model can do: tools, vision, reasoning, fit, and best use."""
+    return await studio.engine_report(name)
+
+
+@router.post("/studio/api/files/read")
+async def read_attached_file(
+    request: Request,
+    name: str,
+    _: None = Access,
+) -> JsonObject:
+    """Read the text out of a file attached to a chat message."""
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > MAX_UPLOAD:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Attach files up to {MAX_UPLOAD // 1024 // 1024} MB.",
+        )
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > MAX_UPLOAD:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Attach files up to {MAX_UPLOAD // 1024 // 1024} MB.",
+            )
+    return await asyncio.to_thread(read_file_text, name, bytes(data))
 
 
 @router.get("/studio/api/engine/logs")

@@ -629,11 +629,19 @@
     );
     const input = el("textarea", { placeholder: "Message", rows: "1" });
     const send = el("button", { class: "primary", text: "Send" });
+    const tray = attachmentTray();
     send.addEventListener("click", async () => {
-      const text = input.value.trim();
+      const typed = input.value.trim();
+      const attached = tray.names();
+      const text = tray.take(typed);
       if (!text) return;
       input.value = "";
-      log.append(el("div", { class: "bubble user", text }));
+      log.append(
+        el("div", {
+          class: "bubble user",
+          text: attached.length ? `${typed}\n📎 ${attached.join(", ")}`.trim() : text,
+        })
+      );
       send.disabled = true;
       send.textContent = "…";
       // Show tool steps and approval requests while the agent is still working.
@@ -681,7 +689,10 @@
         }),
       ]),
       log,
+      tray.chips,
       el("div", { class: "composer" }, [
+        tray.button,
+        tray.input,
         el("div", { class: "grow" }, [input]),
         send,
       ])
@@ -822,6 +833,37 @@
     ]);
   }
 
+  // Deleting an agent: one confirm, then it is gone with its chats and memories.
+  const PERMANENT_ROLES = ["main", "guide"];
+  function confirmDeleteAgent(agent, onDone) {
+    const status = el("p", { class: "muted", role: "status" });
+    const yes = el("button", {
+      class: "danger",
+      type: "button",
+      text: `Delete ${agent.name}`,
+      onclick: async () => {
+        yes.disabled = true;
+        try {
+          const result = await remove(`/studio/api/agents/${agent.id}`);
+          closeSheet();
+          notify(`${result.name} deleted${result.chats ? ` with ${result.chats} chat${result.chats === 1 ? "" : "s"}` : ""}.`);
+          if (onDone) onDone();
+        } catch (error) {
+          status.textContent = error.message;
+          yes.disabled = false;
+        }
+      },
+    });
+    openSheet(`Delete ${agent.name}?`, [
+      el("p", { text: `${agent.name} stops any work it is doing, and its chats, classes, tasks, and memories are deleted. It leaves any rooms it was in. Projects it built stay, and so does what it saved to the team's shared memory.` }),
+      el("div", { class: "row" }, [
+        yes,
+        el("button", { class: "secondary", type: "button", text: "Keep it", onclick: () => closeSheet() }),
+      ]),
+      status,
+    ]);
+  }
+
   async function renderAgents() {
     const generation = renderGeneration;
     const [{ agents }, { sites }, { runs }] = await Promise.all([
@@ -841,19 +883,31 @@
         "Agents",
         agents.length
           ? agents.map((agent) =>
-              el(
-                "button",
-                { class: "list-item", onclick: () => go(`agent/${agent.id}`) },
-                [
-                  el("span", { class: "grow" }, [
-                    el("strong", { text: agent.name }),
-                    el("span", { text: `${agent.role} · ${agent.model}` }),
-                  ]),
-                  agent.tune_pack_id
-                    ? el("span", { class: "pill good", text: "tuned" })
-                    : null,
-                ]
-              )
+              el("div", { class: "agent-row" }, [
+                el(
+                  "button",
+                  { class: "list-item grow", onclick: () => go(`agent/${agent.id}`) },
+                  [
+                    el("span", { class: "grow" }, [
+                      el("strong", { text: agent.name }),
+                      el("span", { text: `${agent.role} · ${agent.model}` }),
+                    ]),
+                    agent.tune_pack_id
+                      ? el("span", { class: "pill good", text: "tuned" })
+                      : null,
+                  ]
+                ),
+                PERMANENT_ROLES.includes(agent.role)
+                  ? null
+                  : el("button", {
+                      class: "danger icon-button",
+                      type: "button",
+                      text: "🗑",
+                      title: `Delete ${agent.name}`,
+                      "aria-label": `Delete ${agent.name}`,
+                      onclick: () => confirmDeleteAgent(agent, () => render()),
+                    }),
+              ])
             )
           : empty("No agents yet.")
       ),
@@ -1282,6 +1336,14 @@
           el("span", { text: agent.memory_enabled ? "on" : "off" }),
         ]),
         modelEditor(agent),
+        PERMANENT_ROLES.includes(agent.role)
+          ? null
+          : el("button", {
+              class: "danger",
+              type: "button",
+              text: "Delete this agent",
+              onclick: () => confirmDeleteAgent(agent, () => go("agents")),
+            }),
         el("div", { class: "row" }, [
           el("button", {
             class: "primary",
@@ -1712,6 +1774,198 @@
     ["reasoning", "Reasoning", "Thinks before answering. Fast Local Replies skips the thinking for speed."],
   ];
 
+  // Send a file's raw bytes, reporting upload progress (fetch can't).
+  function sendFile(path, body, onProgress) {
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open("POST", path);
+      const key = token();
+      if (key) request.setRequestHeader("x-api-key", key);
+      request.setRequestHeader("content-type", "application/octet-stream");
+      if (onProgress) request.upload.onprogress = (event) => onProgress(event.loaded, event.total);
+      request.onload = () => {
+        let parsed = {};
+        try {
+          parsed = request.responseText ? JSON.parse(request.responseText) : {};
+        } catch {
+          parsed = {};
+        }
+        if (request.status === 401) askForToken();
+        if (request.status >= 400) reject(new Error(parsed.detail || `Upload failed (${request.status})`));
+        else resolve(parsed);
+      };
+      request.onerror = () => reject(new OfflineError("Can't reach your Studio server."));
+      request.send(body);
+    });
+  }
+
+  // Attach files to a message: Studio reads them and the agent gets the text.
+  function attachmentTray() {
+    const files = [];
+    const chips = el("div", { class: "chips attach-chips" });
+    const input = el("input", { type: "file", multiple: true, class: "visually-hidden", "aria-label": "Attach files" });
+    const button = el("button", {
+      class: "attach-button",
+      type: "button",
+      text: "📎",
+      title: "Attach a file",
+      "aria-label": "Attach a file",
+      onclick: () => input.click(),
+    });
+    const redraw = () =>
+      chips.replaceChildren(
+        ...files.map((file, index) =>
+          el("span", { class: "pill attach" }, [
+            `📎 ${file.name}${file.truncated ? " (first part)" : ""}`,
+            el("button", {
+              type: "button",
+              class: "attach-remove",
+              "aria-label": `Remove ${file.name}`,
+              text: "✕",
+              onclick: () => {
+                files.splice(index, 1);
+                redraw();
+              },
+            }),
+          ])
+        )
+      );
+    input.addEventListener("change", async () => {
+      for (const file of input.files) {
+        try {
+          const read = await sendFile(`/studio/api/files/read?name=${encodeURIComponent(file.name)}`, file);
+          if (!read.text) {
+            notify(read.message || `${file.name} has no text to read.`);
+            continue;
+          }
+          files.push({ name: file.name, text: read.text, truncated: read.truncated });
+        } catch (error) {
+          notify(error.message);
+        }
+      }
+      input.value = "";
+      redraw();
+    });
+    return {
+      button,
+      input,
+      chips,
+      names: () => files.map((file) => file.name),
+      take(typed) {
+        if (!files.length) return typed;
+        const block = files
+          .map((file) => `[Attached file: ${file.name}${file.truncated ? " (first part)" : ""}]\n\`\`\`\n${file.text}\n\`\`\``)
+          .join("\n\n");
+        files.length = 0;
+        redraw();
+        return `${typed || "Here is a file for you."}\n\n${block}`;
+      },
+    };
+  }
+
+  function showModelReport(report) {
+    if (!report.is_model) {
+      openSheet(`${report.label}: ${report.file}`, [el("p", { text: report.message })]);
+      return;
+    }
+    openSheet(`What ${report.name} can do`, [
+      el("div", { class: "chips" }, [
+        report.params ? el("span", { class: "pill", text: report.params }) : null,
+        el("span", { class: "pill", text: `${report.size_gb} GB` }),
+        report.context_max ? el("span", { class: "pill", text: `up to ${report.context_max.toLocaleString()} tokens` }) : null,
+        report.architecture ? el("span", { class: "pill", text: report.architecture }) : null,
+      ]),
+      ...report.can.map((item) =>
+        el("div", { class: `can-row ${item.yes ? "yes" : "no"}` }, [
+          el("span", { class: "can-mark", "aria-hidden": "true", text: item.yes ? "✓" : "✕" }),
+          el("div", {}, [
+            el("strong", { text: `${item.what}: ${item.yes ? "yes" : "no"}` }),
+            el("p", { class: "muted", text: item.about }),
+          ]),
+        ])
+      ),
+      el("p", {}, [el("strong", { text: "Best for: " }), report.best_for.join(", ")]),
+      el("div", { class: "row" }, [
+        el("button", { class: "primary", type: "button", text: "Give it to an agent", onclick: () => openTeamBrains(() => render()) }),
+        el("button", { class: "secondary", type: "button", text: "Close", onclick: () => closeSheet() }),
+      ]),
+    ]);
+  }
+
+  async function addModelFile(file, status, bar) {
+    status.textContent = `Checking ${file.name}…`;
+    const head = await file.slice(0, 64).arrayBuffer();
+    const found = await sendFile(`/studio/api/engine/identify?name=${encodeURIComponent(file.name)}`, head);
+    if (!found.is_model) {
+      status.textContent = "";
+      showModelReport(found);
+      return;
+    }
+    bar.hidden = false;
+    const report = await sendFile(`/studio/api/engine/upload?name=${encodeURIComponent(file.name)}`, file, (done, total) => {
+      bar.firstChild.style.width = percent(total ? done / total : 0);
+      status.textContent = `Adding ${file.name}: ${bytes(done)} of ${bytes(total)}`;
+    });
+    bar.hidden = true;
+    status.textContent = "";
+    // Refresh the list first: a refresh closes any open sheet.
+    if (report.is_model) await render();
+    showModelReport(report);
+  }
+
+  function addModelPanel() {
+    const status = el("p", { class: "muted", role: "status" });
+    const bar = el("div", { class: "meter", hidden: true }, [el("i")]);
+    const input = el("input", { type: "file", class: "visually-hidden", "aria-label": "Choose a file to add" });
+    const take = async (file) => {
+      if (!file) return;
+      try {
+        await addModelFile(file, status, bar);
+      } catch (error) {
+        bar.hidden = true;
+        status.textContent = error.message;
+      }
+    };
+    input.addEventListener("change", () => take(input.files[0]));
+    const zone = el("label", { class: "engine-drop" }, [
+      input,
+      el("strong", { text: "Drop a file here, or tap to choose one" }),
+      el("small", { class: "muted", text: "Any file: Studio says what it is, and for a model (.gguf) what it can do on your PC." }),
+    ]);
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("over");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("over"));
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("over");
+      take(event.dataTransfer.files[0]);
+    });
+    const pick = el("button", {
+      class: "secondary",
+      type: "button",
+      text: "Find a model on this PC…",
+      onclick: async () => {
+        pick.disabled = true;
+        status.textContent = "A file window opened on the PC running Studio.";
+        try {
+          const result = await post("/studio/api/engine/pick-file");
+          status.textContent = "";
+          if (result.picked) {
+            if (result.is_model) await render();
+            showModelReport(result);
+          }
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          pick.disabled = false;
+        }
+      },
+    });
+    return el("div", { class: "engine-add" }, [zone, el("div", { class: "row" }, [pick]), bar, status]);
+  }
+
   async function renderEngine() {
     const generation = renderGeneration;
     clearTimeout(engineTimer);
@@ -1860,7 +2114,7 @@
       engineCard,
       card(
         "Models on this PC",
-        [data.models.length ? el("div", { class: "row" }, [tuneAll]) : null, ...models],
+        [addModelPanel(), data.models.length ? el("div", { class: "row" }, [tuneAll]) : null, ...models],
         `Graphics memory: ${data.gpu_budget_gb} GB${card0 ? " (found on your card)" : " (set in Settings)"}. New models are fitted to your PC automatically; Tune for my PC saves the best settings.`
       ),
       folders,
@@ -2006,6 +2260,19 @@
         : null,
       model.advice ? el("small", { class: "muted", text: `Best for your PC: ${model.advice}` }) : null,
       el("div", { class: "row" }, [
+        el("button", {
+          class: "secondary",
+          type: "button",
+          text: "What can it do?",
+          "aria-label": `What can ${model.name} do?`,
+          onclick: async () => {
+            try {
+              showModelReport(await api(`/studio/api/engine/models/${encodeURIComponent(model.name)}/report`));
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
         el("button", {
           class: "secondary",
           type: "button",
@@ -4626,6 +4893,7 @@
     const last = data.messages[data.messages.length - 1];
     hud.spokenSeq = last ? last.sequence : 0;
 
+    const hudTray = attachmentTray();
     const input = el("input", {
       type: "text",
       id: "hud-input",
@@ -4797,14 +5065,19 @@
     };
 
     const send = async (raw) => {
-      const text = raw.trim();
+      const typed = raw.trim();
+      const attached = hudTray.names();
+      const text = hudTray.take(typed);
       if (!text) return;
       input.value = "";
       unlockSpeech();
       stopSpeaking(refs);
       hud.orb?.burst();
       hud.optimistic?.remove();
-      hud.optimistic = el("div", { class: "hud-line you pending" }, [hudTag("YOU"), text]);
+      hud.optimistic = el("div", { class: "hud-line you pending" }, [
+        hudTag("YOU"),
+        attached.length ? `${typed} 📎 ${attached.join(", ")}`.trim() : text,
+      ]);
       refs.log.querySelector(".hud-empty")?.remove();
       refs.log.append(hud.optimistic);
       refs.log.scrollTop = refs.log.scrollHeight;
@@ -5074,9 +5347,12 @@
               text: "●",
               onclick: () => hear(),
             }),
+            hudTray.button,
+            hudTray.input,
             input,
             el("button", { class: "hud-send", type: "submit", text: "SEND" }),
           ]),
+          hudTray.chips,
           el("div", { class: "hud-foot" }, [
             refs.talk,
             voiceButton,

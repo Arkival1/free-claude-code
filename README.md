@@ -481,6 +481,9 @@ a starting point from the models on this PC: a coding model (one with *coder*
 in its name) for the Builder and Tester, the biggest general model for the
 Researcher, a reasoning model (such as a DeepSeek R1 distill) for the Helper, a
 mid-sized one for Jarvis so he answers quickly, and the smallest for the Guide.
+Where Model Control can read a model's file, models trained for tools go to
+the agents that use tools most, and models with a thinking mode count as
+reasoning models.
 Or just tell Jarvis: *"give the Builder qwen coder"*, *"switch the Researcher
 to llama 3.1 8b"*, *"use gemma for the Guide"*; he switches it at once, and his
 `agent_model` tool lists who uses what. If an agent's model can't be found,
@@ -546,6 +549,20 @@ so runs on the processor), when it stopped unexpectedly (and why: a busy port,
 say), when a model failed to load or doesn't fit, when a card can't use
 compressed context memory, and when LM Studio is also running and may be
 holding graphics memory.
+
+**Add any file.** Drop a file on the box at the top of **Models on this PC**
+(or tap it to choose one). Studio reads the first bytes and says what it is
+before a large upload starts. A `.gguf` model is saved into Studio's models
+folder and you get a report: **Use tools**, **See images**, **Reason step by
+step**, and **Fit on your graphics card**, each yes or no with what it means,
+the settings it will run with, and the agents it suits best. Anything else is
+explained with what to do instead: a raw safetensors or PyTorch model needs its
+GGUF version from Hugging Face, a ZIP needs unzipping, a document belongs in a
+chat. An upload that is not a model stops after its first chunk, a broken
+upload leaves nothing behind, and there must be room on the disk first. On the
+PC running Studio, **Find a model on this PC…** opens a normal file window and
+adds the model without copying it (a hard link where the drive allows). Every
+model in the list has a **What can it do?** button for the same report.
 
 Saving reloads a loaded model with the new settings. The last reply's speed
 shows in tokens per second, and **Engine log** shows what llama.cpp prints.
@@ -761,8 +778,21 @@ parts for the right agents, running independent parts at the same time. Ask
   changed, and preview links.
 - `system_status`: CPU, memory, and disk use, whether LM Studio is running and
   what it serves, the internet connection, and the voice.
+- `weather`: now and the next few days anywhere. "What's the weather in
+  Sydney tomorrow?" is fetched before he answers: temperature, feels-like,
+  wind, humidity, and each day's high, low, and chance of rain. It uses
+  Open-Meteo (no key; only the place name is sent) and is off when Web Access
+  is off. Asking him to *build* a weather app still goes to the Builder.
 - The date and time ride on every message, so "remind me at 5" and "what day
   is it?" work.
+
+**Attach files.** The 📎 button beside the message box (on the HUD and in
+every chat) attaches one or more files. Studio reads their text: text and code
+as they are, Word, Excel (every sheet, tab-separated), and PowerPoint (slide by
+slide) files, and PDFs with real text (scanned pictures of text can't be read).
+Each file shows as a chip (✕ removes it) and its text goes with your next
+message. Files up to 25 MB; a very long one sends its first 40,000 characters
+and says so.
 
 **The Helper** plans in a fixed shape: *Best approach*, numbered *Steps*,
 *Check* (what to test and how to tell it worked), and *Backup*. Ask it to
@@ -1037,6 +1067,13 @@ Tap **+** on the Agents tab, or in the HUD's Active agents panel, to add an
 agent. Start from a preset (Builder, Researcher, Helper, Designer, Tester,
 Assistant, or Custom), then set its name, role, and model, and choose its
 tools: Internet, Code and files, Run and test code, Ask teammates, and Memory.
+
+To delete an agent, press 🗑 beside it on the Agents tab (or **Delete this
+agent** on its page) and confirm. It stops any work it is doing; its chats,
+classes, waiting commands, and memories go, and it leaves any rooms it was in
+(a room left with nobody in it goes too). Projects it built stay, and so does
+what it saved to the team's shared memory. Jarvis and the Guide can't be
+deleted.
 
 Each agent's page has **Teach a skill**. Paste a link (a docs page, a Reddit
 thread, or a YouTube video) or write notes about a tool, command, or code

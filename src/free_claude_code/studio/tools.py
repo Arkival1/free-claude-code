@@ -44,6 +44,7 @@ CONVERSATION_TOOL = "conversation"
 LEARN_TOOL = "learn"
 KNOWLEDGE_TOOL = "knowledge"
 AGENT_MODEL_TOOL = "agent_model"
+WEATHER_TOOL = "weather"
 CALCULATE_TOOL = "calculate"
 PROJECTS_TOOL = "list_projects"
 SYSTEM_STATUS_TOOL = "system_status"
@@ -67,7 +68,7 @@ VIDEO_NOTES_TOOL = "video_notes"
 HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
 MAX_READ_LINES = 400
-NETWORK_TOOLS = frozenset({*WEB_TOOLS, RESEARCH_TOOL, "study_video"})
+NETWORK_TOOLS = frozenset({*WEB_TOOLS, RESEARCH_TOOL, "study_video", "weather"})
 # Look-ups that change nothing, so several asked for at once run together.
 PARALLEL_TOOLS = frozenset(
     {
@@ -441,6 +442,24 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=WEATHER_TOOL,
+        description=(
+            "The weather now and the forecast for any town or city: temperature, "
+            "rain chance, wind. Use it when the user asks about the weather."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "place": {"type": "string", "description": "Town or city."},
+                "days": {
+                    "type": "integer",
+                    "description": "Days of forecast, 1 to 7 (default 3).",
+                },
+            },
+            "required": ["place"],
+        },
+    ),
+    ToolSpec(
         name=LEARN_TOOL,
         description=(
             "Teach yourself a subject in the background: plan a course, research "
@@ -745,6 +764,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         SYSTEM_STATUS_TOOL,
         LEARN_TOOL,
         AGENT_MODEL_TOOL,
+        WEATHER_TOOL,
     }
 )
 MAIN_TOOL_NAMES: tuple[str, ...] = (
@@ -762,6 +782,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     LEARN_TOOL,
     KNOWLEDGE_TOOL,
     AGENT_MODEL_TOOL,
+    WEATHER_TOOL,
     STUDY_VIDEO_TOOL,
     VIDEO_NOTES_TOOL,
     TODO_TOOL,
@@ -1042,6 +1063,7 @@ class AgentToolbox:
                     | "learn"
                     | "knowledge"
                     | "agent_model"
+                    | "weather"
                 ):
                     if self._assistant is None:
                         raise ValueError(f"{call.name} is not available here.")

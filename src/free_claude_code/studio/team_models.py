@@ -5,7 +5,7 @@ Builder qwen coder", and suggest a sensible mix from the models on this PC.
 """
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 from .llm import LOCAL_MODEL_PREFIX
 
@@ -144,26 +144,41 @@ def parse_model_request(
 
 
 def suggest_mix(
-    team: Sequence[tuple[str, str]], available: Sequence[str]
+    team: Sequence[tuple[str, str]],
+    available: Sequence[str],
+    abilities: Mapping[str, Collection[str]] | None = None,
 ) -> dict[str, str]:
     """A starting mix of models for (agent id, role) pairs.
 
     Coding models go to the Builder and Tester, the biggest general model to
     the Researcher, a reasoning model (when there is one) to the Helper, a
     mid-sized general model to the main AI so it answers quickly, and the
-    smallest to the Guide.
+    smallest to the Guide. ``abilities`` (model to "tools", "reasoning",
+    "vision") comes from the models' own files: where known, models trained
+    for tools go to the agents that use tools most.
     """
     models = [model for model in available if not _NOT_CHAT.search(model)]
     if not models:
         return {}
+    known = abilities or {}
 
     def size(model: str) -> float:
         return model_size(model) or 7.0
 
+    def prefer(candidates: list[str], ability: str) -> list[str]:
+        able = [m for m in candidates if ability in known.get(m, ())]
+        return able or candidates
+
     by_size = sorted(models, key=size)
-    general = [m for m in by_size if model_kind(m) == "general"] or by_size
-    coders = [m for m in by_size if model_kind(m) == "coder"]
-    thinkers = [m for m in by_size if model_kind(m) == "thinker"]
+    general = prefer(
+        [m for m in by_size if model_kind(m) == "general"] or by_size, "tools"
+    )
+    coders = prefer([m for m in by_size if model_kind(m) == "coder"], "tools")
+    thinkers = [
+        m
+        for m in by_size
+        if model_kind(m) == "thinker" or "reasoning" in known.get(m, ())
+    ]
     biggest = general[-1]
     middle = general[(len(general) - 1) // 2] if len(general) > 2 else general[-1]
     picks: Mapping[str, str] = {

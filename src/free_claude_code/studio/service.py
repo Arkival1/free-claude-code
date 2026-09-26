@@ -32,7 +32,7 @@ from .connectivity import Connectivity
 from .convo_notes import NotesKeeper
 from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
-from .engine import Engine, EngineError
+from .engine import Engine, EngineError, not_a_model
 from .guide import (
     GUIDE_TOPICS,
     STARTER_QUESTIONS,
@@ -73,6 +73,7 @@ from .model_files import (
     pick_model_file,
     place_in_lmstudio,
 )
+from .model_inspect import identify
 from .models import (
     AGENT_ROLES,
     Agent,
@@ -144,6 +145,7 @@ from .tools import (
 from .tuning import CloudTuner, LightTuner, TuningError
 from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
 from .voice import SpeechAudio, VoiceError, VoiceService, speakable
+from .weather import WeatherError, forecast, weather_request
 
 GUIDE_AGENT_NAME = "Guide"
 BUILDER_AGENT_NAME = "Builder"
@@ -881,6 +883,37 @@ class StudioService:
             return False
         return response.status_code < 400
 
+    def engine_identify(self, name: str, head: bytes) -> JsonObject:
+        """What a file is, from its first bytes, before it is uploaded."""
+        kind, label = identify(head, name)
+        if kind == "gguf":
+            return {
+                "is_model": True,
+                "kind": kind,
+                "label": label,
+                "file": name,
+                "message": "A model file. Adding it…",
+            }
+        return not_a_model(kind, label, name)
+
+    async def engine_upload(
+        self, name: str, chunks: AsyncIterator[bytes], *, size: int | None
+    ) -> JsonObject:
+        return await self._engine_call(self._engine.receive(name, chunks, size=size))
+
+    async def engine_add_from_pc(self) -> JsonObject:
+        """Pick a file in a normal window on this PC and add it without copying."""
+        try:
+            path = await pick_model_file()
+        except ModelFileError as error:
+            raise StudioError(str(error)) from error
+        if path is None:
+            return {"picked": False}
+        return {"picked": True} | await self._engine_call(self._engine.add_file(path))
+
+    async def engine_report(self, name: str) -> JsonObject:
+        return await self._engine_call(self._engine.report(name))
+
     async def engine_tune(self, name: str | None = None) -> list[JsonObject]:
         done = await self._engine_call(self._engine.tune([name] if name else None))
         self._loaded_probe = None
@@ -1161,10 +1194,70 @@ class StudioService:
         await self._store.put(updated)
         return updated
 
-    async def delete_agent(self, agent_id: str) -> bool:
-        """Delete one agent and the memories it owns."""
+    async def delete_agent(self, agent_id: str) -> JsonObject:
+        """Delete one agent with everything that is only its own.
+
+        Its running tasks stop, and its chats, classes, waiting commands, and
+        memories go. It leaves the rooms it was in; a room left empty goes.
+        Projects it built stay, and so does what it wrote to the team's
+        shared memory. The main AI and the Guide stay.
+        """
+        agent = await self._store.require(Agent, agent_id)
+        if agent.role in {MAIN_ROLE, "guide"}:
+            raise StudioError(
+                f"{agent.name} can't be deleted: "
+                + (
+                    "it runs the team. Give it another model in Team brains instead."
+                    if agent.role == MAIN_ROLE
+                    else "it explains the app."
+                )
+            )
+        await self.stop_agent_work(agent_id)
+        # Rooms are shared: the agent leaves them, and only an empty room goes.
+        chats = [
+            chat
+            for chat in await self._store.find(Chat, where={"agent_id": agent_id})
+            if chat.kind != "room"
+        ]
+        chats += await self._store.find(Chat, where={"partner_agent_id": agent_id})
+        for room in await self._store.find(Chat, where={"kind": "room"}):
+            if agent_id not in room.member_ids and room.agent_id != agent_id:
+                continue
+            members = tuple(m for m in room.member_ids if m != agent_id)
+            if not members:
+                chats.append(room)
+                continue
+            await self._store.put(
+                room.model_copy(
+                    update={
+                        "member_ids": members,
+                        "agent_id": members[0]
+                        if room.agent_id == agent_id
+                        else room.agent_id,
+                        "updated_at": now_ms(),
+                    }
+                )
+            )
+        for field in ("teacher_agent_id", "student_agent_id"):
+            await self._store.delete_where(Course, {field: agent_id})
+        for chat in chats:
+            await self._store.delete_where(Message, {"chat_id": chat.id})
+            await self._store.delete(ChatNotes, chat.id)
+            await self._store.delete(Chat, chat.id)
+        await self._store.delete_where(AgentRun, {"agent_id": agent_id})
+        await self._store.delete_where(
+            CommandRequest, {"agent_id": agent_id, "status": "pending"}
+        )
+        memories = await self._store.count(MemoryEntry, where={"agent_id": agent_id})
         await self._store.delete_where(MemoryEntry, {"agent_id": agent_id})
-        return await self._store.delete(Agent, agent_id)
+        await self._store.delete(Agent, agent_id)
+        self._console_extras = None
+        return {
+            "deleted": True,
+            "name": agent.name,
+            "chats": len(chats),
+            "memories": memories,
+        }
 
     # ----------------------------------------------------------------- chats
 
@@ -1680,9 +1773,38 @@ class StudioService:
             return "\n".join((now_line(datetime.now()), switched))
         orders = await self._carry_out_orders(main, chat, text)
         learning = await self._carry_out_learning(chat, text, started_by=main.name)
+        weather = await self._carry_out_weather(chat, text)
         return "\n".join(
-            part for part in (now_line(datetime.now()), orders, learning) if part
+            part
+            for part in (now_line(datetime.now()), orders, learning, weather)
+            if part
         )
+
+    async def _weather(self, place: str, *, days: int = 3) -> str:
+        if self.settings.studio_web_access == "off":
+            raise ValueError("Web access is off in Studio settings.")
+        try:
+            return await forecast(place, days=days, transport=self._search_transport)
+        except WeatherError as error:
+            raise ValueError(str(error)) from error
+
+    async def _carry_out_weather(self, chat: Chat, text: str) -> str:
+        """'What's the weather in Sydney?' fetches it before the main AI answers."""
+        place = weather_request(text)
+        if place is None or self.settings.studio_web_access == "off":
+            return ""
+        try:
+            report = await self._weather(place)
+        except ValueError as error:
+            return f"The weather for {place} could not be fetched: {error}"
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=report,
+            author="weather",
+            data={"tool": "weather", "place": place, "order": True},
+        )
+        return f"{report}\nTell the user the weather they asked about in a sentence or two."
 
     async def _carry_out_learning(
         self, chat: Chat, text: str, *, started_by: str
@@ -1756,6 +1878,17 @@ class StudioService:
                 return await self._knowledge_tool(call)
             case "agent_model":
                 return await self._agent_model_tool(call)
+            case "weather":
+                place = str(call.arguments.get("place") or "").strip()
+                if not place:
+                    raise ValueError("Say which town or city.")
+                days = call.arguments.get("days")
+                return ToolOutcome(
+                    text=await self._weather(
+                        place, days=days if isinstance(days, int) else 3
+                    ),
+                    data={"tool": "weather", "place": place},
+                )
             case _:
                 return await self._system_tool()
 
@@ -2035,7 +2168,20 @@ class StudioService:
         listed = local.get("models")
         models = [str(m) for m in (listed if isinstance(listed, list) else [])]
         team = [(a.id, a.role) for a in await self.agents() if not a.archived]
-        return suggest_mix(team, models)
+        abilities: dict[str, set[str]] = {}
+        with contextlib.suppress(OSError, EngineError):
+            for found in await self._engine.models():
+                can = {
+                    ability
+                    for ability, yes in (
+                        ("tools", found.info.tools),
+                        ("reasoning", found.info.reasoning),
+                        ("vision", found.vision is not None),
+                    )
+                    if yes
+                }
+                abilities[f"{LOCAL_MODEL_PREFIX}{found.name}"] = can
+        return suggest_mix(team, models, abilities)
 
     async def _find_team_member(self, spoken: str) -> Agent:
         team = [agent for agent in await self.agents() if not agent.archived]

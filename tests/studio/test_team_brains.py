@@ -87,6 +87,26 @@ def test_a_suggested_mix_fits_each_role():
     assert suggest_mix(team, []) == {}
 
 
+def test_a_suggested_mix_uses_what_each_model_can_do():
+    team = [("r", "researcher"), ("h", "helper"), ("m", "main")]
+    models = ["local/big-chat-14b", "local/qwen3-8b", "local/tiny-4b"]
+    blind = suggest_mix(team, models)
+    assert blind["r"] == blind["h"] == "local/big-chat-14b"
+
+    mix = suggest_mix(
+        team,
+        models,
+        {
+            "local/big-chat-14b": set(),
+            "local/qwen3-8b": {"tools", "reasoning"},
+            "local/tiny-4b": {"tools"},
+        },
+    )
+    assert mix["r"] == "local/qwen3-8b", "the Researcher gets a model trained for tools"
+    assert mix["h"] == "local/qwen3-8b", "a model that reasons suits the Helper"
+    assert mix["m"] == "local/qwen3-8b"
+
+
 class Clock:
     def __init__(self) -> None:
         self.now = 100.0

@@ -1,5 +1,7 @@
 """The Studio app on an iPhone-sized viewport: reachable, sized, installable."""
 
+import struct
+
 from playwright.sync_api import Page, ViewportSize, expect
 
 IPHONE_VIEWPORT = ViewportSize(width=390, height=844)  # iPhone 15/16 CSS pixels
@@ -855,3 +857,104 @@ def test_model_control_runs_models_inside_studio(
         "() => document.documentElement.scrollWidth - window.innerWidth"
     )
     assert overflow <= 0, "Model Control fits an iPhone screen"
+
+
+def test_deleting_an_agent_takes_two_taps(page: Page, admin_base_url: str) -> None:
+    created = page.request.post(
+        f"{admin_base_url}/studio/api/agents",
+        data={"name": "Scratch", "role": "helper"},
+    )
+    assert created.ok
+    open_hud(page, admin_base_url)  # the HUD sets up the starter team
+    expect(page.locator(".hud-agent").first).to_be_visible()
+    open_studio(page, admin_base_url, "agents")
+
+    rows = page.locator(".agent-row")
+    expect(
+        rows.filter(has_text="Jarvis").get_by_role("button", name="Delete Jarvis")
+    ).to_have_count(0)
+    rows.filter(has_text="Scratch").get_by_role("button", name="Delete Scratch").click()
+    sheet = page.locator(".sheet-panel")
+    expect(sheet.get_by_role("heading", name="Delete Scratch?")).to_be_visible()
+    sheet.get_by_role("button", name="Delete Scratch").click()
+
+    expect(rows.filter(has_text="Scratch")).to_have_count(0)
+    expect(rows.filter(has_text="Jarvis")).to_be_visible()
+
+
+def test_any_file_dropped_on_model_control_is_explained(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url, "engine")
+    expect(page.get_by_text("Drop a file here, or tap to choose one")).to_be_visible()
+    expect(page.get_by_role("button", name="Find a model on this PC…")).to_be_visible()
+
+    page.get_by_label("Choose a file to add").set_input_files(
+        files=[
+            {
+                "name": "notes.pdf",
+                "mimeType": "application/pdf",
+                "buffer": b"%PDF-1.7\n",
+            }
+        ]
+    )
+    sheet = page.locator(".sheet-panel")
+    expect(sheet.get_by_role("heading", name="PDF document: notes.pdf")).to_be_visible()
+    expect(sheet).to_contain_text("Attach it in a chat instead")
+    sheet.get_by_role("button", name="Close").click()
+
+    page.get_by_label("Choose a file to add").set_input_files(
+        files=[
+            {
+                "name": "tiny-coder-1b-q4_k_m.gguf",
+                "mimeType": "application/octet-stream",
+                "buffer": _tiny_gguf(),
+            }
+        ]
+    )
+    expect(sheet).to_contain_text("Use tools: yes")
+    expect(sheet).to_contain_text("See images: no")
+    expect(sheet).to_contain_text("Best for:")
+    sheet.locator(".row").get_by_role("button", name="Close").click()
+    expect(page.locator(".engine-model", has_text="tiny-coder-1b")).to_be_visible()
+
+
+def test_a_file_can_be_attached_to_a_message(page: Page, admin_base_url: str) -> None:
+    open_hud(page, admin_base_url)
+    expect(page.get_by_role("button", name="Attach a file")).to_be_visible()
+    page.get_by_label("Attach files").set_input_files(
+        files=[
+            {
+                "name": "plan.txt",
+                "mimeType": "text/plain",
+                "buffer": b"Step one: ship it.",
+            }
+        ]
+    )
+    chip = page.locator(".attach", has_text="plan.txt")
+    expect(chip).to_be_visible()
+    chip.get_by_role("button", name="Remove plan.txt").click()
+    expect(chip).to_have_count(0)
+
+
+def _tiny_gguf() -> bytes:
+    """A GGUF header with a tool-calling chat template and nothing else."""
+
+    def text(value: str) -> bytes:
+        raw = value.encode()
+        return struct.pack("<Q", len(raw)) + raw
+
+    pairs = [
+        ("general.architecture", 8, text("llama")),
+        ("general.size_label", 8, text("1B")),
+        ("llama.block_count", 4, struct.pack("<I", 16)),
+        ("llama.embedding_length", 4, struct.pack("<I", 2048)),
+        ("llama.attention.head_count", 4, struct.pack("<I", 32)),
+        ("llama.attention.head_count_kv", 4, struct.pack("<I", 8)),
+        ("llama.context_length", 4, struct.pack("<I", 8192)),
+        ("tokenizer.chat_template", 8, text("{% if tools %}<tool_call>{% endif %}")),
+    ]
+    header = b"GGUF" + struct.pack("<I", 3) + struct.pack("<QQ", 0, len(pairs))
+    return header + b"".join(
+        text(key) + struct.pack("<I", kind) + value for key, kind, value in pairs
+    )

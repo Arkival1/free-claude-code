@@ -20,7 +20,7 @@ import tarfile
 import time
 import zipfile
 from collections import deque
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +33,7 @@ from free_claude_code.core.json_types import JsonObject, JsonValue
 
 from .engine_tuning import Device, diagnose, parse_devices, suggest_settings
 from .gguf_info import GGUFError, GGUFInfo, estimate_memory, read_gguf_info
+from .model_inspect import HEAD_BYTES, file_advice, identify, model_report
 from .models import EngineModelSettings, now_ms
 from .store import StudioStore
 
@@ -193,6 +194,7 @@ class Engine:
         self._models: list[EngineModel] = []
         self._scanned = 0.0
         self._gpu_gb = gpu_gb
+        self._headers: dict[tuple[str, int, int], GGUFInfo] = {}
         self._devices: tuple[tuple[str, float], list[Device] | None] | None = None
         self.crashed = ""
         """Why the engine stopped when nobody asked it to, until it starts again."""
@@ -340,7 +342,13 @@ class Engine:
         taken: set[str] = set()
         for source, path in find_model_files(self._folders()):
             try:
-                info = read_gguf_info(path)
+                stat = path.stat()
+                key = (str(path), stat.st_size, stat.st_mtime_ns)
+                info = self._headers.get(key)
+                if info is None:
+                    # Reading a header walks the whole tokenizer; do it once.
+                    info = read_gguf_info(path)
+                    self._headers[key] = info
             except (GGUFError, OSError, ValueError) as error:
                 logger.info("Studio engine: skipped {}: {}", path.name, error)
                 continue
@@ -361,6 +369,87 @@ class Engine:
                 )
             )
         return models
+
+    @property
+    def added_dir(self) -> Path:
+        """Where models added on Model Control go (inside Studio's models folder)."""
+        return self._root.parent / "added"
+
+    async def report(self, name: str) -> JsonObject:
+        """What one model can do on this PC."""
+        model = next((m for m in await self.models() if m.name == name), None)
+        if model is None:
+            raise EngineError(f"No model called {name} on this PC.")
+        return model_report(
+            name=model.name,
+            file=model.path.name,
+            info=model.info,
+            size=model.size,
+            vision=model.vision is not None,
+            gpu_gb=await self.budget_gb(),
+        )
+
+    async def add_file(self, source: Path) -> JsonObject:
+        """Add a model file from this PC, then report on it (or on what it is)."""
+        head = await anyio.to_thread.run_sync(lambda: _head(source))
+        kind, label = identify(head, source.name)
+        if kind != "gguf":
+            return not_a_model(kind, label, source.name)
+        target = self.added_dir / _safe_name(source.name)
+        await anyio.to_thread.run_sync(lambda: _link_or_copy(source, target))
+        return await self._report_file(target)
+
+    async def receive(
+        self, name: str, chunks: AsyncIterator[bytes], *, size: int | None
+    ) -> JsonObject:
+        """Save an uploaded model file as it arrives, then report on it."""
+        target = self.added_dir / _safe_name(name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if size:
+            free = (
+                await anyio.to_thread.run_sync(shutil.disk_usage, target.parent)
+            ).free
+            if free < size + 512 * 1024**2:
+                raise EngineError(
+                    f"Not enough disk space: the file needs {round(size / 1024**3, 1)} GB "
+                    f"and {round(free / 1024**3, 1)} GB is free."
+                )
+        part = target.with_name(f"{target.name}.part")
+        head = b""
+        handle = await anyio.to_thread.run_sync(part.open, "wb")
+        try:
+            async for chunk in chunks:
+                if len(head) < HEAD_BYTES:
+                    head += chunk[: HEAD_BYTES - len(head)]
+                    if len(head) >= 4 and not head.startswith(b"GGUF"):
+                        kind, label = identify(head, name)
+                        raise _NotModel(not_a_model(kind, label, name))
+                await anyio.to_thread.run_sync(handle.write, chunk)
+        except _NotModel as refused:
+            await anyio.to_thread.run_sync(handle.close)
+            part.unlink(missing_ok=True)
+            return refused.report
+        except BaseException:
+            await anyio.to_thread.run_sync(handle.close)
+            part.unlink(missing_ok=True)
+            raise
+        await anyio.to_thread.run_sync(handle.close)
+        if not head.startswith(b"GGUF"):
+            part.unlink(missing_ok=True)
+            return not_a_model(*identify(head, name), name)
+        await anyio.to_thread.run_sync(part.replace, target)
+        return await self._report_file(target)
+
+    async def _report_file(self, path: Path) -> JsonObject:
+        wanted = path.resolve()
+        for model in await self.models(fresh=True):
+            if model.path.resolve() == wanted:
+                if self.running:
+                    await self.write_presets()
+                    with suppress(httpx.HTTPError):
+                        await self._request("GET", "/models?reload=1")
+                return await self.report(model.name)
+        raise EngineError(f"{path.name} could not be read as a model.")
 
     async def model_settings(self) -> dict[str, EngineModelSettings]:
         return {row.id: row for row in await self._store.find(EngineModelSettings)}
@@ -902,3 +991,43 @@ def _image_encoder(path: Path) -> Path | None:
             if name in label or (len(family) > 2 and family in label):
                 return encoder
     return None
+
+
+def not_a_model(kind: str, label: str, name: str) -> JsonObject:
+    """The report for a file that is not a model the engine can run."""
+    return {
+        "is_model": False,
+        "kind": kind,
+        "label": label,
+        "file": name,
+        "message": file_advice(kind, label, name),
+    }
+
+
+def _head(path: Path) -> bytes:
+    with path.open("rb") as handle:
+        return handle.read(HEAD_BYTES)
+
+
+def _safe_name(name: str) -> str:
+    """A plain file name: no folders, no odd characters, ending in .gguf."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(name).name).strip("-.") or "model"
+    return stem if stem.lower().endswith(".gguf") else f"{stem}.gguf"
+
+
+def _link_or_copy(source: Path, target: Path) -> None:
+    """Put the model in place without a second copy when the drive allows."""
+    source = source.resolve()
+    if target.exists() and target.stat().st_size == source.stat().st_size:
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.hardlink_to(source)
+    except OSError:
+        shutil.copy2(source, target)
+
+
+class _NotModel(Exception):
+    def __init__(self, report: JsonObject) -> None:
+        super().__init__(str(report.get("message") or "not a model"))
+        self.report = report

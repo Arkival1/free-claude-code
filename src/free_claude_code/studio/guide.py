@@ -688,7 +688,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "you have a key). Pick one per agent and press Save, or press "
             "Suggest a mix for a starting point: a coding model for the Builder "
             "and Tester, the biggest model for the Researcher, a reasoning model "
-            "for the Helper, a quick one for Jarvis, the smallest for the Guide. "
+            "for the Helper, a quick one for Jarvis, the smallest for the Guide; "
+            "where Model Control can read a model's file, models trained for "
+            "tools go to the agents that use tools most. "
             "You can also just say 'give the Builder qwen coder' and Jarvis "
             "switches it. With more than one model on this PC, Local Models Take "
             "Turns (on by default) lets one work at a time so an 8 GB card is "
@@ -766,6 +768,108 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "and the model's size."
         ),
         asks=("How do I give each agent its own model?", "How do I set up LM Studio?"),
+    ),
+    GuideTopic(
+        title="Add a model file",
+        route="/studio#engine",
+        where=(
+            "Model Control, the 'Drop a file here' box at the top of Models on "
+            "this PC, or Find a model on this PC."
+        ),
+        terms=(
+            "upload",
+            "add a model",
+            "add model",
+            "drop a file",
+            "gguf",
+            "model file",
+            "what can it do",
+            "what tools",
+            "can it use tools",
+            "use tools",
+            "model use tools",
+            "safetensors",
+            "which file",
+        ),
+        body=(
+            "Drop any file on Model Control (or tap the box to choose one). "
+            "Studio reads its first bytes and says what it is straight away. A "
+            ".gguf model is added and you get a report: whether it can use tools "
+            "(write_file, web_search, run_command, research), see images, and "
+            "reason step by step, whether it fits your graphics card, the "
+            "settings it will run with, and which agents it suits best. Any "
+            "other file is explained instead, with what to do: a raw "
+            "safetensors or PyTorch model needs its GGUF version from Hugging "
+            "Face, a ZIP needs unzipping, and a document belongs in a chat. On "
+            "the PC running Studio, Find a model on this PC adds a file "
+            "without copying it through the browser. Every model in the list "
+            "has a What can it do? button for the same report."
+        ),
+        asks=("How do I give each agent its own model?",),
+    ),
+    GuideTopic(
+        title="Attach files to a chat",
+        route="/studio#home",
+        where="The 📎 button beside the message box, on the HUD and in every chat.",
+        terms=(
+            "attach",
+            "attachment",
+            "paperclip",
+            "pdf",
+            "word",
+            "excel",
+            "powerpoint",
+            "spreadsheet",
+            "document",
+            "read a file",
+            "send a file",
+        ),
+        body=(
+            "Press 📎 and pick one or more files. Studio reads the text out of "
+            "each one: text and code as they are, Word, Excel, and PowerPoint "
+            "files, and PDFs with real text (not scanned pictures). The file "
+            "shows as a chip above the box (✕ removes it), and its text goes "
+            "with your next message, so the agent can read, summarise, or work "
+            "from it. Files up to 25 MB; very long ones send their first 40,000 "
+            "characters and say so. Pictures need a model with the Vision badge."
+        ),
+        asks=("How do I add a model file?",),
+    ),
+    GuideTopic(
+        title="Delete an agent",
+        route="/studio#agents",
+        where="Agents, the 🗑 beside an agent, or Delete this agent on its page.",
+        terms=(
+            "delete agent",
+            "delete an agent",
+            "remove agent",
+            "remove an agent",
+            "get rid of",
+            "too many agents",
+        ),
+        body=(
+            "Press 🗑 beside the agent in Agents (or Delete this agent on its "
+            "page), then Delete to confirm. It stops any work it is doing and "
+            "its chats, classes, tasks, and memories go; it leaves any rooms "
+            "it was in. Projects it built stay, and so does what it saved to "
+            "the team's shared memory. Jarvis and the Guide can't be deleted: "
+            "give Jarvis another model in Team brains instead."
+        ),
+        asks=("How do I add an agent?",),
+    ),
+    GuideTopic(
+        title="Weather",
+        route="/studio#home",
+        where="Just ask Jarvis: 'what's the weather in Sydney tomorrow?'",
+        terms=("weather", "forecast", "rain", "temperature", "how hot", "how cold"),
+        body=(
+            "Ask Jarvis about the weather anywhere and he fetches it before "
+            "answering: now, feels-like, wind, humidity, and each day's high, "
+            "low, and chance of rain for the next few days. It comes from "
+            "Open-Meteo, which needs no key, and only the place name is sent. "
+            "It is off when Web Access is off in Settings."
+        ),
+        asks=("What else can Jarvis do?",),
     ),
     GuideTopic(
         title="Private memory",
