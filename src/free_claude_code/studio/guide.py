@@ -311,8 +311,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "prompt, and runs web searches and file reads side by side. The "
             "biggest wins are in LM Studio: offload every layer to the graphics "
             "card, keep Context Length around 4096 to 8192, and keep only one "
-            "model loaded. A smaller model (3 to 4 billion parameters) answers "
-            "fastest. Agent Temperature only changes wording, not speed."
+            "model loaded. With the built-in engine, Model Control does this for "
+            "you: Tune all for my PC fits every model to your graphics card, "
+            "Test speed shows tokens per second, and the Health check warns when "
+            "the card is not being used. A smaller model (3 to 4 billion "
+            "parameters) answers fastest; a 7B Q4_K_M suits an 8 GB card. Agent "
+            "Temperature only changes wording, not speed."
         ),
         asks=(
             "How do I set up LM Studio?",
@@ -721,6 +725,16 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "speed",
             "without lm studio",
             "instead of lm studio",
+            "tune",
+            "tune for my pc",
+            "speed test",
+            "test speed",
+            "health check",
+            "graphics card",
+            "gpu",
+            "rx 580",
+            "run ai faster",
+            "smoother",
         ),
         body=(
             "Model Control is LM Studio inside Studio. Press Install engine once: "
@@ -736,7 +750,14 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "graphics card, flash attention, and memory for context (q8 halves "
             "it). The last reply's speed shows in tokens per second, and the "
             "Engine log shows what llama.cpp says. Models Loaded At Once in "
-            "Settings is 1 by default, right for an 8 GB card."
+            "Settings is 1 by default, right for an 8 GB card. The engine finds "
+            "your graphics card itself and fits every new model to it; Tune for "
+            "my PC saves those settings (Tune all does every model), Test speed "
+            "times a short answer, and the Health check at the top says in plain "
+            "words when the card is not being used, the engine crashed, a model "
+            "failed to load or is too big, or LM Studio is holding memory too. "
+            "A driver update is not needed: the speed comes from these settings "
+            "and the model's size."
         ),
         asks=("How do I give each agent its own model?", "How do I set up LM Studio?"),
     ),

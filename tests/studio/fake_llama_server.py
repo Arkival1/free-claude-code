@@ -8,11 +8,16 @@ the same shapes the real router returns.
 import argparse
 import configparser
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
 def main() -> None:
+    if "--list-devices" in sys.argv:
+        print("Available devices:")
+        print("  Vulkan0: AMD Radeon RX 580 Series (8192 MiB, 7800 MiB free)")
+        return
     parser = argparse.ArgumentParser()
     parser.add_argument("--models-preset", required=True)
     parser.add_argument("--models-max", type=int, default=4)
@@ -80,6 +85,9 @@ def main() -> None:
                             states[other] = "unloaded"
                 states[name] = "loaded" if self.path == "/models/load" else "unloaded"
                 return self._send({"success": True})
+            if self.path == "/crash":
+                print("ggml_vulkan: device lost", flush=True)
+                os._exit(3)
             if self.path == "/v1/chat/completions":
                 states[name] = "loaded"
                 return self._send(

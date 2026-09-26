@@ -31,6 +31,7 @@ from loguru import logger
 
 from free_claude_code.core.json_types import JsonObject, JsonValue
 
+from .engine_tuning import Device, diagnose, parse_devices, suggest_settings
 from .gguf_info import GGUFError, GGUFInfo, estimate_memory, read_gguf_info
 from .models import EngineModelSettings, now_ms
 from .store import StudioStore
@@ -173,6 +174,7 @@ class Engine:
         build: Callable[[], str] = lambda: "vulkan",
         binary_override: Callable[[], str] = lambda: "",
         models_at_once: Callable[[], int] = lambda: 1,
+        gpu_gb: Callable[[], float] = lambda: 8.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._root = root
@@ -188,6 +190,11 @@ class Engine:
         self._lock = asyncio.Lock()
         self._models: list[EngineModel] = []
         self._scanned = 0.0
+        self._gpu_gb = gpu_gb
+        self._devices: tuple[tuple[str, float], list[Device] | None] | None = None
+        self.crashed = ""
+        """Why the engine stopped when nobody asked it to, until it starts again."""
+        self.benchmarks: dict[str, dict[str, float]] = {}
         self.install_state = InstallState()
 
     # ---------------------------------------------------------------- places
@@ -355,8 +362,137 @@ class Engine:
     async def model_settings(self) -> dict[str, EngineModelSettings]:
         return {row.id: row for row in await self._store.find(EngineModelSettings)}
 
+    async def devices(self, *, fresh: bool = False) -> list[Device] | None:
+        """The graphics cards the engine can use; None until it is installed."""
+        binary = self.binary()
+        if binary is None:
+            return None
+        key = (str(binary), binary.stat().st_mtime)
+        if not fresh and self._devices is not None and self._devices[0] == key:
+            return self._devices[1]
+        try:
+            process = await asyncio.create_subprocess_exec(
+                str(binary),
+                "--list-devices",
+                cwd=str(binary.parent),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW
+                if sys.platform == "win32"
+                else 0,
+            )
+            output, _ = await asyncio.wait_for(process.communicate(), 60.0)
+        except (OSError, TimeoutError) as error:
+            logger.info("Studio engine: could not list devices: {}", error)
+            return None
+        text = output.decode("utf-8", "replace")
+        found = parse_devices(text) if "Available devices" in text else None
+        self._devices = (key, found)
+        return found
+
+    async def budget_gb(self) -> float:
+        """The graphics card's memory: found by the engine, else the setting."""
+        found = await self.devices()
+        if found:
+            return max(device.total_gb for device in found)
+        return self._gpu_gb()
+
+    async def effective_settings(
+        self,
+    ) -> tuple[dict[str, EngineModelSettings], dict[str, str]]:
+        """Each model's settings: the ones saved, or ones fitted to this PC."""
+        saved = await self.model_settings()
+        budget = await self.budget_gb()
+        chosen: dict[str, EngineModelSettings] = {}
+        advice: dict[str, str] = {}
+        for model in await self.models():
+            suggestion, reason = suggest_settings(
+                model.name, model.info, size=model.size, gpu_gb=budget
+            )
+            advice[model.name] = reason
+            chosen[model.name] = saved.get(model.name) or suggestion
+        return chosen, advice
+
+    async def tune(self, names: Sequence[str] | None = None) -> list[JsonObject]:
+        """Save the settings fitted to this PC for these models (or all)."""
+        budget = await self.budget_gb()
+        done: list[JsonObject] = []
+        wanted = set(names) if names else None
+        for model in await self.models(fresh=True):
+            if wanted is not None and model.name not in wanted:
+                continue
+            suggestion, reason = suggest_settings(
+                model.name, model.info, size=model.size, gpu_gb=budget
+            )
+            await self._store.put(suggestion)
+            done.append({"name": model.name, "reason": reason})
+        if wanted and not done:
+            raise EngineError(
+                f"No model called {', '.join(sorted(wanted))} on this PC."
+            )
+        await self._reload([str(item["name"]) for item in done])
+        return done
+
+    async def benchmark(self, name: str) -> dict[str, float]:
+        """Load one model and time a short reply: reading and writing speed."""
+        if name not in {model.name for model in await self.models()}:
+            raise EngineError(f"No model called {name} on this PC.")
+        await self.load(name)
+        deadline = time.monotonic() + 300
+        while (state := (await self.states()).get(name)) != "loaded":
+            if state == "failed" or time.monotonic() > deadline:
+                raise EngineError(f"{name} did not load; the Engine log shows why.")
+            await asyncio.sleep(0.5)
+        prompt = (
+            "Write a short paragraph about why fresh bread smells good, then list "
+            "three tips for keeping it fresh."
+        )
+        started = time.monotonic()
+        try:
+            response = await self._request(
+                "POST",
+                "/v1/chat/completions",
+                json={
+                    "model": name,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 128,
+                    "temperature": 0,
+                    "cache_prompt": False,
+                },
+                timeout=300.0,
+            )
+            body = response.json()
+        except (httpx.HTTPError, ValueError) as error:
+            raise EngineError(f"The speed test failed: {error}") from error
+        timings = body.get("timings") if isinstance(body, dict) else None
+        if not isinstance(timings, dict):
+            raise EngineError("The engine did not report its speed.")
+        result = {
+            key: round(float(value), 1)
+            for key in ("prompt_per_second", "predicted_per_second", "predicted_n")
+            if isinstance(value := timings.get(key), (int, float))
+        }
+        result["seconds"] = round(time.monotonic() - started, 1)
+        self.benchmarks[name] = result
+        return result
+
+    async def _reload(self, names: Sequence[str]) -> None:
+        """Write the presets and reload any of these models that are loaded."""
+        await self.write_presets()
+        if not self.running:
+            return
+        states = await self.states()
+        await self._request("GET", "/models?reload=1")
+        for name in names:
+            if states.get(name) == "loaded":
+                await self.unload(name)
+                await self.load(name)
+
     async def write_presets(self) -> None:
-        text = presets_text(await self.models(fresh=True), await self.model_settings())
+        await self.models(fresh=True)
+        chosen, _ = await self.effective_settings()
+        text = presets_text(self._models, chosen)
         self._root.mkdir(parents=True, exist_ok=True)
         await anyio.to_thread.run_sync(
             lambda: self.presets_path.write_text(text, encoding="utf-8")
@@ -366,8 +502,8 @@ class Engine:
         """Change how one model runs; a loaded model reloads with it."""
         if name not in {model.name for model in await self.models()}:
             raise EngineError(f"No model called {name} on this PC.")
-        current = (await self.model_settings()).get(name) or EngineModelSettings(
-            id=name
+        current = (await self.effective_settings())[0].get(name) or (
+            EngineModelSettings(id=name)
         )
         update: dict[str, object] = {"updated_at": now_ms()}
         if "context" in values:
@@ -390,13 +526,7 @@ class Engine:
             update["threads"] = max(0, min(256, _whole(values["threads"], "Threads")))
         saved = current.model_copy(update=update)
         await self._store.put(saved)
-        await self.write_presets()
-        if self.running:
-            states = await self.states()
-            await self._request("GET", "/models?reload=1")
-            if states.get(name) == "loaded":
-                await self.unload(name)
-                await self.load(name)
+        await self._reload([name])
         return saved
 
     # --------------------------------------------------------------- process
@@ -425,6 +555,7 @@ class Engine:
                 str(self._port()),
             ]
             await anyio.to_thread.run_sync(self._stop_leftover)
+            self.crashed = ""
             self._log.append(f"$ {' '.join(args)}")
             windows = sys.platform == "win32"
             process = await asyncio.create_subprocess_exec(
@@ -469,6 +600,11 @@ class Engine:
                 self._log.append(text)
         code = await process.wait()
         self._log.append(f"(engine stopped, exit code {code})")
+        running = self._running
+        if running is not None and running.process is process:
+            # Nobody asked it to stop.
+            tail = " ".join(line for line in list(self._log)[-6:-1])
+            self.crashed = f"exit code {code}. {tail[-300:]}".strip()
 
     async def stop(self) -> None:
         async with self._lock:
@@ -569,16 +705,20 @@ class Engine:
     async def status(
         self,
         *,
-        gpu_budget_gb: float,
         speeds: dict[str, dict[str, float]] | None = None,
         on: bool = False,
+        lm_studio_running: bool = False,
     ) -> JsonObject:
         """Everything Model Control shows."""
         models = await self.models()
-        chosen = await self.model_settings()
+        devices = await self.devices()
+        gpu_budget_gb = await self.budget_gb()
+        saved = await self.model_settings()
+        chosen, advice = await self.effective_settings()
         states = await self.states()
         speeds = speeds or {}
         rows: list[JsonValue] = []
+        too_big: list[str] = []
         for model in models:
             setting = chosen.get(model.name) or EngineModelSettings(id=model.name)
             estimate = estimate_memory(
@@ -617,12 +757,40 @@ class Engine:
                     "estimate": estimate,
                     "fits": estimate["gpu_gb"] <= gpu_budget_gb,
                     "speed": speeds.get(model.name, {}),
+                    "benchmark": self.benchmarks.get(model.name, {}),
+                    "auto": model.name not in saved,
+                    "advice": advice.get(model.name, ""),
                 }
             )
+            if estimate["gpu_gb"] > gpu_budget_gb:
+                too_big.append(model.name)
         install = self.install_state
+        installed = self.binary() is not None
+        diagnostics = diagnose(
+            on=on,
+            installed=installed,
+            build=self._build(),
+            devices=devices,
+            logs=self.logs(LOG_LINES),
+            crashed=self.crashed,
+            failed_models=[name for name, state in states.items() if state == "failed"],
+            too_big=too_big,
+            lm_studio_running=lm_studio_running,
+        )
         return {
+            "gpu": [
+                {
+                    "name": device.name,
+                    "description": device.description,
+                    "total_gb": device.total_gb,
+                    "free_gb": round(device.free_mb / 1024, 1),
+                }
+                for device in devices or []
+            ],
+            "gpu_checked": devices is not None,
+            "diagnostics": list(diagnostics),
             "on": on,
-            "installed": self.binary() is not None,
+            "installed": installed,
             "version": self.version(),
             "running": self.running,
             "url": self.url,

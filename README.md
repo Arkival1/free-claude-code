@@ -525,6 +525,21 @@ change:
 - **Memory for context**: full quality, q8 (half the memory), or q4.
 - **CPU threads**: 0 lets llama.cpp choose.
 
+The memory estimate updates as you change these, before saving. The engine
+finds your graphics card itself (`llama-server --list-devices`) and uses its
+memory; every model without saved settings is fitted to it automatically:
+the largest context up to 16,384 tokens that fits with every layer on the card
+(about 1 GB is left for Windows and the screen), q8 context memory before
+giving up layers, and for a model too big for the card, as many layers as fit
+with the rest on the processor's cores. **Tune for my PC** (or **Tune all for
+my PC**) saves those settings; **Test speed** loads the model and times a short
+answer, in tokens per second for reading and writing. The **Health check** at
+the top says in plain words when the engine can't see the graphics card (and
+so runs on the processor), when it stopped unexpectedly (and why: a busy port,
+say), when a model failed to load or doesn't fit, when a card can't use
+compressed context memory, and when LM Studio is also running and may be
+holding graphics memory.
+
 Saving reloads a loaded model with the new settings. The last reply's speed
 shows in tokens per second, and **Engine log** shows what llama.cpp prints.
 Model names follow LM Studio's style (`qwen2.5-coder-7b-instruct`), so agents

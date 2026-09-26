@@ -136,6 +136,10 @@ class EngineUsePayload(BaseModel):
     on: bool
 
 
+class EngineTunePayload(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+
+
 class EngineModelPayload(BaseModel):
     context: int | None = Field(default=None, ge=1024, le=131_072)
     gpu_layers: int | None = Field(default=None, ge=-1, le=999)
@@ -1271,6 +1275,26 @@ async def engine_model_settings(
 ) -> JsonObject:
     """Change how one model runs; a loaded model reloads with the change."""
     return await studio.engine_settings(name, payload.model_dump(exclude_none=True))
+
+
+@router.post("/studio/api/engine/tune")
+async def engine_tune(
+    payload: EngineTunePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Fit one model (or every model) to this PC's graphics card."""
+    return {"tuned": list(await studio.engine_tune(payload.name))}
+
+
+@router.post("/studio/api/engine/models/{name}/benchmark")
+async def engine_benchmark(
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Time a short reply: how fast the model reads and writes on this PC."""
+    return dict(await studio.engine_benchmark(name))
 
 
 @router.get("/studio/api/engine/logs")

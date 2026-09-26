@@ -2584,3 +2584,20 @@ body[data-page="settings"] .view {
   margin: 10px 0 0;
 }
 .engine-folder { min-width: 0; overflow-wrap: anywhere; }
+.engine-gpu { margin: 0 0 12px; color: var(--good); }
+.engine-gpu.bad { color: var(--bad); }
+.engine-note { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 10px; }
+.engine-note-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+.engine-note.ok .engine-note-icon { background: var(--good); color: #02140b; }
+.engine-note.warn .engine-note-icon { background: var(--warn); color: #1a1000; }
+.engine-note.error .engine-note-icon { background: var(--bad); color: #1a0004; }
+.engine-bench { color: var(--good); }

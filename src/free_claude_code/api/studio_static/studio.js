@@ -1735,11 +1735,18 @@
       : data.running
       ? `Running · llama.cpp ${data.version || ""} · ${data.url}`
       : `Stopped · llama.cpp ${data.version || ""}`;
+    const card0 = data.gpu[0];
+    const gpuLine = card0
+      ? `Graphics card: ${card0.description} · ${card0.total_gb} GB (${card0.free_gb} GB free)`
+      : data.gpu_checked
+      ? "No graphics card found by the engine"
+      : "";
     const engineCard = card("Engine", [
       el("p", { class: "engine-state" }, [
         el("span", { class: `hud-dot${data.running ? " on" : ""}`, "aria-hidden": "true" }),
         el("strong", { text: state }),
       ]),
+      gpuLine ? el("p", { class: `engine-gpu${card0 ? "" : " bad"}`, text: gpuLine }) : null,
       el("label", { class: "check" }, [use, "Use the built-in engine for local models (instead of LM Studio)"]),
       installing
         ? el("div", {}, [
@@ -1800,9 +1807,32 @@
         log.textContent = error.message;
       }
     });
+    const icons = { ok: "✓", warn: "!", error: "✕" };
+    const health = data.diagnostics.length
+      ? card(
+          "Health check",
+          data.diagnostics.map((item) =>
+            el("p", { class: `engine-note ${item.level}` }, [
+              el("span", { class: "engine-note-icon", "aria-hidden": "true", text: icons[item.level] || "•" }),
+              el("span", { text: item.text }),
+            ])
+          )
+        )
+      : null;
+    const tuneAll = el("button", {
+      class: "primary",
+      type: "button",
+      text: "Tune all for my PC",
+      onclick: () => act("Fitting every model to your graphics card", () => post("/studio/api/engine/tune", {})),
+    });
     view.replaceChildren(
+      ...(health ? [health] : []),
       engineCard,
-      card("Models on this PC", models, `Graphics memory: ${data.gpu_budget_gb} GB (change in Settings). Each model shows what its settings need.`),
+      card(
+        "Models on this PC",
+        [data.models.length ? el("div", { class: "row" }, [tuneAll]) : null, ...models],
+        `Graphics memory: ${data.gpu_budget_gb} GB${card0 ? " (found on your card)" : " (set in Settings)"}. New models are fitted to your PC automatically; Tune for my PC saves the best settings.`
+      ),
       folders,
       logs
     );
@@ -1909,6 +1939,7 @@
         el("div", { class: "grow" }, [
           el("strong", { text: model.name }),
           el("div", { class: "chips" }, [
+            model.auto ? el("span", { class: "pill good", text: "fitted to your PC" }) : null,
             model.params ? el("span", { class: "pill", text: model.params }) : null,
             model.quant ? el("span", { class: "pill", text: model.quant }) : null,
             el("span", { class: "pill", text: `${model.size_gb} GB` }),
@@ -1930,6 +1961,36 @@
       ]),
       memory,
       speed ? el("small", { class: "muted", text: `Last reply: ${speed}` }) : null,
+      model.benchmark && model.benchmark.predicted_per_second
+        ? el("small", {
+            class: "engine-bench",
+            text: `Speed test: ${model.benchmark.predicted_per_second} tokens/s writing · ${Math.round(model.benchmark.prompt_per_second || 0)} tokens/s reading · ${model.benchmark.seconds}s for a short answer`,
+          })
+        : null,
+      model.advice ? el("small", { class: "muted", text: `Best for your PC: ${model.advice}` }) : null,
+      el("div", { class: "row" }, [
+        el("button", {
+          class: "secondary",
+          type: "button",
+          text: "Tune for my PC",
+          "aria-label": `Tune ${model.name} for my PC`,
+          onclick: () =>
+            act(`Fitting ${model.name} to your graphics card`, () =>
+              post("/studio/api/engine/tune", { name: model.name })
+            ),
+        }),
+        el("button", {
+          class: "secondary",
+          type: "button",
+          text: "Test speed",
+          "aria-label": `Test the speed of ${model.name}`,
+          disabled: !data.installed,
+          onclick: () =>
+            act(`Testing ${model.name} (it loads first, then writes a short answer)`, () =>
+              post(`/studio/api/engine/models/${encodeURIComponent(model.name)}/benchmark`)
+            ),
+        }),
+      ]),
       el("details", { class: "engine-settings" }, [
         el("summary", { text: "Settings" }),
         el("label", {}, ["Context (how much it remembers at once)", context]),

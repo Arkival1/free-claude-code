@@ -329,6 +329,7 @@ class StudioService:
             build=lambda: self.settings.studio_engine_build,
             binary_override=lambda: self.settings.studio_engine_path or "",
             models_at_once=lambda: self.settings.studio_engine_models_at_once,
+            gpu_gb=lambda: self.settings.studio_engine_gpu_gb,
         )
         self._router = router or self._build_router(settings_provider())
         self._tasks: set[asyncio.Task[object]] = set()
@@ -862,10 +863,33 @@ class StudioService:
     async def engine_status(self) -> JsonObject:
         settings = self.settings
         return await self._engine.status(
-            gpu_budget_gb=settings.studio_engine_gpu_gb,
             speeds=self._router.local_speeds(),
             on=settings.studio_engine,
+            lm_studio_running=settings.studio_engine
+            and await self._lm_studio_answers(),
         )
+
+    async def _lm_studio_answers(self) -> bool:
+        """True when LM Studio's server answers while the engine is in use."""
+        base = self.settings.studio_local_base_url.rstrip("/")
+        if base.startswith(self._engine.url):
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=1.0) as client:
+                response = await client.get(f"{base}/models")
+        except httpx.HTTPError:
+            return False
+        return response.status_code < 400
+
+    async def engine_tune(self, name: str | None = None) -> list[JsonObject]:
+        done = await self._engine_call(self._engine.tune([name] if name else None))
+        self._loaded_probe = None
+        return done
+
+    async def engine_benchmark(self, name: str) -> dict[str, float]:
+        result = await self._engine_call(self._engine.benchmark(name))
+        self._loaded_probe = None
+        return result
 
     def engine_install(self) -> JsonObject:
         """Download the engine in the background; progress shows in the status."""
