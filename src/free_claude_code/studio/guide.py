@@ -836,6 +836,36 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         asks=("How do I add a model file?",),
     ),
     GuideTopic(
+        title="Every tool for every agent",
+        route="/studio#settings",
+        where="Settings, Studio, Every Agent Gets Every Tool (on by default).",
+        terms=(
+            "all tools",
+            "every tool",
+            "which tools",
+            "what tools",
+            "agent tools",
+            "give tools",
+            "more tools",
+            "tool list",
+        ),
+        body=(
+            "Every agent but the Guide can use every tool Studio has: building "
+            "and editing files, running and testing code, run_command (still "
+            "only with your approval), web search and deep research, videos, "
+            "memory and the knowledge library, to-dos, maths, weather, your "
+            "projects, the PC's status, and handing a part of a job to a "
+            "teammate with ask_agent. A job can be passed on twice at most "
+            "(Jarvis to the Builder to the Researcher), never back to whoever "
+            "gave it, and agents in a room hand over with @Name, so work never "
+            "goes in circles. Agents on a server or cloud AI still get no "
+            "memory tools. Each agent's page lists the tools it really has; "
+            "turn the setting off to give each agent only its ticked tools. "
+            "The Guide keeps its few: it runs on the smallest model."
+        ),
+        asks=("How do I add an agent?", "Who can see my memory?"),
+    ),
+    GuideTopic(
         title="Delete an agent",
         route="/studio#agents",
         where="Agents, the 🗑 beside an agent, or Delete this agent on its page.",

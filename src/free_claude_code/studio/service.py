@@ -25,7 +25,7 @@ from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject, JsonValue
 
 from . import system_monitor
-from .agents import AgentRunner, TurnResult
+from .agents import PRIVATE_TOOLS, AgentRunner, TurnResult
 from .assistant_tools import describe_time, now_line, parse_when
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
@@ -134,6 +134,7 @@ from .team_models import (
     suggest_mix,
 )
 from .tools import (
+    ALL_TOOL_NAMES,
     DEFAULT_TOOL_NAMES,
     MAIN_ROLE,
     MAIN_TOOL_NAMES,
@@ -739,6 +740,7 @@ class StudioService:
             videos=self._videos(),
             study_later=self._study_later,
             assistant=self._assistant_tool,
+            all_tools=settings.studio_all_tools,
         )
 
     def _runner(self) -> AgentRunner:
@@ -1068,7 +1070,7 @@ class StudioService:
 
     def agent_options(self) -> JsonObject:
         """Roles, presets, and tool groups for the add-agent sheet."""
-        return agent_options()
+        return agent_options() | {"all_tools": self.settings.studio_all_tools}
 
     async def _upgrade_defaults(self, existing: Sequence[Agent]) -> None:
         """Give starter agents from older versions their newer tools and roles.
@@ -1122,6 +1124,17 @@ class StudioService:
     async def agents(self) -> tuple[Agent, ...]:
         """Return every agent, oldest first."""
         return await self._store.find(Agent, order_by="created_at ASC")
+
+    async def tools_in_use(self, agent: Agent) -> tuple[str, ...]:
+        """The tools an agent really gets on its next turn."""
+        granted = (
+            ALL_TOOL_NAMES
+            if self.settings.studio_all_tools and agent.role != "guide"
+            else agent.tools
+        )
+        if await self.is_private_from(agent):
+            granted = tuple(t for t in granted if t not in PRIVATE_TOOLS)
+        return granted
 
     async def agent(self, agent_id: str) -> Agent:
         """Return one agent or raise."""

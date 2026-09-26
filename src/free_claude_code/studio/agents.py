@@ -21,6 +21,7 @@ from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
 from .recall_messages import Found, recall_note, search
 from .store import StudioStore
 from .tools import (
+    ASK_AGENT_TOOL,
     CHECK_PROJECT_TOOL,
     COMMAND_TOOL,
     FINISH_TOOL,
@@ -262,6 +263,13 @@ MAIN_PROMPT = (
     "button names it gives."
     "\n\nYour team:\n{roster}"
 )
+TEAM_PROMPT = (
+    "You have every tool Studio has. Do your own job yourself; when a separate "
+    "part is better done by a teammate (the Researcher for facts, the Builder "
+    "for code, the Tester to check it, the Helper to plan), hand just that "
+    "part over with ask_agent and use what it reports. Never hand your job "
+    "back to whoever gave it to you."
+)
 WEB_PROMPT = (
     "You are connected to the internet through two tools: web_search finds "
     "pages and web_fetch reads one in full. Use them for anything current, "
@@ -331,7 +339,11 @@ class AgentRunner:
         self._temperature = temperature
 
     async def _private_view(self, agent: Agent) -> tuple[Agent, bool]:
-        """The agent as it may act: without memory when it thinks on a server."""
+        """The agent as it may act: with every tool when that is on, and
+        without memory when it thinks on a server."""
+        granted = self._toolbox.granted(agent.tools, role=agent.role)
+        if granted != agent.tools:
+            agent = agent.model_copy(update={"tools": granted})
         if self._sealed is None or not await self._sealed(agent):
             return agent, False
         return (
@@ -384,6 +396,12 @@ class AgentRunner:
             and "remember" in agent.tools
         ):
             parts.append(SHARED_MEMORY_PROMPT)
+        if (
+            agent.role != MAIN_ROLE
+            and ASK_AGENT_TOOL in agent.tools
+            and self._toolbox.delegation_allowed(agent.role)
+        ):
+            parts.append(TEAM_PROMPT)
         if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):
             parts.append(WEB_PROMPT)
         elif self._toolbox.web_paused(agent.tools, role=agent.role):

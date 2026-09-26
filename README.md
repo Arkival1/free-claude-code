@@ -1068,6 +1068,21 @@ agent. Start from a preset (Builder, Researcher, Helper, Designer, Tester,
 Assistant, or Custom), then set its name, role, and model, and choose its
 tools: Internet, Code and files, Run and test code, Ask teammates, and Memory.
 
+**Every agent gets every tool.** With **Every Agent Gets Every Tool**
+(`STUDIO_ALL_TOOLS`, on by default) every agent but the Guide can use all of
+Studio's tools, whatever is ticked on its page: files and code, `run_command`
+(still only when Agent Commands allows it, and with your approval),
+web search and deep research, videos, memory and knowledge, `todo`,
+`calculate`, `weather`, `list_projects`, `system_status`, `learn`,
+`agent_model`, and the team tools (`ask_agent`, `team_task`, `team_status`,
+`stop_agent`). An agent hands a part of its job to a teammate with `ask_agent`;
+a job is passed on at most twice (Jarvis to the Builder to the Researcher),
+never back to whoever gave it, and agents in a room hand over with `@Name`
+instead, so work never goes in circles. Agents on a server or cloud AI still
+get no memory tools. Each agent's page lists the tools it really has. The
+Guide keeps its own few because it runs on the smallest model. Turn the
+setting off to give each agent only the tools ticked for it.
+
 To delete an agent, press 🗑 beside it on the Agents tab (or **Delete this
 agent** on its page) and confirm. It stops any work it is doing; its chats,
 classes, waiting commands, and memories go, and it leaves any rooms it was in

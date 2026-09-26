@@ -1054,6 +1054,20 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_ALL_TOOLS",
+        "Every Agent Gets Every Tool",
+        "studio",
+        "boolean",
+        settings_attr="studio_all_tools",
+        description=(
+            "Every agent but the Guide can use every tool Studio has: files, "
+            "code, commands (still with your approval), the web, research, "
+            "videos, memory, to-dos, maths, weather, projects, the PC's status, "
+            "and handing parts of a job to teammates. Turn off to give each "
+            "agent only the tools ticked on its page."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_PRIVATE_MEMORY",
         "Keep Memory on This PC",
         "studio",

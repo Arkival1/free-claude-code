@@ -20,6 +20,10 @@ _BUILD_WORDS = re.compile(
     re.IGNORECASE,
 )
 _NOT_DELEGABLE_ROLES = frozenset({MAIN_ROLE, "guide"})
+MAX_HANDOFF_DEPTH = 2
+"""How far a job may be passed down: the main AI to the Builder to the
+Researcher, and no further, so agents with every tool never pass work in a
+circle."""
 
 
 class CrewHost(Protocol):
@@ -101,6 +105,9 @@ class Crew:
     ) -> ToolOutcome:
         """Run one task on another agent and report its result."""
         worker = await self._resolve(agent, caller_id=context.agent_id)
+        refused = await self._refuse_handoff(context, [worker])
+        if refused is not None:
+            return refused
         same = await self._already_on_it(worker, task, context.chat_id)
         if same is not None:
             return ToolOutcome(
@@ -190,6 +197,9 @@ class Crew:
             member = await self._resolve(name, caller_id=context.agent_id)
             if all(existing.id != member.id for existing in members):
                 members.append(member)
+        refused = await self._refuse_handoff(context, members, tool="team_task")
+        if refused is not None:
+            return refused
         site = await self._project(
             context,
             project,
@@ -383,6 +393,47 @@ class Crew:
             name=RESEARCH_LAB,
             description="Where the researcher tests code before recommending it.",
             agent_id=researcher.id,
+        )
+
+    async def _refuse_handoff(
+        self,
+        context: ToolContext,
+        workers: Sequence[Agent],
+        *,
+        tool: str = "ask_agent",
+    ) -> ToolOutcome | None:
+        """Why this hand-off would send work in a circle, or None when it is fine."""
+        if context.agent_role == MAIN_ROLE:
+            return None
+        chain: list[Chat] = []
+        chat = await self._store.get(Chat, context.chat_id)
+        while chat is not None:
+            chain.append(chat)
+            if not chat.parent_chat_id or len(chain) > MAX_HANDOFF_DEPTH + 1:
+                break
+            chat = await self._store.get(Chat, chat.parent_chat_id)
+        reason = ""
+        if chain and chain[0].kind == "room":
+            reason = "You are in a room: hand the turn on by writing @Name instead."
+        elif len(chain) > MAX_HANDOFF_DEPTH:
+            reason = (
+                "This job has already been handed down twice, so do this part "
+                "yourself, or finish and say what is missing."
+            )
+        else:
+            above = {link.agent_id for link in chain[1:]}
+            back = [worker.name for worker in workers if worker.id in above]
+            if back:
+                reason = (
+                    f"{', '.join(back)} handed you this job, so don't hand it "
+                    "back: finish it and report, or say what is missing."
+                )
+        if not reason:
+            return None
+        return ToolOutcome(
+            text=reason,
+            data={"tool": tool, "refused": True},
+            failed=True,
         )
 
     async def _resolve(self, name: str, *, caller_id: str) -> Agent:

@@ -787,6 +787,7 @@ class Settings(BaseModel):
     studio_private_memory: bool = Field(
         default=True, validation_alias="STUDIO_PRIVATE_MEMORY"
     )
+    studio_all_tools: bool = Field(default=True, validation_alias="STUDIO_ALL_TOOLS")
     studio_engine: bool = Field(default=False, validation_alias="STUDIO_ENGINE")
     studio_engine_port: int = Field(
         default=39281, ge=1024, le=65535, validation_alias="STUDIO_ENGINE_PORT"

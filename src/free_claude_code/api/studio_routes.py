@@ -551,8 +551,18 @@ async def main_new_conversation(
 async def list_agents(
     studio: StudioService = Depends(get_studio), _: None = Access
 ) -> JsonObject:
-    """Return every agent."""
-    return {"agents": [agent.model_dump() for agent in await studio.agents()]}
+    """Return every agent, with the tools each really gets."""
+    all_tools = studio.settings.studio_all_tools
+    return {
+        "agents": [
+            agent.model_dump()
+            | {
+                "tools_in_use": list(await studio.tools_in_use(agent)),
+                "all_tools": all_tools and agent.role != "guide",
+            }
+            for agent in await studio.agents()
+        ]
+    }
 
 
 @router.post("/studio/api/agents")

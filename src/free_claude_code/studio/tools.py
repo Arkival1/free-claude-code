@@ -752,6 +752,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 )
 
 TOOL_SPEC_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
+ALL_TOOL_NAMES: tuple[str, ...] = tuple(spec.name for spec in TOOL_SPECS)
+"""Every tool Studio has, for agents when Every Agent Gets Every Tool is on."""
 DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
     spec.name
     for spec in TOOL_SPECS
@@ -932,6 +934,7 @@ class AgentToolbox:
         study_later: Callable[[PlatformPage], None] | None = None,
         assistant: Callable[[ToolCall, ToolContext], Awaitable[ToolOutcome]]
         | None = None,
+        all_tools: bool = False,
     ) -> None:
         self._web = web_tools
         self._sites = sites
@@ -951,6 +954,17 @@ class AgentToolbox:
         self._videos = videos
         self._study_later = study_later
         self._assistant = assistant
+        self._all_tools = all_tools
+
+    def granted(self, names: Sequence[str], *, role: str) -> tuple[str, ...]:
+        """The tools an agent may use: its own, or every tool when that is on.
+
+        The Guide keeps its own few: it runs on the smallest model and only
+        explains the app.
+        """
+        if not self._all_tools or role == "guide":
+            return tuple(names)
+        return (*names, *(name for name in ALL_TOOL_NAMES if name not in names))
 
     @property
     def commands_enabled(self) -> bool:
@@ -996,8 +1010,10 @@ class AgentToolbox:
         return tuple(chosen)
 
     def delegation_allowed(self, role: str) -> bool:
-        """Only the main agent may hand work to other agents."""
-        return self._delegate is not None and role == MAIN_ROLE
+        """The main agent hands work on; so does every agent with every tool."""
+        if self._delegate is None or role == "guide":
+            return False
+        return role == MAIN_ROLE or self._all_tools
 
     async def run(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         """Execute one tool call, converting every failure into tool output."""
@@ -1749,7 +1765,7 @@ class AgentToolbox:
 
     async def _delegate_call(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         if self._delegate is None or not self.delegation_allowed(context.agent_role):
-            raise ValueError("Only the main agent can hand work to other agents.")
+            raise ValueError("Only the main agent can hand work to other agents here.")
         project = str(call.arguments.get("project") or "").strip()
         if call.name == TEAM_STATUS_TOOL:
             return await self._delegate.status(context)

@@ -2673,3 +2673,14 @@ body[data-page="settings"] .view {
 .attach-chips { margin: 6px 0; }
 .pill.attach { display: inline-flex; gap: 6px; align-items: center; }
 .attach-remove { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 2px; }
+
+.tool-list {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.all-tools-note {
+  border-left: 2px solid var(--good, #4ade80);
+  padding-left: 10px;
+}

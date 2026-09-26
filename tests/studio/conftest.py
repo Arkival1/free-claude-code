@@ -125,6 +125,9 @@ def studio_settings() -> Callable[..., Settings]:
             # Tests run agents on a server model; the private-memory tests
             # turn this back on.
             "STUDIO_PRIVATE_MEMORY": False,
+            # Tests check each agent's own tool list; the all-tools tests turn
+            # this back on.
+            "STUDIO_ALL_TOOLS": False,
         }
         values.update(overrides)
         return Settings.model_validate(values)

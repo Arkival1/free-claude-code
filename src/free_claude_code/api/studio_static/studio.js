@@ -1241,6 +1241,12 @@
       roleNote,
       el("label", {}, ["Model", model]),
       el("label", {}, ["Instructions", prompt]),
+      options.all_tools
+        ? el("p", {
+            class: "muted all-tools-note",
+            text: "Every Agent Gets Every Tool is on (Settings, Studio), so this agent can use every tool. The ticks below are what it keeps if you turn that off.",
+          })
+        : null,
       ...groups,
       el("button", {
         class: "primary",
@@ -1331,7 +1337,12 @@
           el("span", { text: "Model" }),
           el("span", { text: agent.model }),
           el("span", { text: "Tools" }),
-          el("span", { text: (agent.tools || []).join(", ") || "none" }),
+          agent.all_tools
+            ? el("span", {}, [
+                el("strong", { text: `Every tool Studio has (${agent.tools_in_use.length})` }),
+                el("small", { class: "muted tool-list", text: agent.tools_in_use.join(", ") }),
+              ])
+            : el("span", { text: (agent.tools_in_use || agent.tools || []).join(", ") || "none" }),
           el("span", { text: "Memory" }),
           el("span", { text: agent.memory_enabled ? "on" : "off" }),
         ]),

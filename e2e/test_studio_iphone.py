@@ -958,3 +958,15 @@ def _tiny_gguf() -> bytes:
     return header + b"".join(
         text(key) + struct.pack("<I", kind) + value for key, kind, value in pairs
     )
+
+
+def test_an_agent_page_lists_every_tool(page: Page, admin_base_url: str) -> None:
+    open_hud(page, admin_base_url)
+    expect(page.locator(".hud-agent").first).to_be_visible()
+    open_studio(page, admin_base_url, "agents")
+    page.locator(".agent-row", has_text="Researcher").locator(".list-item").click()
+
+    tools = page.locator(".kv")
+    expect(tools).to_contain_text("Every tool Studio has")
+    expect(tools.locator(".tool-list")).to_contain_text("weather")
+    expect(tools.locator(".tool-list")).to_contain_text("ask_agent")
