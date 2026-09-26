@@ -149,9 +149,14 @@ class StudioStore:
     def _connect(self) -> sqlite3.Connection:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self._path, isolation_level=None, timeout=30.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA foreign_keys = ON")
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA foreign_keys = ON")
+        except BaseException:
+            # A busy database can refuse the setup; never leave the handle open.
+            connection.close()
+            raise
         return connection
 
     def _prepare(self) -> None:

@@ -1,6 +1,8 @@
 """Model Control: Studio's built-in engine, like LM Studio inside the app."""
 
+import asyncio
 import io
+import os
 import socket
 import struct
 import sys
@@ -331,3 +333,54 @@ async def test_model_control_through_the_routes(make_studio, tmp_path):
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs a POSIX script as the engine")
+@pytest.mark.asyncio
+async def test_an_engine_left_running_is_stopped_on_the_next_start(tmp_path, store):
+    fake_gguf(tmp_path / "gguf" / "tiny-q8_0.gguf")
+    program = tmp_path / "llama-server"
+    program.write_text(f"#!{sys.executable}\n" + FAKE_SERVER.read_text())
+    program.chmod(0o755)
+    port = free_port()
+
+    def engine() -> Engine:
+        return Engine(
+            root=tmp_path / "engine",
+            store=store,
+            folders=lambda: [("Yours", tmp_path / "gguf")],
+            port=lambda: port,
+            binary_override=lambda: str(program),
+        )
+
+    crashed = engine()
+    await crashed.start()
+    pid_file = tmp_path / "engine" / "engine.pid"
+    old_pid = int(pid_file.read_text())
+    # Studio closes without stopping it; the next Studio starts its own.
+    fresh = engine()
+    await fresh.start()
+    assert any("left running before" in line for line in fresh.logs())
+    assert int(pid_file.read_text()) != old_pid
+    await asyncio.sleep(0.2)
+    assert (
+        not Path(f"/proc/{old_pid}").exists()
+        or b"llama-server" not in Path(f"/proc/{old_pid}/cmdline").read_bytes()
+    )
+    await fresh.stop()
+    assert not pid_file.exists()
+    await crashed.stop()
+
+
+@pytest.mark.asyncio
+async def test_a_pid_file_for_another_program_is_left_alone(tmp_path, store):
+    engine = Engine(
+        root=tmp_path / "engine",
+        store=store,
+        folders=lambda: [],
+        port=free_port,
+    )
+    (tmp_path / "engine").mkdir()
+    (tmp_path / "engine" / "engine.pid").write_text(str(os.getpid()))
+    engine._stop_leftover()
+    assert not (tmp_path / "engine" / "engine.pid").exists(), "we are still here"

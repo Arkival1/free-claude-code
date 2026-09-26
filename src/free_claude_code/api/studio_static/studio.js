@@ -1812,6 +1812,29 @@
     }, busy ? 1500 : 6000);
   }
 
+  // The same estimate the server makes (gguf_info.estimate_memory), redone
+  // live as settings change, so the bar moves before anything is saved.
+  const KV_BYTES = { f16: 2, q8_0: 34 / 32, q4_0: 18 / 32 };
+  function estimateMemory(shape, context, gpuLayers, kvCache) {
+    const layers = shape.layers || 32;
+    const onGpu = gpuLayers < 0 ? layers : Math.min(gpuLayers, layers);
+    const share = onGpu / layers;
+    const heads = shape.heads || 32;
+    const headSize = shape.embedding ? Math.floor(shape.embedding / heads) : 128;
+    const key = shape.key_length || headSize;
+    const value = shape.value_length || key;
+    const kv = layers * context * (shape.kv_heads || heads) * (key + value) * (KV_BYTES[kvCache] || 2);
+    const overhead = 0.3e9 + context * Math.max(shape.embedding, 2048) * 4 * 1.5;
+    const gb = 1024 ** 3;
+    const round = (value) => Math.round((value / gb) * 100) / 100;
+    return {
+      gpu_gb: round(shape.size * share + kv * share + (onGpu ? overhead : 0)),
+      cpu_gb: round(shape.size * (1 - share) + kv * (1 - share)),
+      kv_gb: round(kv),
+      weights_gb: round(shape.size),
+    };
+  }
+
   function engineModelRow(model, data, act) {
     const settings = model.settings;
     const estimate = model.estimate;
@@ -1861,7 +1884,26 @@
           })
         ),
     });
-    const used = Math.min(1, estimate.gpu_gb / Math.max(0.1, data.gpu_budget_gb));
+    const memoryBar = el("div", { class: "meter" }, [el("i")]);
+    const memoryText = el("small");
+    const memory = el("div", { class: "engine-memory" }, [memoryBar, memoryText]);
+    const showMemory = (shown) => {
+      const fits = shown.gpu_gb <= data.gpu_budget_gb;
+      memory.classList.toggle("over", !fits);
+      memoryBar.firstChild.style.width = percent(Math.min(1, shown.gpu_gb / Math.max(0.1, data.gpu_budget_gb)));
+      memoryText.textContent = `Needs about ${shown.gpu_gb} GB of ${data.gpu_budget_gb} GB graphics memory (${shown.weights_gb} GB model + ${shown.kv_gb} GB context)${shown.cpu_gb ? `, ${shown.cpu_gb} GB in system memory` : ""}.${fits ? "" : " Too big: lower the context, use q8 memory for context, or put fewer layers on the card."}`;
+    };
+    const liveEstimate = () =>
+      model.shape
+        ? estimateMemory(
+            model.shape,
+            Number(context.value),
+            Number(layers.value) >= allLayers ? -1 : Number(layers.value),
+            kv.value
+          )
+        : estimate;
+    for (const input of [context, layers, kv]) input.addEventListener("input", () => showMemory(liveEstimate()));
+    showMemory(estimate);
     return el("article", { class: `engine-model${loaded ? " loaded" : ""}` }, [
       el("div", { class: "engine-model-head" }, [
         el("div", { class: "grow" }, [
@@ -1886,12 +1928,7 @@
             ),
         }),
       ]),
-      el("div", { class: `engine-memory${model.fits ? "" : " over"}` }, [
-        meter(used),
-        el("small", {
-          text: `Needs about ${estimate.gpu_gb} GB of ${data.gpu_budget_gb} GB graphics memory (${estimate.weights_gb} GB model + ${estimate.kv_gb} GB context)${estimate.cpu_gb ? `, ${estimate.cpu_gb} GB in system memory` : ""}.${model.fits ? "" : " Too big: lower the context, use q8 memory for context, or put fewer layers on the card."}`,
-        }),
-      ]),
+      memory,
       speed ? el("small", { class: "muted", text: `Last reply: ${speed}` }) : null,
       el("details", { class: "engine-settings" }, [
         el("summary", { text: "Settings" }),

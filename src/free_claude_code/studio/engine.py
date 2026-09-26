@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -42,6 +43,7 @@ KV_CHOICES = ("f16", "q8_0", "q4_0")
 CONTEXT_RANGE = (1024, 131_072)
 _QUANT = re.compile(r"[-_.](i?q\d[\w]*|f16|f32|bf16|fp16)$", re.IGNORECASE)
 _SHARD = re.compile(r"-(\d{5})-of-(\d{5})$")
+_EMPTY_LINE = re.compile(r"\[\d+\]\s*")
 
 
 class EngineError(Exception):
@@ -422,17 +424,26 @@ class Engine:
                 "--port",
                 str(self._port()),
             ]
+            await anyio.to_thread.run_sync(self._stop_leftover)
             self._log.append(f"$ {' '.join(args)}")
+            windows = sys.platform == "win32"
             process = await asyncio.create_subprocess_exec(
                 *args,
                 cwd=str(binary.parent),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW
-                if sys.platform == "win32"
-                else 0,
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                    if windows
+                    else 0
+                ),
+                # Its own process group, so stopping it also stops every
+                # model it started.
+                start_new_session=not windows,
             )
+            with suppress(OSError):
+                self._pid_path.write_text(str(process.pid), encoding="utf-8")
             reader = asyncio.ensure_future(self._read_output(process))
             self._running = _Running(process=process, reader=reader)
         deadline = time.monotonic() + START_SECONDS
@@ -452,7 +463,10 @@ class Engine:
         if stream is None:
             return
         while line := await stream.readline():
-            self._log.append(line.decode("utf-8", "replace").rstrip())
+            text = line.decode("utf-8", "replace").rstrip()
+            # Model instances prefix every line with their port, even blank ones.
+            if text and not _EMPTY_LINE.fullmatch(text):
+                self._log.append(text)
         code = await process.wait()
         self._log.append(f"(engine stopped, exit code {code})")
 
@@ -469,9 +483,27 @@ class Engine:
                 except TimeoutError:
                     process.kill()
                     await process.wait()
+            # Models the router started must not outlive it and hold memory.
+            await anyio.to_thread.run_sync(lambda: _stop_tree(process.pid))
             running.reader.cancel()
             with suppress(asyncio.CancelledError):
                 await running.reader
+            self._pid_path.unlink(missing_ok=True)
+
+    @property
+    def _pid_path(self) -> Path:
+        return self._root / "engine.pid"
+
+    def _stop_leftover(self) -> None:
+        """Stop an engine left running when Studio last closed without stopping it."""
+        try:
+            pid = int(self._pid_path.read_text(encoding="utf-8").strip())
+        except OSError, ValueError:
+            return
+        if _is_engine_process(pid):
+            self._log.append(f"(stopping an engine left running before, pid {pid})")
+            _stop_tree(pid)
+        self._pid_path.unlink(missing_ok=True)
 
     async def ensure_running(self) -> None:
         if not self.running:
@@ -568,6 +600,15 @@ class Engine:
                     "architecture": model.info.architecture,
                     "quant": quant.group(1).upper() if quant else "",
                     "layers": model.info.layers,
+                    "shape": {
+                        "size": model.size,
+                        "layers": model.info.layers,
+                        "embedding": model.info.embedding,
+                        "heads": model.info.heads,
+                        "kv_heads": model.info.kv_heads,
+                        "key_length": model.info.key_length,
+                        "value_length": model.info.value_length,
+                    },
                     "context_max": model.info.context_max,
                     "state": states.get(model.name, "unloaded"),
                     "settings": setting.model_dump(
@@ -617,3 +658,50 @@ def _choice(value: object, choices: Sequence[str], label: str) -> str:
     if text not in choices:
         raise EngineError(f"{label} must be one of {', '.join(choices)}.")
     return text
+
+
+def _is_engine_process(pid: int) -> bool:
+    """True when this process id is still a llama-server, not a reused id."""
+    if pid <= 0:
+        return False
+    try:
+        if sys.platform == "win32":
+            listed = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            ).stdout
+            return "llama-server" in listed.lower()
+        command = Path(f"/proc/{pid}/cmdline")
+        if command.exists():
+            return b"llama-server" in command.read_bytes()
+        listed = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout
+        return "llama-server" in listed
+    except OSError, subprocess.SubprocessError:
+        return False
+
+
+def _stop_tree(pid: int) -> None:
+    """Stop a process and everything it started."""
+    if sys.platform == "win32":
+        with suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        return
+    killpg = getattr(os, "killpg", None)
+    if killpg is not None:
+        with suppress(ProcessLookupError, PermissionError):
+            killpg(pid, signal.SIGKILL)
+    with suppress(ProcessLookupError, PermissionError):
+        os.kill(pid, signal.SIGKILL)
