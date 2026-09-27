@@ -216,6 +216,14 @@ def _check_html(path: str, text: str, files: Mapping[str, str]) -> list[str]:
         problems.append(
             f"{path}: {parser.images_without_alt} image(s) without alt text."
         )
+    drawn = len(re.findall(r"<img\b[^>]*\bdata-placeholder\b", text, re.I))
+    if drawn:
+        problems.append(
+            f"{path}: {drawn} picture(s) are still the template's drawn "
+            "placeholders (data-placeholder). Swap in real photos (find_images, "
+            "then save_image) and remove data-placeholder, or remove it to keep "
+            "the drawn art."
+        )
     left = [phrase for phrase in STARTER_TEXT if phrase in text]
     if left:
         problems.insert(

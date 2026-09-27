@@ -396,10 +396,13 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         name=START_PROJECT_TOOL,
         description=(
             "Start a new project from a solid, mobile-first starter instead of a "
-            "blank page, then change it to fit the job. Templates: website, "
-            "landing, webapp (single-page app with saved state), game (canvas "
-            "game loop with touch controls), python-tool, python-web (FastAPI), "
-            "node-api. Existing work is never overwritten unless overwrite is set."
+            "blank page, then change it to fit the job. Templates: business "
+            "(professional multi-page site: Home, About, Services with tabs, "
+            "Gallery, Contact; for any café, shop, salon, trade, or studio), "
+            "website (one page), landing, webapp (single-page app with saved "
+            "state), game (canvas game loop with touch controls), python-tool, "
+            "python-web (FastAPI), node-api. Existing work is never overwritten "
+            "unless overwrite is set."
         ),
         parameters={
             "type": "object",
@@ -407,6 +410,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "template": {
                     "type": "string",
                     "enum": [
+                        "business",
                         "website",
                         "landing",
                         "webapp",

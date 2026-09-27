@@ -45,10 +45,17 @@ function renderProject(view, id) {
     return null;
   }
   const ask = el("textarea", { "aria-label": "Change request", placeholder: "Make the header teal and add a contact form" });
-  const frame = el("iframe", { class: "preview", title: `${project.name} preview`, sandbox: "allow-scripts allow-forms allow-modals" });
+  const frame = el("iframe", { class: "preview", title: `${project.name} preview`, sandbox: SANDBOX });
+  let page = "index.html";
   const draw = () => {
-    const html = projects.previewHtml(project);
+    const pageNames = projects.pages(project);
+    if (!pageNames.includes(page)) page = pageNames[0] || "index.html";
+    const html = projects.previewHtml(project, { page });
     const names = Object.keys(project.files);
+    const picker = pageNames.length > 1
+      ? el("select", { "aria-label": "Page", onchange: (event) => { page = event.target.value; draw(); } }, pageNames.map((name) => el("option", { value: name, text: name })))
+      : null;
+    if (picker) picker.value = page;
     const builder = agentById("builder") || state.agents.find((agent) => agent.role === "builder");
     const tester = agentById("tester") || state.agents.find((agent) => agent.role === "tester");
     const busy = [builder, tester].filter(Boolean).some((agent) => isBusy(agent));
@@ -56,11 +63,14 @@ function renderProject(view, id) {
     view.replaceChildren(
       card(project.name, [
         el("p", { class: "muted", text: `${names.length} files · changed ${ago(project.updated_at)}${busy ? " · the team is working on it" : ""}` }),
+        picker ? el("label", { class: "page-pick" }, ["Page", picker]) : null,
         html ? frame : el("p", { class: "empty", text: busy ? "The Builder is writing the first page…" : "No page yet." }),
         html
           ? el("div", { class: "row" }, [
-              button("Open full screen", () => fullScreen(project)),
-              button("Save as one HTML file", () => projects.download(`${project.slug}.html`, projects.bundle(project))),
+              button("Open full screen", () => fullScreen(project, page)),
+              pageNames.length > 1
+                ? button("Save all files (.zip)", () => projects.download(`${project.slug}.zip`, projects.zipProject(project)))
+                : button("Save as one HTML file", () => projects.download(`${project.slug}.html`, projects.bundle(project))),
             ])
           : null,
       ]),
@@ -101,7 +111,36 @@ function renderProject(view, id) {
     );
   };
   draw();
-  return onChange((what) => (what === "projects" || what === "team") && draw());
+  const stopFollowing = followLinks(frame, project, (next) => {
+    page = next;
+    draw();
+  });
+  const stopWatching = onChange((what) => (what === "projects" || what === "team") && draw());
+  return () => {
+    stopFollowing();
+    stopWatching();
+  };
+}
+
+// Previews may run their scripts and open links in a new tab, but can't reach
+// the app's storage (keys, memories), whatever the model wrote into them.
+const SANDBOX = "allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox";
+
+/** Show another page of the project when a link in the preview asks for it. */
+function followLinks(frame, project, show) {
+  const listen = (event) => {
+    if (event.source !== frame.contentWindow || !event.data || typeof event.data.fccPage !== "string") return;
+    let wanted = "";
+    try {
+      wanted = projects.cleanPath(decodeURIComponent(event.data.fccPage));
+    } catch {
+      wanted = "";
+    }
+    if (projects.pages(project).includes(wanted)) show(wanted);
+    else notify(`${event.data.fccPage.slice(0, 60)} isn't in ${project.name} yet.`);
+  };
+  addEventListener("message", listen);
+  return () => removeEventListener("message", listen);
 }
 
 function fileSheet(project, name) {
@@ -130,14 +169,19 @@ function fileSheet(project, name) {
   ]);
 }
 
-/** The page on its own, sandboxed: it can run its scripts but can't reach the
- * app's storage (keys, memories), whatever the model wrote into it. */
-function fullScreen(project) {
-  const frame = el("iframe", { class: "preview-full", title: `${project.name} full screen`, sandbox: "allow-scripts allow-forms allow-modals" });
-  frame.srcdoc = projects.previewHtml(project);
+/** The site on its own, sandboxed, with its links between pages working. */
+function fullScreen(project, page) {
+  const frame = el("iframe", { class: "preview-full", title: `${project.name} full screen`, sandbox: SANDBOX });
+  frame.srcdoc = projects.previewHtml(project, { page });
+  const stop = followLinks(frame, project, (next) => {
+    frame.srcdoc = projects.previewHtml(project, { page: next });
+  });
   const layer = el("div", { class: "fullscreen", role: "dialog", "aria-label": `${project.name} full screen` }, [
     frame,
-    button("✕ Close", () => layer.remove(), { class: "close-full", "aria-label": "Close full screen" }),
+    button("✕ Close", () => {
+      stop();
+      layer.remove();
+    }, { class: "close-full", "aria-label": "Close full screen" }),
   ]);
   document.body.append(layer);
 }

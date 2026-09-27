@@ -6,7 +6,7 @@ import { speak } from "./voice.js";
 import { calculate, findImages } from "./tools.js";
 import { bestModel } from "./brains.js";
 import { readGguf } from "./gguf.js";
-import { checkProject, bundle, previewHtml } from "./projects.js";
+import { checkProject, bundle, previewHtml, zipProject } from "./projects.js";
 import { polishNotes } from "./polish.js";
 import { lookAtSite, describeLook } from "./inspect.js";
 import { templateFiles } from "./templates.js";
@@ -145,6 +145,7 @@ window.fccPhone = {
   checkProject,
   bundle,
   previewHtml,
+  zipProject,
   polishNotes,
   lookAtSite,
   describeLook,

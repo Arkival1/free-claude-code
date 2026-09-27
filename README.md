@@ -490,6 +490,16 @@ to llama 3.1 8b"*, *"use gemma for the Guide"*; he switches it at once, and his
 the agent borrows the loaded one; Team brains and the HUD say which it is
 really using.
 
+**Which brain for the Builder?** The templates, photos, and checks help any
+model, but a whole multi-page site is a lot of careful writing. A small
+model (the 0.5–3B ones that fit a phone, or a 7B on an 8 GB graphics card)
+does best filling in the `business` template and fixing what the checks
+report; a large server model writes whole custom pages well. A good split is
+a server model for the Builder (Team brains, or tell Jarvis *"give the
+Builder gemini"*) and local models for everyone else, so only building work
+leaves the PC. Server agents keep their own memory area and can't read your
+main memory.
+
 In LM Studio, turn on **Just-in-Time model loading** (Developer → Settings).
 Without it LM Studio lists only the model that is loaded, so every agent ends
 up on that one. With it, every downloaded model is listed and LM Studio loads
@@ -1019,8 +1029,22 @@ still looks finished.
 
 **Builder upgrades.**
 
+- **Multi-page business sites.** The `business` template is a professional
+  five-page site for a café, shop, salon, restaurant, trade, or studio:
+  Home (full-bleed photo hero with a dark fade, opening hours, address, and
+  phone), About, Services (tabs with prices, keyboard friendly), Gallery (tap
+  a picture to open it large, then step through), and Contact (a form that
+  checks each field, hours, and a map link). Every page shares a header that
+  sits over the photo and turns solid as you scroll, a full-screen phone
+  menu, and a footer with pages, hours, contact, and social links. Headings
+  use Playfair Display and text Inter, colours are variables at the top of
+  `styles.css`, and sections fade in as you scroll (not for people who turn
+  motion off). Its pictures start as drawn placeholders marked
+  `data-placeholder`; `check_project` asks the Builder to swap them for real
+  photos. To receive form messages, put a form service address (such as
+  Formspree) in the form's `data-endpoint`.
 - **Starter templates.** `start_project` begins a new project from a tested,
-  mobile-first starter instead of a blank page: `website` (sections, phone
+  mobile-first starter instead of a blank page: `business` (above), `website` (sections, phone
   menu, contact form), `landing` (hero, features, testimonial, pricing,
   signup), `webapp` (single-page app with saved state), `game` (canvas game
   loop, score, best score, touch controls), `python-tool` (command line with a
@@ -1356,15 +1380,20 @@ account, and costs nothing.
   `read_file`, `edit_file`, `list_files`, `delete_file`, `check_project`,
   `restore_file`, `find_images`, `polish_check`, and `look_at_site`.
 - **The phone Builder's website tools**: `start_project` starts from the same
-  `website`, `landing`, `webapp`, and `game` templates as the PC;
+  `business` (five pages), `website`, `landing`, `webapp`, and `game`
+  templates as the PC;
   `find_images` finds free photos with credit lines (used by their https
   address); `polish_check` is the PC's designer once-over, word for word;
   `restore_file` undoes a change (the last five versions of each file are
-  kept); and `look_at_site` opens the site like a visitor, on a phone
-  (390px) and a computer (1280px), and reports what shows first and what's
-  wrong: sideways scrolling and the element causing it, broken pictures,
-  script errors, tiny text, hard-to-read colours, and buttons too small to
-  tap. The Tester gets `look_at_site`, `polish_check`, and `restore_file`
+  kept); and `look_at_site` opens every page like a visitor (scrolling
+  through it first), on a phone (390px) and the front page on a computer
+  (1280px) too, and reports what shows first and what's wrong: sideways
+  scrolling and the element causing it, broken or stretched pictures, script
+  errors, tiny text, hard-to-read colours (judged against what is really
+  behind the text), and buttons too small to tap.
+- **Multi-page previews**: links between pages work in the preview and full
+  screen, a **Page** picker jumps to any page, and **Save all files (.zip)**
+  saves the whole site, pictures included. The Tester gets `look_at_site`, `polish_check`, and `restore_file`
   too. Agents from an earlier version get the new tools once; a tool you
   turn off afterwards stays off.
 - **Projects**: websites the Builder makes, with a live preview, **Open full

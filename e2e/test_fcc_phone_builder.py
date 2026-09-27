@@ -1,6 +1,8 @@
 """The phone Builder's website tools: templates, photos, looking at the site, polish, undo."""
 
+import io
 import json
+import zipfile
 
 from playwright.sync_api import Page, Route, expect
 
@@ -67,7 +69,7 @@ def openverse(page: Page, seen: list[str] | None = None) -> None:
 
 def test_templates_and_polish_match_the_pc(page: Page, admin_base_url: str) -> None:
     open_phone(page, admin_base_url)
-    for name in ("website", "landing", "webapp", "game"):
+    for name in ("business", "website", "landing", "webapp", "game"):
         files = page.evaluate(
             "([name]) => window.fccPhone.templateFiles(name, 'Cafe Luna')", [name]
         )
@@ -84,6 +86,7 @@ def test_templates_and_polish_match_the_pc(page: Page, admin_base_url: str) -> N
         },
         template_files("landing", "Cafe Luna"),
         template_files("website", "Cafe Luna"),
+        template_files("business", "Cafe Luna"),
         {
             "about.htm": "<style>:root{--ink:#eee;--bg:#fff}body{color:var(--ink);background:var(--bg)}</style>"
         },
@@ -117,7 +120,7 @@ def test_look_at_site_sees_what_a_visitor_would(
     assert 'heading "Bad page"' in phone
 
     # Starter templates look right, including a game that saves its best score.
-    for name in ("landing", "game"):
+    for name in ("landing", "game", "business"):
         clean = page.evaluate(
             """async ([name]) => window.fccPhone.describeLook(
                 await window.fccPhone.lookAtSite({name: 'Cafe', files: window.fccPhone.templateFiles(name, 'Cafe')}))""",
@@ -217,6 +220,7 @@ def test_the_builder_builds_with_templates_photos_and_a_look(
         t for t in seen[0]["tools"] if t["function"]["name"] == "start_project"
     )
     assert start["function"]["parameters"]["properties"]["template"]["enum"] == [
+        "business",
         "website",
         "landing",
         "webapp",
@@ -324,3 +328,82 @@ def test_no_screen_shows_a_stray_null(page: Page, admin_base_url: str) -> None:
         go(page, route)
         page.wait_for_timeout(150)
         assert not page.evaluate(stray), route
+
+
+def test_a_multi_page_site_works_in_the_preview(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    project_id = page.evaluate(
+        """() => {
+            const files = window.fccPhone.templateFiles('business', 'Cafe Luna');
+            const project = {id: 'p1', name: 'Cafe Luna', slug: 'cafe-luna', files,
+                created_at: Date.now(), updated_at: Date.now(), by: 'you'};
+            window.fccPhone.state.projects.unshift(project);
+            return project.id;
+        }"""
+    )
+    go(page, f"projects/{project_id}")
+    preview = page.frame_locator("iframe.preview")
+    expect(preview.locator("h1")).to_have_text("Cafe Luna")
+    # The drawn pictures are inlined, so they show in the sandbox.
+    shown = preview.locator(".hero-media").evaluate("img => img.naturalWidth")
+    assert shown > 0
+
+    # Menu links move between the project's pages.
+    preview.get_by_role("link", name="Services", exact=True).first.click()
+    expect(preview.locator("h1")).to_have_text("Services and prices")
+    expect(page.get_by_label("Page")).to_have_value("services.html")
+    preview.get_by_role("tab", name="Classics").click()
+    expect(preview.locator("#panel-2")).to_be_visible()
+    expect(preview.locator("#panel-1")).to_be_hidden()
+    page.get_by_label("Page").select_option("gallery.html")
+    preview.get_by_role("button", name="Open picture 3").click()
+    expect(preview.locator("#lightbox")).to_be_visible()
+    preview.get_by_role("button", name="Next picture").click()
+    expect(preview.locator("#lightbox figcaption")).to_have_text("Picture 4")
+    preview.get_by_role("button", name="Close").click()
+
+    # A phone-sized visitor gets the menu button, and the form checks itself.
+    # (The app's top bar can cover part of the frame, so the form uses keys.)
+    page.get_by_label("Page").select_option("contact.html")
+    preview.get_by_role("button", name="Send message").press("Enter")
+    expect(preview.locator("#name-error")).to_have_text("Please fill this in.")
+    preview.get_by_label("Name").fill("Sam")
+    preview.get_by_label("Email").fill("sam@example.org")
+    preview.get_by_label("Message").fill("A table for two, please.")
+    preview.get_by_role("button", name="Send message").press("Enter")
+    expect(preview.locator("#form-status")).to_contain_text("Thank you!")
+
+    page.get_by_role("button", name="Open full screen").click()
+    full = page.frame_locator("iframe.preview-full")
+    expect(full.locator("h1")).to_have_text("Contact and booking")
+    full.get_by_role("button", name="Open menu").click()
+    full.get_by_role("link", name="About", exact=True).first.click()
+    expect(full.locator("h1")).to_have_text("Our story")
+    page.get_by_role("button", name="Close full screen").click()
+
+    # Every file, pictures included, saves as one zip.
+    raw = page.evaluate(
+        """async () => [...new Uint8Array(await window.fccPhone.zipProject(
+            window.fccPhone.state.projects[0]).arrayBuffer())]"""
+    )
+    with zipfile.ZipFile(io.BytesIO(bytes(raw))) as archive:
+        assert archive.testzip() is None
+        names = set(archive.namelist())
+        assert {"cafe-luna/index.html", "cafe-luna/images/hero.svg"} <= names
+        expected = template_files("business", "Cafe Luna")["about.html"]
+        assert archive.read("cafe-luna/about.html").decode() == expected
+    expect(page.get_by_role("button", name="Save all files (.zip)")).to_be_visible()
+
+
+def test_look_at_site_checks_every_page(page: Page, admin_base_url: str) -> None:
+    open_phone(page, admin_base_url)
+    report = page.evaluate(
+        """async () => window.fccPhone.describeLook(await window.fccPhone.lookAtSite(
+            {name: 'Cafe', files: window.fccPhone.templateFiles('business', 'Cafe')}))"""
+    )
+    for name in ("index", "about", "services", "gallery", "contact"):
+        assert f"{name}.html, Phone (390px wide):" in report, report
+    assert "index.html, Computer (1280px wide):" in report
+    assert report.startswith("Looked at the site: it looks right"), report

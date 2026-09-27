@@ -80,7 +80,7 @@ export async function answer(agent, text, { project } = {}) {
   const ctx = { project: project || null, depth: 0, chain: [agent.id] };
   try {
     const said = await loop(agent, systemPrompt(agent, text, ctx), convo, ctx, {
-      maxRounds: agent.role === "builder" ? 16 : 8,
+      maxRounds: agent.role === "builder" ? 30 : 8,
       onTool: (call, result) => addTurn(agent, { role: "tool", text: `${call.name}: ${result.split("\n")[0].slice(0, 180)}` }),
     });
     await addTurn(agent, { role: "assistant", text: said });
@@ -104,7 +104,7 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
   const ctx = { project, depth, chain: [...chain, agent.id] };
   try {
     const result = await loop(agent, systemPrompt(agent, goal, ctx), [{ role: "user", content: goal }], ctx, {
-      maxRounds: agent.role === "builder" || agent.role === "tester" ? 20 : 10,
+      maxRounds: agent.role === "builder" ? 30 : agent.role === "tester" ? 20 : 10,
       onTool: async (call, output) => {
         job.steps += 1;
         feed(agent.name, `${call.name}: ${output.split("\n")[0].slice(0, 120)}`, "tool");

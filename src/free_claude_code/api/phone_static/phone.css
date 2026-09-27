@@ -607,11 +607,14 @@ pre.notes {
   background: #fff;
 }
 
+/* Bottom centre, clear of the menu buttons sites put at the top. */
 .close-full {
   position: absolute;
-  top: calc(8px + var(--safe-top));
-  right: 10px;
-  background: rgba(2, 7, 13, 0.85);
+  bottom: calc(14px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(2, 7, 13, 0.88);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
 
 /* ------------------------------------------------------------------- HUD */
@@ -1048,4 +1051,14 @@ pre.notes {
   border: 1px solid var(--line);
   border-radius: 999px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.page-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.page-pick select {
+  flex: 1;
 }

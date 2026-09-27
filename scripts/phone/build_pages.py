@@ -17,7 +17,7 @@ SOURCE = ROOT / "src" / "free_claude_code" / "api" / "phone_static"
 DOCS = ROOT / "docs"
 TARGET = DOCS / "phone"
 TEMPLATES_JS = SOURCE / "js" / "templates.js"
-WEB_TEMPLATES = ("website", "landing", "webapp", "game")
+WEB_TEMPLATES = ("business", "website", "landing", "webapp", "game")
 """The starters that run in a browser, so the phone can preview them."""
 TITLE_MARK = "FCCTITLE0"
 """ Stands in for the title; its lower case stands in for the slug."""

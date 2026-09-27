@@ -3,13 +3,14 @@
 // broken pictures, tiny text, small buttons, hard-to-read colours, errors.
 // The page runs in a sandboxed frame; a small script inside it measures and
 // posts the results back, so the page never touches the app.
-import { previewHtml } from "./projects.js";
+import { previewHtml, pages } from "./projects.js";
 
 export const WIDTHS = [
   { label: "Phone", width: 390, height: 844 },
   { label: "Computer", width: 1280, height: 800 },
 ];
-const WAIT_MS = 8000;
+const WAIT_MS = 12000;
+const MAX_PAGES = 6;
 
 // Runs inside the page. TOKEN is replaced per look.
 const MEASURE = `(() => {
@@ -47,12 +48,25 @@ const MEASURE = `(() => {
     const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
     return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
   };
+  // What is really painted behind some text: the first solid background under
+  // its middle, or null over a picture (colour alone can't judge that).
+  const solid = (node) => {
+    const style = getComputedStyle(node);
+    if (style.backgroundImage && style.backgroundImage !== "none") return null;
+    if (["IMG", "VIDEO", "CANVAS", "PICTURE"].includes(node.tagName) || node instanceof SVGElement) return null;
+    const color = parse(style.backgroundColor);
+    return color && color.a > 0.9 ? color : undefined;
+  };
   const behind = (el) => {
-    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
-      const style = getComputedStyle(node);
-      if (style.backgroundImage && style.backgroundImage !== "none") return null;
-      const color = parse(style.backgroundColor);
-      if (color && color.a > 0.9) return color;
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const stack = x >= 0 && y >= 0 && x < innerWidth && y < innerHeight ? document.elementsFromPoint(x, y) : [];
+    const layers = stack.length ? stack.filter((node) => node === el || !el.contains(node)) : [];
+    if (!layers.length) for (let node = el; node && node.nodeType === 1; node = node.parentElement) layers.push(node);
+    for (const node of layers) {
+      const found = solid(node);
+      if (found !== undefined) return found;
     }
     return { r: 255, g: 255, b: 255, a: 1 };
   };
@@ -136,14 +150,26 @@ const MEASURE = `(() => {
       picture,
     }, "*");
   };
-  addEventListener("load", () => setTimeout(report, 600));
+  // Scroll through once like a visitor, so fade-ins and lazy pictures show,
+  // then measure from the top.
+  const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+  addEventListener("load", async () => {
+    await pause(300);
+    for (let step = 0; step < 25 && scrollY + innerHeight < document.documentElement.scrollHeight; step += 1) {
+      scrollBy({ top: Math.round(innerHeight * 0.8), behavior: "instant" });
+      await pause(120);
+    }
+    scrollTo({ top: 0, left: 0, behavior: "instant" });
+    await pause(900);
+    report();
+  });
   setTimeout(report, ${WAIT_MS - 1500});
 })();`;
 
-function measure(project, size) {
+function measure(project, size, page = "index.html") {
   return new Promise((resolve) => {
     const token = Math.random().toString(36).slice(2);
-    const html = previewHtml(project, `<script>${MEASURE.replace("__TOKEN__", token)}</script>`);
+    const html = previewHtml(project, { page, extra: `<script>${MEASURE.replace("__TOKEN__", token)}</script>` });
     if (html === null) return resolve(null);
     const frame = document.createElement("iframe");
     frame.setAttribute("sandbox", "allow-scripts");
@@ -169,13 +195,18 @@ function measure(project, size) {
   });
 }
 
-/** Measure the project's front page at each width. Null when it has no page. */
+/** Measure the front page at each width and the other pages on a phone.
+ * Null when there is no page. */
 export async function lookAtSite(project) {
+  const names = pages(project).slice(0, MAX_PAGES);
+  if (!names.length) return null;
   const results = [];
-  for (const size of WIDTHS) {
-    const result = await measure(project, size);
-    if (result === null) return null;
-    results.push(result);
+  for (const [index, page] of names.entries()) {
+    for (const size of index === 0 ? WIDTHS : WIDTHS.slice(0, 1)) {
+      const result = await measure(project, size, page);
+      if (result === null) return null;
+      results.push({ ...result, page });
+    }
   }
   return results;
 }
@@ -185,7 +216,7 @@ export function describeLook(results) {
   const lines = [];
   let problems = 0;
   for (const look of results) {
-    lines.push(`${look.label} (${look.width}px wide):`);
+    lines.push(`${look.page || "index.html"}, ${look.label} (${look.width}px wide):`);
     if (look.timedOut) {
       lines.push("- The page didn't finish loading in time; a script may be stuck in a loop.");
       problems += 1;

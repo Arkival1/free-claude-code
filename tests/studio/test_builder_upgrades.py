@@ -78,6 +78,7 @@ async def test_templates_never_replace_real_work(make_studio):
 
 def test_every_template_is_listed_and_known():
     assert set(TEMPLATES) == {
+        "business",
         "website",
         "landing",
         "webapp",

@@ -3,6 +3,8 @@
 from collections.abc import Mapping
 from string import Template
 
+from .templates_business import BUSINESS, PLACEHOLDER_TEXT
+
 _HEAD = """<!doctype html>
 <html lang="en">
 <head>
@@ -714,10 +716,17 @@ STARTER_TEXT: tuple[str, ...] = (
     "A benefit, not a feature.",
     "It changed how I work.",
     "A happy customer",
+    *PLACEHOLDER_TEXT,
 )
 """Placeholder copy in the templates, which a finished project replaces."""
 
 TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
+    "business": (
+        "A professional multi-page site for a café, shop, salon, or studio: "
+        "photo hero, Home, About, Services (tabs with prices), Gallery "
+        "(picture viewer), Contact (form, hours, map)",
+        BUSINESS,
+    ),
     "website": ("A multi-section website with a phone menu and contact form", _WEBSITE),
     "landing": (
         "A landing page: hero, features, testimonial, pricing, signup",

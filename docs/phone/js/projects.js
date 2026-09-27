@@ -132,7 +132,26 @@ export function bundle(project, page = "index.html") {
     const module = /type=["']module["']/i.test(before + after);
     return `<script${module ? ' type="module"' : ""}>\n${js.replace(/<\/script/gi, "<\\/script")}\n</script>`;
   });
+  // Pictures drawn as SVG files in the project go in as data addresses.
+  const picture = (ref) => {
+    const svg = /\.svg$/i.test(ref) ? files[cleanRelative(ref)] : undefined;
+    return svg === undefined ? null : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  };
+  html = html.replace(/(\bsrc=)(["'])([^"']+)\2/gi, (match, attr, quote, ref) => {
+    const inline = picture(ref);
+    return inline ? `${attr}${quote}${inline}${quote}` : match;
+  });
+  html = html.replace(/url\(\s*(["']?)([^"')]+)\1\s*\)/gi, (match, quote, ref) => {
+    const inline = picture(ref);
+    return inline ? `url("${inline}")` : match;
+  });
   return html;
+}
+
+/** The project's pages, front page first. */
+export function pages(project) {
+  const names = Object.keys(project.files).filter((name) => /\.html?$/i.test(name));
+  return names.sort((a, b) => (a === "index.html" ? -1 : b === "index.html" ? 1 : 0));
 }
 
 // Previews run sandboxed, where the browser refuses saved storage; pages that
@@ -140,11 +159,16 @@ export function bundle(project, page = "index.html") {
 const STORAGE_SHIM =
   "<script>try{localStorage.getItem('x')}catch(e){const s=()=>{const m=new Map();return{getItem:(k)=>m.has(String(k))?m.get(String(k)):null,setItem:(k,v)=>{m.set(String(k),String(v))},removeItem:(k)=>{m.delete(String(k))},clear:()=>m.clear(),key:(i)=>[...m.keys()][i]??null,get length(){return m.size}}};for(const n of['localStorage','sessionStorage']){try{Object.defineProperty(window,n,{value:s(),configurable:true})}catch(e){}}}</script>";
 
-/** The bundled page, ready for a sandboxed preview; extra goes first in <head>. */
-export function previewHtml(project, extra = "") {
-  const html = bundle(project);
+// Links between the project's pages ask the app to show that page (a preview
+// has no address of its own); links out of the project open in a new tab.
+const PAGE_LINKS =
+  "<script>document.addEventListener('click',(e)=>{const a=e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented)return;const h=a.getAttribute('href');if(/^(#|mailto:|tel:|javascript:)/i.test(h))return;e.preventDefault();if(/^(https?:)?\\/\\//i.test(h)){window.open(h,'_blank','noopener');return}const page=h.split('#')[0].split('?')[0];if(page)parent.postMessage({fccPage:page},'*')});</script>";
+
+/** A page of the project, ready for a sandboxed preview; extra goes first in <head>. */
+export function previewHtml(project, { page = "index.html", extra = "" } = {}) {
+  const html = bundle(project, page);
   if (html === null) return null;
-  const inject = STORAGE_SHIM + extra;
+  const inject = STORAGE_SHIM + PAGE_LINKS + extra;
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (tag) => tag + inject);
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (tag) => tag + inject);
   return inject + html;
@@ -169,7 +193,11 @@ export function checkProject(project) {
   for (const name of names) {
     const text = project.files[name];
     if (!text.trim()) problems.push(`${name} is empty.`);
-    if (/lorem ipsum|TODO|your (?:text|content) here|placeholder/i.test(text)) problems.push(`${name} still has placeholder text.`);
+    // Placeholder words, not placeholder="" hints or the template's picture marker.
+    const words = text.replace(/\bdata-placeholder\b|\bplaceholder=(["'])[^"']*\1/gi, "");
+    if (/lorem ipsum|TODO|your (?:text|content) here|placeholder/i.test(words)) problems.push(`${name} still has placeholder text.`);
+    const drawn = (text.match(/<img\b[^>]*\bdata-placeholder\b/gi) || []).length;
+    if (drawn) problems.push(`${name}: ${drawn} picture(s) are still the template's drawn placeholders; use real photos from find_images and remove data-placeholder (or remove it to keep the drawn art).`);
     const starter = STARTER_TEXT.find((line) => text.includes(line));
     if (starter) problems.push(`${name} still has the template's placeholder line "${starter}"; replace it with real content.`);
   }
@@ -194,7 +222,7 @@ export function checkProject(project) {
 }
 
 export function download(name, text, type = "text/html") {
-  const blob = new Blob([text], { type });
+  const blob = text instanceof Blob ? text : new Blob([text], { type });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
   link.download = name;
@@ -202,4 +230,52 @@ export function download(name, text, type = "text/html") {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+}
+
+// ------------------------------------------------------------------- zip
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** Every file of the project in one .zip (stored, not compressed), in a folder. */
+export function zipProject(project) {
+  const encoder = new TextEncoder();
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  const now = new Date();
+  const time = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  for (const [path, text] of Object.entries(project.files)) {
+    const name = encoder.encode(`${project.slug}/${path}`);
+    const data = encoder.encode(text);
+    const crc = crc32(data);
+    const local = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, time, 2], [12, date, 2], [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, name.length, 2], [28, 0, 2]].forEach(([at, value, size]) =>
+      size === 4 ? local.setUint32(at, value, true) : local.setUint16(at, value, true)
+    );
+    const entry = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, time, 2], [14, date, 2], [16, crc, 4], [20, data.length, 4], [24, data.length, 4], [28, name.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, offset, 4]].forEach(([at, value, size]) =>
+      size === 4 ? entry.setUint32(at, value, true) : entry.setUint16(at, value, true)
+    );
+    parts.push(local, name, data);
+    central.push(entry, name);
+    offset += 30 + name.length + data.length;
+  }
+  const size = central.reduce((sum, part) => sum + part.byteLength, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  const count = Object.keys(project.files).length;
+  [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, count, 2], [10, count, 2], [12, size, 4], [16, offset, 4], [20, 0, 2]].forEach(([at, value, bytes]) =>
+    bytes === 4 ? end.setUint32(at, value, true) : end.setUint16(at, value, true)
+  );
+  return new Blob([...parts, ...central, end], { type: "application/zip" });
 }
