@@ -10,7 +10,13 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from pydantic import BaseModel, Field
 
 from free_claude_code.config.settings import Settings
@@ -27,7 +33,8 @@ from free_claude_code.studio.lora import (
     LoraAuthError,
     LoraError,
 )
-from free_claude_code.studio.models import Agent, LoraJob, VideoNote
+from free_claude_code.studio.models import Agent, LoraJob, PhoneLink, VideoNote
+from free_claude_code.studio.phone_link import PhoneAuthError, PhoneLinkError
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.tuning import TuningError
@@ -2053,3 +2060,135 @@ def studio_error_status(error: Exception) -> int:
     if isinstance(error, StudioError):
         return 400
     return 500
+
+
+# ------------------------------------------------------------ FCC Phone
+# The phone app lives on another origin (GitHub Pages), so the paths under
+# /studio/api/phone/ answer any origin (see PhoneCorsMiddleware). Each needs a
+# pairing code or the phone's secret; managing phones stays on /studio/api/phones.
+
+
+class PhonePairPayload(BaseModel):
+    code: str = Field(min_length=4, max_length=40)
+    name: str = Field(default="iPhone", max_length=80)
+
+
+def _phone_token(request: Request) -> str:
+    return _bearer(request.headers.get("authorization"))
+
+
+async def _phone(request: Request, studio: StudioService) -> PhoneLink:
+    try:
+        return await studio.phone_auth(_phone_token(request))
+    except PhoneAuthError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+
+
+def _phone_failed(error: PhoneLinkError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(error))
+
+
+@router.post("/studio/api/phones/code")
+async def phone_pairing_code(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """A code to type into FCC Phone (on the PC only)."""
+    return studio.phone_pairing_code()
+
+
+@router.get("/studio/api/phones")
+async def phone_list(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return await studio.phone_links()
+
+
+@router.delete("/studio/api/phones/{link_id}")
+async def phone_unlink(
+    link_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"deleted": await studio.phone_unlink(link_id)}
+
+
+@router.post("/studio/api/phone/pair")
+async def phone_pair(
+    payload: PhonePairPayload, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """Trade a pairing code for the secret the phone keeps."""
+    try:
+        return await studio.phone_pair(payload.code, payload.name)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.get("/studio/api/phone/hello")
+async def phone_hello(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    return await studio.phone_hello(await _phone(request, studio))
+
+
+@router.post("/studio/api/phone/sync")
+async def phone_sync(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """Share the phone's new memories and send the PC's back."""
+    link = await _phone(request, studio)
+    body = await _json_body(request)
+    try:
+        return await studio.phone_sync(link, body.get("memories", []))
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.post("/studio/api/phone/complete")
+async def phone_complete(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """Think with the PC's main AI model for a phone agent."""
+    link = await _phone(request, studio)
+    body = await _json_body(request)
+    try:
+        return await studio.phone_complete(link, body)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+async def _json_body(request: Request) -> JsonObject:
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > 2_000_000:
+        raise HTTPException(status_code=413, detail="That is too much to send at once.")
+    try:
+        body = await request.json()
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Send JSON.") from error
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Send a JSON object.")
+    return body
+
+
+# FCC Phone's own files, so a phone on the PC's network (or Tailscale) can
+# open it from here too. They hold no secrets: everything lives on the phone.
+PHONE_DIR = Path(__file__).with_name("phone_static")
+_PHONE_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".webmanifest": "application/manifest+json",
+    ".png": "image/png",
+}
+
+
+@router.get("/phone", include_in_schema=False)
+def phone_root() -> RedirectResponse:
+    return RedirectResponse("/phone/", status_code=307)
+
+
+@router.get("/phone/", include_in_schema=False)
+@router.get("/phone/{name}", include_in_schema=False)
+def phone_file(name: str = "index.html") -> FileResponse:
+    path = PHONE_DIR / name
+    kind = _PHONE_TYPES.get(path.suffix)
+    if kind is None or "/" in name or "\\" in name or not path.is_file():
+        raise HTTPException(status_code=404, detail="Not part of FCC Phone.")
+    return FileResponse(path, media_type=kind, headers={"Cache-Control": "no-cache"})

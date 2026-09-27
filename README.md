@@ -1318,6 +1318,70 @@ current after every chat turn, room conversation, and class.
 </details>
 
 <details>
+<summary><strong>FCC Phone: a separate app for your iPhone</strong></summary>
+
+FCC Phone is its own app for your phone, apart from Studio on the PC. It has
+its own agents (Jarvis to start; add a Helper, Researcher, Coach, or your own),
+its own memory, and its own brain, so it works with the PC switched off.
+Everything is stored on the phone. It is a web app installed to the Home
+Screen, so it needs no App Store and no developer account, and it costs nothing.
+
+**Put it on the phone (once).** GitHub Pages hosts it for free from this
+repository's `docs/` folder:
+
+1. On GitHub, open the repository, then **Settings → Pages**. Under **Build and
+   deployment**, set **Source** to **Deploy from a branch**, pick the branch
+   with FCC Phone and the **/docs** folder, and press **Save**. After a minute
+   the page shows the address, `https://<you>.github.io/<repo>/`.
+2. On the iPhone, open `https://<you>.github.io/<repo>/phone/` in **Safari**,
+   tap **Share → Add to Home Screen → Add**. FCC Phone opens full screen from
+   its own icon and still opens with no connection.
+
+(Studio on the PC also serves it at `/phone/`, for example
+`https://<your-pc>.ts.net/phone/` over Tailscale.)
+
+**Give it a free brain.** In FCC Phone, **Settings**: paste a key under one of
+these and press **Save**; it picks a good model by itself.
+
+- **Google Gemini**: a free key from [Google AI Studio](https://aistudio.google.com/apikey).
+  The most generous free tier; recommended.
+- **Groq**: a free key from [console.groq.com](https://console.groq.com/keys); very fast.
+- **OpenRouter**: a free key from [openrouter.ai](https://openrouter.ai/keys);
+  its free models allow about 50 messages a day.
+- **Other**: any OpenAI-style service that allows browser apps.
+
+Keys stay on the phone. Each phone agent can use a different brain (Agents →
+Edit). Phone agents have `remember`, `recall`, `calculate`, `weather`
+(Open-Meteo, no key), and `wikipedia`; memory is shared by the phone's agents
+and rides on each message. **Speak replies out loud** reads answers aloud, 🎤
+listens, and **Save a backup** / **Restore a backup** keep a copy (without keys).
+
+**Link it to your PC (optional).** Pairing shares memories both ways and lets
+phone agents think with your PC's AI (**My PC** brain). The phone app is on
+https, so it reaches the PC over HTTPS, which Tailscale gives you for free:
+
+1. Install [Tailscale](https://tailscale.com/download) on the PC and the
+   iPhone, signed in to the same account.
+2. On the PC, run `tailscale serve --bg 8082` once. Studio's **More → FCC
+   Phone** card then shows the PC's `https://….ts.net` address.
+3. Press **Make a pairing code** there (it works once, for 10 minutes).
+4. In FCC Phone, **Settings → Connect to my PC**: type the address and the
+   code, then **Pair**.
+
+After that the phone syncs when it opens and a few seconds after it learns
+something: its new memories go into the PC's team memory (tagged `phone`,
+written by "Jarvis (phone)" and so on), and the PC's team memory and the main
+AI's memories come back to the phone's **Memory → From my PC**. The PC's
+memories never go to a cloud brain on the phone unless you tick **Let cloud
+brains read memories from my PC**; with the **My PC** brain they are used when
+your PC's main AI runs on the PC itself. Forgetting a memory on one side does
+not remove it from the other. Studio lists paired phones on the same card,
+with **Unlink**; the PC keeps only a hash of each phone's secret, and only the
+`/studio/api/phone/` paths accept the phone app's requests.
+
+</details>
+
+<details>
 <summary><strong>Installing it on an iPhone</strong></summary>
 
 Studio is served wherever the proxy is bound, so a phone on the same network

@@ -22,6 +22,7 @@ from .models import (
     MemoryEntry,
     Message,
     ModelAsset,
+    PhoneLink,
     Record,
     SiteProject,
     Study,
@@ -78,6 +79,7 @@ TABLES: Mapping[type[Record], str] = {
     Study: "studio_studies",
     StudyLesson: "studio_study_lessons",
     EngineModelSettings: "studio_engine_models",
+    PhoneLink: "studio_phone_links",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (

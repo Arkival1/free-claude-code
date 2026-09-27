@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#02070d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="FCC Phone" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="Your own AI agents with their own memory, on your phone." />
+    <title>FCC Phone</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <link rel="stylesheet" href="phone.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="orb" aria-hidden="true"><i></i></div>
+      <div class="bar-text">
+        <h1 id="title">FCC PHONE</h1>
+        <p id="subtitle" class="muted">Starting…</p>
+      </div>
+      <span id="link-pill" class="pill" hidden></span>
+    </header>
+
+    <main id="view" class="view" aria-live="polite"></main>
+
+    <nav class="tabs" aria-label="Sections">
+      <button class="tab" data-route="chat"><span aria-hidden="true">◆</span>Chat</button>
+      <button class="tab" data-route="agents"><span aria-hidden="true">◎</span>Agents</button>
+      <button class="tab" data-route="memory"><span aria-hidden="true">◈</span>Memory</button>
+      <button class="tab" data-route="settings"><span aria-hidden="true">⚙</span>Settings</button>
+    </nav>
+
+    <div id="sheet" class="sheet" hidden>
+      <div class="sheet-backdrop" data-close></div>
+      <section class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <header class="sheet-head">
+          <h2 id="sheet-title"></h2>
+          <button class="ghost" data-close aria-label="Close">✕</button>
+        </header>
+        <div id="sheet-body"></div>
+      </section>
+    </div>
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <script src="phone.js"></script>
+  </body>
+</html>

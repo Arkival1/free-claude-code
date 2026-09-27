@@ -2744,3 +2744,23 @@ button.small {
   padding: 4px 12px;
   font-size: 13px;
 }
+
+.pair-code {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  text-align: center;
+}
+.pair-code strong {
+  font-size: 30px;
+  letter-spacing: 0.18em;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+h3.subhead {
+  margin: 14px 0 6px;
+  font-size: 14px;
+  color: var(--muted);
+}

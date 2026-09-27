@@ -1,0 +1,522 @@
+/* FCC Phone: the HUD's dark console, cyan lines, and gold accents, sized for a
+   thumb. Safe areas keep everything clear of the notch and the home bar. */
+:root {
+  --bg: #02070d;
+  --surface: #071722;
+  --surface-2: #0c2231;
+  --line: rgba(64, 214, 255, 0.24);
+  --text: #d9f6ff;
+  --muted: #7fa9ba;
+  --accent: #ffc861;
+  --accent-ink: #1a1000;
+  --good: #4dffa6;
+  --bad: #ff5d6c;
+  --cyan: #40d6ff;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --tap: 44px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+body {
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(64, 214, 255, 0.12), transparent 60%),
+    var(--bg);
+  padding-bottom: calc(72px + var(--safe-bottom));
+}
+
+a {
+  color: var(--cyan);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ bar */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(10px + var(--safe-top)) 16px 10px;
+  background: rgba(2, 7, 13, 0.92);
+  border-bottom: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.bar-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.bar h1 {
+  margin: 0;
+  font: 700 15px/1.2 var(--mono);
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+}
+
+.bar p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orb {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #fff3cf 0 8%, #ffc861 22%, rgba(255, 200, 97, 0.15) 58%, transparent 70%);
+  box-shadow: 0 0 22px rgba(255, 200, 97, 0.35);
+  animation: breathe 4s ease-in-out infinite;
+}
+
+.orb i {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 200, 97, 0.45);
+  animation: spin 18s linear infinite;
+}
+
+body.thinking .orb {
+  animation-duration: 0.9s;
+}
+
+@keyframes breathe {
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 30px rgba(255, 200, 97, 0.55);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .orb i {
+    animation: none;
+  }
+}
+
+/* ----------------------------------------------------------------- view */
+
+.view {
+  padding: 14px 16px 24px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.card {
+  margin: 0 0 14px;
+  padding: 14px;
+  background: linear-gradient(180deg, var(--surface), rgba(7, 23, 34, 0.75));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.card h2 {
+  margin: 0 0 10px;
+  font: 700 12px/1.3 var(--mono);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.card h2::before {
+  content: "■ ";
+  color: var(--accent);
+}
+
+.card p {
+  margin: 0 0 10px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #031019;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px; /* 16px keeps iOS from zooming in on focus */
+}
+
+textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
+}
+
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+label.check input {
+  width: 22px;
+  min-height: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
+button {
+  min-height: var(--tap);
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--cyan);
+  font: 600 15px/1.2 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+button.danger {
+  color: var(--bad);
+  background: transparent;
+}
+
+button.ghost {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  min-width: var(--tap);
+}
+
+button:disabled {
+  opacity: 0.55;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.row > .grow {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pill.good {
+  color: var(--good);
+  border-color: rgba(77, 255, 166, 0.4);
+}
+
+.pill.gold {
+  color: var(--accent);
+  border-color: rgba(255, 200, 97, 0.45);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(64, 214, 255, 0.1);
+}
+
+.item:first-of-type {
+  border-top: 0;
+}
+
+.item .grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.item strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.item small {
+  color: var(--muted);
+}
+
+.empty {
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+/* ----------------------------------------------------------------- chat */
+
+.chat-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.chat-head select {
+  flex: 1;
+}
+
+.messages {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.msg {
+  max-width: 88%;
+  padding: 10px 13px;
+  border-radius: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg.user {
+  justify-self: end;
+  background: rgba(255, 200, 97, 0.14);
+  border: 1px solid rgba(255, 200, 97, 0.35);
+  border-bottom-right-radius: 4px;
+}
+
+.msg.assistant {
+  justify-self: start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 4px;
+}
+
+.msg.tool {
+  justify-self: start;
+  max-width: 100%;
+  padding: 4px 10px;
+  font: 12px/1.4 var(--mono);
+  color: var(--muted);
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
+}
+
+.msg.error {
+  justify-self: stretch;
+  max-width: 100%;
+  color: var(--bad);
+  border: 1px solid rgba(255, 93, 108, 0.4);
+}
+
+.msg .who {
+  display: block;
+  margin-bottom: 2px;
+  font: 700 11px/1.3 var(--mono);
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.composer {
+  position: sticky;
+  bottom: calc(72px + var(--safe-bottom));
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 10px 0 4px;
+  background: linear-gradient(transparent, var(--bg) 30%);
+}
+
+.composer textarea {
+  flex: 1;
+  min-height: var(--tap);
+  max-height: 160px;
+  resize: none;
+}
+
+.composer button {
+  flex: none;
+}
+
+.typing {
+  justify-self: start;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ----------------------------------------------------------------- tabs */
+
+.tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 6px 8px calc(6px + var(--safe-bottom));
+  background: rgba(2, 7, 13, 0.96);
+  border-top: 1px solid var(--line);
+}
+
+.tab {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-height: 52px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 600 11px/1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tab span {
+  font-size: 18px;
+}
+
+.tab[aria-current="page"] {
+  color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- sheet */
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.sheet-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 88vh;
+  overflow: auto;
+  padding: 0 16px calc(18px + var(--safe-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--cyan);
+  border-radius: 18px 18px 0 0;
+}
+
+.sheet-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  background: var(--surface);
+}
+
+.sheet-head h2 {
+  margin: 0;
+  font: 700 14px/1.3 var(--mono);
+  letter-spacing: 0.14em;
+  color: var(--cyan);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(86px + var(--safe-bottom));
+  z-index: 20;
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  transform: translateX(-50%);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.steps {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+
+.steps li {
+  margin: 0 0 6px;
+}
+
+.code {
+  font: 600 22px/1.2 var(--mono);
+  letter-spacing: 0.16em;
+}
+
+.warn {
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: rgba(255, 200, 97, 0.08);
+  border-radius: 6px;
+}

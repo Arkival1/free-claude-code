@@ -480,3 +480,18 @@ class EngineModelSettings(Record):
     """CPU threads; 0 lets the engine choose."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
+
+
+class PhoneLink(Record):
+    """A phone running FCC Phone, paired with this PC to share memory."""
+
+    id: str = Field(default_factory=lambda: new_id("phn"))
+    name: str = "Phone"
+    token_hash: str
+    """SHA-256 of the phone's secret; the secret itself lives on the phone."""
+    last_seen: int = 0
+    last_sync: int = 0
+    memories_in: int = 0
+    """Memories this phone has sent to the PC."""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)

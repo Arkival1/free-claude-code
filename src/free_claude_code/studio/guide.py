@@ -888,6 +888,41 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         asks=("How do I add an agent?", "Who can see my memory?"),
     ),
     GuideTopic(
+        title="FCC Phone",
+        route="/studio#more",
+        where="More, FCC Phone (on the PC). On the phone: the FCC Phone app, Settings.",
+        terms=(
+            "fcc phone",
+            "phone app",
+            "iphone app",
+            "on my phone",
+            "separate app",
+            "pair",
+            "pairing",
+            "pairing code",
+            "phone memory",
+            "phone agents",
+            "download on iphone",
+            "install on iphone",
+        ),
+        body=(
+            "FCC Phone is a separate app for your iPhone with its own agents "
+            "and memory; it works without the PC. Open the app's address (More, "
+            "FCC Phone shows it) in Safari, then Share, Add to Home Screen. In "
+            "its Settings, paste a free key (Google Gemini is the most generous; "
+            "Groq and OpenRouter work too) and your phone agents can chat, "
+            "remember, recall, do maths, check the weather, and look things up "
+            "on Wikipedia. To link it to this PC: install Tailscale on both, run "
+            "'tailscale serve --bg 8082' on the PC, press Make a pairing code "
+            "here, and type the code and the PC's https address into FCC Phone. "
+            "Then memories sync both ways (the phone's go into team memory "
+            "marked phone), and phone agents can think with this PC's AI. Your "
+            "PC's memories stay away from cloud brains on the phone unless you "
+            "allow it there. Unlink a phone here any time."
+        ),
+        asks=("Who can see my memory?", "How do I install Studio on my iPhone?"),
+    ),
+    GuideTopic(
         title="Jarvis controls the team",
         route="/studio#home",
         where="Ask Jarvis on the HUD: 'show me the team', 'clear the Builder's memory'.",

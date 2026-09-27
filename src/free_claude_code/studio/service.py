@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import re
+import socket
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -23,6 +24,7 @@ from free_claude_code.config.model_refs import parse_provider_type
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject, JsonValue
+from free_claude_code.core.version import package_version
 
 from . import system_monitor
 from .agents import SEALED_TOOLS, AgentRunner, TurnResult
@@ -95,6 +97,7 @@ from .models import (
     MemoryEntry,
     Message,
     ModelAsset,
+    PhoneLink,
     SiteProject,
     Study,
     StudyLesson,
@@ -107,6 +110,21 @@ from .models import (
 )
 from .obsidian import ObsidianVault, VaultStatus
 from .orders import parse_orders, pick_agent
+from .phone_link import (
+    MAX_MEMORY_CHARS,
+    MAX_PULL,
+    MAX_REPLY_TOKENS,
+    PAIR_SECONDS,
+    PHONE_TAG,
+    PhoneLinkError,
+    PhoneLinks,
+    chat_messages,
+    incoming_memories,
+    link_view,
+    reply_json,
+    tailscale_address,
+    tool_specs,
+)
 from .platforms import (
     PlatformError,
     PlatformPage,
@@ -333,6 +351,7 @@ class StudioService:
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._models_dir = models_dir
         self._voice_setup = SetupState()
+        self._phones = PhoneLinks(store)
         self._engine = Engine(
             root=models_dir / "engine",
             store=store,
@@ -2181,6 +2200,104 @@ class StudioService:
             logger.info("Studio: briefing fell back to the job itself: {}", error)
             brief = ""
         return brief or goal.strip()
+
+    # ------------------------------------------------------------ FCC Phone
+
+    def phone_pairing_code(self) -> JsonObject:
+        """A code to type into FCC Phone to pair it with this PC."""
+        return {"code": self._phones.new_code(), "expires_in": PAIR_SECONDS}
+
+    async def phone_links(self) -> JsonObject:
+        """Paired phones, and the https address a phone can reach this PC on."""
+        return {
+            "phones": [link_view(link) for link in await self._phones.links()],
+            "tailscale": await tailscale_address(),
+        }
+
+    async def phone_unlink(self, link_id: str) -> bool:
+        return await self._phones.unlink(link_id)
+
+    async def phone_auth(self, token: str) -> PhoneLink:
+        return await self._phones.check(token)
+
+    async def phone_pair(self, code: str, name: str) -> JsonObject:
+        link, token = await self._phones.pair(code, name)
+        return {"token": token, "link": link_view(link)} | await self.phone_hello(link)
+
+    async def phone_hello(self, link: PhoneLink) -> JsonObject:
+        """Who this PC is, and whether its main AI thinks on this PC."""
+        main = await self.main_agent()
+        model = await self.effective_model(main.model or self.default_model)
+        return {
+            "pc": socket.gethostname(),
+            "version": package_version(),
+            "main": main.name,
+            "model": model,
+            # Memory from the PC may only go to a brain that runs on the PC.
+            "private": self.runs_on_this_pc(model),
+            "phone": link.name,
+        }
+
+    async def phone_sync(self, link: PhoneLink, memories: JsonValue) -> JsonObject:
+        """Take the phone's new memories into team memory; send the PC's back."""
+        memory = self._memory()
+        main = await self.main_agent()
+        stored = 0
+        for agent, text in incoming_memories(memories):
+            kept = await memory.share(
+                text,
+                author=f"{agent} (phone)",
+                tags=(PHONE_TAG,),
+                source="phone",
+            ) or await memory.remember(
+                main.id, text, tags=(PHONE_TAG,), source="phone", author=agent
+            )
+            if kept is not None:
+                stored += 1
+        if stored:
+            await self._after_memory_change([SHARED_MEMORY_ID, main.id], wait=False)
+        await self._phones.note_sync(link, stored)
+        owners = [SHARED_MEMORY_ID, main.id]
+        pc: list[JsonObject] = []
+        for owner in owners:
+            for entry in await memory.entries(owner, scope="long_term"):
+                if PHONE_TAG in entry.tags or SKILL_TAG in entry.tags:
+                    continue  # the phone already has its own; skills are the PC's
+                pc.append(
+                    {
+                        "id": entry.id,
+                        "text": entry.text[:MAX_MEMORY_CHARS],
+                        "author": entry.author
+                        or (main.name if owner == main.id else "team"),
+                        "created_at": entry.created_at,
+                    }
+                )
+        pc.sort(key=lambda row: -int(str(row["created_at"])))
+        return {
+            "stored": stored,
+            "pc_memories": list(pc[:MAX_PULL]),
+            "private": (await self.phone_hello(link))["private"],
+        }
+
+    async def phone_complete(self, link: PhoneLink, payload: JsonObject) -> JsonObject:
+        """Think with the main AI's model on this PC, for the phone."""
+        main = await self.main_agent()
+        model = await self.effective_model(main.model or self.default_model)
+        messages = chat_messages(payload.get("messages"))
+        tools = tool_specs(payload.get("tools"))
+        system = str(payload.get("system") or "")[:20_000]
+        try:
+            reply = await self._router.complete(
+                messages,
+                system=system,
+                tools=tools,
+                model=model,
+                temperature=0.4,
+                max_tokens=MAX_REPLY_TOKENS,
+            )
+        except StudioLLMError as error:
+            raise PhoneLinkError(f"The PC's AI didn't answer: {error}") from error
+        return reply_json(reply) | {"model": reply.model or model}
 
     # ---------------------------------------------------------- team brains
 

@@ -3702,6 +3702,7 @@
       voiceCard(voiceInfo),
       webCard(overview.settings.web),
       connectCard(connect),
+      phoneCard(),
       card("Tuning", [
         el("p", { class: "muted", text: "Very light tuning, on device or in the cloud." }),
         el("button", {
@@ -5933,6 +5934,94 @@
             class: "muted",
             text: "Anyone on this network can open Studio. On a shared network, turn on proxy authentication in admin settings.",
           }),
+    ]);
+  }
+
+  // FCC Phone: a separate app on the phone that can pair with this PC.
+  const PHONE_APP_URL = "https://arkival1.github.io/free-claude-code/phone/";
+  function phoneCard() {
+    const list = el("div", {}, [empty("Loading…")]);
+    const codeBox = el("div", { class: "pair-code", hidden: true });
+    const address = el("p", { class: "muted" });
+    let timer = null;
+    const load = async () => {
+      try {
+        const { phones, tailscale } = await api("/studio/api/phones");
+        address.replaceChildren(
+          tailscale
+            ? el("span", {}, ["This PC's address for the phone: ", el("strong", { text: tailscale })])
+            : el("span", {
+                text: "The phone reaches this PC over HTTPS. Install Tailscale (free) on the PC and the phone, then run  tailscale serve --bg 8082  on the PC and use the https://…ts.net address it prints.",
+              })
+        );
+        list.replaceChildren(
+          ...(phones.length
+            ? phones.map((phone) =>
+                el("div", { class: "list-item" }, [
+                  el("span", { class: "grow" }, [
+                    el("strong", { text: phone.name }),
+                    el("span", {
+                      text: `${phone.memories_in} memories shared · ${phone.last_sync ? `last sync ${when(phone.last_sync)}` : "not synced yet"}`,
+                    }),
+                  ]),
+                  el("button", {
+                    class: "danger",
+                    type: "button",
+                    text: "Unlink",
+                    "aria-label": `Unlink ${phone.name}`,
+                    onclick: async () => {
+                      await remove(`/studio/api/phones/${phone.id}`);
+                      notify(`${phone.name} unlinked.`);
+                      load();
+                    },
+                  }),
+                ])
+              )
+            : [empty("No phone paired yet.")])
+        );
+      } catch (error) {
+        list.replaceChildren(empty(error.message));
+      }
+    };
+    load();
+    return card("FCC Phone", [
+      el("p", {
+        class: "muted",
+        text: "FCC Phone is a separate app for your iPhone with its own agents and memory, free AI brains, and no need for this PC. Pair it here to share memories both ways and let its agents think with this PC's AI.",
+      }),
+      el("p", {}, ["Get it on the phone: open ", el("a", { href: PHONE_APP_URL, target: "_blank", rel: "noopener", text: PHONE_APP_URL }), " in Safari, then Share, Add to Home Screen."]),
+      address,
+      el("button", {
+        class: "primary",
+        type: "button",
+        text: "Make a pairing code",
+        onclick: async () => {
+          const { code, expires_in } = await post("/studio/api/phones/code");
+          let left = expires_in;
+          clearInterval(timer);
+          codeBox.hidden = false;
+          const draw = () => {
+            codeBox.replaceChildren(
+              el("strong", { text: code }),
+              el("span", {
+                class: "muted",
+                text: left > 0 ? `In FCC Phone: Connect to my PC, then type this code. It works once, for ${Math.ceil(left / 60)} more minute${left > 60 ? "s" : ""}.` : "This code has run out. Make a new one.",
+              })
+            );
+          };
+          draw();
+          timer = setInterval(() => {
+            left -= 15;
+            draw();
+            if (left <= 0) clearInterval(timer);
+            if (!document.body.contains(codeBox)) clearInterval(timer);
+          }, 15000);
+          setTimeout(load, 5000);
+        },
+      }),
+      codeBox,
+      el("h3", { class: "subhead", text: "Paired phones" }),
+      list,
     ]);
   }
 

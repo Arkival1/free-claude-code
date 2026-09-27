@@ -38,6 +38,7 @@ from free_claude_code.studio.voice import VoiceError
 from .admin_cache import AdminNoStoreMiddleware, attach_admin_no_store
 from .admin_routes import router as admin_router
 from .code_sessions_routes import router as code_router
+from .phone_cors import PhoneCorsMiddleware
 from .ports import ApiServices
 from .request_errors import ordinary_application_error_response
 from .request_ids import (
@@ -56,6 +57,7 @@ def create_app(services: ApiServices) -> FastAPI:
     """Create the HTTP adapter around explicitly supplied runtime services."""
     app = FastAPI(title="Claude Code Proxy", version=package_version())
     app.state.services = services
+    app.add_middleware(PhoneCorsMiddleware)
     app.add_middleware(AdminNoStoreMiddleware)
     app.add_middleware(ClientRequestLifetimeMiddleware)
     app.add_middleware(RequestCorrelationMiddleware)
