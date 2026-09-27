@@ -788,6 +788,12 @@ class Settings(BaseModel):
         default=True, validation_alias="STUDIO_PRIVATE_MEMORY"
     )
     studio_all_tools: bool = Field(default=True, validation_alias="STUDIO_ALL_TOOLS")
+    studio_local_control: bool = Field(
+        default=True, validation_alias="STUDIO_LOCAL_CONTROL"
+    )
+    studio_main_own_memory: bool = Field(
+        default=True, validation_alias="STUDIO_MAIN_OWN_MEMORY"
+    )
     studio_engine: bool = Field(default=False, validation_alias="STUDIO_ENGINE")
     studio_engine_port: int = Field(
         default=39281, ge=1024, le=65535, validation_alias="STUDIO_ENGINE_PORT"

@@ -3,7 +3,7 @@ import { state, load, save, changed, onChange, feed, VERSION, upgradeAgent } fro
 import { $, el, notify, closeSheet } from "./ui.js";
 import { sync } from "./sync.js";
 import { speak } from "./voice.js";
-import { calculate, findImages } from "./tools.js";
+import { calculate, findImages, remember, recall, canRead } from "./tools.js";
 import { bestModel } from "./brains.js";
 import { readGguf } from "./gguf.js";
 import { checkProject, bundle, previewHtml, zipProject } from "./projects.js";
@@ -151,12 +151,16 @@ window.fccPhone = {
   describeLook,
   templateFiles,
   findImages,
+  remember,
+  recall,
+  canRead,
   upgradeAgent,
   state,
   checkReminders,
 };
 
-load().then(async () => {
+// Resolves once saved data is loaded and the first screen is drawn.
+window.fccPhone.ready = load().then(async () => {
   await render();
   setInterval(checkReminders, 20000);
   checkReminders();

@@ -866,10 +866,11 @@
 
   async function renderAgents() {
     const generation = renderGeneration;
-    const [{ agents }, { sites }, { runs }] = await Promise.all([
+    const [{ agents }, { sites }, { runs }, { photos }] = await Promise.all([
       api("/studio/api/agents"),
       api("/studio/api/sites"),
       api("/studio/api/tasks"),
+      api("/studio/api/photos"),
     ]);
     const nodes = [
       card("Run an agent task", [
@@ -986,12 +987,85 @@
             )
           : empty("No projects yet. Create one when you start a build task.")
       ),
+      photosCard(photos, () => render()),
     ];
     if (generation !== renderGeneration) return;
     view.replaceChildren(
       ...nodes,
       el("button", { class: "fab", "aria-label": "Add an agent", text: "+", onclick: () => openAddAgent() })
     );
+  }
+
+  // The user's business photos, each with the note the agents read.
+  function photosCard(photos, refresh) {
+    const input = el("input", { type: "file", accept: "image/*", multiple: true, class: "visually-hidden", "aria-label": "Add business photos" });
+    const note = el("textarea", { rows: 2, placeholder: "What they show, and anything to know: prices, hours, the story…", "aria-label": "Note for new photos" });
+    const status = el("p", { class: "muted", role: "status" });
+    input.addEventListener("change", async () => {
+      const chosen = [...input.files];
+      input.value = "";
+      let added = 0;
+      for (const [index, file] of chosen.entries()) {
+        status.textContent = `Adding ${index + 1} of ${chosen.length}: ${file.name}…`;
+        try {
+          await uploadPhoto(file, note.value.trim());
+          added += 1;
+        } catch (error) {
+          notify(error.message);
+        }
+      }
+      status.textContent = added ? `Added ${added} photo${added === 1 ? "" : "s"}.` : "";
+      if (added) refresh();
+    });
+    return card("Business photos", [
+      el("p", {
+        class: "muted",
+        text: "Photos of your real business (the shop, team, food, work) with notes. The Builder uses them on your sites, before any stock photos, and reads your notes as facts. You can also attach photos to any message.",
+      }),
+      note,
+      el("div", { class: "row" }, [
+        input,
+        el("button", { class: "primary", type: "button", text: "Add photos", onclick: () => input.click() }),
+      ]),
+      status,
+      photos.length
+        ? el(
+            "div",
+            { class: "photo-grid" },
+            photos.map((photo) => {
+              const text = el("textarea", { rows: 3, "aria-label": `Note for ${photo.name}`, placeholder: "Add a note" });
+              text.value = photo.note || "";
+              text.addEventListener("change", async () => {
+                try {
+                  await api(`/studio/api/photos/${photo.id}`, { method: "PATCH", body: JSON.stringify({ note: text.value }) });
+                  notify("Note saved.");
+                } catch (error) {
+                  notify(error.message);
+                }
+              });
+              return el("figure", { class: "photo-tile" }, [
+                el("img", { src: photo.url, alt: photo.note || photo.name, loading: "lazy", width: String(photo.width), height: String(photo.height) }),
+                el("figcaption", {}, [
+                  el("strong", { text: photo.name }),
+                  el("small", { class: "muted", text: `${photo.width}×${photo.height}` }),
+                  text,
+                  el("button", {
+                    class: "danger small",
+                    type: "button",
+                    text: "Delete",
+                    "aria-label": `Delete ${photo.name}`,
+                    onclick: async () => {
+                      if (!confirm(`Delete ${photo.name}? Sites that already use it keep their copy.`)) return;
+                      await api(`/studio/api/photos/${photo.id}`, { method: "DELETE" });
+                      refresh();
+                    },
+                  }),
+                ]),
+              ]);
+            })
+          )
+        : empty("No photos yet."),
+    ]);
   }
 
   // Pick the model the main AI (or every agent) thinks with, from the models
@@ -1561,10 +1635,14 @@
           el("span", {
             text: agent.private
               ? "its own memory area (it runs on a server AI)"
-              : agent.memory_enabled
-                ? "on"
-                : "off",
+              : agent.own_memory
+                ? "its own memory, which only it reads; it also reads every agent's and adds to the team's"
+                : agent.memory_enabled
+                  ? "on"
+                  : "off",
           }),
+          el("span", { text: "Team" }),
+          el("span", { text: `${agent.private ? "Server AI" : "This PC"} · ${agent.command}` }),
         ]),
         modelEditor(agent),
         PERMANENT_ROLES.includes(agent.role)
@@ -2032,11 +2110,48 @@
     });
   }
 
+  // Business photos: shrunk here (upright, at most 2000px) so sites load fast,
+  // then kept on this PC with the user's note for the agents.
+  const PHOTO_FILE = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
+  const isPhoto = (file) => (file.type || "").startsWith("image/") || PHOTO_FILE.test(file.name);
+
+  async function shrinkPhoto(file) {
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      throw new Error(`${file.name} can't be opened here. Save it as a JPEG (on an iPhone: Settings → Camera → Formats → Most Compatible) or send it from FCC Phone.`);
+    }
+    const keepPng = file.type === "image/png" && file.size < 3 * 1024 * 1024;
+    const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && (keepPng || (file.type === "image/jpeg" && file.size < 1.5 * 1024 * 1024))) {
+      bitmap.close();
+      return file;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return await new Promise((resolve) => canvas.toBlob(resolve, keepPng ? "image/png" : "image/jpeg", 0.86));
+  }
+
+  async function uploadPhoto(file, note = "") {
+    const body = await shrinkPhoto(file);
+    const query = new URLSearchParams({ name: file.name, note });
+    return await sendFile(`/studio/api/photos?${query}`, body);
+  }
+
+  function photoLine(photo) {
+    return `[Business photo: ${photo.name} (${photo.width}x${photo.height}, id ${photo.id}), kept in Business photos with the note in this message. Builders put it on a site with use_photo.]`;
+  }
+
   // Attach files to a message: Studio reads them and the agent gets the text.
+  // Photos go to Business photos, with the message as their note.
   function attachmentTray() {
     const files = [];
     const chips = el("div", { class: "chips attach-chips" });
-    const input = el("input", { type: "file", multiple: true, class: "visually-hidden", "aria-label": "Attach files" });
+    const input = el("input", { type: "file", multiple: true, class: "visually-hidden", "aria-label": "Attach files or photos" });
     const button = el("button", {
       class: "attach-button",
       type: "button",
@@ -2049,7 +2164,7 @@
       chips.replaceChildren(
         ...files.map((file, index) =>
           el("span", { class: "pill attach" }, [
-            `📎 ${file.name}${file.truncated ? " (first part)" : ""}`,
+            file.photo ? `🖼 ${file.name}` : `📎 ${file.name}${file.truncated ? " (first part)" : ""}`,
             el("button", {
               type: "button",
               class: "attach-remove",
@@ -2066,6 +2181,11 @@
     input.addEventListener("change", async () => {
       for (const file of input.files) {
         try {
+          if (isPhoto(file)) {
+            const photo = await uploadPhoto(file);
+            files.push({ name: photo.name, photo });
+            continue;
+          }
           const read = await sendFile(`/studio/api/files/read?name=${encodeURIComponent(file.name)}`, file);
           if (!read.text) {
             notify(read.message || `${file.name} has no text to read.`);
@@ -2086,12 +2206,23 @@
       names: () => files.map((file) => file.name),
       take(typed) {
         if (!files.length) return typed;
+        const photos = files.filter((file) => file.photo);
+        // What the user wrote with the photos is kept as their note.
+        for (const file of photos) {
+          if (typed) api(`/studio/api/photos/${file.photo.id}`, { method: "PATCH", body: JSON.stringify({ note: typed }) }).catch(() => {});
+        }
         const block = files
-          .map((file) => `[Attached file: ${file.name}${file.truncated ? " (first part)" : ""}]\n\`\`\`\n${file.text}\n\`\`\``)
+          .map((file) =>
+            file.photo
+              ? photoLine(file.photo)
+              : `[Attached file: ${file.name}${file.truncated ? " (first part)" : ""}]\n\`\`\`\n${file.text}\n\`\`\``
+          )
           .join("\n\n");
+        const onlyPhotos = photos.length === files.length;
         files.length = 0;
         redraw();
-        return `${typed || "Here is a file for you."}\n\n${block}`;
+        const opening = typed || (onlyPhotos ? "Here are photos of my business." : "Here is a file for you.");
+        return `${opening}\n\n${block}`;
       },
     };
   }

@@ -23,6 +23,7 @@ from .models import (
     Message,
     ModelAsset,
     PhoneLink,
+    Photo,
     Record,
     SiteProject,
     Study,
@@ -80,6 +81,7 @@ TABLES: Mapping[type[Record], str] = {
     StudyLesson: "studio_study_lessons",
     EngineModelSettings: "studio_engine_models",
     PhoneLink: "studio_phone_links",
+    Photo: "studio_photos",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (
@@ -429,6 +431,17 @@ class StudioStore:
                 (*owners, *patterns, int(limit)),
             ).fetchall()
             return tuple(_decode(MemoryEntry, row) for row in rows)
+
+        return await self._call(work)
+
+    async def memory_owners(self) -> tuple[str, ...]:
+        """Every id that owns at least one memory."""
+
+        def work(connection: sqlite3.Connection) -> tuple[str, ...]:
+            rows = connection.execute(
+                "SELECT DISTINCT agent_id FROM studio_memories ORDER BY agent_id"
+            ).fetchall()
+            return tuple(str(row[0]) for row in rows)
 
         return await self._call(work)
 

@@ -241,6 +241,8 @@ class Crew:
     async def stop(self, context: ToolContext, *, agent: str) -> ToolOutcome:
         """Stop an agent's background work."""
         worker = await self._resolve(agent, caller_id=context.agent_id)
+        if (outside := _not_directed(context, [worker], "stop_agent")) is not None:
+            return outside
         stopped = await self._host.stop_agent_work(worker.id)
         text = (
             f"Stopped {worker.name}: "
@@ -402,7 +404,10 @@ class Crew:
         *,
         tool: str = "ask_agent",
     ) -> ToolOutcome | None:
-        """Why this hand-off would send work in a circle, or None when it is fine."""
+        """Why this hand-off would send work in a circle, or reach an agent
+        the caller doesn't direct, or None when it is fine."""
+        if (outside := _not_directed(context, workers, tool)) is not None:
+            return outside
         if context.agent_role == MAIN_ROLE:
             return None
         chain: list[Chat] = []
@@ -511,3 +516,22 @@ class Crew:
 def _title_from(task: str) -> str:
     words = re.findall(r"[A-Za-z0-9]+", task)
     return " ".join(words[:5]).strip() or "New project"
+
+
+def _not_directed(
+    context: ToolContext, workers: Sequence[Agent], tool: str
+) -> ToolOutcome | None:
+    """A refusal when a worker is outside the agents the caller directs."""
+    outside = [worker.name for worker in workers if not context.may_direct(worker.name)]
+    if not outside:
+        return None
+    mine = ", ".join(context.directs or ()) or "nobody right now"
+    return ToolOutcome(
+        text=(
+            f"{', '.join(outside)} thinks on this PC, and only the main AI "
+            f"directs agents on this PC. You direct the agents on server AIs: "
+            f"{mine}. Ask the main AI if you need the others."
+        ),
+        data={"tool": tool, "refused": True, "outside": outside},
+        failed=True,
+    )

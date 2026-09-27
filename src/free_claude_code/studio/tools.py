@@ -28,6 +28,9 @@ from .connectivity import Connectivity
 from .images import FoundImage, ImageError, download_image, find_images
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
+from .models import MemoryEntry
+from .photos import PhotoError, PhotoLibrary
+from .photos import describe as describe_photo
 from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
 from .polish import polish_notes
 from .project_check import CHECKED_FILES, check_project
@@ -76,9 +79,12 @@ POLISH_TOOL = "polish_check"
 RESTORE_FILE_TOOL = "restore_file"
 VIDEO_NOTES_TOOL = "video_notes"
 FIND_IMAGES_TOOL = "find_images"
+LIST_PHOTOS_TOOL = "list_photos"
+USE_PHOTO_TOOL = "use_photo"
 SAVE_IMAGE_TOOL = "save_image"
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
+MAX_LISTED_PHOTOS = 30
 HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
 MAX_READ_LINES = 400
@@ -107,6 +113,7 @@ PARALLEL_TOOLS = frozenset(
         CONVERSATION_TOOL,
         KNOWLEDGE_TOOL,
         FIND_IMAGES_TOOL,
+        LIST_PHOTOS_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -440,6 +447,38 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "versions_back": {"type": "integer"},
             },
             "required": ["path"],
+        },
+    ),
+    ToolSpec(
+        name=LIST_PHOTOS_TOOL,
+        description=(
+            "The user's own photos of their business (the shop, team, food, "
+            "work) with what they said about each: what it shows, prices, "
+            "hours, anything. Use these before stock photos, and use the notes "
+            "as facts for the site. query narrows the list."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
+    ),
+    ToolSpec(
+        name=USE_PHOTO_TOOL,
+        description=(
+            "Put one of the user's business photos into the project (for "
+            "example images/shopfront.jpg), then use it with <img> and its "
+            "width and height. Their own photos need no credit line."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "photo": {"type": "string", "description": "Its name or id."},
+                "path": {
+                    "type": "string",
+                    "description": "Where to put it, e.g. images/shopfront.jpg.",
+                },
+            },
+            "required": ["photo"],
         },
     ),
     ToolSpec(
@@ -909,6 +948,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     PROJECTS_TOOL,
     SYSTEM_STATUS_TOOL,
     APP_HELP_TOOL,
+    LIST_PHOTOS_TOOL,
     FINISH_TOOL,
 )
 SHARED_REMEMBER_SPEC = ToolSpec(
@@ -932,6 +972,38 @@ SHARED_RECALL_SPEC = ToolSpec(
     description="Search your own memory and the team's shared memory.",
     parameters=TOOL_SPEC_BY_NAME["recall"].parameters,
 )
+MAIN_REMEMBER_SPEC = ToolSpec(
+    name="remember",
+    description=(
+        "Save one durable fact into your own memory, which only you read. "
+        "Set share to true to put it in the team memory every agent reads "
+        "instead (for what the whole team should know)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "text": {"type": "string"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "share": {"type": "boolean"},
+        },
+        "required": ["text"],
+    },
+)
+MAIN_RECALL_SPEC = ToolSpec(
+    name="recall",
+    description=(
+        "Search your own memory, the team memory, and every agent's own "
+        "memory; each result says whose it is."
+    ),
+    parameters=TOOL_SPEC_BY_NAME["recall"].parameters,
+)
+LEAD_TOOLS: tuple[str, ...] = (
+    ASK_AGENT_TOOL,
+    TEAM_STATUS_TOOL,
+    STOP_AGENT_TOOL,
+    MANAGE_AGENT_TOOL,
+)
+"""What an agent on this PC gets to direct the agents on server AIs."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -947,6 +1019,16 @@ class ToolContext:
     """Set for an agent on a server AI: the memory area it reads and writes
     instead of the user's memory."""
     can_delegate: bool = False
+    directs: tuple[str, ...] | None = None
+    """The agents this one may direct, by name, or None for anyone (the main
+    AI): an agent on this PC directs the agents on server AIs only."""
+    main_memory: bool = False
+    """The main AI keeps its own memory and reads every agent's."""
+
+    def may_direct(self, name: str) -> bool:
+        return self.directs is None or name.casefold() in {
+            item.casefold() for item in self.directs
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1025,6 +1107,7 @@ def tool_specs(
     commands_enabled: bool = False,
     shared_memory: bool = False,
     delegation: bool = False,
+    main_memory: bool = False,
 ) -> tuple[ToolSpec, ...]:
     """Return the specs for named tools, always including ``finish``."""
     chosen: list[ToolSpec] = []
@@ -1036,7 +1119,11 @@ def tool_specs(
             continue
         if name in DELEGATION_TOOLS and not delegation:
             continue
-        if shared_memory and name == "remember":
+        if main_memory and name == "remember":
+            spec = MAIN_REMEMBER_SPEC
+        elif main_memory and name == "recall":
+            spec = MAIN_RECALL_SPEC
+        elif shared_memory and name == "remember":
             spec = SHARED_REMEMBER_SPEC
         elif shared_memory and name == "recall":
             spec = SHARED_RECALL_SPEC
@@ -1073,8 +1160,10 @@ class AgentToolbox:
         | None = None,
         all_tools: bool = False,
         image_transport: httpx.AsyncBaseTransport | None = None,
+        photos: PhotoLibrary | None = None,
     ) -> None:
         self._web = web_tools
+        self._photos = photos
         self._sites = sites
         self._memory = memory
         self._egress = egress
@@ -1224,6 +1313,10 @@ class AgentToolbox:
                     return await self._find_images(call)
                 case "save_image":
                     return await self._save_image(call, context)
+                case "list_photos":
+                    return await self._list_photos(call)
+                case "use_photo":
+                    return await self._use_photo(call, context)
                 case (
                     "todo"
                     | "list_projects"
@@ -1251,6 +1344,7 @@ class AgentToolbox:
         except (
             SiteError,
             ImageError,
+            PhotoError,
             WebFetchEgressViolation,
             CommandError,
             SearchError,
@@ -1528,6 +1622,64 @@ class AgentToolbox:
                 "template": template,
                 "written": written,
                 "kept": kept,
+            },
+        )
+
+    async def _list_photos(self, call: ToolCall) -> ToolOutcome:
+        if self._photos is None:
+            raise ValueError("Business photos aren't available here.")
+        query = str(call.arguments.get("query") or "").strip()
+        photos = await self._photos.photos(query)
+        data: JsonObject = {
+            "tool": LIST_PHOTOS_TOOL,
+            "photos": [photo.id for photo in photos[:MAX_LISTED_PHOTOS]],
+        }
+        if not photos:
+            text = (
+                f"No business photos match {query!r}."
+                if query
+                else "The user hasn't sent any business photos yet. They can "
+                "attach photos to any message. Use find_images meanwhile."
+            )
+            return ToolOutcome(text=text, data=data)
+        lines = [
+            f"{index}. {describe_photo(photo)}"
+            for index, photo in enumerate(photos[:MAX_LISTED_PHOTOS], start=1)
+        ]
+        if len(photos) > MAX_LISTED_PHOTOS:
+            lines.append(
+                f"…and {len(photos) - MAX_LISTED_PHOTOS} more; narrow with query."
+            )
+        lines.append("Put one on the site with use_photo.")
+        return ToolOutcome(text="\n".join(lines), data=data)
+
+    async def _use_photo(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        if self._photos is None:
+            raise ValueError("Business photos aren't available here.")
+        site_id = self._require_site(context)
+        photo = await self._photos.find(str(call.arguments.get("photo") or ""))
+        suffix = Path(photo.name).suffix
+        wanted = str(call.arguments.get("path") or "").strip().lstrip("/")
+        path = wanted or f"images/{photo.name}"
+        if Path(path).suffix.lower() != suffix:
+            path = f"{Path(path).with_suffix('')!s}{suffix}"
+        saved = await self._sites.write_image(
+            site_id, path, await self._photos.read(photo)
+        )
+        text = (
+            f"Put {photo.name} in the project as {saved.path}. It is "
+            f'{photo.width}x{photo.height}: use width="{photo.width}" '
+            f'height="{photo.height}" on the <img>.'
+        )
+        if photo.note:
+            text += f" The user says about it: {photo.note}"
+        return ToolOutcome(
+            text=text,
+            data={
+                "tool": USE_PHOTO_TOOL,
+                "site_id": site_id,
+                "path": saved.path,
+                "photo_id": photo.id,
             },
         )
 
@@ -1955,6 +2107,8 @@ class AgentToolbox:
         raw_tags = call.arguments.get("tags")
         tags = [str(tag) for tag in raw_tags] if isinstance(raw_tags, list) else []
         private = call.arguments.get("private") is True or bool(context.memory_owner)
+        if context.main_memory and not context.memory_owner:
+            private = call.arguments.get("share") is not True
         shared = self._memory.shared_enabled and not private
         if shared:
             entry = await self._memory.share(
@@ -1988,22 +2142,29 @@ class AgentToolbox:
 
     async def _recall(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         query = str(call.arguments.get("query", ""))
+        everyone = context.main_memory and not context.memory_owner
         entries = await self._memory.recall(
             context.memory_owner or context.agent_id,
             query,
             own_only=bool(context.memory_owner),
+            everyone=everyone,
         )
         if not entries:
             return ToolOutcome(
                 text="Nothing relevant in memory.",
                 data={"tool": "recall", "query": query, "hits": 0},
             )
+        names = await self._memory.owner_names() if everyone else {}
+
+        def whose(entry: MemoryEntry) -> str:
+            if entry.agent_id == context.agent_id:
+                return "(yours) " if everyone else ""
+            if entry.agent_id == SHARED_MEMORY_ID:
+                return "(team) "
+            return f"({names.get(entry.agent_id, 'an agent')}) "
+
         return ToolOutcome(
-            text="\n".join(
-                f"- {'(team) ' if entry.agent_id == SHARED_MEMORY_ID else ''}"
-                f"{entry.text}"
-                for entry in entries
-            ),
+            text="\n".join(f"- {whose(entry)}{entry.text}" for entry in entries),
             data={"tool": "recall", "query": query, "hits": len(entries)},
         )
 
@@ -2011,7 +2172,10 @@ class AgentToolbox:
         if self._delegate is None or not (
             context.agent_role == MAIN_ROLE or context.can_delegate
         ):
-            raise ValueError("Only the main agent can hand work to other agents here.")
+            raise ValueError(
+                "Only the main AI, and agents on this PC for agents on server "
+                "AIs, can hand work to other agents here."
+            )
         project = str(call.arguments.get("project") or "").strip()
         if call.name == TEAM_STATUS_TOOL:
             return await self._delegate.status(context)

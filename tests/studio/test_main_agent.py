@@ -225,7 +225,7 @@ async def test_only_the_main_ai_can_hand_off_work(make_studio):
 
     tool = next(m for m in await studio.transcript(chat.id) if m.role == "tool")
     assert tool.data["failed"] is True
-    assert "Only the main agent" in tool.text
+    assert "Only the main AI" in tool.text
     assert await studio.runs() == ()
 
 

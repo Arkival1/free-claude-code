@@ -4,7 +4,7 @@ import math
 import re
 from collections.abc import Iterable, Sequence
 
-from .models import MemoryEntry, now_ms
+from .models import Agent, MemoryEntry, now_ms
 from .store import StudioStore
 
 _WORD_PATTERN = re.compile(r"[a-z0-9][a-z0-9'_-]{1,}")
@@ -244,6 +244,15 @@ class MemoryService:
             agent_id, text, tags=tags, source=source, chat_id=chat_id
         )
 
+    async def owner_names(self) -> dict[str, str]:
+        """A readable name for every memory owner: agents, their server
+        areas, and the team memory."""
+        names = {SHARED_MEMORY_ID: "team memory"}
+        for agent in await self._store.find(Agent):
+            names[agent.id] = agent.name
+            names[server_area(agent.id)] = f"{agent.name}'s server area"
+        return names
+
     def _owners(self, agent_id: str, *, own_only: bool = False) -> tuple[str, ...]:
         if (
             self._shared
@@ -261,18 +270,23 @@ class MemoryService:
         *,
         limit: int | None = None,
         own_only: bool = False,
+        everyone: bool = False,
     ) -> tuple[MemoryEntry, ...]:
         """Return the long-term memories most relevant to a query.
 
         Agents recall from their own memory and, when it is on, the team's; a
-        server memory area only ever recalls from itself.
+        server memory area only ever recalls from itself. With everyone (the
+        main AI), every agent's memory is searched too.
         """
         terms = keywords(query)
         if not terms:
             return ()
-        candidates = await self._store.search_memory(
-            self._owners(agent_id, own_only=own_only), terms, limit=40
+        owners = (
+            (agent_id, *await self._store.memory_owners())
+            if everyone
+            else self._owners(agent_id, own_only=own_only)
         )
+        candidates = await self._store.search_memory(owners, terms, limit=40)
         now = now_ms()
         ranked = sorted(
             (
@@ -291,12 +305,26 @@ class MemoryService:
         await self._store.touch_memories([entry.id for entry in chosen])
         return chosen
 
-    async def context_block(self, agent_id: str, query: str) -> str:
+    async def context_block(
+        self, agent_id: str, query: str, *, everyone: bool = False
+    ) -> str:
         """Return recalled memory formatted for a system prompt, or empty text."""
         working = await self.working(agent_id)
-        recalled = await self.recall(agent_id, query)
+        recalled = await self.recall(
+            agent_id,
+            query,
+            limit=self._recall_limit + 3 if everyone else None,
+            everyone=everyone,
+        )
         own = [entry for entry in recalled if entry.agent_id == agent_id]
-        team = [entry for entry in recalled if entry.agent_id != agent_id]
+        team = [entry for entry in recalled if entry.agent_id == SHARED_MEMORY_ID]
+        if not everyone:
+            team = [entry for entry in recalled if entry.agent_id != agent_id]
+        others = [
+            entry
+            for entry in recalled
+            if everyone and entry.agent_id not in {agent_id, SHARED_MEMORY_ID}
+        ]
         sections: list[str] = []
         if own:
             lines = "\n".join(f"- {entry.text}" for entry in own)
@@ -307,6 +335,13 @@ class MemoryService:
                 for entry in team
             )
             sections.append(f"What the team knows (shared memory):\n{lines}")
+        if others:
+            names = await self.owner_names()
+            lines = "\n".join(
+                f"- {entry.text} ({names.get(entry.agent_id, 'an agent')})"
+                for entry in others
+            )
+            sections.append(f"What your agents know (their own memories):\n{lines}")
         if working:
             lines = "\n".join(f"- {entry.text}" for entry in working)
             sections.append(f"Your working notes right now:\n{lines}")

@@ -736,6 +736,45 @@ What a local agent says in a team room is seen by every member of that room,
 server agents included. And if you put Jarvis himself on a server AI, he is
 kept out of memory too, and no briefings are written.
 
+**Jarvis's own memory.** With **Main AI Has Its Own Memory**
+(`STUDIO_MAIN_OWN_MEMORY`, on by default), what Jarvis remembers goes into a
+memory of his own that the other agents can't read; he puts a fact in the team
+memory only when it's for everyone (`remember` with `share`). He reads every
+agent's memory as well as the team's, and each result says whose it is (*(Builder)*,
+*(Researcher's server area)*), so his answers and briefings draw on all of it.
+He adds to the team in his own way: team facts with `share`, a note for one
+agent with `manage_agent add_memory`, and jobs and questions with `ask_agent`.
+The same holds in FCC Phone: Jarvis's own memories are marked *only Jarvis reads
+it* on the Memory page and stay on the phone.
+
+**Local agents direct server agents.** With **Local Agents Direct Server
+Agents** (`STUDIO_LOCAL_CONTROL`, on by default), every agent thinking on this
+PC gets `ask_agent`, `team_status`, `stop_agent`, and `manage_agent` over the
+agents that think on a server AI: it hands them jobs (with everything the job
+needs, since they can't see memory), checks on them, stops them, and changes
+their tools or leaves them notes. Agents on this PC take orders from Jarvis
+only, and server agents never direct agents on this PC, which read your
+memory. Who is on which side follows each agent's model right now, so
+switching a model (Team brains, the agent's page, or *"switch the Researcher to
+gemini"*) moves the agent between the groups on its next message. Each agent's
+page shows its side and role under **Team** (*This PC · Directs the agents on
+server AIs*). Agents you chose for every tool on this PC can still ask anyone.
+FCC Phone follows the same rule: an agent on a cloud AI can't hand work to an
+agent thinking on the phone.
+
+**Business photos.** Attach photos of the real business (the shop, team,
+food, work) to any message, on the PC (📎) or in FCC Phone (🖼): what you
+write with them is kept as their note, such as what they show, prices, hours,
+or the story. They're also on **Agents → Business photos** on the PC and on
+**Projects** on the phone, where you add more, edit notes, or delete them.
+Photos are shrunk and turned upright before they're kept (at most 2000px on
+the PC, 1600px on the phone). The Builder checks `list_photos` first, puts
+yours on the site with `use_photo` (into `images/`, with the right width and
+height), uses your notes as facts, and only fills gaps with free stock
+photos. Your own photos need no credit line. iPhone HEIC photos open in FCC
+Phone; on the PC, send them as JPEG (iPhone: Settings → Camera → Formats →
+Most Compatible).
+
 </details>
 
 <details>

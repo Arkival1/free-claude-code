@@ -2764,3 +2764,30 @@ h3.subhead {
   font-size: 14px;
   color: var(--muted);
 }
+
+/* Business photos */
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.photo-tile {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  border-radius: 12px;
+}
+.photo-tile img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.photo-tile figcaption {
+  display: grid;
+  gap: 6px;
+}

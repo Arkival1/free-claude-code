@@ -1070,6 +1070,33 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_LOCAL_CONTROL",
+        "Local Agents Direct Server Agents",
+        "studio",
+        "boolean",
+        settings_attr="studio_local_control",
+        description=(
+            "Agents thinking on this PC can hand work to, check on, stop, and "
+            "adjust the agents that think on a server or cloud AI. Server "
+            "agents can't direct agents on this PC, which read your memory. "
+            "Switching an agent's model moves it between the two groups."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MAIN_OWN_MEMORY",
+        "Main AI Has Its Own Memory",
+        "studio",
+        "boolean",
+        settings_attr="studio_main_own_memory",
+        description=(
+            "The main AI (Jarvis) keeps what it remembers in a memory of its "
+            "own that the other agents can't read, and shares a fact with the "
+            "team only when it chooses. It can still read every agent's "
+            "memory and the team memory, and add notes to theirs. Off: what "
+            "it remembers goes into the team memory, as before."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_PRIVATE_MEMORY",
         "Keep Memory on This PC",
         "studio",

@@ -15,7 +15,8 @@ export function render(view) {
           el("div", { class: "grow" }, [input]),
           button("Add", async () => {
             if (!input.value.trim()) return;
-            await remember(jarvis(), input.value);
+            // What you add here is for the whole team.
+            await remember(jarvis(), input.value, { share: true });
             input.value = "";
           }),
         ]),
@@ -24,7 +25,11 @@ export function render(view) {
               el("div", { class: "item" }, [
                 el("div", { class: "grow" }, [
                   el("strong", { text: memory.text }),
-                  el("small", { text: `${agentName(memory.agent_id)} · ${ago(memory.created_at)}${pc ? (memory.synced ? " · on your PC" : " · not synced yet") : ""}` }),
+                  el("small", {
+                    text: memory.own
+                      ? `${agentName(memory.agent_id)}'s own memory · only ${agentName(memory.agent_id)} reads it · ${ago(memory.created_at)}`
+                      : `${agentName(memory.agent_id)} · ${ago(memory.created_at)}${pc ? (memory.synced ? " · on your PC" : " · not synced yet") : ""}`,
+                  }),
                 ]),
                 button("✕", async () => {
                   state.memories = state.memories.filter((item) => item.id !== memory.id);

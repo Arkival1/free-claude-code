@@ -128,6 +128,8 @@ def studio_settings() -> Callable[..., Settings]:
             # Tests check each agent's own tool list; the all-tools tests turn
             # this back on.
             "STUDIO_ALL_TOOLS": False,
+            "STUDIO_LOCAL_CONTROL": False,
+            "STUDIO_MAIN_OWN_MEMORY": False,
         }
         values.update(overrides)
         return Settings.model_validate(values)

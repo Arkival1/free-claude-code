@@ -7,6 +7,7 @@ import * as projects from "./projects.js";
 import { polishNotes } from "./polish.js";
 import { lookAtSite, describeLook } from "./inspect.js";
 import { TEMPLATES, templateFiles } from "./templates.js";
+import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
 const hooks = { delegate: null, learn: null, teamStatus: null };
 export function setHooks(next) {
@@ -79,6 +80,14 @@ export const SPECS = {
     description: "Delete one file from the current project.",
     parameters: { type: "object", properties: { path: text("File name.") }, required: ["path"] },
   },
+  list_photos: {
+    description: "The user's own photos of their business (the shop, team, food, work) with what they said about each: what it shows, prices, hours, anything. Use these before stock photos, and the notes as facts for the site.",
+    parameters: { type: "object", properties: { query: text("Words to narrow the list, if any.") } },
+  },
+  use_photo: {
+    description: "Put one of the user's business photos into the current project (e.g. images/shopfront.jpg), then use it in <img> with its width and height. Their own photos need no credit.",
+    parameters: { type: "object", properties: { photo: text("Its name."), path: text("Where to put it, e.g. images/shopfront.jpg.") }, required: ["photo"] },
+  },
   restore_file: {
     description: "Undo changes to a file: put back an earlier version (1 = before the last change). Without versions_back, lists the saved versions.",
     parameters: { type: "object", properties: { path: text("File name."), versions_back: { type: "integer" } }, required: ["path"] },
@@ -117,10 +126,25 @@ export const SPECS = {
   },
 };
 
+// The main AI keeps its own memory, so its remember can share or not.
+const MAIN_SPECS = {
+  remember: {
+    description: "Save one fact into your own memory, which only you read. Set share to true to put it where every agent reads it instead.",
+    parameters: { type: "object", properties: { text: text("The fact, in one clear sentence."), share: { type: "boolean" } }, required: ["text"] },
+  },
+  recall: {
+    description: "Search your own memory, the team's, and every agent's; each result says whose it is.",
+    parameters: SPECS.recall.parameters,
+  },
+};
+
 export function specsFor(agent) {
   return toolsOf(agent)
     .filter((name) => SPECS[name])
-    .map((name) => ({ type: "function", function: { name, description: SPECS[name].description, parameters: SPECS[name].parameters } }));
+    .map((name) => {
+      const spec = (agent.role === "main" && MAIN_SPECS[name]) || SPECS[name];
+      return { type: "function", function: { name, description: spec.description, parameters: spec.parameters } };
+    });
 }
 
 /** Run one tool call for an agent. ctx: {project, depth, chain}. Returns text. */
@@ -130,7 +154,7 @@ export async function runTool(agent, call, ctx) {
   try {
     switch (call.name) {
       case "remember":
-        return await remember(agent, String(args.text || ""));
+        return await remember(agent, String(args.text || ""), { share: args.share === true });
       case "recall": {
         const found = recall(agent, String(args.query || ""), 8);
         return found.length ? found.map((row) => `- ${row.text}${row.from ? ` (${row.from})` : ""}`).join("\n") : "Nothing in memory about that.";
@@ -173,6 +197,7 @@ export async function runTool(agent, call, ctx) {
         const project = await needProject(agent, ctx);
         const name = projects.cleanPath(args.path);
         const body = project.files[name];
+        if (projects.isPicture(project.files[String(args.path || "").replace(/^\.?\/+/, "")])) return `${args.path} is a picture; use it with <img src="${args.path}">.`;
         return body === undefined ? `There is no ${name} in ${project.name}. Files: ${Object.keys(project.files).join(", ") || "none"}.` : body.slice(0, 24000);
       }
       case "edit_file": {
@@ -183,7 +208,7 @@ export async function runTool(agent, call, ctx) {
       case "list_files": {
         const project = await needProject(agent, ctx);
         const names = Object.keys(project.files);
-        return names.length ? names.map((name) => `${name} (${project.files[name].length.toLocaleString()} characters)`).join("\n") : `${project.name} has no files yet.`;
+        return names.length ? names.map((name) => (projects.isPicture(project.files[name]) ? `${name} (picture)` : `${name} (${project.files[name].length.toLocaleString()} characters)`)).join("\n") : `${project.name} has no files yet.`;
       }
       case "delete_file": {
         const project = await needProject(agent, ctx);
@@ -201,6 +226,21 @@ export async function runTool(agent, call, ctx) {
         }
         const name = await projects.restoreFile(project, args.path, back, agent.name);
         return `Restored ${name} to the version from ${back} change(s) ago. The version it replaced is kept, so this can be undone too.`;
+      }
+      case "list_photos": {
+        const found = searchPhotos(String(args.query || ""));
+        if (!found.length) return args.query ? `No business photos match "${args.query}".` : "The user hasn't sent any business photos yet; they can attach them in a chat or add them on Projects. Use find_images meanwhile.";
+        return [...found.slice(0, 30).map((photo, i) => `${i + 1}. ${describePhoto(photo)}`), "Put one on the site with use_photo."].join("\n");
+      }
+      case "use_photo": {
+        const photo = findPhoto(args.photo);
+        if (!photo) return `No business photo called ${args.photo}; list_photos shows them.`;
+        const project = await needProject(agent, ctx);
+        const extension = photo.name.slice(photo.name.lastIndexOf("."));
+        let path = String(args.path || `images/${photo.name}`).trim().replace(/^\/+/, "");
+        path = path.replace(/\.[a-z0-9]+$/i, "") + extension;
+        const name = await projects.putPicture(project, path, await photoData(photo), agent.name);
+        return `Put ${photo.name} in ${project.name} as ${name}. It is ${photo.width}x${photo.height}: use width="${photo.width}" height="${photo.height}" on the <img>.${photo.note ? ` The user says about it: ${photo.note}` : ""}`;
       }
       case "find_images":
         return await findImagesText(String(args.query || ""), Number(args.count) || 5, String(args.orientation || ""));
@@ -254,17 +294,32 @@ async function needProject(agent, ctx) {
 
 // ------------------------------------------------------------------ memory
 
-export async function remember(agent, raw) {
+/** Save a fact. Jarvis keeps his to himself unless he shares it; every other
+ * agent's go where the whole team reads them. */
+export async function remember(agent, raw, { share = false } = {}) {
   const clean = raw.trim();
   if (!clean) return "Nothing to remember.";
-  const same = state.memories.find((memory) => memory.text.toLowerCase() === clean.toLowerCase());
+  const own = agent.role === "main" && !share;
+  const same = state.memories.find((memory) => memory.text.toLowerCase() === clean.toLowerCase() && canRead(agent, memory));
   if (same) return `Already remembered: ${same.text}`;
-  state.memories.unshift({ id: uid(), agent_id: agent.id, text: clean.slice(0, 2000), created_at: Date.now(), synced: false });
+  state.memories.unshift({ id: uid(), agent_id: agent.id, text: clean.slice(0, 2000), created_at: Date.now(), synced: own, own });
   await save.memories();
   changed("memory");
   feed(agent.name, `Remembered: ${clean.slice(0, 90)}`);
-  syncSoon();
-  return `Saved to memory: ${clean}`;
+  if (!own) syncSoon();
+  return own ? `Saved to your own memory: ${clean}` : `Saved to memory: ${clean}`;
+}
+
+/** A memory Jarvis kept to himself is his alone; he reads everyone's. */
+export function canRead(agent, memory) {
+  return !memory.own || memory.agent_id === agent.id || agent.role === "main";
+}
+
+function whose(agent, memory) {
+  if (agent.role !== "main") return "";
+  if (memory.own && memory.agent_id === agent.id) return "yours";
+  const author = state.agents.find((item) => item.id === memory.agent_id);
+  return author && author.id !== agent.id ? `from ${author.name}` : "";
 }
 
 /** Memories from the PC reach only brains that keep them private, unless allowed. */
@@ -276,7 +331,9 @@ export function pcMemoryAllowed(agent) {
 export function recall(agent, query, limit) {
   const terms = new Set(words(query));
   const score = (value) => words(value).reduce((sum, word) => sum + (terms.has(word) ? 1 : 0), 0);
-  const rows = state.memories.map((memory) => ({ text: memory.text, at: memory.created_at, score: score(memory.text), from: "" }));
+  const rows = state.memories
+    .filter((memory) => canRead(agent, memory))
+    .map((memory) => ({ text: memory.text, at: memory.created_at, score: score(memory.text), from: whose(agent, memory) }));
   if (pcMemoryAllowed(agent)) {
     for (const memory of state.pcMemories) rows.push({ text: memory.text, at: memory.created_at, score: score(memory.text), from: "from your PC" });
   }

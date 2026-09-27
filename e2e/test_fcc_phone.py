@@ -16,6 +16,9 @@ def open_phone(page: Page, admin_base_url: str, route: str = "home") -> None:
     page.set_viewport_size(IPHONE_12_PRO)
     page.goto(f"{admin_base_url}/phone/#{route}")
     expect(page.locator(".tabs")).to_be_visible()
+    # Wait for saved data to load, so a test's changes aren't loaded over.
+    page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
+    page.evaluate("() => window.fccPhone.ready")
 
 
 def go(page: Page, route: str) -> None:
@@ -257,7 +260,7 @@ def test_jarvis_remembers_checks_the_weather_and_runs_the_builder(
     talk.fill("Remember my gym days are Monday and Thursday")
     talk.press("Enter")
     expect(page.locator(".hud-line.assistant").last).to_contain_text(
-        "Done. (Saved to memory"
+        "Done. (Saved to your own memory"
     )
     first = seen[0]
     assert first["model"] == "gemini-2.5-flash"

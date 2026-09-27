@@ -35,6 +35,7 @@ from free_claude_code.studio.lora import (
 )
 from free_claude_code.studio.models import Agent, LoraJob, PhoneLink, VideoNote
 from free_claude_code.studio.phone_link import PhoneAuthError, PhoneLinkError
+from free_claude_code.studio.photos import MAX_PHOTO_BYTES, PhotoError
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.tuning import TuningError
@@ -1379,6 +1380,67 @@ async def read_attached_file(
                 detail=f"Attach files up to {MAX_UPLOAD // 1024 // 1024} MB.",
             )
     return await asyncio.to_thread(read_file_text, name, bytes(data))
+
+
+class PhotoNotePayload(BaseModel):
+    note: str = Field(default="", max_length=2000)
+
+
+@router.post("/studio/api/photos")
+async def add_photo(
+    request: Request,
+    name: str,
+    note: str = "",
+    chat_id: str | None = None,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Keep one business photo the user sent the agents, with a note."""
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > MAX_PHOTO_BYTES:
+            raise HTTPException(status_code=413, detail="Send photos up to 15 MB.")
+    return await studio.add_photo(name, bytes(data), note=note, chat_id=chat_id)
+
+
+@router.get("/studio/api/photos")
+async def list_photos(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"photos": await studio.photo_list()}
+
+
+@router.get("/studio/api/photos/{photo_id}/file")
+async def photo_file(
+    photo_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> FileResponse:
+    try:
+        photo = await studio.photos.find(photo_id)
+    except PhotoError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return FileResponse(
+        studio.photos.path(photo),
+        media_type=photo.content_type,
+        headers={"cache-control": "private, max-age=3600"},
+    )
+
+
+@router.patch("/studio/api/photos/{photo_id}")
+async def set_photo_note(
+    photo_id: str,
+    payload: PhotoNotePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    return await studio.set_photo_note(photo_id, payload.note)
+
+
+@router.delete("/studio/api/photos/{photo_id}")
+async def delete_photo(
+    photo_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"deleted": await studio.delete_photo(photo_id)}
 
 
 @router.get("/studio/api/engine/logs")

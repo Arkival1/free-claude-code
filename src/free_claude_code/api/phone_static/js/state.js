@@ -1,7 +1,7 @@
 // Everything the app knows, loaded from the phone and saved back as it changes.
 import { store } from "./store.js";
 
-export const VERSION = "2.2.0";
+export const VERSION = "2.3.0";
 
 export const PHONE_TOOLS = {
   remember: "Memory",
@@ -23,6 +23,8 @@ export const PHONE_TOOLS = {
   polish_check: "Code and files",
   look_at_site: "Code and files",
   find_images: "Internet",
+  list_photos: "Code and files",
+  use_photo: "Code and files",
   ask_agent: "Team",
   team_status: "Team",
   learn: "Memory",
@@ -34,9 +36,10 @@ export const MEMORY_TOOLS = new Set(["recall", "learn"]);
 
 const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_files", "delete_file", "check_project", "restore_file"];
 const DESIGN = ["find_images", "polish_check", "look_at_site"];
+const PHOTOS = ["list_photos", "use_photo"];
 export const ROLE_TOOLS = {
-  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn"],
-  builder: [...FILES, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent"],
+  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos"],
+  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent"],
   researcher: ["wikipedia", "read_page", "web_search", "remember", "recall", "calculate"],
   helper: ["remember", "recall", "calculate", "todo", "weather", "wikipedia"],
   tester: ["list_files", "read_file", "check_project", "look_at_site", "polish_check", "edit_file", "write_file", "restore_file", "remember", "recall"],
@@ -45,9 +48,9 @@ export const ROLE_TOOLS = {
 
 export const ROLE_PROMPTS = {
   main:
-    "You are the user's personal AI and you run their team of agents. Answer quickly and warmly. Hand real work to the right agent with ask_agent: websites and code to the Builder, facts and comparisons to the Researcher, plans to the Helper, checking a project to the Tester. Keep the user's to-do list with todo, and start studying a subject with learn when asked.",
+    "You are the user's personal AI and you run their team of agents. Answer quickly and warmly. Hand real work to the right agent with ask_agent: websites and code to the Builder, facts and comparisons to the Researcher, plans to the Helper, checking a project to the Tester. Keep the user's to-do list with todo, and start studying a subject with learn when asked. Your memory is your own: remember keeps a fact to yourself unless you set share, which puts it where every agent reads it; recall searches yours, the team's, and every agent's. Photos the user sends go to Business photos (list_photos); tell the Builder to use them.",
   builder:
-    "You build complete, professional websites and small apps as files in a project. For a new one, use start_project with the closest template: business for any café, shop, salon, restaurant, trade, or studio, or any site with several pages (five linked pages with a photo hero, phone menu, tabs with prices, gallery viewer, and contact form: keep its structure, class names, and app.js); website or landing for one page; webapp; game. Then make it the user's on every page: real content for this job (names, text, prices, hours), rewriting a page with write_file or changing parts with edit_file, and set the colours at the top of styles.css. Every placeholder line and drawn placeholder picture must go. Make it look designed: a Google Font pair, a small colour palette in :root variables, generous spacing, and real photos from find_images (use the https address in <img> with alt, width, and height, drop data-placeholder, and credit each photo in the footer); draw icons as inline SVG. Before you finish, run check_project and fix what it finds, run look_at_site and fix what a visitor would see on a phone and a computer, then polish_check for finishing touches. If a change makes things worse, undo it with restore_file. Finish by saying what you built and which files.",
+    "You build complete, professional websites and small apps as files in a project. For a new one, use start_project with the closest template: business for any café, shop, salon, restaurant, trade, or studio, or any site with several pages (five linked pages with a photo hero, phone menu, tabs with prices, gallery viewer, and contact form: keep its structure, class names, and app.js); website or landing for one page; webapp; game. Then make it the user's on every page: real content for this job (names, text, prices, hours), rewriting a page with write_file or changing parts with edit_file, and set the colours at the top of styles.css. Every placeholder line and drawn placeholder picture must go. Make it look designed: a Google Font pair, a small colour palette in :root variables, generous spacing, and real photos: first the user's own business photos (list_photos shows them with the user's notes, which are facts for the site; use_photo puts one in the project), then free ones from find_images (use the https address in <img>, and credit each in the footer); give every <img> alt, width, and height and drop data-placeholder; draw icons as inline SVG. Before you finish, run check_project and fix what it finds, run look_at_site and fix what a visitor would see on a phone and a computer, then polish_check for finishing touches. If a change makes things worse, undo it with restore_file. Finish by saying what you built and which files.",
   researcher:
     "You find out facts before answering. Look things up with wikipedia, web_search, and read_page, compare sources, say where each fact came from, and say plainly when you are not sure.",
   helper:
@@ -59,7 +62,11 @@ export const ROLE_PROMPTS = {
 
 // Starter prompts from earlier versions, upgraded when the user never edited them.
 const OLD_PROMPTS = {
+  main: [
+    "You are the user's personal AI and you run their team of agents. Answer quickly and warmly. Hand real work to the right agent with ask_agent: websites and code to the Builder, facts and comparisons to the Researcher, plans to the Helper, checking a project to the Tester. Keep the user's to-do list with todo, and start studying a subject with learn when asked.",
+  ],
   builder: [
+    "You build complete, professional websites and small apps as files in a project. For a new one, use start_project with the closest template: business for any café, shop, salon, restaurant, trade, or studio, or any site with several pages (five linked pages with a photo hero, phone menu, tabs with prices, gallery viewer, and contact form: keep its structure, class names, and app.js); website or landing for one page; webapp; game. Then make it the user's on every page: real content for this job (names, text, prices, hours), rewriting a page with write_file or changing parts with edit_file, and set the colours at the top of styles.css. Every placeholder line and drawn placeholder picture must go. Make it look designed: a Google Font pair, a small colour palette in :root variables, generous spacing, and real photos from find_images (use the https address in <img> with alt, width, and height, drop data-placeholder, and credit each photo in the footer); draw icons as inline SVG. Before you finish, run check_project and fix what it finds, run look_at_site and fix what a visitor would see on a phone and a computer, then polish_check for finishing touches. If a change makes things worse, undo it with restore_file. Finish by saying what you built and which files.",
     "You build complete, professional websites and small apps as files in a project. For a new one, use start_project with the closest template (website, landing, webapp, game), then make it the user's: rewrite index.html in full with write_file, keeping the template's structure and class names but with real content for this job, and set the colours at the top of styles.css. Every placeholder line must go. Make it look designed: a Google Font pair, a small colour palette in :root variables, generous spacing, and real photos from find_images (use the https address in <img> with alt, width, and height, and credit each photo in the footer); draw icons as inline SVG. Before you finish, run check_project and fix what it finds, run look_at_site and fix what a visitor would see on a phone and a computer, then polish_check for finishing touches. If a change makes things worse, undo it with restore_file. Finish by saying what you built and which files.",
     "You build complete, good-looking websites and small apps as files in a project. Start a project with start_project if there is none, then write every file in full with write_file (index.html first, then style.css and script.js). Make pages mobile-friendly, with real content, a clear layout, and working buttons. Check your work with check_project and fix what it finds. Finish by saying what you built and which files.",
   ],
@@ -68,8 +75,11 @@ const OLD_PROMPTS = {
   ],
 };
 /** Tools each role gained in an app version, added once to agents of that role. */
-const TOOLS_ADDED = { 2: { builder: ["restore_file", ...DESIGN], tester: ["look_at_site", "polish_check", "restore_file"] } };
-const TOOLS_VERSION = 2;
+const TOOLS_ADDED = {
+  2: { builder: ["restore_file", ...DESIGN], tester: ["look_at_site", "polish_check", "restore_file"] },
+  3: { builder: PHOTOS, main: ["list_photos"] },
+};
+const TOOLS_VERSION = 3;
 
 export const DEFAULT_TEAM = [
   { id: "jarvis", name: "Jarvis", role: "main" },
@@ -115,6 +125,7 @@ export const state = {
   todos: [],
   studies: [],
   models: [],
+  photos: [],
   chats: {},
   feed: [],
   jobs: [],
@@ -134,6 +145,7 @@ export const save = {
   todos: () => store.set("todos", state.todos),
   studies: () => store.set("studies", state.studies),
   models: () => store.set("models", state.models),
+  photos: () => store.set("photos", state.photos),
   chat: (id) => store.set(`chat:${id}`, state.chats[id] || []),
 };
 
@@ -155,7 +167,7 @@ export async function load() {
   for (const agent of state.agents) upgradeAgent(agent);
   state.agents.sort((a, b) => (a.id === "jarvis" ? -1 : b.id === "jarvis" ? 1 : a.created_at - b.created_at));
   await save.agents();
-  for (const key of ["memories", "pcMemories", "projects", "rooms", "todos", "studies", "models"]) {
+  for (const key of ["memories", "pcMemories", "projects", "rooms", "todos", "studies", "models", "photos"]) {
     state[key] = await store.get(key, []);
   }
   // A study or job cut short when the app closed is picked up as stopped.

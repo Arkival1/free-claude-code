@@ -63,6 +63,30 @@ export async function writeFile(project, path, content, agentName) {
   return name;
 }
 
+export const PICTURE_TYPES = /\.(jpe?g|png|webp|gif)$/i;
+/** Pictures live in a project as data addresses, so previews and zips need nothing else. */
+export const isPicture = (text) => typeof text === "string" && text.startsWith("data:image/");
+
+/** Put a picture (a data address) into the project, e.g. images/shop.jpg. */
+export async function putPicture(project, path, data, agentName) {
+  const name = String(path || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter((part) => part && part !== "." && part !== "..")
+    .join("/")
+    .slice(0, 120);
+  if (!PICTURE_TYPES.test(name)) throw new Error("Pictures are saved as .jpg or .png files, like images/shop.jpg.");
+  if (!isPicture(data)) throw new Error("That isn't a picture.");
+  const isNew = !(name in project.files);
+  if (!isNew) keepVersion(project, name, data);
+  project.files[name] = data;
+  project.updated_at = Date.now();
+  await save.projects();
+  changed("projects");
+  feed(agentName, `${isNew ? "Added" : "Replaced"} the picture ${project.name}/${name}.`);
+  return name;
+}
+
 export async function deleteFile(project, path, agentName) {
   const name = cleanPath(path);
   if (!(name in project.files)) throw new Error(`There is no ${name} in ${project.name}.`);
@@ -134,6 +158,8 @@ export function bundle(project, page = "index.html") {
   });
   // Pictures drawn as SVG files in the project go in as data addresses.
   const picture = (ref) => {
+    const kept = files[cleanPictureRef(ref)];
+    if (isPicture(kept)) return kept;
     const svg = /\.svg$/i.test(ref) ? files[cleanRelative(ref)] : undefined;
     return svg === undefined ? null : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   };
@@ -174,6 +200,10 @@ export function previewHtml(project, { page = "index.html", extra = "" } = {}) {
   return inject + html;
 }
 
+function cleanPictureRef(ref) {
+  return String(ref || "").split("?")[0].split("#")[0].replace(/^\.?\/+/, "");
+}
+
 function cleanRelative(href) {
   try {
     return cleanPath(href.split("?")[0].split("#")[0]);
@@ -192,6 +222,7 @@ export function checkProject(project) {
   else if (!project.files["index.html"]) problems.push("There is no index.html, so the project has no front page.");
   for (const name of names) {
     const text = project.files[name];
+    if (isPicture(text)) continue;
     if (!text.trim()) problems.push(`${name} is empty.`);
     // Placeholder words, not placeholder="" hints or the template's picture marker.
     const words = text.replace(/\bdata-placeholder\b|\bplaceholder=(["'])[^"']*\1/gi, "");
@@ -209,7 +240,7 @@ export function checkProject(project) {
     for (const match of html.matchAll(/(?:href|src)=["']([^"'#?]+)["']/gi)) {
       const target = match[1];
       if (/^(https?:|mailto:|tel:|data:|\/\/|#)/i.test(target)) continue;
-      if (!project.files[cleanRelative(target)]) problems.push(`${page} links to ${target}, which isn't in the project.`);
+      if (!project.files[cleanRelative(target)] && !project.files[cleanPictureRef(target)]) problems.push(`${page} links to ${target}, which isn't in the project.`);
     }
     for (const img of html.matchAll(/<img\b(?![^>]*\balt=)[^>]*>/gi)) {
       problems.push(`${page} has an image with no alt text: ${img[0].slice(0, 60)}`);
@@ -257,7 +288,7 @@ export function zipProject(project) {
   const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
   for (const [path, text] of Object.entries(project.files)) {
     const name = encoder.encode(`${project.slug}/${path}`);
-    const data = encoder.encode(text);
+    const data = isPicture(text) ? pictureBytes(text) : encoder.encode(text);
     const crc = crc32(data);
     const local = new DataView(new ArrayBuffer(30));
     [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, time, 2], [12, date, 2], [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, name.length, 2], [28, 0, 2]].forEach(([at, value, size]) =>
@@ -278,4 +309,13 @@ export function zipProject(project) {
     bytes === 4 ? end.setUint32(at, value, true) : end.setUint16(at, value, true)
   );
   return new Blob([...parts, ...central, end], { type: "application/zip" });
+}
+
+function pictureBytes(dataUrl) {
+  const [head, body] = dataUrl.split(",", 2);
+  if (!/;base64$/i.test(head)) return new TextEncoder().encode(decodeURIComponent(body));
+  const binary = atob(body);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }

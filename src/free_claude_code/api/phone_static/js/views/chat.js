@@ -6,6 +6,7 @@ import { brainOf, brainReady, PROVIDERS, modelOf } from "../brains.js";
 import { speak, micButton } from "../voice.js";
 import { createProject, findProject } from "../projects.js";
 import { store } from "../store.js";
+import { addPhoto, setNote, photoLine } from "../photos.js";
 
 export async function renderList(view) {
   const rows = await Promise.all(
@@ -28,9 +29,44 @@ export async function render(view, agentId) {
   const messages = el("div", { class: "messages", "aria-live": "polite" });
   const input = el("textarea", { rows: 1, placeholder: `Message ${agent.name}`, "aria-label": "Message", enterkeyhint: "send" });
   const send = button("Send", () => submit(), { class: "primary" });
+  // Photos of the business ride on the next message; its words become their note.
+  const attached = [];
+  const chips = el("div", { class: "chips attach-chips" });
+  const drawChips = () =>
+    chips.replaceChildren(
+      ...attached.map((photo, index) =>
+        el("span", { class: "pill" }, [
+          `🖼 ${photo.name}`,
+          button("✕", () => {
+            attached.splice(index, 1);
+            drawChips();
+          }, { class: "chip-remove", "aria-label": `Remove ${photo.name}` }),
+        ])
+      )
+    );
+  const photoInput = el("input", { type: "file", accept: "image/*", multiple: true, class: "visually-hidden", "aria-label": "Choose photos" });
+  photoInput.addEventListener("change", async () => {
+    const files = [...photoInput.files];
+    photoInput.value = "";
+    for (const file of files) {
+      try {
+        attached.push(await addPhoto(file));
+        drawChips();
+      } catch (error) {
+        notify(error.message);
+      }
+    }
+  });
+  const photoButton = button("🖼", () => photoInput.click(), { class: "mic", "aria-label": "Add photos of your business" });
   const submit = async () => {
-    const text = input.value.trim();
-    if (!text || isBusy(agent)) return;
+    let text = input.value.trim();
+    if ((!text && !attached.length) || isBusy(agent)) return;
+    if (attached.length) {
+      for (const photo of attached) if (text) await setNote(photo.id, text);
+      text = `${text || "Here are photos of my business."}\n\n${attached.map(photoLine).join("\n")}`;
+      attached.length = 0;
+      drawChips();
+    }
     input.value = "";
     input.style.height = "auto";
     try {
@@ -77,7 +113,8 @@ export async function render(view, agentId) {
           ]),
         ]),
     messages,
-    el("div", { class: "composer" }, [input, micButton(input, submit), send])
+    chips,
+    el("div", { class: "composer" }, [photoInput, photoButton, input, micButton(input, submit), send])
   );
   const draw = async () => {
     const chat = await chatOf(agent.id);

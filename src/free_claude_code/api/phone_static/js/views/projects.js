@@ -3,6 +3,7 @@ import { state, onChange, agentById } from "../state.js";
 import { el, button, card, go, notify, openSheet, closeSheet, ago } from "../ui.js";
 import * as projects from "../projects.js";
 import { runTask, isBusy } from "../agents.js";
+import { addPhoto, setNote, removePhoto, photoData } from "../photos.js";
 
 export function render(view, id) {
   if (id) return renderProject(view, id);
@@ -32,10 +33,58 @@ export function render(view, id) {
               ])
             )
           : [el("p", { class: "empty", text: "No projects yet." })]
-      )
+      ),
+      photosCard()
     );
   draw();
-  return onChange((what) => what === "projects" && draw());
+  return onChange((what) => (what === "projects" || what === "photos") && draw());
+}
+
+/** Photos of the user's real business, each with a note the agents read. */
+function photosCard() {
+  const note = el("textarea", { rows: 2, "aria-label": "Note for new photos", placeholder: "What they show, prices, hours, the story…" });
+  const input = el("input", { type: "file", accept: "image/*", multiple: true, class: "visually-hidden", "aria-label": "Add business photos" });
+  const status = el("p", { class: "muted", role: "status" });
+  input.addEventListener("change", async () => {
+    const files = [...input.files];
+    input.value = "";
+    let added = 0;
+    for (const file of files) {
+      status.textContent = `Adding ${file.name}…`;
+      try {
+        await addPhoto(file, note.value);
+        added += 1;
+      } catch (error) {
+        notify(error.message);
+      }
+    }
+    status.textContent = added ? `Added ${added} photo${added === 1 ? "" : "s"}.` : "";
+  });
+  const tiles = state.photos.map((photo) => {
+    const image = el("img", { alt: photo.note || photo.name, width: String(photo.width), height: String(photo.height) });
+    photoData(photo).then((data) => {
+      if (data) image.src = data;
+    });
+    const text = el("textarea", { "aria-label": `Note for ${photo.name}`, placeholder: "Add a note" });
+    text.value = photo.note || "";
+    text.addEventListener("change", () => setNote(photo.id, text.value).then(() => notify("Note saved.")));
+    return el("figure", { class: "photo-tile" }, [
+      image,
+      el("small", { class: "muted", text: `${photo.name} · ${photo.width}×${photo.height}` }),
+      text,
+      button("Delete", async () => {
+        if (!confirm(`Delete ${photo.name}? Sites that use it keep their copy.`)) return;
+        await removePhoto(photo.id);
+      }, { class: "danger", "aria-label": `Delete ${photo.name}` }),
+    ]);
+  });
+  return card("Business photos", [
+    el("p", { class: "muted", text: "Photos of your real business with notes. The Builder puts them on your sites before any stock photos and reads your notes as facts. You can also send photos in any chat with 🖼." }),
+    note,
+    el("div", { class: "row" }, [input, button("Add photos", () => input.click(), { class: "primary" })]),
+    status,
+    tiles.length ? el("div", { class: "photo-grid" }, tiles) : el("p", { class: "empty", text: "No photos yet." }),
+  ]);
 }
 
 function renderProject(view, id) {
@@ -94,8 +143,10 @@ function renderProject(view, id) {
         ...(names.length
           ? names.map((name) =>
               el("div", { class: "item" }, [
-                el("div", { class: "grow" }, [el("strong", { text: name }), el("small", { text: `${project.files[name].length.toLocaleString()} characters` })]),
-                button("Open", () => fileSheet(project, name), { "aria-label": `Open ${name}` }),
+                el("div", { class: "grow" }, [el("strong", { text: name }), el("small", { text: projects.isPicture(project.files[name]) ? "picture" : `${project.files[name].length.toLocaleString()} characters` })]),
+                projects.isPicture(project.files[name])
+                  ? null
+                  : button("Open", () => fileSheet(project, name), { "aria-label": `Open ${name}` }),
               ])
             )
           : [el("p", { class: "empty", text: "No files yet." })]),

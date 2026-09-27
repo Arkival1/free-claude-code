@@ -1062,3 +1062,46 @@ pre.notes {
 .page-pick select {
   flex: 1;
 }
+
+/* Photos waiting to go with the next message */
+.attach-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attach-chips:empty {
+  display: none;
+}
+.attach-chips .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chip-remove {
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0 8px;
+}
+
+/* Business photos */
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.photo-tile {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.photo-tile img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 10px;
+}
+.photo-tile textarea {
+  min-height: 64px;
+  font-size: 0.9rem;
+}

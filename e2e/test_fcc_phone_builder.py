@@ -282,15 +282,18 @@ def test_older_phone_agents_get_the_new_tools_once(
         "find_images",
         "polish_check",
         "look_at_site",
+        "list_photos",
+        "use_photo",
     ]
     assert "find_images" in upgraded["instructions"]
-    assert upgraded["toolsVersion"] == 2
+    assert "list_photos" in upgraded["instructions"]
+    assert upgraded["toolsVersion"] == 3
 
     # A tool the user turned off afterwards stays off; an edited prompt stays.
     again = page.evaluate(
         """() => window.fccPhone.upgradeAgent({
             id: 'b', name: 'B', role: 'builder', instructions: 'Mine',
-            tools: ['write_file'], toolsVersion: 2})"""
+            tools: ['write_file'], toolsVersion: 3})"""
     )
     assert again["tools"] == ["write_file"] and again["instructions"] == "Mine"
     builder = page.evaluate(

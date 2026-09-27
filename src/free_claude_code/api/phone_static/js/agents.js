@@ -1,7 +1,7 @@
 // How phone agents think, use tools, and hand work to each other.
 import { state, save, chatOf, changed, feed, agentByName, toolsOf } from "./state.js";
 import { think, brainOf, isPrivate, PROVIDERS, modelOf } from "./brains.js";
-import { specsFor, runTool, recall, setHooks, pcMemoryAllowed } from "./tools.js";
+import { specsFor, runTool, recall, setHooks, pcMemoryAllowed, canRead } from "./tools.js";
 import { startStudy } from "./learn.js";
 
 const HISTORY_TURNS = 20;
@@ -32,7 +32,10 @@ export function systemPrompt(agent, question, ctx = {}) {
     parts.push(`Current project: ${ctx.project.name}. Files: ${files.length ? files.join(", ") : "none yet"}.`);
   }
   const relevant = recall(agent, question, 6);
-  const recent = state.memories.slice(0, 4).filter((memory) => !relevant.some((row) => row.text === memory.text));
+  const recent = state.memories
+    .filter((memory) => canRead(agent, memory))
+    .slice(0, 4)
+    .filter((memory) => !relevant.some((row) => row.text === memory.text));
   const lines = [...relevant.map((row) => `- ${row.text}${row.from ? ` (${row.from})` : ""}`), ...recent.map((memory) => `- ${memory.text}`)];
   if (lines.length) parts.push(`What you remember (use it when it helps):\n${lines.join("\n")}`);
   return parts.filter(Boolean).join("\n\n");
@@ -135,6 +138,11 @@ async function delegate(from, name, task, projectName, ctx) {
   if (worker.id === from.id) return "That's you: do it yourself.";
   if ((ctx.chain || []).includes(worker.id)) return `${worker.name} handed you this job, so don't hand it back: finish it and report, or say what is missing.`;
   if ((ctx.depth || 0) >= MAX_HANDOFF_DEPTH) return "This job has already been handed down twice, so do this part yourself.";
+  // Agents on a cloud AI never direct the agents on this phone (or the PC),
+  // which read the user's memory; those take jobs from Jarvis and each other.
+  if (!isPrivate(from) && isPrivate(worker)) {
+    return `${worker.name} thinks on this phone and takes jobs from Jarvis and the other agents here, not from agents on a cloud AI. Ask Jarvis if you need it.`;
+  }
   if (isBusy(worker)) return `${worker.name} is busy with another job. Try again in a moment, or do it yourself.`;
   let project = ctx.project;
   if (projectName) {

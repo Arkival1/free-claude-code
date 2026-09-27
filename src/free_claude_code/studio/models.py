@@ -495,3 +495,21 @@ class PhoneLink(Record):
     """Memories this phone has sent to the PC."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
+
+
+class Photo(Record):
+    """A photo of the user's business, sent to the agents with a note."""
+
+    id: str = Field(default_factory=lambda: new_id("pho"))
+    name: str
+    file: str
+    """The file's name in the photo folder."""
+    content_type: str = "image/jpeg"
+    width: int = 0
+    height: int = 0
+    size: int = 0
+    note: str = ""
+    """What the user said about it: what it shows, prices, hours, anything."""
+    chat_id: str | None = None
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)

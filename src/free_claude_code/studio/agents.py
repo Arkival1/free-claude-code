@@ -24,6 +24,7 @@ from .tools import (
     CHECK_PROJECT_TOOL,
     COMMAND_TOOL,
     FINISH_TOOL,
+    LEAD_TOOLS,
     MAIN_ROLE,
     PARALLEL_TOOLS,
     SEALED_TOOLS,
@@ -56,6 +57,7 @@ WRITE_TOOLS = frozenset(
         "start_project",
         "restore_file",
         "save_image",
+        "use_photo",
     }
 )
 REPEAT_FAILURES = 2
@@ -252,7 +254,10 @@ MAIN_PROMPT = (
     "learned is in knowledge (and memory), so check it before answering or "
     "designing from that subject. weather gives the weather now and the next "
     "days for any town. Files the user attaches arrive in the message as "
-    "[Attached file: name] blocks; read them before answering. "
+    "[Attached file: name] blocks; read them before answering. Photos they "
+    "attach go to Business photos with their words as the note ([Business "
+    "photo: name] lines); list_photos shows them all, and when a site is "
+    "being built, tell the Builder to use them. "
     "Each agent can think with its own AI model; "
     "agent_model shows who uses which and switches one when the user asks. "
     "You control every agent with manage_agent: show the team or one agent "
@@ -273,6 +278,34 @@ MAIN_PROMPT = (
     "button names it gives."
     "\n\nYour team:\n{roster}"
 )
+MAIN_MEMORY_PROMPT = (
+    "Your memory is your own: remember saves there and the other agents "
+    "can't read it. Add share: true when the whole team should know a fact. "
+    "You can read every agent's memory (recall says whose each result is), "
+    "leave one agent a note with manage_agent add_memory, and talk to any "
+    "agent with ask_agent."
+)
+
+
+def lead_prompt(names: Sequence[str], *, sealed: bool) -> str:
+    """What an agent learns about the server agents it directs."""
+    team = ", ".join(names)
+    if sealed:
+        return (
+            f"You may hand parts of your job to the other agents on server "
+            f"AIs ({team}) with ask_agent; agents on the user's PC take "
+            "orders from the main AI only."
+        )
+    return (
+        f"The agents on server AIs work under you: {team}. Hand one a job "
+        "with ask_agent: put in everything the job needs, since they can't "
+        "see the user's memory, and nothing private it doesn't need. Check on "
+        "them with team_status, stop one with stop_agent, and change one's "
+        "tools or leave it a note with manage_agent. Agents on this PC take "
+        "orders from the main AI only."
+    )
+
+
 TEAM_PROMPT = (
     "You have every tool Studio has. Do your own job yourself; when a separate "
     "part is better done by a teammate (the Researcher for facts, the Builder "
@@ -333,8 +366,14 @@ class AgentRunner:
         live: MutableMapping[str, str] | None = None,
         temperature: float = 0.2,
         sealed: Callable[[Agent], Awaitable[bool]] | None = None,
+        local_control: bool = False,
+        main_own_memory: bool = False,
     ) -> None:
         self._store = store
+        # Agents on this PC direct the agents on server AIs.
+        self._local_control = local_control
+        # The main AI keeps its own memory and reads every agent's.
+        self._main_own_memory = main_own_memory
         # Says which agents think on a server, and so must not see memory.
         self._sealed = sealed
         self._router = router
@@ -348,26 +387,65 @@ class AgentRunner:
         self._live = live
         self._temperature = temperature
 
-    async def _private_view(self, agent: Agent) -> tuple[Agent, bool]:
-        """The agent as it may act: with every tool when that is on, and
-        without memory when it thinks on a server."""
+    async def _private_view(
+        self, agent: Agent
+    ) -> tuple[Agent, bool, tuple[str, ...] | None]:
+        """The agent as it may act, and whom it may direct.
+
+        With every tool when that is on; without memory when it thinks on a
+        server; and, on this PC, with the tools to direct the agents on
+        server AIs. Who directs whom follows each agent's current model, so
+        switching a model moves an agent between the two groups at once.
+        """
         granted = self._toolbox.granted(
             agent.tools, role=agent.role, chosen=agent.all_tools
         )
         if granted != agent.tools:
             agent = agent.model_copy(update={"tools": granted})
-        if self._sealed is None or not await self._sealed(agent):
-            return agent, False
-        # The user's memory is out of reach; its own area stays in reach.
-        return (
-            agent.model_copy(
+        sealed = self._sealed is not None and await self._sealed(agent)
+        if sealed:
+            # The user's memory is out of reach; its own area stays in reach.
+            agent = agent.model_copy(
                 update={
                     "memory_enabled": False,
                     "tools": tuple(t for t in agent.tools if t not in SEALED_TOOLS),
                 }
-            ),
-            True,
+            )
+        if agent.role == MAIN_ROLE:
+            return agent, sealed, None
+        if agent.role == "guide":
+            return agent, sealed, ()
+        free = self._toolbox.delegation_allowed(agent.role, agent.tools)
+        if free and not sealed:
+            # Chosen for every tool on this PC: it hands work to anyone.
+            return agent, sealed, None
+        servers = await self._server_team(agent)
+        if sealed:
+            return agent, sealed, servers if free else ()
+        if not (self._local_control and servers):
+            return agent, sealed, ()
+        missing = tuple(tool for tool in LEAD_TOOLS if tool not in agent.tools)
+        return (
+            agent.model_copy(update={"tools": (*agent.tools, *missing)}),
+            sealed,
+            servers,
         )
+
+    async def _server_team(self, agent: Agent) -> tuple[str, ...]:
+        """The names of the other agents that think on a server AI."""
+        if self._sealed is None:
+            return ()
+        names: list[str] = []
+        for member in await self._store.find(Agent, order_by="created_at ASC"):
+            if (
+                member.id == agent.id
+                or member.archived
+                or member.role in {MAIN_ROLE, "guide"}
+            ):
+                continue
+            if await self._sealed(member):
+                names.append(member.name)
+        return tuple(names)
 
     def _steps_for(self, agent: Agent) -> int:
         return self._builder_max_steps if agent.role == "builder" else self._max_steps
@@ -457,7 +535,13 @@ class AgentRunner:
         return "\n".join(lines) or "- nobody yet; the user can add agents."
 
     def _context(
-        self, agent: Agent, chat: Chat, *, site_id: str | None, sealed: bool = False
+        self,
+        agent: Agent,
+        chat: Chat,
+        *,
+        site_id: str | None,
+        sealed: bool = False,
+        directs: tuple[str, ...] | None = None,
     ) -> ToolContext:
         return ToolContext(
             agent_id=agent.id,
@@ -466,7 +550,12 @@ class AgentRunner:
             agent_name=agent.name,
             agent_role=agent.role,
             memory_owner=server_area(agent.id) if sealed else "",
-            can_delegate=self._toolbox.delegation_allowed(agent.role, agent.tools),
+            can_delegate=self._toolbox.delegation_allowed(agent.role, agent.tools)
+            or bool(directs),
+            directs=directs,
+            main_memory=agent.role == MAIN_ROLE
+            and self._main_own_memory
+            and not sealed,
         )
 
     async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:
@@ -590,14 +679,16 @@ class AgentRunner:
         await self._store.append_message(
             chat_id=chat.id, role="user", text=user_text, author="user"
         )
-        agent, sealed = await self._private_view(agent)
+        agent, sealed, directs = await self._private_view(agent)
         note = await prepare() if prepare is not None else ""
         recalled = "" if sealed else await self._recall_earlier(agent, chat, user_text)
         note = "\n\n".join(part for part in (note, recalled) if part)
         history = await self._history(agent, chat)
         if not history or not history[-1].content.endswith(user_text):
             history.append(ChatMessage.user(user_text))
-        context = self._context(agent, chat, site_id=chat.site_id, sealed=sealed)
+        context = self._context(
+            agent, chat, site_id=chat.site_id, sealed=sealed, directs=directs
+        )
         result = await self._loop(
             agent,
             chat,
@@ -621,7 +712,7 @@ class AgentRunner:
 
     async def run_task(self, agent: Agent, chat: Chat, run: AgentRun) -> AgentRun:
         """Run one autonomous goal to completion and persist its outcome."""
-        agent, sealed = await self._private_view(agent)
+        agent, sealed, directs = await self._private_view(agent)
         started = run.model_copy(update={"status": "running", "updated_at": now_ms()})
         await self._store.put(started)
         await self._store.append_message(
@@ -632,7 +723,11 @@ class AgentRunner:
             data={"kind": "run_started", "run_id": run.id},
         )
         context = self._context(
-            agent, chat, site_id=run.site_id or chat.site_id, sealed=sealed
+            agent,
+            chat,
+            site_id=run.site_id or chat.site_id,
+            sealed=sealed,
+            directs=directs,
         )
         history = [ChatMessage.user(run.goal)]
         result = await self._loop(
@@ -694,8 +789,10 @@ class AgentRunner:
         max_steps: int | None = None,
     ) -> TurnResult:
         """Take one turn in an existing conversation someone else is driving."""
-        agent, sealed = await self._private_view(agent)
-        context = self._context(agent, chat, site_id=chat.site_id, sealed=sealed)
+        agent, sealed, directs = await self._private_view(agent)
+        context = self._context(
+            agent, chat, site_id=chat.site_id, sealed=sealed, directs=directs
+        )
         return await self._loop(
             agent,
             chat,
@@ -726,7 +823,9 @@ class AgentRunner:
             names,
             commands_enabled=self._toolbox.commands_enabled,
             shared_memory=self._toolbox.shared_memory and agent.memory_enabled,
-            delegation=self._toolbox.delegation_allowed(agent.role, names),
+            delegation=self._toolbox.delegation_allowed(agent.role, names)
+            or context.can_delegate,
+            main_memory=context.main_memory,
         )
         # The instructions stay the same from message to message; what memory
         # recalls for this message rides on the message itself. A local
@@ -737,12 +836,19 @@ class AgentRunner:
         )
         if sealed:
             system = f"{system}\n\n{SEALED_PROMPT}"
+        if context.directs and agent.role != MAIN_ROLE:
+            system = f"{system}\n\n{lead_prompt(context.directs, sealed=sealed)}"
+        if context.main_memory:
+            system = f"{system}\n\n{MAIN_MEMORY_PROMPT}"
         if extra_system:
             system = f"{system}\n\n{extra_system}"
         if agent.memory_enabled or sealed:
             owner = server_area(agent.id) if sealed else agent.id
             history = with_memory_note(
-                history, await self._memory.context_block(owner, query)
+                history,
+                await self._memory.context_block(
+                    owner, query, everyone=context.main_memory
+                ),
             )
         if turn_note:
             history = with_memory_note(history, turn_note, header=STUDIO_NOTE_HEADER)

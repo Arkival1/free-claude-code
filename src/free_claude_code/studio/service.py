@@ -98,6 +98,7 @@ from .models import (
     Message,
     ModelAsset,
     PhoneLink,
+    Photo,
     SiteProject,
     Study,
     StudyLesson,
@@ -125,6 +126,7 @@ from .phone_link import (
     tailscale_address,
     tool_specs,
 )
+from .photos import PhotoError, PhotoLibrary
 from .platforms import (
     PlatformError,
     PlatformPage,
@@ -200,6 +202,8 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "knowledge",
         "find_images",
         "save_image",
+        "list_photos",
+        "use_photo",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
@@ -350,6 +354,7 @@ class StudioService:
         self._connectivity = Connectivity(transport=search_transport)
         self._settings_provider = settings_provider
         self._sites = SiteWorkspace(sites_dir)
+        self._photos = PhotoLibrary(store, sites_dir.parent / "photos")
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._models_dir = models_dir
         self._voice_setup = SetupState()
@@ -772,6 +777,7 @@ class StudioService:
             assistant=self._assistant_tool,
             all_tools=settings.studio_all_tools,
             image_transport=self._search_transport,
+            photos=self._photos,
         )
 
     def _runner(self) -> AgentRunner:
@@ -787,6 +793,8 @@ class StudioService:
             temperature=self.settings.studio_agent_temperature,
             notes=self._notes_keeper,
             sealed=self.is_private_from,
+            local_control=self.settings.studio_local_control,
+            main_own_memory=self.settings.studio_main_own_memory,
         )
 
     def _tuner(self) -> LightTuner:
@@ -1215,7 +1223,27 @@ class StudioService:
             "private": private,
             "memory_area": server_area(agent.id),
             "memory_area_count": area,
+            "command": self._command_line(agent, private=private),
+            "own_memory": agent.role == MAIN_ROLE
+            and self.settings.studio_main_own_memory
+            and not private,
         }
+
+    def _command_line(self, agent: Agent, *, private: bool) -> str:
+        """Who this agent directs and who directs it, in a few words."""
+        if agent.role == MAIN_ROLE:
+            return "Directs every agent"
+        if agent.role == "guide":
+            return "Explains the app"
+        if private:
+            return (
+                "Takes jobs from the main AI and the agents on this PC"
+                if self.settings.studio_local_control
+                else "Takes jobs from the main AI"
+            )
+        if self.settings.studio_local_control:
+            return "Directs the agents on server AIs; takes jobs from the main AI"
+        return "Takes jobs from the main AI"
 
     async def set_every_tool(self, agent_id: str, on: bool) -> Agent:
         """Give one agent every tool, or only its own."""
@@ -1225,6 +1253,32 @@ class StudioService:
                 "The Guide keeps its few tools: it runs on the smallest model."
             )
         return await self.update_agent(agent_id, {"all_tools": on})
+
+    # ------------------------------------------------------------ photos
+
+    @property
+    def photos(self) -> PhotoLibrary:
+        """The user's business photos."""
+        return self._photos
+
+    async def add_photo(
+        self, name: str, data: bytes, *, note: str = "", chat_id: str | None = None
+    ) -> JsonObject:
+        """Keep one business photo the user sent, with their note."""
+        try:
+            photo = await self._photos.add(name, data, note=note, chat_id=chat_id)
+        except PhotoError as error:
+            raise StudioError(str(error)) from error
+        return photo_view(photo)
+
+    async def photo_list(self) -> list[JsonObject]:
+        return [photo_view(photo) for photo in await self._photos.photos()]
+
+    async def set_photo_note(self, photo_id: str, note: str) -> JsonObject:
+        return photo_view(await self._photos.set_note(photo_id, note))
+
+    async def delete_photo(self, photo_id: str) -> bool:
+        return await self._photos.delete(photo_id)
 
     async def agent(self, agent_id: str) -> Agent:
         """Return one agent or raise."""
@@ -1994,7 +2048,7 @@ class StudioService:
             case "agent_model":
                 return await self._agent_model_tool(call)
             case "manage_agent":
-                return await self._manage_agent_tool(call)
+                return await self._manage_agent_tool(call, context)
             case "weather":
                 place = str(call.arguments.get("place") or "").strip()
                 if not place:
@@ -2177,7 +2231,9 @@ class StudioService:
             for m in said
         )
         memory = (
-            await self._memory().context_block(main.id, goal)
+            await self._memory().context_block(
+                main.id, goal, everyone=self.settings.studio_main_own_memory
+            )
             if main.memory_enabled
             else ""
         )
@@ -2428,14 +2484,21 @@ class StudioService:
             )
         return agent
 
-    async def _manage_agent_tool(self, call: ToolCall) -> ToolOutcome:
-        """The main AI's control over every agent: tools and memory."""
+    async def _manage_agent_tool(
+        self, call: ToolCall, context: ToolContext | None = None
+    ) -> ToolOutcome:
+        """Control over agents' tools and memory: every agent for the main AI,
+        the agents on server AIs for an agent on this PC."""
         action = str(call.arguments.get("action") or "show").strip().lower()
         spoken = str(call.arguments.get("agent") or "").strip()
+        directs = context.directs if context is not None else None
+        caller = context.agent_name if context is not None else "Jarvis"
         if action == "show" and not spoken:
             lines = []
             for member in await self.agents():
-                if member.archived:
+                if member.archived or (
+                    context is not None and not context.may_direct(member.name)
+                ):
                     continue
                 using = await self.tools_in_use(member)
                 where = (
@@ -2457,6 +2520,12 @@ class StudioService:
                 data={"tool": "manage_agent", "action": "show"},
             )
         member = await self._find_team_member(spoken)
+        if context is not None and not context.may_direct(member.name):
+            mine = ", ".join(directs or ()) or "nobody right now"
+            raise ValueError(
+                f"{member.name} thinks on this PC; only the main AI manages "
+                f"agents on this PC. You manage: {mine}."
+            )
         private = await self.is_private_from(member)
         owner = server_area(member.id) if private else member.id
         where = (
@@ -2530,7 +2599,7 @@ class StudioService:
                 if not note:
                     raise ValueError("Say what to save.")
                 entry = await self._memory().remember(
-                    owner, note, source="main_ai", author="Jarvis"
+                    owner, note, source="main_ai", author=caller
                 )
                 if entry is None:
                     raise ValueError("Nothing to save.")
@@ -4371,3 +4440,8 @@ class StudioService:
                 "web": self.web_status(),
             },
         }
+
+
+def photo_view(photo: Photo) -> JsonObject:
+    """One business photo for the app."""
+    return photo.model_dump() | {"url": f"/studio/api/photos/{photo.id}/file"}
