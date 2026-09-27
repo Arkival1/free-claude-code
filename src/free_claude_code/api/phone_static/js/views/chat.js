@@ -68,11 +68,13 @@ export async function render(view, agentId) {
       }, { "aria-label": `Clear the chat with ${agent.name}` }),
     ]),
     el("p", { class: "muted small", text: `${agent.role} · ${brain ? `${PROVIDERS[brain].label}${modelOf(agent) ? ` · ${modelOf(agent)}` : ""}` : "no brain yet"}` }),
-    brainReady(brain)
-      ? null
-      : card("Start here", [
-          el("p", { text: `${agent.name} needs a brain. Put a free AI on this phone, or add a free cloud AI key.` }),
-          el("div", { class: "row" }, [button("Model control", () => go("models"), { class: "primary" }), button("Settings", () => go("settings"))]),
+    ...(brainReady(brain)
+      ? []
+      : [
+          card("Start here", [
+            el("p", { text: `${agent.name} needs a brain. Put a free AI on this phone, or add a free cloud AI key.` }),
+            el("div", { class: "row" }, [button("Model control", () => go("models"), { class: "primary" }), button("Settings", () => go("settings"))]),
+          ]),
         ]),
     messages,
     el("div", { class: "composer" }, [input, micButton(input, submit), send])

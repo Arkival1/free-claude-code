@@ -1,7 +1,7 @@
 // Everything the app knows, loaded from the phone and saved back as it changes.
 import { store } from "./store.js";
 
-export const VERSION = "2.0.0";
+export const VERSION = "2.1.0";
 
 export const PHONE_TOOLS = {
   remember: "Memory",
@@ -19,6 +19,10 @@ export const PHONE_TOOLS = {
   list_files: "Code and files",
   delete_file: "Code and files",
   check_project: "Code and files",
+  restore_file: "Code and files",
+  polish_check: "Code and files",
+  look_at_site: "Code and files",
+  find_images: "Internet",
   ask_agent: "Team",
   team_status: "Team",
   learn: "Memory",
@@ -28,13 +32,14 @@ export const MAIN_ONLY = new Set(["team_status"]);
 /** Tools that read the user's memory, kept from cloud brains on the phone too. */
 export const MEMORY_TOOLS = new Set(["recall", "learn"]);
 
-const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_files", "delete_file", "check_project"];
+const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_files", "delete_file", "check_project", "restore_file"];
+const DESIGN = ["find_images", "polish_check", "look_at_site"];
 export const ROLE_TOOLS = {
   main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn"],
-  builder: [...FILES, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent"],
+  builder: [...FILES, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent"],
   researcher: ["wikipedia", "read_page", "web_search", "remember", "recall", "calculate"],
   helper: ["remember", "recall", "calculate", "todo", "weather", "wikipedia"],
-  tester: ["list_files", "read_file", "check_project", "edit_file", "write_file", "remember", "recall"],
+  tester: ["list_files", "read_file", "check_project", "look_at_site", "polish_check", "edit_file", "write_file", "restore_file", "remember", "recall"],
   assistant: ["remember", "recall", "calculate", "weather", "wikipedia"],
 };
 
@@ -42,15 +47,28 @@ export const ROLE_PROMPTS = {
   main:
     "You are the user's personal AI and you run their team of agents. Answer quickly and warmly. Hand real work to the right agent with ask_agent: websites and code to the Builder, facts and comparisons to the Researcher, plans to the Helper, checking a project to the Tester. Keep the user's to-do list with todo, and start studying a subject with learn when asked.",
   builder:
-    "You build complete, good-looking websites and small apps as files in a project. Start a project with start_project if there is none, then write every file in full with write_file (index.html first, then style.css and script.js). Make pages mobile-friendly, with real content, a clear layout, and working buttons. Check your work with check_project and fix what it finds. Finish by saying what you built and which files.",
+    "You build complete, professional websites and small apps as files in a project. For a new one, use start_project with the closest template (website, landing, webapp, game), then make it the user's: rewrite index.html in full with write_file, keeping the template's structure and class names but with real content for this job, and set the colours at the top of styles.css. Every placeholder line must go. Make it look designed: a Google Font pair, a small colour palette in :root variables, generous spacing, and real photos from find_images (use the https address in <img> with alt, width, and height, and credit each photo in the footer); draw icons as inline SVG. Before you finish, run check_project and fix what it finds, run look_at_site and fix what a visitor would see on a phone and a computer, then polish_check for finishing touches. If a change makes things worse, undo it with restore_file. Finish by saying what you built and which files.",
   researcher:
     "You find out facts before answering. Look things up with wikipedia, web_search, and read_page, compare sources, say where each fact came from, and say plainly when you are not sure.",
   helper:
     "You plan with the user: turn goals into short numbered steps, say how to check each one worked, and give a backup plan. Use calculate for every sum and todo for things to remember to do.",
   tester:
-    "You test projects. List and read the files, run check_project, then fix real problems with edit_file or write_file. Report what you checked and what you fixed.",
+    "You test projects. List and read the files, run check_project and look_at_site (it opens the site on a phone and a computer), then fix real problems with edit_file or write_file; undo a bad change with restore_file. Report what you checked and what you fixed.",
   assistant: "You are a helpful assistant. Keep answers short and clear.",
 };
+
+// Starter prompts from earlier versions, upgraded when the user never edited them.
+const OLD_PROMPTS = {
+  builder: [
+    "You build complete, good-looking websites and small apps as files in a project. Start a project with start_project if there is none, then write every file in full with write_file (index.html first, then style.css and script.js). Make pages mobile-friendly, with real content, a clear layout, and working buttons. Check your work with check_project and fix what it finds. Finish by saying what you built and which files.",
+  ],
+  tester: [
+    "You test projects. List and read the files, run check_project, then fix real problems with edit_file or write_file. Report what you checked and what you fixed.",
+  ],
+};
+/** Tools each role gained in an app version, added once to agents of that role. */
+const TOOLS_ADDED = { 2: { builder: ["restore_file", ...DESIGN], tester: ["look_at_site", "polish_check", "restore_file"] } };
+const TOOLS_VERSION = 2;
 
 export const DEFAULT_TEAM = [
   { id: "jarvis", name: "Jarvis", role: "main" },
@@ -67,6 +85,7 @@ export function newAgent(base) {
     model: "",
     tools: [...(ROLE_TOOLS[base.role] || ROLE_TOOLS.assistant)],
     allTools: false,
+    toolsVersion: TOOLS_VERSION,
     created_at: Date.now(),
     ...base,
   };
@@ -132,6 +151,7 @@ export async function load() {
       state.agents.push(newAgent(base));
     }
   }
+  for (const agent of state.agents) upgradeAgent(agent);
   state.agents.sort((a, b) => (a.id === "jarvis" ? -1 : b.id === "jarvis" ? 1 : a.created_at - b.created_at));
   await save.agents();
   for (const key of ["memories", "pcMemories", "projects", "rooms", "todos", "studies", "models"]) {
@@ -142,6 +162,19 @@ export async function load() {
   state.agentId = (await store.get("agentId", "jarvis")) || "jarvis";
   if (!state.agents.some((agent) => agent.id === state.agentId)) state.agentId = "jarvis";
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+}
+
+/** Give an agent from an earlier version its role's new tools and prompt, once. */
+export function upgradeAgent(agent) {
+  const from = agent.toolsVersion || 1;
+  for (let version = from + 1; version <= TOOLS_VERSION; version += 1) {
+    for (const name of (TOOLS_ADDED[version] || {})[agent.role] || []) {
+      if (!agent.tools.includes(name)) agent.tools.push(name);
+    }
+  }
+  agent.toolsVersion = TOOLS_VERSION;
+  if ((OLD_PROMPTS[agent.role] || []).includes(agent.instructions)) agent.instructions = ROLE_PROMPTS[agent.role];
+  return agent;
 }
 
 export async function chatOf(id) {

@@ -30,6 +30,7 @@ _BASE_CSS = """*, *::before, *::after { box-sizing: border-box; }
 }
 body { margin: 0; background: var(--bg); color: var(--text); }
 img, svg { max-width: 100%; display: block; }
+img { height: auto; }
 a { color: var(--accent); transition: color 0.2s, opacity 0.2s; }
 a:hover { opacity: 0.8; }
 button, input, select, textarea { font: inherit; }
@@ -97,7 +98,7 @@ _WEBSITE = {
     "styles.css": _BASE_CSS
     + """.site-header { position: sticky; top: 0; background: rgb(15 23 42 / 0.9); backdrop-filter: blur(8px); z-index: 10; }
 .nav { display: flex; align-items: center; justify-content: space-between; min-height: 64px; }
-.brand { font-weight: 800; text-decoration: none; color: var(--text); }
+.brand { font-weight: 800; text-decoration: none; color: var(--text); display: inline-flex; align-items: center; min-height: 44px; }
 .menu { display: flex; gap: 20px; }
 .menu a { text-decoration: none; color: var(--text); }
 .nav-toggle { display: none; background: none; color: var(--text); border: 1px solid var(--muted); border-radius: 8px; padding: 8px 12px; min-height: 44px; }
@@ -195,6 +196,7 @@ _LANDING = {
 .eyebrow { color: var(--accent); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
 .lead { font-size: 1.2rem; max-width: 640px; margin-inline: auto; }
 .actions { display: flex; gap: 20px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 24px; }
+.actions a:not(.button) { display: inline-flex; align-items: center; min-height: 44px; }
 .section { padding-block: clamp(32px, 8vw, 80px); }
 .price { font-size: 2rem; font-weight: 800; margin: 8px 0 16px; }
 blockquote { margin: 0; font-size: 1.2rem; }

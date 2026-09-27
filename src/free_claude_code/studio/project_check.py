@@ -3,7 +3,7 @@
 import ast
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from html.parser import HTMLParser
 from posixpath import dirname, normpath
 from urllib.parse import unquote, urlsplit
@@ -126,27 +126,32 @@ def _skip_regex(code: str, start: int) -> int:
     return start + 1
 
 
-def check_project(files: Mapping[str, str]) -> list[str]:
-    """Return the problems found in a project's text files, most useful first."""
+def check_project(files: Mapping[str, str], *, others: Iterable[str] = ()) -> list[str]:
+    """Return the problems found in a project's text files, most useful first.
+
+    others names the project's remaining files, such as pictures, so links
+    to them count as found.
+    """
     problems: list[str] = []
+    present = {**dict.fromkeys(others, ""), **files}
     pages = [path for path in files if path.endswith((".html", ".htm"))]
     if pages and not any(path.split("/")[-1] == "index.html" for path in pages):
         problems.append("There is no index.html, so the preview has no start page.")
     for path in sorted(files):
         text = files[path]
         if path.endswith((".html", ".htm")):
-            problems.extend(_check_html(path, text, files))
+            problems.extend(_check_html(path, text, present))
         elif path.endswith(".css"):
             problems.extend(
                 f"{path}: {target} is missing (url() in the stylesheet)."
-                for target in _missing(path, _CSS_URL.findall(text), files)
+                for target in _missing(path, _CSS_URL.findall(text), present)
             )
             if (issue := _balanced(re.sub(r"url\([^)]*\)", "url()", text))) is not None:
                 problems.append(f"{path}: {issue}.")
         elif path.endswith((".js", ".mjs")):
             problems.extend(
                 f"{path}: imports {target}, which is missing."
-                for target in _missing(path, _JS_IMPORT.findall(text), files)
+                for target in _missing(path, _JS_IMPORT.findall(text), present)
             )
             if (issue := _balanced(text)) is not None:
                 problems.append(f"{path}: {issue}.")

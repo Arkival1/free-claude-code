@@ -107,6 +107,9 @@ ALLOWED_NAMES = frozenset(
         ".env.example",
     }
 )
+# Pictures the Builder saves with save_image, the only binary files it writes.
+IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+MAX_IMAGE_FILE_BYTES = 5_000_000
 # Files agents may not write but the preview may serve, e.g. build output.
 PREVIEW_ONLY_SUFFIXES = frozenset(
     {
@@ -500,6 +503,31 @@ class SiteWorkspace:
 
         return await anyio.to_thread.run_sync(work)
 
+    async def write_image(
+        self, site_id: str, relative_path: str, data: bytes
+    ) -> SiteFile:
+        """Save a picture into the site; earlier versions are kept like text."""
+        if len(data) > MAX_IMAGE_FILE_BYTES:
+            raise SiteError("That picture is over 5 MB.")
+        target = self.resolve(site_id, relative_path, for_preview=True)
+        if target.suffix.lower() not in IMAGE_SUFFIXES:
+            raise SiteError("Pictures are saved as .jpg, .png, .webp, or .gif files.")
+
+        def work() -> SiteFile:
+            directory = self.directory(site_id)
+            if not target.exists() and self._count(directory) >= MAX_SITE_FILES:
+                raise SiteError("This site already has the maximum number of files.")
+            self._keep_version(site_id, target, replacing=data)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            return SiteFile(
+                path=self._relative(site_id, target),
+                size=len(data),
+                content_type=content_type_for(target.name),
+            )
+
+        return await anyio.to_thread.run_sync(work)
+
     async def read(self, site_id: str, relative_path: str) -> str:
         """Return one site file decoded as UTF-8 text."""
         target = self.resolve(site_id, relative_path)
@@ -537,7 +565,9 @@ class SiteWorkspace:
 
     async def versions(self, site_id: str, relative_path: str) -> list[int]:
         """When each kept earlier version of a file was saved, newest first."""
-        target = self.resolve(site_id, relative_path)
+        target = self.resolve(
+            site_id, relative_path, for_preview=_is_image(relative_path)
+        )
 
         def work() -> list[int]:
             folder = self._history_folder(site_id, target)
@@ -554,7 +584,8 @@ class SiteWorkspace:
         self, site_id: str, relative_path: str, *, back: int = 1
     ) -> SiteFile:
         """Put back an earlier version of a file; the current one is kept too."""
-        target = self.resolve(site_id, relative_path)
+        image = _is_image(relative_path)
+        target = self.resolve(site_id, relative_path, for_preview=image)
         saved = await self.versions(site_id, relative_path)
         if not saved:
             raise SiteError(f"There is no earlier version of {relative_path}.")
@@ -562,6 +593,8 @@ class SiteWorkspace:
             raise SiteError(f"{relative_path} has {len(saved)} earlier version(s).")
         folder = self._history_folder(site_id, target)
         content = (folder / str(saved[back - 1])).read_bytes()
+        if image:
+            return await self.write_image(site_id, relative_path, content)
         return await self.write(site_id, relative_path, content.decode("utf-8"))
 
     def _history_folder(self, site_id: str, target: Path) -> Path:
@@ -649,3 +682,7 @@ def _retry_writable(function, path, _error) -> None:
     """Windows marks some files (e.g. in .git) read-only; clear it and retry."""
     os.chmod(path, stat.S_IWRITE)
     function(path)
+
+
+def _is_image(path: str) -> bool:
+    return Path(path.strip()).suffix.lower() in IMAGE_SUFFIXES

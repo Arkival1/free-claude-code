@@ -49,7 +49,14 @@ def _trim(text: str) -> str:
 
 
 WRITE_TOOLS = frozenset(
-    {"write_file", "edit_file", "delete_file", "start_project", "restore_file"}
+    {
+        "write_file",
+        "edit_file",
+        "delete_file",
+        "start_project",
+        "restore_file",
+        "save_image",
+    }
 )
 REPEAT_FAILURES = 2
 REPEAT_NOTE = (

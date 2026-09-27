@@ -198,6 +198,8 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "polish_check",
         "conversation",
         "knowledge",
+        "find_images",
+        "save_image",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
@@ -769,6 +771,7 @@ class StudioService:
             study_later=self._study_later,
             assistant=self._assistant_tool,
             all_tools=settings.studio_all_tools,
+            image_transport=self._search_transport,
         )
 
     def _runner(self) -> AgentRunner:

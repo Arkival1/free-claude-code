@@ -1,12 +1,15 @@
 // FCC Phone: your own agents, models, and memory, on your phone.
-import { state, load, save, changed, onChange, feed, VERSION } from "./state.js";
+import { state, load, save, changed, onChange, feed, VERSION, upgradeAgent } from "./state.js";
 import { $, el, notify, closeSheet } from "./ui.js";
 import { sync } from "./sync.js";
 import { speak } from "./voice.js";
-import { calculate } from "./tools.js";
+import { calculate, findImages } from "./tools.js";
 import { bestModel } from "./brains.js";
 import { readGguf } from "./gguf.js";
-import { checkProject, bundle } from "./projects.js";
+import { checkProject, bundle, previewHtml } from "./projects.js";
+import { polishNotes } from "./polish.js";
+import { lookAtSite, describeLook } from "./inspect.js";
+import { templateFiles } from "./templates.js";
 import * as hud from "./views/hud.js";
 import * as chat from "./views/chat.js";
 import * as agents from "./views/agents.js";
@@ -133,8 +136,24 @@ if ("serviceWorker" in navigator && (location.protocol === "https:" || location.
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
-// For the app's own tests: pure helpers, no network.
-window.fccPhone = { version: VERSION, calculate, bestModel, readGguf, checkProject, bundle, state, checkReminders };
+// For the app's own tests: helpers they can call directly.
+window.fccPhone = {
+  version: VERSION,
+  calculate,
+  bestModel,
+  readGguf,
+  checkProject,
+  bundle,
+  previewHtml,
+  polishNotes,
+  lookAtSite,
+  describeLook,
+  templateFiles,
+  findImages,
+  upgradeAgent,
+  state,
+  checkReminders,
+};
 
 load().then(async () => {
   await render();

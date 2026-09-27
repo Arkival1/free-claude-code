@@ -47,7 +47,7 @@ function renderProject(view, id) {
   const ask = el("textarea", { "aria-label": "Change request", placeholder: "Make the header teal and add a contact form" });
   const frame = el("iframe", { class: "preview", title: `${project.name} preview`, sandbox: "allow-scripts allow-forms allow-modals" });
   const draw = () => {
-    const html = projects.bundle(project);
+    const html = projects.previewHtml(project);
     const names = Object.keys(project.files);
     const builder = agentById("builder") || state.agents.find((agent) => agent.role === "builder");
     const tester = agentById("tester") || state.agents.find((agent) => agent.role === "tester");
@@ -134,7 +134,7 @@ function fileSheet(project, name) {
  * app's storage (keys, memories), whatever the model wrote into it. */
 function fullScreen(project) {
   const frame = el("iframe", { class: "preview-full", title: `${project.name} full screen`, sandbox: "allow-scripts allow-forms allow-modals" });
-  frame.srcdoc = projects.bundle(project);
+  frame.srcdoc = projects.previewHtml(project);
   const layer = el("div", { class: "fullscreen", role: "dialog", "aria-label": `${project.name} full screen` }, [
     frame,
     button("✕ Close", () => layer.remove(), { class: "close-full", "aria-label": "Close full screen" }),

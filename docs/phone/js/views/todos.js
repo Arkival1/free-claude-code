@@ -25,7 +25,7 @@ export function render(view) {
         el("p", { class: "muted small", text: "Reminders show and speak while FCC Phone is open (iPhones don't let web apps set alarms when they're closed)." }),
       ]),
       card("To do", open.length ? open.map(row) : [el("p", { class: "empty", text: "Nothing to do." })]),
-      done.length ? card("Done", done.map(row)) : null
+      ...(done.length ? [card("Done", done.map(row))] : [])
     );
   };
   const row = (item) =>

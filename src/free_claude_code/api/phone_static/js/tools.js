@@ -4,6 +4,9 @@ import { uid, words } from "./ui.js";
 import { isPrivate } from "./brains.js";
 import { syncSoon, pcSearch } from "./sync.js";
 import * as projects from "./projects.js";
+import { polishNotes } from "./polish.js";
+import { lookAtSite, describeLook } from "./inspect.js";
+import { TEMPLATES, templateFiles } from "./templates.js";
 
 const hooks = { delegate: null, learn: null, teamStatus: null };
 export function setHooks(next) {
@@ -49,8 +52,12 @@ export const SPECS = {
     },
   },
   start_project: {
-    description: "Start (or switch to) a project, a folder of files for a website or app.",
-    parameters: { type: "object", properties: { name: text("The project's name.") }, required: ["name"] },
+    description: `Start (or switch to) a project, a folder of files for a website or app. For a new one, pick the closest starter template (${Object.entries(TEMPLATES).map(([name, t]) => `${name}: ${t.about}`).join("; ")}), then make it the user's.`,
+    parameters: {
+      type: "object",
+      properties: { name: text("The project's name."), template: { type: "string", enum: Object.keys(TEMPLATES), description: "A starter template for a new project." } },
+      required: ["name"],
+    },
   },
   write_file: {
     description: "Write one whole file in the current project (index.html, style.css, script.js, …). Always the complete file.",
@@ -71,6 +78,26 @@ export const SPECS = {
   delete_file: {
     description: "Delete one file from the current project.",
     parameters: { type: "object", properties: { path: text("File name.") }, required: ["path"] },
+  },
+  restore_file: {
+    description: "Undo changes to a file: put back an earlier version (1 = before the last change). Without versions_back, lists the saved versions.",
+    parameters: { type: "object", properties: { path: text("File name."), versions_back: { type: "integer" } }, required: ["path"] },
+  },
+  find_images: {
+    description: "Find real photos a website may use for free (Creative Commons, fine for business use), with sizes and credit lines. Use the https address straight in <img src>, with alt, width, and height, and put the credit in the footer.",
+    parameters: {
+      type: "object",
+      properties: { query: text("What the photo shows, e.g. 'coffee shop interior'."), count: { type: "integer", description: "1 to 10, default 5" }, orientation: { type: "string", enum: ["wide", "tall", "square"] } },
+      required: ["query"],
+    },
+  },
+  polish_check: {
+    description: "A designer's once-over of the pages: contrast, phone layout, fonts, hover and focus states, pictures, structure. Make the changes that fit.",
+    parameters: { type: "object", properties: {} },
+  },
+  look_at_site: {
+    description: "Open the site like a visitor, on a phone (390px) and a computer (1280px), and report what shows first and what's wrong: sideways scrolling, broken pictures, script errors, tiny text, hard-to-read colours, small buttons.",
+    parameters: { type: "object", properties: {} },
   },
   check_project: {
     description: "Check the current project for problems: missing pages, broken links, placeholder text, missing viewport or titles.",
@@ -125,6 +152,16 @@ export async function runTool(agent, call, ctx) {
       case "start_project": {
         const project = await projects.createProject(String(args.name || ""), agent.name);
         ctx.project = project;
+        const template = String(args.template || "");
+        if (template && TEMPLATES[template]) {
+          if (Object.keys(project.files).length) {
+            return `${project.name} already has files (${Object.keys(project.files).join(", ")}), so the template wasn't used. Build on them.`;
+          }
+          for (const [path, body] of Object.entries(templateFiles(template, project.name))) {
+            await projects.writeFile(project, path, body, agent.name);
+          }
+          return `Started ${project.name} from the ${template} template: ${Object.keys(project.files).join(", ")}. Now make it the user's: rewrite index.html with real content for this job (keep the structure and class names), set the colours at the top of styles.css, and replace every placeholder line.`;
+        }
         return `Working in the project ${project.name}. Files: ${Object.keys(project.files).join(", ") || "none yet"}.`;
       }
       case "write_file": {
@@ -152,6 +189,35 @@ export async function runTool(agent, call, ctx) {
         const project = await needProject(agent, ctx);
         await projects.deleteFile(project, args.path, agent.name);
         return `Deleted ${args.path}.`;
+      }
+      case "restore_file": {
+        const project = await needProject(agent, ctx);
+        const kept = projects.versions(project, args.path);
+        const back = Number(args.versions_back);
+        if (!back) {
+          return kept.length
+            ? `${projects.cleanPath(args.path)} has ${kept.length} earlier version(s): ${kept.map((row, i) => `${i + 1} (${Math.max(0, Math.round((Date.now() - row.at) / 60000))} min ago)`).join(", ")}.`
+            : `${projects.cleanPath(args.path)} has no earlier versions.`;
+        }
+        const name = await projects.restoreFile(project, args.path, back, agent.name);
+        return `Restored ${name} to the version from ${back} change(s) ago. The version it replaced is kept, so this can be undone too.`;
+      }
+      case "find_images":
+        return await findImagesText(String(args.query || ""), Number(args.count) || 5, String(args.orientation || ""));
+      case "polish_check": {
+        const project = await needProject(agent, ctx);
+        const notes = polishNotes(project.files);
+        feed(agent.name, `Polish check on ${project.name}: ${notes.length ? `${notes.length} suggestions` : "looks finished"}.`);
+        if (!Object.keys(project.files).some((name) => /\.html?$/i.test(name))) return "There are no web pages to polish in this project.";
+        return notes.length ? `${notes.length} polish suggestion(s):\n${notes.map((note) => `- ${note}`).join("\n")}` : "The pages look finished: nothing to polish.";
+      }
+      case "look_at_site": {
+        const project = await needProject(agent, ctx);
+        const looks = await lookAtSite(project);
+        if (!looks) return `${project.name} has no web page to look at yet. Write index.html first.`;
+        const report = describeLook(looks);
+        feed(agent.name, report.split("\n")[0]);
+        return report;
       }
       case "check_project": {
         const project = await needProject(agent, ctx);
@@ -385,6 +451,47 @@ export async function readPage(url) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ------------------------------------------------------------------- photos
+
+const OPENVERSE = "https://api.openverse.org/v1/images/";
+
+/** Free photos from Openverse that a website may use, with credit lines. */
+export async function findImages(query, count = 5, orientation = "") {
+  const clean = query.trim().replace(/\s+/g, " ").slice(0, 120);
+  if (!clean) throw new Error("say what the pictures should show");
+  const params = new URLSearchParams({ q: clean, page_size: String(Math.max(1, Math.min(10, count))), license_type: "commercial", mature: "false" });
+  if (["wide", "tall", "square"].includes(orientation)) params.set("aspect_ratio", orientation);
+  let data;
+  try {
+    data = await getJson(`${OPENVERSE}?${params}`);
+  } catch (error) {
+    if (/429/.test(error.message)) throw new Error("the free photo search is busy; try again in a minute");
+    throw error;
+  }
+  return (data.results || [])
+    .filter((item) => item && /^https:\/\//.test(String(item.url || "")))
+    .map((item) => {
+      const licence = String(item.license || "").toUpperCase();
+      const creator = item.creator || "unknown";
+      return {
+        url: item.url,
+        width: Number(item.width) || 0,
+        height: Number(item.height) || 0,
+        title: String(item.title || "Photo").slice(0, 80),
+        credit: ["CC0", "PDM"].includes(licence) ? `Photo by ${creator} (public domain)` : `Photo by ${creator}, CC ${licence} ${item.license_version || ""}`.trim(),
+      };
+    });
+}
+
+async function findImagesText(query, count, orientation) {
+  const found = await findImages(query, count, orientation);
+  if (!found.length) return `No free photos for "${query}". Try fewer or plainer words.`;
+  return [
+    ...found.map((image, i) => `${i + 1}. ${image.title} (${image.width}x${image.height}) ${image.url}\n   Credit: ${image.credit}`),
+    'Use one with <img src="its address" alt="what it shows" width="…" height="…">, and put its credit in the footer.',
+  ].join("\n");
 }
 
 // -------------------------------------------------------------------- to-dos

@@ -1,5 +1,6 @@
 """FCC Phone's files: served by the PC, and copied into docs/ for GitHub Pages."""
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -9,7 +10,8 @@ import pytest
 from free_claude_code.api.studio_routes import PHONE_DIR
 from tests.api.support import create_test_app
 
-DOCS = Path(__file__).resolve().parents[2] / "docs"
+ROOT = Path(__file__).resolve().parents[2]
+DOCS = ROOT / "docs"
 
 
 def test_the_pages_copy_matches_the_app():
@@ -25,6 +27,19 @@ def test_the_pages_copy_matches_the_app():
     assert files(DOCS / "phone") == files(PHONE_DIR)
     assert (DOCS / ".nojekyll").exists()
     assert "url=phone/" in (DOCS / "index.html").read_text()
+
+
+def test_the_phone_has_the_pcs_web_templates():
+    """Run scripts/phone/build_pages.py after changing studio/templates.py."""
+    spec = importlib.util.spec_from_file_location(
+        "build_pages", ROOT / "scripts" / "phone" / "build_pages.py"
+    )
+    assert spec is not None and spec.loader is not None
+    build_pages = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_pages)
+    written = (PHONE_DIR / "js" / "templates.js").read_text(encoding="utf-8")
+    assert written == build_pages.templates_js()
+    assert '"landing"' in written and '"python-web"' not in written
 
 
 def test_the_app_installs_as_its_own_home_screen_app():

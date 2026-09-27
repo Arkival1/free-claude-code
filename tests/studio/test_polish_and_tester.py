@@ -40,7 +40,14 @@ def test_a_plain_page_gets_a_designers_notes():
 
 
 def test_every_web_template_already_looks_finished():
-    for name in ("website", "landing", "webapp", "game"):
+    # Apart from the photos, which depend on the job: the Builder adds those.
+    pictures = [
+        "index.html: has no pictures; a real photo (find_images) or an SVG "
+        "illustration makes it look finished."
+    ]
+    for name in ("website", "landing"):
+        assert polish_notes(template_files(name, "Shop")) == pictures, name
+    for name in ("webapp", "game"):
         assert polish_notes(template_files(name, "Shop")) == [], name
     assert set(TEMPLATES) >= {"website", "game"}
 

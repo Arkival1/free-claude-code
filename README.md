@@ -1034,12 +1034,25 @@ still looks finished.
 - **Better edits.** `edit_file` takes several changes to one file at once
   (`edits`), saves nothing if any of them fails, and still applies a change
   whose `old_text` only differs in indentation, re-indented to match the file.
+- **Real photos.** `find_images` searches [Openverse](https://openverse.org)
+  (free, no key) for photos cleared for commercial use and gives each one's
+  size and credit line; `save_image` downloads the chosen one into the
+  project (for example `images/hero.jpg`, JPEG/PNG/WebP/GIF, up to 5 MB) so
+  the site loads fast and works offline, and says the `width`/`height` to use
+  and the credit to put in the footer. Downloads only go to public https
+  addresses (redirects included), and follow Web Access like the other
+  internet tools. Saved pictures keep earlier versions for `restore_file`,
+  and `check_project` counts them as present.
+- **Designed, not just working.** The Builder picks a Google Font pair, a
+  small palette in `:root` variables, generous spacing, real photos, and
+  inline SVG icons.
 - **Polish.** `polish_check` gives a designer's once-over once the pages
   work: text contrast (WCAG 4.5:1), phone layouts, hover and focus states,
-  font sizes, a consistent palette in CSS variables, content width, line
-  height, page structure, transitions, image sizes, and a favicon. The
-  Builder runs it after `check_project` and makes the fixes that fit; every
-  web template already passes it.
+  font sizes, a chosen font, a consistent palette in CSS variables, content
+  width, line height, page structure, transitions, image sizes and alt text,
+  pictures on content pages, a meta description, and a favicon. The Builder
+  runs it after `check_project` and makes the fixes that fit; every web
+  template passes it apart from the photos, which depend on the job.
 - **Knows the project.** At the start of every job the Builder sees the
   project's files and the start of its README, so it builds on what is there.
 - **Real JavaScript checks.** When Node is installed, `check_project` has Node
@@ -1340,7 +1353,20 @@ account, and costs nothing.
 - **Tools**: `remember`, `recall`, `calculate`, `weather`, `wikipedia`,
   `read_page`, `web_search` (through your PC when paired), `todo`, `learn`,
   `ask_agent`, `team_status`, and the Builder's `start_project`, `write_file`,
-  `read_file`, `edit_file`, `list_files`, `delete_file`, `check_project`.
+  `read_file`, `edit_file`, `list_files`, `delete_file`, `check_project`,
+  `restore_file`, `find_images`, `polish_check`, and `look_at_site`.
+- **The phone Builder's website tools**: `start_project` starts from the same
+  `website`, `landing`, `webapp`, and `game` templates as the PC;
+  `find_images` finds free photos with credit lines (used by their https
+  address); `polish_check` is the PC's designer once-over, word for word;
+  `restore_file` undoes a change (the last five versions of each file are
+  kept); and `look_at_site` opens the site like a visitor, on a phone
+  (390px) and a computer (1280px), and reports what shows first and what's
+  wrong: sideways scrolling and the element causing it, broken pictures,
+  script errors, tiny text, hard-to-read colours, and buttons too small to
+  tap. The Tester gets `look_at_site`, `polish_check`, and `restore_file`
+  too. Agents from an earlier version get the new tools once; a tool you
+  turn off afterwards stays off.
 - **Projects**: websites the Builder makes, with a live preview, **Open full
   screen**, file editing, **Ask the Builder** for changes, **Have the Tester
   check it**, and **Save as one HTML file**. Previews run sandboxed, so a page

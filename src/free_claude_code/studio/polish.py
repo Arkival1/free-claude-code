@@ -135,10 +135,16 @@ def polish_notes(files: Mapping[str, str]) -> list[str]:
         )
     if "line-height" not in styles:
         notes.append("Set a line-height around 1.5 for comfortable reading.")
+    if "font-family" not in styles:
+        notes.append(
+            "No font is chosen, so the browser's plain default shows: set a "
+            "font-family (a Google Font such as Inter or Poppins, or system-ui)."
+        )
     if "transition" not in styles and clickable:
         notes.append(
             "Add short transitions (150-250ms) to hovers and toggles so changes feel smooth."
         )
+    background_picture = re.search(r"background(-image)?\s*:[^;]*url\(", styles, re.I)
     for path, text in pages.items():
         if not re.search(r"<(header|nav|main|footer)\b", text, re.I):
             notes.append(
@@ -150,8 +156,29 @@ def polish_notes(files: Mapping[str, str]) -> list[str]:
             notes.append(
                 f'{path}: give images width and height (or loading="lazy") so the page does not jump while loading.'
             )
+        if re.search(r"<img\b(?![^>]*\balt=)", text, re.I):
+            notes.append(
+                f'{path}: every <img> needs alt text describing it (alt="" for decoration).'
+            )
+        # Ignore <link> tags: an emoji favicon is an <svg> inside an attribute.
+        body = re.sub(r"<link\b(?:\"[^\"]*\"|'[^']*'|[^'\">])*>", "", text, flags=re.I)
+        content_page = len(re.findall(r"<section\b", text, re.I)) >= 2
+        if (
+            content_page
+            and not re.search(r"<(img|svg|picture|video|canvas)\b", body, re.I)
+            and not background_picture
+        ):
+            notes.append(
+                f"{path}: has no pictures; a real photo (find_images) or an "
+                "SVG illustration makes it look finished."
+            )
+        if not re.search(r"<meta[^>]+name=[\"']description", text, re.I):
+            notes.append(
+                f'{path}: add <meta name="description" content="..."> so search '
+                "engines and shared links show a summary."
+            )
         if 'rel="icon"' not in text and "rel='icon'" not in text:
             notes.append(
                 f'{path}: add a favicon (an emoji SVG works: <link rel="icon" href="data:image/svg+xml,...">).'
             )
-    return notes[:20]
+    return notes[:24]

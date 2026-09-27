@@ -25,6 +25,7 @@ from free_claude_code.core.json_types import JsonObject
 from .assistant_tools import calculate
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
+from .images import FoundImage, ImageError, download_image, find_images
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
 from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
@@ -32,7 +33,14 @@ from .polish import polish_notes
 from .project_check import CHECKED_FILES, check_project
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
-from .sites import STARTER_STYLES, SiteError, SiteWorkspace, is_starter, tidy_html
+from .sites import (
+    IMAGE_SUFFIXES,
+    STARTER_STYLES,
+    SiteError,
+    SiteWorkspace,
+    is_starter,
+    tidy_html,
+)
 from .templates import template_files
 from .videos import VideoStudy, at, clock, passages, render_note, studied
 
@@ -67,10 +75,16 @@ START_PROJECT_TOOL = "start_project"
 POLISH_TOOL = "polish_check"
 RESTORE_FILE_TOOL = "restore_file"
 VIDEO_NOTES_TOOL = "video_notes"
+FIND_IMAGES_TOOL = "find_images"
+SAVE_IMAGE_TOOL = "save_image"
+IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
+MAX_REMEMBERED_IMAGES = 60
 HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
 MAX_READ_LINES = 400
-NETWORK_TOOLS = frozenset({*WEB_TOOLS, RESEARCH_TOOL, "study_video", "weather"})
+NETWORK_TOOLS = frozenset(
+    {*WEB_TOOLS, RESEARCH_TOOL, "study_video", "weather", *IMAGE_TOOLS}
+)
 # Look-ups that change nothing, so several asked for at once run together.
 PARALLEL_TOOLS = frozenset(
     {
@@ -92,6 +106,7 @@ PARALLEL_TOOLS = frozenset(
         POLISH_TOOL,
         CONVERSATION_TOOL,
         KNOWLEDGE_TOOL,
+        FIND_IMAGES_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -421,6 +436,47 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "versions_back": {"type": "integer"},
             },
             "required": ["path"],
+        },
+    ),
+    ToolSpec(
+        name=FIND_IMAGES_TOOL,
+        description=(
+            "Find real photos a website may use for free (Creative Commons, "
+            "cleared for commercial use), each with its size and the credit "
+            "line to show. Use it for heroes, cards, and galleries instead of "
+            "empty boxes; then save the one you want with save_image."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What the photo shows, e.g. 'coffee shop interior'.",
+                },
+                "count": {"type": "integer", "description": "1 to 12 (default 6)."},
+                "orientation": {"type": "string", "enum": ["wide", "tall", "square"]},
+            },
+            "required": ["query"],
+        },
+    ),
+    ToolSpec(
+        name=SAVE_IMAGE_TOOL,
+        description=(
+            "Download a photo (a find_images result) into the project, e.g. "
+            "images/hero.jpg, so the site works offline and loads fast. Then "
+            'use it with <img src="images/hero.jpg" alt="..." width height> '
+            "and put its credit line in the footer."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The photo's https address."},
+                "path": {
+                    "type": "string",
+                    "description": "Where to save it, e.g. images/hero.jpg.",
+                },
+            },
+            "required": ["url", "path"],
         },
     ),
     ToolSpec(
@@ -1012,6 +1068,7 @@ class AgentToolbox:
         assistant: Callable[[ToolCall, ToolContext], Awaitable[ToolOutcome]]
         | None = None,
         all_tools: bool = False,
+        image_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._web = web_tools
         self._sites = sites
@@ -1032,6 +1089,8 @@ class AgentToolbox:
         self._study_later = study_later
         self._assistant = assistant
         self._all_tools = all_tools
+        self._image_transport = image_transport
+        self._found_images: dict[str, FoundImage] = {}
 
     def granted(
         self, names: Sequence[str], *, role: str, chosen: bool = True
@@ -1157,6 +1216,10 @@ class AgentToolbox:
                     return await self._restore_file(call, context)
                 case "calculate":
                     return self._calculate(call)
+                case "find_images":
+                    return await self._find_images(call)
+                case "save_image":
+                    return await self._save_image(call, context)
                 case (
                     "todo"
                     | "list_projects"
@@ -1183,6 +1246,7 @@ class AgentToolbox:
                     )
         except (
             SiteError,
+            ImageError,
             WebFetchEgressViolation,
             CommandError,
             SearchError,
@@ -1463,6 +1527,81 @@ class AgentToolbox:
             },
         )
 
+    async def _find_images(self, call: ToolCall) -> ToolOutcome:
+        query = str(call.arguments.get("query", "")).strip()
+        count = _int_arg(call.arguments.get("count")) or 6
+        orientation = str(call.arguments.get("orientation", "")).strip()
+        found = await find_images(
+            query,
+            count=count,
+            orientation=orientation,
+            transport=self._image_transport,
+        )
+        data: JsonObject = {
+            "tool": FIND_IMAGES_TOOL,
+            "query": query,
+            "images": [
+                {"url": image.url, "width": image.width, "height": image.height}
+                for image in found
+            ],
+        }
+        if not found:
+            return ToolOutcome(
+                text=f"No free photos for {query!r}. Try fewer or plainer words.",
+                data=data,
+            )
+        for image in found:
+            self._found_images[image.url] = image
+        while len(self._found_images) > MAX_REMEMBERED_IMAGES:
+            self._found_images.pop(next(iter(self._found_images)))
+        lines = [
+            f"{index}. {image.title or 'Photo'} ({image.width}x{image.height}) "
+            f"{image.url}\n   Credit: {image.credit}"
+            for index, image in enumerate(found, start=1)
+        ]
+        lines.append(
+            "Save one with save_image (url, path like images/hero.jpg), then "
+            "show its credit line in the footer."
+        )
+        return ToolOutcome(text="\n".join(lines), data=data)
+
+    async def _save_image(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        url = str(call.arguments.get("url", "")).strip()
+        path = str(call.arguments.get("path", "")).strip().lstrip("/")
+        if not path:
+            raise ValueError("Say where to save it, e.g. images/hero.jpg.")
+        content, suffix = await download_image(
+            url,
+            allow_private=self._egress.allow_private_network_targets,
+            transport=self._image_transport,
+        )
+        stem, dot, given = path.rpartition(".")
+        if not dot or f".{given.lower()}" not in IMAGE_SUFFIXES:
+            path = f"{path}{suffix}"
+        elif f".{given.lower()}" != suffix and not (
+            suffix == ".jpg" and given.lower() == "jpeg"
+        ):
+            path = f"{stem}{suffix}"
+        saved = await self._sites.write_image(site_id, path, content)
+        found = self._found_images.get(url)
+        text = f"Saved {saved.path} ({saved.size // 1000} KB)."
+        data: JsonObject = {
+            "tool": SAVE_IMAGE_TOOL,
+            "site_id": site_id,
+            "path": saved.path,
+            "bytes": saved.size,
+        }
+        if found is not None:
+            text += (
+                f" It is {found.width}x{found.height}: use "
+                f'width="{found.width}" height="{found.height}" on the <img> '
+                "(CSS can still size it). Credit it in the footer: "
+                f"{found.credit}."
+            )
+            data["credit"] = found.credit
+        return ToolOutcome(text=text, data=data)
+
     async def _restore_file(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)
         path = str(call.arguments.get("path", "")).strip()
@@ -1730,14 +1869,18 @@ class AgentToolbox:
     async def _check_project(self, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)
         contents: dict[str, str] = {}
+        others: list[str] = []
         for item in await self._sites.files(site_id):
-            if item.path.startswith("lab/") or not item.path.endswith(CHECKED_FILES):
+            if item.path.startswith("lab/"):
+                continue
+            if not item.path.endswith(CHECKED_FILES):
+                others.append(item.path)
                 continue
             try:
                 contents[item.path] = await self._sites.read(site_id, item.path)
             except SiteError, UnicodeDecodeError:
                 continue
-        problems = check_project(contents)
+        problems = check_project(contents, others=others)
         node = shutil.which("node")
         if node:
             problems = await self._node_syntax(node, site_id, contents, problems)

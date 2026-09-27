@@ -108,7 +108,7 @@ export function render(view) {
       const brain = brainOf(main);
       refs.log.replaceChildren(
         el("p", { class: "hud-empty", text: brainReady(brain) ? `${main.name} is online. Ask a question, or give the team a job: "Have Builder make a landing page for my bakery."` : `${main.name} needs a brain. Open Model control to put a free AI on this phone, or Settings for a free cloud AI.` }),
-        brainReady(brain) ? null : el("div", { class: "row" }, [button("Model control", () => go("models"), { class: "primary" }), button("Settings", () => go("settings"))])
+        ...(brainReady(brain) ? [] : [el("div", { class: "row" }, [button("Model control", () => go("models"), { class: "primary" }), button("Settings", () => go("settings"))])])
       );
       return;
     }

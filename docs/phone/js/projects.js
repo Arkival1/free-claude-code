@@ -2,8 +2,11 @@
 // a preview, and saved out as one HTML file you can open anywhere.
 import { state, save, changed, feed } from "./state.js";
 import { uid } from "./ui.js";
+import { STARTER_TEXT } from "./templates.js";
 
 export const MAX_FILE_CHARS = 200_000;
+/** Earlier versions kept of each file, so restore_file can undo a change. */
+export const MAX_VERSIONS = 5;
 export const TEXT_TYPES = /\.(html?|css|js|mjs|json|txt|md|svg|xml|csv)$/i;
 
 const slug = (name) =>
@@ -51,6 +54,7 @@ export async function writeFile(project, path, content, agentName) {
   const text = String(content ?? "");
   if (text.length > MAX_FILE_CHARS) throw new Error("That file is too long for the phone. Split it into smaller files.");
   const isNew = !(name in project.files);
+  if (!isNew) keepVersion(project, name, text);
   project.files[name] = text;
   project.updated_at = Date.now();
   await save.projects();
@@ -62,11 +66,37 @@ export async function writeFile(project, path, content, agentName) {
 export async function deleteFile(project, path, agentName) {
   const name = cleanPath(path);
   if (!(name in project.files)) throw new Error(`There is no ${name} in ${project.name}.`);
+  keepVersion(project, name, null);
   delete project.files[name];
   project.updated_at = Date.now();
   await save.projects();
   changed("projects");
   feed(agentName, `Deleted ${project.name}/${name}.`);
+}
+
+function keepVersion(project, name, replacing) {
+  const current = project.files[name];
+  if (current === undefined || current === replacing) return;
+  project.history = project.history || {};
+  const kept = project.history[name] || [];
+  kept.unshift({ at: Date.now(), content: current });
+  project.history[name] = kept.slice(0, MAX_VERSIONS);
+}
+
+/** The kept earlier versions of a file, newest first. */
+export function versions(project, path) {
+  return (project.history && project.history[cleanPath(path)]) || [];
+}
+
+/** Put back an earlier version of a file; the one it replaces is kept too. */
+export async function restoreFile(project, path, back, agentName) {
+  const name = cleanPath(path);
+  const kept = versions(project, name);
+  if (!kept.length) throw new Error(`There is no earlier version of ${name}.`);
+  if (!(back >= 1 && back <= kept.length)) throw new Error(`${name} has ${kept.length} earlier version(s).`);
+  const [chosen] = kept.splice(back - 1, 1);
+  await writeFile(project, name, chosen.content, agentName);
+  return name;
 }
 
 export async function deleteProject(project) {
@@ -105,6 +135,21 @@ export function bundle(project, page = "index.html") {
   return html;
 }
 
+// Previews run sandboxed, where the browser refuses saved storage; pages that
+// save things (games, to-do apps) get a stand-in that lasts while they're open.
+const STORAGE_SHIM =
+  "<script>try{localStorage.getItem('x')}catch(e){const s=()=>{const m=new Map();return{getItem:(k)=>m.has(String(k))?m.get(String(k)):null,setItem:(k,v)=>{m.set(String(k),String(v))},removeItem:(k)=>{m.delete(String(k))},clear:()=>m.clear(),key:(i)=>[...m.keys()][i]??null,get length(){return m.size}}};for(const n of['localStorage','sessionStorage']){try{Object.defineProperty(window,n,{value:s(),configurable:true})}catch(e){}}}</script>";
+
+/** The bundled page, ready for a sandboxed preview; extra goes first in <head>. */
+export function previewHtml(project, extra = "") {
+  const html = bundle(project);
+  if (html === null) return null;
+  const inject = STORAGE_SHIM + extra;
+  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (tag) => tag + inject);
+  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (tag) => tag + inject);
+  return inject + html;
+}
+
 function cleanRelative(href) {
   try {
     return cleanPath(href.split("?")[0].split("#")[0]);
@@ -125,6 +170,8 @@ export function checkProject(project) {
     const text = project.files[name];
     if (!text.trim()) problems.push(`${name} is empty.`);
     if (/lorem ipsum|TODO|your (?:text|content) here|placeholder/i.test(text)) problems.push(`${name} still has placeholder text.`);
+    const starter = STARTER_TEXT.find((line) => text.includes(line));
+    if (starter) problems.push(`${name} still has the template's placeholder line "${starter}"; replace it with real content.`);
   }
   for (const page of pages) {
     const html = project.files[page];
