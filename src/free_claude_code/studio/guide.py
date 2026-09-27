@@ -904,21 +904,27 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "phone agents",
             "download on iphone",
             "install on iphone",
+            "iphone models",
+            "model on my phone",
+            "gguf on iphone",
+            "phone jarvis",
         ),
         body=(
-            "FCC Phone is a separate app for your iPhone with its own agents "
-            "and memory; it works without the PC. Open the app's address (More, "
-            "FCC Phone shows it) in Safari, then Share, Add to Home Screen. In "
-            "its Settings, paste a free key (Google Gemini is the most generous; "
-            "Groq and OpenRouter work too) and your phone agents can chat, "
-            "remember, recall, do maths, check the weather, and look things up "
-            "on Wikipedia. To link it to this PC: install Tailscale on both, run "
-            "'tailscale serve --bg 8082' on the PC, press Make a pairing code "
-            "here, and type the code and the PC's https address into FCC Phone. "
-            "Then memories sync both ways (the phone's go into team memory "
-            "marked phone), and phone agents can think with this PC's AI. Your "
-            "PC's memories stay away from cloud brains on the phone unless you "
-            "allow it there. Unlink a phone here any time."
+            "FCC Phone is Studio for your iPhone, separate from this PC: the "
+            "same Jarvis command center, the team (Jarvis, Builder, Researcher, "
+            "Helper, Tester), projects with previews, rooms, learning, to-dos, "
+            "and memory. Its Models tab runs AI models on the phone itself with "
+            "the same llama.cpp engine as Model Control: download Qwen3 0.6B or "
+            "another free model, or add any .gguf from the Files app, and see "
+            "its Tools and Reasoning badges, speed, and settings. Free cloud "
+            "brains (Gemini, Groq, OpenRouter) work too. Open the app's address "
+            "(More, FCC Phone shows it) in Safari, then Share, Add to Home "
+            "Screen. To link it to this PC: install Tailscale on both, run "
+            "'tailscale serve --bg 8082' here, press Make a pairing code, and "
+            "type the code and the PC's https address into FCC Phone. Then "
+            "memories sync both ways, phone agents can think with this PC's AI, "
+            "and the Researcher gets web search. Your PC's memories stay away "
+            "from cloud brains on the phone unless you allow it there."
         ),
         asks=("Who can see my memory?", "How do I install Studio on my iPhone?"),
     ),

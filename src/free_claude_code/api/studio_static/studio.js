@@ -5987,7 +5987,7 @@
     return card("FCC Phone", [
       el("p", {
         class: "muted",
-        text: "FCC Phone is a separate app for your iPhone with its own agents and memory, free AI brains, and no need for this PC. Pair it here to share memories both ways and let its agents think with this PC's AI.",
+        text: "FCC Phone is Studio for your iPhone: the Jarvis command center, the whole team, and AI models running on the phone itself (download one, or add a .gguf from Files). It works without this PC; pair it here to share memories both ways, lend it this PC's AI, and give it web search.",
       }),
       el("p", {}, ["Get it on the phone: open ", el("a", { href: PHONE_APP_URL, target: "_blank", rel: "noopener", text: PHONE_APP_URL }), " in Safari, then Share, Add to Home Screen."]),
       address,

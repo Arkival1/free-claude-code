@@ -1318,13 +1318,60 @@ current after every chat turn, room conversation, and class.
 </details>
 
 <details>
-<summary><strong>FCC Phone: a separate app for your iPhone</strong></summary>
+<summary><strong>FCC Phone: the Studio app for your iPhone</strong></summary>
 
-FCC Phone is its own app for your phone, apart from Studio on the PC. It has
-its own agents (Jarvis to start; add a Helper, Researcher, Coach, or your own),
-its own memory, and its own brain, so it works with the PC switched off.
-Everything is stored on the phone. It is a web app installed to the Home
-Screen, so it needs no App Store and no developer account, and it costs nothing.
+FCC Phone is Studio for your phone, separate from the PC app: the same Jarvis
+command center, the same team, and AI models that run on the iPhone itself.
+Everything is stored on the phone and it works with the PC switched off. It is
+a web app installed to the Home Screen, so it needs no App Store, no developer
+account, and costs nothing.
+
+**What it has**
+
+- **Home**: the Jarvis command center, as on the PC: the gold AI core, status
+  chips, a talk bar with 🎤, the AI core overview, Agents at work, quick
+  commands, a live feed, and a progress bar while Jarvis is learning.
+- **The team**: Jarvis, Builder, Researcher, Helper, and Tester, and any you
+  add (Coach and Custom templates). Jarvis hands jobs to them with
+  `ask_agent` (passed on at most twice, never back to whoever gave it), or give
+  one a job yourself (Chat, **Job…**). **Agents → Edit** sets each agent's
+  brain and tools: the **Every tool** switch, or a box per tool with its token
+  cost. **Team brains** sets every agent's brain on one page.
+- **Tools**: `remember`, `recall`, `calculate`, `weather`, `wikipedia`,
+  `read_page`, `web_search` (through your PC when paired), `todo`, `learn`,
+  `ask_agent`, `team_status`, and the Builder's `start_project`, `write_file`,
+  `read_file`, `edit_file`, `list_files`, `delete_file`, `check_project`.
+- **Projects**: websites the Builder makes, with a live preview, **Open full
+  screen**, file editing, **Ask the Builder** for changes, **Have the Tester
+  check it**, and **Save as one HTML file**. Previews run sandboxed, so a page
+  can't read the app's keys or memory.
+- **Agent rooms** (@Name for one agent, or a goal they work through),
+  **Learn** (lessons read up on Wikipedia, notes kept in memory), **To-dos and
+  reminders** (shown and spoken while the app is open), **Memory**, and
+  **Settings** with backups.
+
+**Models on the phone (Models tab).** The same engine as Model Control on the
+PC, llama.cpp's server, runs inside Safari ([wllama](https://github.com/ngxson/wllama),
+using the iPhone's graphics chip through WebGPU). **Download a model** offers
+free models that fit an iPhone: Qwen3 0.6B (fastest, 0.4 GB), Qwen2.5 1.5B,
+Qwen2.5 Coder 1.5B (for the Builder), Qwen3 1.7B, Llama 3.2 1B, and Gemma 3 1B.
+**Add a model from Files** takes any `.gguf` from the Files app or iCloud Drive
+(under 2 GB; a 0.5–3B model at Q4_K_M suits an iPhone 12 Pro) and copies it
+into the app, so it works offline. Each model shows its size, context, and
+**Tools** / **Reasoning** badges read from the file, and how much memory it
+needs; **Load**, **Unload**, **Make default**, **Test speed**, **Settings**
+(context 2,048–8,192 tokens, graphics chip on or off), and **Delete**. The
+engine's files (about 15 MB) download from jsDelivr the first time a model
+loads, then stay on the phone. Fewer tools per agent means less to read before
+each reply, which matters most for phone models.
+
+**Cloud and PC brains.** In **Settings** a free key makes agents think in the
+cloud instead (faster and smarter on long jobs): **Google Gemini** (free key
+from [Google AI Studio](https://aistudio.google.com/apikey), the most generous),
+**Groq** ([console.groq.com](https://console.groq.com/keys)), **OpenRouter**
+free models ([openrouter.ai](https://openrouter.ai/keys), about 50 messages a
+day), or any OpenAI-style service. Keys stay on the phone. Once paired, **My
+PC** thinks with your PC's main AI.
 
 **Put it on the phone (once).** GitHub Pages hosts it for free from this
 repository's `docs/` folder:
@@ -1334,50 +1381,36 @@ repository's `docs/` folder:
    with FCC Phone and the **/docs** folder, and press **Save**. After a minute
    the page shows the address, `https://<you>.github.io/<repo>/`.
 2. On the iPhone, open `https://<you>.github.io/<repo>/phone/` in **Safari**,
-   tap **Share → Add to Home Screen → Add**. FCC Phone opens full screen from
-   its own icon and still opens with no connection.
+   tap **Share → Add to Home Screen → Add**.
+3. Open FCC Phone from its icon, go to **Models**, and download Qwen3 0.6B (or
+   add a `.gguf` from Files). Tick **Use a model on this phone as every
+   agent's default brain**, then talk to Jarvis on **Home**.
 
 (Studio on the PC also serves it at `/phone/`, for example
 `https://<your-pc>.ts.net/phone/` over Tailscale.)
 
-**Give it a free brain.** In FCC Phone, **Settings**: paste a key under one of
-these and press **Save**; it picks a good model by itself.
-
-- **Google Gemini**: a free key from [Google AI Studio](https://aistudio.google.com/apikey).
-  The most generous free tier; recommended.
-- **Groq**: a free key from [console.groq.com](https://console.groq.com/keys); very fast.
-- **OpenRouter**: a free key from [openrouter.ai](https://openrouter.ai/keys);
-  its free models allow about 50 messages a day.
-- **Other**: any OpenAI-style service that allows browser apps.
-
-Keys stay on the phone. Each phone agent can use a different brain (Agents →
-Edit). Phone agents have `remember`, `recall`, `calculate`, `weather`
-(Open-Meteo, no key), and `wikipedia`; memory is shared by the phone's agents
-and rides on each message. **Speak replies out loud** reads answers aloud, 🎤
-listens, and **Save a backup** / **Restore a backup** keep a copy (without keys).
-
-**Link it to your PC (optional).** Pairing shares memories both ways and lets
-phone agents think with your PC's AI (**My PC** brain). The phone app is on
-https, so it reaches the PC over HTTPS, which Tailscale gives you for free:
+**Link it to your PC (optional).** Pairing shares memories both ways, lets
+phone agents think with your PC's AI, and gives the Researcher web search
+through the PC's search setup. The phone app is on https, so it reaches the PC
+over HTTPS, which Tailscale gives you for free:
 
 1. Install [Tailscale](https://tailscale.com/download) on the PC and the
    iPhone, signed in to the same account.
 2. On the PC, run `tailscale serve --bg 8082` once. Studio's **More → FCC
    Phone** card then shows the PC's `https://….ts.net` address.
 3. Press **Make a pairing code** there (it works once, for 10 minutes).
-4. In FCC Phone, **Settings → Connect to my PC**: type the address and the
-   code, then **Pair**.
+4. In FCC Phone, **More → Settings → Connect to my PC**: type the address and
+   the code, then **Pair**.
 
-After that the phone syncs when it opens and a few seconds after it learns
-something: its new memories go into the PC's team memory (tagged `phone`,
-written by "Jarvis (phone)" and so on), and the PC's team memory and the main
-AI's memories come back to the phone's **Memory → From my PC**. The PC's
-memories never go to a cloud brain on the phone unless you tick **Let cloud
-brains read memories from my PC**; with the **My PC** brain they are used when
-your PC's main AI runs on the PC itself. Forgetting a memory on one side does
-not remove it from the other. Studio lists paired phones on the same card,
-with **Unlink**; the PC keeps only a hash of each phone's secret, and only the
-`/studio/api/phone/` paths accept the phone app's requests.
+The phone syncs when it opens and a few seconds after it learns something: its
+new memories go into the PC's team memory (tagged `phone`, written by "Jarvis
+(phone)" and so on), and the PC's team memory and main-AI memories come back to
+**Memory → From my PC**. The PC's memories reach only brains that keep them
+private (a model on the phone, or My PC when the PC's AI runs on the PC) unless
+you tick **Let cloud brains read memories from my PC**. Forgetting a memory on
+one side does not remove it from the other. Studio lists paired phones on the
+same card, with **Unlink**; the PC keeps only a hash of each phone's secret, and
+only the `/studio/api/phone/` paths accept the phone app's requests.
 
 </details>
 

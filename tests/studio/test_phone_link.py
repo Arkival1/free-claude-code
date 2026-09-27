@@ -307,3 +307,31 @@ async def test_the_pc_finds_its_tailscale_address(tmp_path, monkeypatch):
     assert await phone_link.tailscale_address() == "https://gaming-pc.tail1234.ts.net"
     monkeypatch.setattr(phone_link, "_TAILSCALE_PROGRAMS", (str(tmp_path / "none"),))
     assert await phone_link.tailscale_address() is None
+
+
+@pytest.mark.asyncio
+async def test_a_phone_agent_can_search_the_web_through_the_pc(make_studio):
+    studio, _ = make_studio([])
+    await studio.ensure_defaults()
+    app = create_test_app(studio=studio)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        try:
+            _, headers = await paired(client)
+            found = await client.post(
+                "/studio/api/phone/search", headers=headers, json={"query": "tides"}
+            )
+            assert found.status_code == 200
+            assert found.json()["results"][0] == {
+                "title": "Tide tables",
+                "url": "https://example.test/tides",
+                "snippet": "",
+            }
+            anonymous = await client.post(
+                "/studio/api/phone/search", json={"query": "tides"}
+            )
+            assert anonymous.status_code == 401
+        finally:
+            await studio.shutdown()
+            await app.state.services.admin.close()

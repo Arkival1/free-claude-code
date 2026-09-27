@@ -14,9 +14,15 @@ DOCS = Path(__file__).resolve().parents[2] / "docs"
 
 def test_the_pages_copy_matches_the_app():
     """Run scripts/phone/build_pages.py after changing the phone app."""
-    source = {path.name: path.read_bytes() for path in PHONE_DIR.iterdir()}
-    published = {path.name: path.read_bytes() for path in (DOCS / "phone").iterdir()}
-    assert published == source
+
+    def files(root: Path) -> dict[str, bytes]:
+        return {
+            str(path.relative_to(root)): path.read_bytes()
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
+        }
+
+    assert files(DOCS / "phone") == files(PHONE_DIR)
     assert (DOCS / ".nojekyll").exists()
     assert "url=phone/" in (DOCS / "index.html").read_text()
 
@@ -31,8 +37,13 @@ def test_the_app_installs_as_its_own_home_screen_app():
     # Every link is relative, so it works at /phone/ and on GitHub Pages alike.
     assert 'href="/' not in page and 'src="/' not in page
     worker = (PHONE_DIR / "sw.js").read_text()
-    for name in ("phone.js", "phone.css", "icon-180.png", "manifest.webmanifest"):
-        assert f'"{name}"' in worker
+    shipped = [
+        str(path.relative_to(PHONE_DIR))
+        for path in PHONE_DIR.rglob("*")
+        if path.is_file() and path.suffix != ".txt" and path.name != "sw.js"
+    ]
+    for name in shipped:
+        assert f'"{name}"' in worker, f"sw.js must cache {name} for offline use"
 
 
 @pytest.mark.asyncio
@@ -47,11 +58,18 @@ async def test_the_pc_serves_the_phone_app(make_studio):
             assert moved.status_code == 307 and moved.headers["location"] == "/phone/"
             page = await client.get("/phone/")
             assert page.status_code == 200 and "FCC Phone" in page.text
-            script = await client.get("/phone/phone.js")
+            script = await client.get("/phone/js/app.js")
             assert script.headers["content-type"].startswith("text/javascript")
+            engine = await client.get("/phone/vendor/wllama.min.js")
+            assert engine.status_code == 200 and "Wllama" in engine.text
             manifest = await client.get("/phone/manifest.webmanifest")
             assert manifest.headers["content-type"] == "application/manifest+json"
-            for bad in ("/phone/secret.txt", "/phone/..%2Fstudio_static%2Fstudio.js"):
+            for bad in (
+                "/phone/secret.txt",
+                "/phone/..%2Fstudio_static%2Fstudio.js",
+                "/phone/../studio_static/studio.js",
+                "/phone/js/../../phone_link.py",
+            ):
                 assert (await client.get(bad)).status_code == 404
         finally:
             await studio.shutdown()

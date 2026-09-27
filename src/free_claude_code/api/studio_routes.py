@@ -2141,6 +2141,19 @@ async def phone_sync(
         raise _phone_failed(error) from error
 
 
+@router.post("/studio/api/phone/search")
+async def phone_search(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """Search the web with the PC's search setup for a phone agent."""
+    link = await _phone(request, studio)
+    body = await _json_body(request)
+    try:
+        return await studio.phone_search(link, str(body.get("query") or ""))
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
 @router.post("/studio/api/phone/complete")
 async def phone_complete(
     request: Request, studio: StudioService = Depends(get_studio)
@@ -2176,6 +2189,7 @@ _PHONE_TYPES = {
     ".js": "text/javascript; charset=utf-8",
     ".webmanifest": "application/manifest+json",
     ".png": "image/png",
+    ".txt": "text/plain; charset=utf-8",
 }
 
 
@@ -2185,10 +2199,11 @@ def phone_root() -> RedirectResponse:
 
 
 @router.get("/phone/", include_in_schema=False)
-@router.get("/phone/{name}", include_in_schema=False)
+@router.get("/phone/{name:path}", include_in_schema=False)
 def phone_file(name: str = "index.html") -> FileResponse:
-    path = PHONE_DIR / name
+    root = PHONE_DIR.resolve()
+    path = (root / (name or "index.html")).resolve()
     kind = _PHONE_TYPES.get(path.suffix)
-    if kind is None or "/" in name or "\\" in name or not path.is_file():
+    if kind is None or not path.is_relative_to(root) or not path.is_file():
         raise HTTPException(status_code=404, detail="Not part of FCC Phone.")
     return FileResponse(path, media_type=kind, headers={"Cache-Control": "no-cache"})

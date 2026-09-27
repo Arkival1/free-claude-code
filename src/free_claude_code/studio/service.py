@@ -2279,6 +2279,23 @@ class StudioService:
             "private": (await self.phone_hello(link))["private"],
         }
 
+    async def phone_search(self, link: PhoneLink, query: str) -> JsonObject:
+        """Search the web with the PC's search setup, for a phone agent."""
+        del link
+        if self.settings.studio_web_access == "off":
+            raise PhoneLinkError("Web access is off in Studio settings on the PC.")
+        try:
+            report = await self._search().search(query[:300], limit=6)
+        except (SearchError, ValueError) as error:
+            raise PhoneLinkError(f"Search failed: {error}") from error
+        return {
+            "provider": report.provider,
+            "results": [
+                {"title": hit.title, "url": hit.url, "snippet": hit.snippet}
+                for hit in report.hits
+            ],
+        }
+
     async def phone_complete(self, link: PhoneLink, payload: JsonObject) -> JsonObject:
         """Think with the main AI's model on this PC, for the phone."""
         main = await self.main_agent()
