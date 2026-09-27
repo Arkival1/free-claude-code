@@ -219,7 +219,10 @@ async def test_choosing_tools_and_memory_areas_through_the_app(make_studio):
             before = (await listed())["Builder"]
             assert before["all_tools"] and before["private"]
             assert before["memory_area"] == server_area(builder.id)
-            assert before["every_tool_tokens"] == tool_tokens(ALL_TOOL_NAMES)
+            assert before["every_tool_tokens"] == before["tool_tokens"]
+            assert before["every_tool_tokens"] < tool_tokens(ALL_TOOL_NAMES), (
+                "a server agent never gets the user's memory tools"
+            )
 
             changed = await client.patch(
                 f"/studio/api/agents/{builder.id}",
@@ -229,6 +232,7 @@ async def test_choosing_tools_and_memory_areas_through_the_app(make_studio):
             after = (await listed())["Builder"]
             assert not after["all_tools"]
             assert after["tool_tokens"] < before["tool_tokens"]
+            assert after["own_tool_tokens"] == after["tool_tokens"]
 
             area = f"/studio/api/memory/{server_area(builder.id)}"
             wrote = await client.post(area, json={"text": "Use teal."})

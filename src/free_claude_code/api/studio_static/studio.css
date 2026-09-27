@@ -2702,6 +2702,11 @@ body[data-page="settings"] .view {
   flex: 1 1 260px;
   margin: 0;
 }
-.every-tool-row .pill {
-  margin-left: 8px;
+.every-tool-row > .grow {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
 }

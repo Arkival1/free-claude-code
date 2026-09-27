@@ -1140,10 +1140,15 @@ class StudioService:
             self.settings.studio_all_tools and agent.all_tools and agent.role != "guide"
         )
 
-    async def tools_in_use(self, agent: Agent) -> tuple[str, ...]:
-        """The tools an agent really gets on its next turn."""
+    async def tools_in_use(
+        self, agent: Agent, *, every_tool: bool | None = None
+    ) -> tuple[str, ...]:
+        """The tools an agent really gets on its next turn (or would, with
+        ``every_tool`` set either way)."""
         granted = agent.tools
-        if self.has_every_tool(agent):
+        if every_tool is None:
+            every_tool = self.has_every_tool(agent)
+        if every_tool and agent.role != "guide":
             granted = (
                 *agent.tools,
                 *(
@@ -1174,8 +1179,12 @@ class StudioService:
             "every_tool_allowed": self.settings.studio_all_tools
             and agent.role != "guide",
             "tool_tokens": tool_tokens(using),
-            "every_tool_tokens": tool_tokens(ALL_TOOL_NAMES),
-            "own_tool_tokens": tool_tokens(agent.tools),
+            "every_tool_tokens": tool_tokens(
+                await self.tools_in_use(agent, every_tool=True)
+            ),
+            "own_tool_tokens": tool_tokens(
+                await self.tools_in_use(agent, every_tool=False)
+            ),
             "private": private,
             "memory_area": server_area(agent.id),
             "memory_area_count": area,
