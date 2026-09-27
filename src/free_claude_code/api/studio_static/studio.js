@@ -932,6 +932,13 @@
                 agent.private ? el("span", { class: "pill", text: "server AI · own memory" }) : null,
               ]),
               everyToolSwitch(agent, () => render()),
+              el("button", {
+                class: "secondary small",
+                type: "button",
+                text: "Choose tools",
+                "aria-label": `Choose tools for ${agent.name}`,
+                onclick: () => go(`agent/${agent.id}`),
+              }),
             ])
           ),
         el("p", {
@@ -1233,7 +1240,7 @@
     const groups = options.tool_groups.map((group) =>
       el("fieldset", { class: "tool-group" }, [
         el("legend", { text: group.label }),
-        ...group.tools.map((tool) => {
+        ...group.tools.filter((tool) => !tool.main_only).map((tool) => {
           const box = el("input", { type: "checkbox", value: tool.name });
           boxes.set(tool.name, box);
           return el("label", { class: "check", title: tool.description }, [box, el("span", { text: tool.name.replace(/_/g, " ") })]);
@@ -1378,6 +1385,90 @@
     ]);
   }
 
+  // Every tool, or its own tools one by one: each box saves as you tick it.
+  function toolsCard(agent, options) {
+    const own = new Set(agent.tools);
+    const every = agent.all_tools;
+    const status = el("p", { class: "muted", role: "status" });
+    const count = el("p", { class: "tool-count" });
+    const boxes = [];
+    const listed = new Set();
+    const blocked = (tool) => agent.private && tool.private;
+    const showCount = () => {
+      const ticked = boxes.filter(([, box]) => box.checked);
+      const tokens = ticked.reduce((sum, [tool]) => sum + tool.tokens, 0);
+      count.textContent = every
+        ? `Every tool: about ${agent.tool_tokens.toLocaleString()} tokens of tools on every message.`
+        : `${ticked.length} tools: about ${tokens.toLocaleString()} tokens of tools on every message.`;
+    };
+    const save = async () => {
+      const chosen = boxes.filter(([, box]) => box.checked).map(([tool]) => tool.name);
+      // Keep what the boxes can't show: tools a server AI can't use right now.
+      const kept = [...own].filter((name) => !listed.has(name) || boxes.some(([tool, box]) => tool.name === name && box.disabled));
+      showCount();
+      status.textContent = "Saving…";
+      try {
+        await patch(`/studio/api/agents/${agent.id}`, { updates: { tools: [...new Set([...chosen, ...kept])] } });
+        status.textContent = "Saved.";
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+    const groups = options.tool_groups.map((group) => {
+      const rows = group.tools
+        .filter((tool) => !tool.main_only || agent.role === "main")
+        .map((tool) => {
+          listed.add(tool.name);
+          const off = blocked(tool);
+          const box = el("input", {
+            type: "checkbox",
+            value: tool.name,
+            checked: off ? false : every || own.has(tool.name),
+            disabled: every || off,
+            "aria-label": `${tool.name} for ${agent.name}`,
+          });
+          box.addEventListener("change", save);
+          boxes.push([tool, box]);
+          const note = off
+            ? "not on server AIs"
+            : options.web_for_all && agent.role !== "guide" && ["web_search", "web_fetch"].includes(tool.name)
+              ? "on for all (Web Access)"
+              : tool.name === "run_command" && !options.commands_enabled
+              ? "needs Agent Commands in Settings"
+              : `~${tool.tokens} tokens`;
+          return el("label", { class: "check tool-check", title: tool.description }, [
+            box,
+            el("span", { text: tool.name.replace(/_/g, " ") }),
+            el("small", { class: "muted", text: note }),
+          ]);
+        });
+      return rows.length ? el("fieldset", { class: "tool-group" }, [el("legend", { text: group.label }), ...rows]) : null;
+    });
+    const pick = (on) => {
+      for (const [tool, box] of boxes) if (!box.disabled) box.checked = on && !blocked(tool);
+      save();
+    };
+    showCount();
+    return card("Tools", [
+      everyToolSwitch(agent, () => render()),
+      el("p", {
+        class: "muted",
+        text: every
+          ? "Every tool is on, so it can use all of these. Turn Every tool off to choose them one by one; your ticks are kept."
+          : "Tick the tools this agent may use. Fewer tools means fewer tokens on every message it sends.",
+      }),
+      every
+        ? null
+        : el("div", { class: "row" }, [
+            el("button", { class: "secondary", type: "button", text: "Tick all", onclick: () => pick(true) }),
+            el("button", { class: "secondary", type: "button", text: "Untick all", onclick: () => pick(false) }),
+          ]),
+      ...groups,
+      count,
+      status,
+    ]);
+  }
+
   function memoryAreaCard(agent, entries) {
     const input = el("input", { type: "text", placeholder: "Add a note to its own memory", "aria-label": "Note for its memory area" });
     return card(`${agent.name}'s own memory area`, [
@@ -1433,10 +1524,11 @@
 
   async function renderAgent(agentId) {
     const generation = renderGeneration;
-    const [{ agents }, { memories }, { skills }] = await Promise.all([
+    const [{ agents }, { memories }, { skills }, options] = await Promise.all([
       api("/studio/api/agents"),
       api(`/studio/api/memory/${agentId}`),
       api(`/studio/api/agents/${agentId}/skills`),
+      api("/studio/api/agent-options"),
     ]);
     const agent = agents.find((item) => item.id === agentId);
     if (!agent) return go("agents");
@@ -1454,12 +1546,14 @@
           el("span", { text: "Model" }),
           el("span", { text: agent.model }),
           el("span", { text: "Tools" }),
-          agent.all_tools
-            ? el("span", {}, [
-                el("strong", { text: `Every tool Studio has (${agent.tools_in_use.length})` }),
-                el("small", { class: "muted tool-list", text: agent.tools_in_use.join(", ") }),
-              ])
-            : el("span", { text: (agent.tools_in_use || agent.tools || []).join(", ") || "none" }),
+          el("span", {}, [
+            el("strong", {
+              text: agent.all_tools
+                ? `Every tool Studio has (${agent.tools_in_use.length})`
+                : `${agent.tools_in_use.length} of its own`,
+            }),
+            el("small", { class: "muted tool-list", text: agent.tools_in_use.join(", ") }),
+          ]),
           el("span", { text: "Memory" }),
           el("span", {
             text: agent.private
@@ -1469,7 +1563,6 @@
                 : "off",
           }),
         ]),
-        everyToolSwitch(agent, () => render()),
         modelEditor(agent),
         PERMANENT_ROLES.includes(agent.role)
           ? null
@@ -1505,6 +1598,7 @@
           }),
         ]),
       ]),
+      toolsCard(agent, options),
       teachCard(agent, skills),
       ...(area ? [memoryAreaCard(agent, area)] : []),
       card(

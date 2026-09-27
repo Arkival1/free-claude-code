@@ -1011,3 +1011,36 @@ def test_a_server_agent_has_its_own_memory_area(
     )
     expect(area).to_contain_text("Client likes teal.")
     expect(page.locator(".kv")).to_contain_text("its own memory area")
+
+
+def test_tools_can_be_ticked_one_by_one(page: Page, admin_base_url: str) -> None:
+    open_hud(page, admin_base_url)
+    expect(page.locator(".hud-agent").first).to_be_visible()
+    open_studio(page, admin_base_url, "agents")
+    page.get_by_role("button", name="Choose tools for Helper").click()
+
+    tools = page.locator(
+        ".card", has=page.get_by_role("heading", name="Tools", exact=True)
+    )
+    weather = tools.get_by_label("weather for Helper")
+    expect(weather).to_be_checked()
+    expect(weather).to_be_disabled()
+    tools.get_by_label("Every tool for Helper").uncheck()
+    expect(page.get_by_text("Helper uses only its own tools.")).to_be_visible()
+
+    tools = page.locator(
+        ".card", has=page.get_by_role("heading", name="Tools", exact=True)
+    )
+    weather = tools.get_by_label("weather for Helper")
+    expect(weather).to_be_enabled()
+    expect(weather).not_to_be_checked()
+    expect(tools.get_by_label("manage_agent for Helper")).to_have_count(0)
+    weather.check()
+    expect(tools.get_by_role("status")).to_have_text("Saved.")
+    page.reload()
+    tools = page.locator(
+        ".card", has=page.get_by_role("heading", name="Tools", exact=True)
+    )
+    expect(tools.get_by_label("weather for Helper")).to_be_checked()
+    expect(tools).to_contain_text("tokens of tools on every message")
+    expect(page.locator(".kv")).to_contain_text("of its own")

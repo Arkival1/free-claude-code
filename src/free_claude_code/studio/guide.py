@@ -856,6 +856,11 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "tokens",
             "token usage",
             "fewer tokens",
+            "choose tools",
+            "turn off a tool",
+            "turn on a tool",
+            "tick",
+            "checkbox",
         ),
         body=(
             "Every agent but the Guide can use every tool Studio has: building "
@@ -872,7 +877,11 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "(about 4,000 tokens for every tool, far fewer for an agent's own), "
             "so choose who gets every tool in Agents, Who gets every tool, "
             "where each switch shows its cost, or tell Jarvis ('give the Tester "
-            "only its own tools'). New agents ask as you create them. Turn the "
+            "only its own tools'). With Every tool off, the Tools card on the "
+            "agent's page (Choose tools) has a box for each tool with its token "
+            "cost: tick or untick any one and it saves at once, or use Tick all "
+            "and Untick all. Jarvis can add or remove one too ('give the Helper "
+            "weather'). New agents ask as you create them. Turn the "
             "Settings switch off and nobody gets every tool. The Guide keeps "
             "its few: it runs on the smallest model."
         ),

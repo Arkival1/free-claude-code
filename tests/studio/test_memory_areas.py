@@ -250,3 +250,52 @@ async def test_choosing_tools_and_memory_areas_through_the_app(make_studio):
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()
+
+
+@pytest.mark.asyncio
+async def test_tools_are_chosen_one_by_one(make_studio):
+    studio, model, agents = await team(make_studio, STUDIO_PRIVATE_MEMORY=False)
+    helper = agents["Helper"]
+    await studio.set_every_tool(helper.id, False)
+
+    saved = await studio.update_agent(
+        helper.id, {"tools": ["web_search", "weather", "finish", "weather"]}
+    )
+    assert saved.tools == ("web_search", "weather", "finish")
+    no_finish = await studio.update_agent(helper.id, {"tools": ["calculate"]})
+    assert no_finish.tools == ("calculate", "finish"), "finish always stays"
+    with pytest.raises(Exception, match="Unknown tools: teleport"):
+        await studio.update_agent(helper.id, {"tools": ["teleport"]})
+
+    on = await jarvis_does(studio, action="tool_on", agent="Helper", tool="weather")
+    assert on.text == "Helper has weather."
+    off = await jarvis_does(studio, action="tool_off", agent="Helper", tool="calculate")
+    assert off.text == "Helper no longer has calculate."
+    assert (await studio.agent(helper.id)).tools == ("weather", "finish")
+    with pytest.raises(ValueError, match="Only the main AI has manage_agent"):
+        await jarvis_does(studio, action="tool_on", agent="Helper", tool="manage_agent")
+
+    chat = await studio.create_chat(agent_id=helper.id)
+    await studio.send(chat.id, "hello")
+    # Web Access "all" (the default) adds web search and fetch for everyone.
+    assert set(model.calls[-1]["tools"]) == {
+        "weather",
+        "finish",
+        "web_search",
+        "web_fetch",
+    }
+    assert studio.agent_options()["web_for_all"] is True
+
+
+@pytest.mark.asyncio
+async def test_the_app_lists_every_tool_with_its_cost(make_studio):
+    studio, _, _ = await team(make_studio)
+    options = studio.agent_options()
+    listed = [tool for group in options["tool_groups"] for tool in group["tools"]]
+    names = {tool["name"] for tool in listed}
+    assert names == set(ALL_TOOL_NAMES) - {"finish"}
+    assert all(tool["tokens"] > 0 for tool in listed)
+    flags = {tool["name"]: tool for tool in listed}
+    assert flags["manage_agent"]["main_only"] and not flags["weather"]["main_only"]
+    assert flags["todo"]["private"] and not flags["remember"]["private"]
+    assert options["commands_enabled"] is False

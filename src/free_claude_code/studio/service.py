@@ -1079,7 +1079,12 @@ class StudioService:
 
     def agent_options(self) -> JsonObject:
         """Roles, presets, and tool groups for the add-agent sheet."""
-        return agent_options() | {"all_tools": self.settings.studio_all_tools}
+        return agent_options() | {
+            "all_tools": self.settings.studio_all_tools,
+            "commands_enabled": self.settings.studio_agent_commands in {"ask", "auto"},
+            # Web Access "all" gives every agent but the Guide web search and fetch.
+            "web_for_all": self.settings.studio_web_access == "all",
+        }
 
     async def _upgrade_defaults(self, existing: Sequence[Agent]) -> None:
         """Give starter agents from older versions their newer tools and roles.
@@ -1270,7 +1275,12 @@ class StudioService:
         if "all_tools" in allowed:
             allowed["all_tools"] = allowed["all_tools"] is True
         if "tools" in allowed and isinstance(allowed["tools"], list):
-            allowed["tools"] = tuple(str(item) for item in allowed["tools"])
+            chosen = tuple(dict.fromkeys(str(item) for item in allowed["tools"]))
+            unknown = [tool for tool in chosen if tool not in TOOL_SPEC_BY_NAME]
+            if unknown:
+                raise StudioError(f"Unknown tools: {', '.join(unknown)}.")
+            # finish is how an agent says it is done, so it always stays.
+            allowed["tools"] = (*(t for t in chosen if t != "finish"), "finish")
         updated = agent.model_copy(update={**allowed, "updated_at": now_ms()})
         await self._store.put(updated)
         return updated
@@ -2353,6 +2363,31 @@ class StudioService:
                         " Every Agent Gets Every Tool is off in Settings, so it "
                         "takes effect when that is turned on."
                     )
+            case "tool_on" | "tool_off":
+                tool = str(call.arguments.get("tool") or "").strip()
+                if tool not in TOOL_SPEC_BY_NAME or tool == "finish":
+                    raise ValueError(f"No tool called {tool!r}.")
+                if tool in MAIN_ONLY_TOOLS and member.role != MAIN_ROLE:
+                    raise ValueError(f"Only the main AI has {tool}.")
+                on = action == "tool_on"
+                tools = [t for t in member.tools if t != tool]
+                if on:
+                    tools.append(tool)
+                await self.update_agent(member.id, {"tools": tools})
+                text = (
+                    f"{member.name} {'has' if on else 'no longer has'} {tool}."
+                    + (
+                        " It has every tool right now, so this is what it keeps "
+                        "when every tool is off."
+                        if self.has_every_tool(member)
+                        else ""
+                    )
+                    + (
+                        " It runs on a server AI, so it can't use that one."
+                        if on and private and tool in SEALED_TOOLS
+                        else ""
+                    )
+                )
             case "add_memory":
                 note = str(call.arguments.get("text") or "").strip()
                 if not note:
@@ -2370,7 +2405,8 @@ class StudioService:
                 text = f"Cleared {where} ({removed} memories)."
             case _:
                 raise ValueError(
-                    "Use show, every_tool_on, every_tool_off, add_memory, or forget."
+                    "Use show, every_tool_on, every_tool_off, tool_on, tool_off, "
+                    "add_memory, or forget."
                 )
         return ToolOutcome(text=text, data=data)
 

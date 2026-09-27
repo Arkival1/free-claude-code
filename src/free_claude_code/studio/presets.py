@@ -3,7 +3,13 @@
 from free_claude_code.core.json_types import JsonObject
 
 from .models import AGENT_ROLES
-from .tools import DEFAULT_TOOL_NAMES, TOOL_SPEC_BY_NAME
+from .tools import (
+    DEFAULT_TOOL_NAMES,
+    MAIN_ONLY_TOOLS,
+    SEALED_TOOLS,
+    TOOL_SPEC_BY_NAME,
+    tool_tokens,
+)
 
 RESEARCHER_TOOLS: tuple[str, ...] = (
     "knowledge",
@@ -238,7 +244,7 @@ ASSISTANT_PROMPT = (
 )
 
 TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Internet", ("web_search", "web_fetch", "research", "study_video")),
+    ("Internet", ("web_search", "web_fetch", "research", "study_video", "weather")),
     (
         "Code and files",
         (
@@ -257,10 +263,29 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Run and test code",
         ("run_command", "test_code", "check_project", "polish_check"),
     ),
-    ("Ask teammates", ("ask_researcher", "ask_helper")),
-    ("Memory", ("remember", "recall", "video_notes", "conversation", "knowledge")),
-    ("Everyday", ("calculate", "todo")),
+    (
+        "Ask teammates",
+        (
+            "ask_researcher",
+            "ask_helper",
+            "ask_agent",
+            "team_task",
+            "team_status",
+            "stop_agent",
+            "agent_model",
+            "manage_agent",
+        ),
+    ),
+    (
+        "Memory",
+        ("remember", "recall", "video_notes", "conversation", "knowledge", "learn"),
+    ),
+    (
+        "Everyday",
+        ("calculate", "todo", "list_projects", "system_status", "app_help"),
+    ),
 )
+"""Every tool but finish (always on), in the groups the app shows them."""
 _BUILD = (
     "start_project",
     "restore_file",
@@ -325,7 +350,13 @@ def agent_options() -> JsonObject:
             {
                 "label": label,
                 "tools": [
-                    {"name": tool, "description": TOOL_SPEC_BY_NAME[tool].description}
+                    {
+                        "name": tool,
+                        "description": TOOL_SPEC_BY_NAME[tool].description,
+                        "tokens": tool_tokens((tool,)),
+                        "main_only": tool in MAIN_ONLY_TOOLS,
+                        "private": tool in SEALED_TOOLS,
+                    }
                     for tool in tools
                 ],
             }

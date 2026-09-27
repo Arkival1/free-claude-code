@@ -26,6 +26,7 @@ from .tools import (
     FINISH_TOOL,
     MAIN_ROLE,
     PARALLEL_TOOLS,
+    SEALED_TOOLS,
     AgentToolbox,
     ToolContext,
     ToolOutcome,
@@ -157,13 +158,6 @@ def compact_history(
 
 
 MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user):"
-PRIVATE_TOOLS = frozenset(
-    {"remember", "recall", "video_notes", "knowledge", "conversation", "learn", "todo"}
-)
-"""Tools that read the user's memory bank, so agents on server AIs lose them."""
-AREA_TOOLS = frozenset({"remember", "recall"})
-"""What an agent on a server AI keeps: remember and recall, in its own area."""
-SEALED_TOOLS = PRIVATE_TOOLS - AREA_TOOLS
 SEALED_PROMPT = (
     "You run on an outside server, so the user's memory, notes, Obsidian "
     "vault, and earlier conversations stay on their PC and are not shared "

@@ -1081,7 +1081,13 @@ sends: about 4,000 tokens with every tool, often under half that with an
 agent's own tools. **Agents → Who gets every tool** has a switch per agent
 showing what each costs; the same **Every tool** switch is on each agent's
 page, the new-agent sheet asks, and Jarvis can do it (*"give the Tester only
-its own tools"*). Existing agents start with every tool. **Every Agent Gets
+its own tools"*). With **Every tool** off, the **Tools** card on the agent's
+page (**Choose tools** in the list) has a box for every tool, grouped and with
+its token cost: tick or untick any one and it saves at once (**Tick all** and
+**Untick all** do the lot), and the total updates as you go. Boxes explain the
+tools an agent can't turn off or on: web search and fetch when Web Access is
+"all agents", `run_command` until Agent Commands is on, and memory tools on a
+server AI. Jarvis can add or remove one (*"give the Helper weather"*). Existing agents start with every tool. **Every Agent Gets
 Every Tool** (`STUDIO_ALL_TOOLS`, on by default) is the master switch: off, and
 nobody gets every tool. An agent with every tool (every agent but the Guide)
 can use all of Studio's tools, whatever is ticked on its page: files and code, `run_command`

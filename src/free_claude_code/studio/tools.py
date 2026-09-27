@@ -512,7 +512,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "Control any agent on the team. action 'show' lists every agent with "
             "its model, whether it has every tool, and its memory (for one agent, "
             "what it remembers). 'every_tool_on' or 'every_tool_off' gives an "
-            "agent every tool or only its own (fewer tools uses fewer tokens). "
+            "agent every tool or only its own (fewer tools uses fewer tokens); "
+            "'tool_on' or 'tool_off' adds or removes one tool of its own. "
             "'add_memory' saves text into an agent's memory; for an agent on a "
             "server AI that is its own memory area, so write only what it needs, "
             "never the user's private details. 'forget' clears that memory."
@@ -526,9 +527,15 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "show",
                         "every_tool_on",
                         "every_tool_off",
+                        "tool_on",
+                        "tool_off",
                         "add_memory",
                         "forget",
                     ],
+                },
+                "tool": {
+                    "type": "string",
+                    "description": "The tool, for tool_on and tool_off.",
                 },
                 "agent": {
                     "type": "string",
@@ -793,6 +800,14 @@ TOOL_SPEC_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
 ALL_TOOL_NAMES: tuple[str, ...] = tuple(spec.name for spec in TOOL_SPECS)
 """Every tool Studio has."""
 MAIN_ONLY_TOOLS = frozenset({MANAGE_AGENT_TOOL})
+PRIVATE_TOOLS = frozenset(
+    {"remember", "recall", "video_notes", "knowledge", "conversation", "learn", "todo"}
+)
+"""Tools that read the user's memory bank, so agents on server AIs lose them."""
+AREA_TOOLS = frozenset({"remember", "recall"})
+"""What an agent on a server AI keeps: remember and recall, in its own area."""
+SEALED_TOOLS = PRIVATE_TOOLS - AREA_TOOLS
+
 """Tools only the main AI has, even for agents given every tool: it runs the team."""
 DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
     spec.name
