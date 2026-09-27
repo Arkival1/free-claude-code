@@ -1394,6 +1394,8 @@
     const boxes = [];
     const listed = new Set();
     const blocked = (tool) => agent.private && tool.private;
+    const forAll = (tool) =>
+      options.web_for_all && agent.role !== "guide" && ["web_search", "web_fetch"].includes(tool.name);
     const showCount = () => {
       const ticked = boxes.filter(([, box]) => box.checked);
       const tokens = ticked.reduce((sum, [tool]) => sum + tool.tokens, 0);
@@ -1402,7 +1404,7 @@
         : `${ticked.length} tools: about ${tokens.toLocaleString()} tokens of tools on every message.`;
     };
     const save = async () => {
-      const chosen = boxes.filter(([, box]) => box.checked).map(([tool]) => tool.name);
+      const chosen = boxes.filter(([, box]) => box.checked && !box.disabled).map(([tool]) => tool.name);
       // Keep what the boxes can't show: tools a server AI can't use right now.
       const kept = [...own].filter((name) => !listed.has(name) || boxes.some(([tool, box]) => tool.name === name && box.disabled));
       showCount();
@@ -1420,19 +1422,20 @@
         .map((tool) => {
           listed.add(tool.name);
           const off = blocked(tool);
+          const always = forAll(tool);
           const box = el("input", {
             type: "checkbox",
             value: tool.name,
-            checked: off ? false : every || own.has(tool.name),
-            disabled: every || off,
+            checked: off ? false : every || always || own.has(tool.name),
+            disabled: every || off || always,
             "aria-label": `${tool.name} for ${agent.name}`,
           });
           box.addEventListener("change", save);
           boxes.push([tool, box]);
           const note = off
             ? "not on server AIs"
-            : options.web_for_all && agent.role !== "guide" && ["web_search", "web_fetch"].includes(tool.name)
-              ? "on for all (Web Access)"
+            : always
+              ? "on for every agent (Web Access)"
               : tool.name === "run_command" && !options.commands_enabled
               ? "needs Agent Commands in Settings"
               : `~${tool.tokens} tokens`;
