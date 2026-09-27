@@ -76,6 +76,7 @@ class AgentPayload(BaseModel):
     tools: list[str] | None = None
     memory_enabled: bool = True
     description: str = ""
+    all_tools: bool = True
 
 
 class StudyPayload(BaseModel):
@@ -551,17 +552,9 @@ async def main_new_conversation(
 async def list_agents(
     studio: StudioService = Depends(get_studio), _: None = Access
 ) -> JsonObject:
-    """Return every agent, with the tools each really gets."""
-    all_tools = studio.settings.studio_all_tools
+    """Return every agent, with the tools each really gets and their cost."""
     return {
-        "agents": [
-            agent.model_dump()
-            | {
-                "tools_in_use": list(await studio.tools_in_use(agent)),
-                "all_tools": all_tools and agent.role != "guide",
-            }
-            for agent in await studio.agents()
-        ]
+        "agents": [await studio.agent_view(agent) for agent in await studio.agents()]
     }
 
 
@@ -580,6 +573,7 @@ async def create_agent(
         tools=payload.tools,
         memory_enabled=payload.memory_enabled,
         description=payload.description,
+        all_tools=payload.all_tools,
     )
     return agent.model_dump()
 
@@ -1915,6 +1909,16 @@ async def write_memory(
     """Write one memory by hand."""
     entry = await studio.remember(agent_id, payload.text, scope=payload.scope)
     return entry.model_dump() if entry else {}
+
+
+@router.delete("/studio/api/agents/{agent_id}/memory-area")
+async def clear_memory_area(
+    agent_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Empty the memory area an agent keeps on a server AI."""
+    return {"removed": await studio.clear_memory_area(agent_id)}
 
 
 @router.delete("/studio/api/memory/entry/{memory_id}")

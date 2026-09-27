@@ -16,12 +16,11 @@ from .llm import (
     ToolCall,
     unreadable_tool_call,
 )
-from .memory import MemoryService
+from .memory import MemoryService, server_area
 from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
 from .recall_messages import Found, recall_note, search
 from .store import StudioStore
 from .tools import (
-    ASK_AGENT_TOOL,
     CHECK_PROJECT_TOOL,
     COMMAND_TOOL,
     FINISH_TOOL,
@@ -162,12 +161,17 @@ PRIVATE_TOOLS = frozenset(
     {"remember", "recall", "video_notes", "knowledge", "conversation", "learn", "todo"}
 )
 """Tools that read the user's memory bank, so agents on server AIs lose them."""
+AREA_TOOLS = frozenset({"remember", "recall"})
+"""What an agent on a server AI keeps: remember and recall, in its own area."""
+SEALED_TOOLS = PRIVATE_TOOLS - AREA_TOOLS
 SEALED_PROMPT = (
     "You run on an outside server, so the user's memory, notes, Obsidian "
     "vault, and earlier conversations stay on their PC and are not shared "
-    "with you. The task you are given is your briefing: work from it, the "
-    "project files, and the web. If something you need is missing, say "
-    "exactly what, and the user's main AI will fill it in."
+    "with you. You have your own memory area instead: remember saves to it "
+    "and recall reads it, and nothing else is in it. The task you are given "
+    "is your briefing: work from it, your own memory, the project files, and "
+    "the web. If something you need is missing, say exactly what, and the "
+    "user's main AI will fill it in."
 )
 
 
@@ -249,7 +253,12 @@ MAIN_PROMPT = (
     "days for any town. Files the user attaches arrive in the message as "
     "[Attached file: name] blocks; read them before answering. "
     "Each agent can think with its own AI model; "
-    "agent_model shows who uses which and switches one when the user asks.\n"
+    "agent_model shows who uses which and switches one when the user asks. "
+    "You control every agent with manage_agent: show the team or one agent "
+    "and what it remembers, give an agent every tool or only its own (fewer "
+    "tools cost fewer tokens), and add to or clear an agent's memory. Agents "
+    "on server AIs have their own memory area and never see the user's "
+    "memory; save there only what their job needs.\n"
     "Use research yourself when you need to understand something first, and "
     "end that reply with the links of the sources you used; they show on "
     "screen. When the user gives you a YouTube link, study it with "
@@ -341,16 +350,19 @@ class AgentRunner:
     async def _private_view(self, agent: Agent) -> tuple[Agent, bool]:
         """The agent as it may act: with every tool when that is on, and
         without memory when it thinks on a server."""
-        granted = self._toolbox.granted(agent.tools, role=agent.role)
+        granted = self._toolbox.granted(
+            agent.tools, role=agent.role, chosen=agent.all_tools
+        )
         if granted != agent.tools:
             agent = agent.model_copy(update={"tools": granted})
         if self._sealed is None or not await self._sealed(agent):
             return agent, False
+        # The user's memory is out of reach; its own area stays in reach.
         return (
             agent.model_copy(
                 update={
                     "memory_enabled": False,
-                    "tools": tuple(t for t in agent.tools if t not in PRIVATE_TOOLS),
+                    "tools": tuple(t for t in agent.tools if t not in SEALED_TOOLS),
                 }
             ),
             True,
@@ -396,10 +408,8 @@ class AgentRunner:
             and "remember" in agent.tools
         ):
             parts.append(SHARED_MEMORY_PROMPT)
-        if (
-            agent.role != MAIN_ROLE
-            and ASK_AGENT_TOOL in agent.tools
-            and self._toolbox.delegation_allowed(agent.role)
+        if agent.role != MAIN_ROLE and self._toolbox.delegation_allowed(
+            agent.role, agent.tools
         ):
             parts.append(TEAM_PROMPT)
         if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):
@@ -445,13 +455,17 @@ class AgentRunner:
             lines.append(line)
         return "\n".join(lines) or "- nobody yet; the user can add agents."
 
-    def _context(self, agent: Agent, chat: Chat, *, site_id: str | None) -> ToolContext:
+    def _context(
+        self, agent: Agent, chat: Chat, *, site_id: str | None, sealed: bool = False
+    ) -> ToolContext:
         return ToolContext(
             agent_id=agent.id,
             chat_id=chat.id,
             site_id=site_id,
             agent_name=agent.name,
             agent_role=agent.role,
+            memory_owner=server_area(agent.id) if sealed else "",
+            can_delegate=self._toolbox.delegation_allowed(agent.role, agent.tools),
         )
 
     async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:
@@ -582,7 +596,7 @@ class AgentRunner:
         history = await self._history(agent, chat)
         if not history or not history[-1].content.endswith(user_text):
             history.append(ChatMessage.user(user_text))
-        context = self._context(agent, chat, site_id=chat.site_id)
+        context = self._context(agent, chat, site_id=chat.site_id, sealed=sealed)
         result = await self._loop(
             agent,
             chat,
@@ -594,9 +608,9 @@ class AgentRunner:
             sealed=sealed,
         )
         self._keep_notes(agent, chat, await self._history_start(chat))
-        if agent.memory_enabled and not result.failed and result.text:
+        if (agent.memory_enabled or sealed) and not result.failed and result.text:
             await self._memory.remember(
-                agent.id,
+                server_area(agent.id) if sealed else agent.id,
                 f"User asked: {user_text.strip()[:160]}",
                 scope="working",
                 source="chat",
@@ -616,7 +630,9 @@ class AgentRunner:
             author=agent.name,
             data={"kind": "run_started", "run_id": run.id},
         )
-        context = self._context(agent, chat, site_id=run.site_id or chat.site_id)
+        context = self._context(
+            agent, chat, site_id=run.site_id or chat.site_id, sealed=sealed
+        )
         history = [ChatMessage.user(run.goal)]
         result = await self._loop(
             agent,
@@ -644,7 +660,15 @@ class AgentRunner:
             author=agent.name,
             data={"kind": "run_finished", "run_id": run.id, "status": finished.status},
         )
-        if agent.memory_enabled and not result.failed:
+        if sealed and not result.failed:
+            await self._memory.remember(
+                server_area(agent.id),
+                f"Finished: {run.goal.strip()[:200]}",
+                tags=("task",),
+                source="agent_run",
+                chat_id=chat.id,
+            )
+        elif agent.memory_enabled and not result.failed:
             outcome = f"{agent.name} completed: {run.goal.strip()[:200]}"
             if result.text:
                 outcome += f" — {result.text.strip()[:240]}"
@@ -670,7 +694,7 @@ class AgentRunner:
     ) -> TurnResult:
         """Take one turn in an existing conversation someone else is driving."""
         agent, sealed = await self._private_view(agent)
-        context = self._context(agent, chat, site_id=chat.site_id)
+        context = self._context(agent, chat, site_id=chat.site_id, sealed=sealed)
         return await self._loop(
             agent,
             chat,
@@ -701,7 +725,7 @@ class AgentRunner:
             names,
             commands_enabled=self._toolbox.commands_enabled,
             shared_memory=self._toolbox.shared_memory and agent.memory_enabled,
-            delegation=self._toolbox.delegation_allowed(agent.role),
+            delegation=self._toolbox.delegation_allowed(agent.role, names),
         )
         # The instructions stay the same from message to message; what memory
         # recalls for this message rides on the message itself. A local
@@ -714,9 +738,10 @@ class AgentRunner:
             system = f"{system}\n\n{SEALED_PROMPT}"
         if extra_system:
             system = f"{system}\n\n{extra_system}"
-        if agent.memory_enabled:
+        if agent.memory_enabled or sealed:
+            owner = server_area(agent.id) if sealed else agent.id
             history = with_memory_note(
-                history, await self._memory.context_block(agent.id, query)
+                history, await self._memory.context_block(owner, query)
             )
         if turn_note:
             history = with_memory_note(history, turn_note, header=STUDIO_NOTE_HEADER)
@@ -930,7 +955,7 @@ class AgentRunner:
         """Run tool calls; look-ups that change nothing run at the same time."""
 
         async def run(call: ToolCall) -> ToolOutcome:
-            if sealed and call.name in PRIVATE_TOOLS:
+            if sealed and call.name in SEALED_TOOLS:
                 return ToolOutcome(
                     text=(
                         "The user's memory stays on their PC; agents on server AIs "

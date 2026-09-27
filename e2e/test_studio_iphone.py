@@ -970,3 +970,44 @@ def test_an_agent_page_lists_every_tool(page: Page, admin_base_url: str) -> None
     expect(tools).to_contain_text("Every tool Studio has")
     expect(tools.locator(".tool-list")).to_contain_text("weather")
     expect(tools.locator(".tool-list")).to_contain_text("ask_agent")
+
+
+def test_choosing_who_gets_every_tool(page: Page, admin_base_url: str) -> None:
+    open_hud(page, admin_base_url)
+    expect(page.locator(".hud-agent").first).to_be_visible()
+    open_studio(page, admin_base_url, "agents")
+
+    chooser = page.locator(
+        ".card", has=page.get_by_role("heading", name="Who gets every tool")
+    )
+    tester = chooser.get_by_label("Every tool for Tester")
+    expect(tester).to_be_checked()
+    expect(chooser).to_contain_text("tokens of tools across the team")
+    tester.uncheck()
+    expect(page.get_by_text("Tester uses only its own tools.")).to_be_visible()
+    chooser = page.locator(
+        ".card", has=page.get_by_role("heading", name="Who gets every tool")
+    )
+    expect(chooser.get_by_label("Every tool for Tester")).not_to_be_checked()
+    expect(chooser.get_by_label("Every tool for Guide")).to_be_disabled()
+
+
+def test_a_server_agent_has_its_own_memory_area(
+    page: Page, admin_base_url: str
+) -> None:
+    open_hud(page, admin_base_url)
+    expect(page.locator(".hud-agent").first).to_be_visible()
+    open_studio(page, admin_base_url, "agents")
+    page.locator(".agent-row", has_text="Builder").locator(".list-item").click()
+
+    area = page.locator(
+        ".card", has=page.get_by_role("heading", name="Builder's own memory area")
+    )
+    expect(area).to_contain_text("never sees your memory")
+    area.get_by_label("Note for its memory area").fill("Client likes teal.")
+    area.get_by_role("button", name="Add").click()
+    area = page.locator(
+        ".card", has=page.get_by_role("heading", name="Builder's own memory area")
+    )
+    expect(area).to_contain_text("Client likes teal.")
+    expect(page.locator(".kv")).to_contain_text("its own memory area")

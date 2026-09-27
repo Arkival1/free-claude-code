@@ -918,6 +918,30 @@
         }),
         el("button", { class: "primary", type: "button", text: "Choose each agent's model", onclick: () => openTeamBrains(() => render()) }),
       ]),
+      card("Who gets every tool", [
+        el("p", {
+          class: "muted",
+          text: "An agent with every tool can do anything Studio can, but the tool list rides on every message it sends. Untick the ones that don't need it to use fewer tokens.",
+        }),
+        ...agents
+          .filter((agent) => !agent.archived)
+          .map((agent) =>
+            el("div", { class: "every-tool-row" }, [
+              el("span", { class: "grow" }, [
+                el("strong", { text: agent.name }),
+                agent.private ? el("span", { class: "pill", text: "server AI · own memory" }) : null,
+              ]),
+              everyToolSwitch(agent, () => render()),
+            ])
+          ),
+        el("p", {
+          class: "muted",
+          text: `Right now: about ${agents
+            .filter((agent) => !agent.archived)
+            .reduce((sum, agent) => sum + agent.tool_tokens, 0)
+            .toLocaleString()} tokens of tools across the team. Jarvis can change these too: "give the Tester every tool", "Helper only its own tools".`,
+        }),
+      ]),
       card("Add an agent", [
         el("p", {
           class: "muted",
@@ -1204,6 +1228,7 @@
       placeholder: "Leave empty for the default, or local/<model>",
     });
     const prompt = el("textarea", { "aria-label": "Instructions", placeholder: "What this agent is for and how it should work." });
+    const everyTool = el("input", { type: "checkbox", checked: true, "aria-label": "Give it every tool" });
     const boxes = new Map();
     const groups = options.tool_groups.map((group) =>
       el("fieldset", { class: "tool-group" }, [
@@ -1242,10 +1267,10 @@
       el("label", {}, ["Model", model]),
       el("label", {}, ["Instructions", prompt]),
       options.all_tools
-        ? el("p", {
-            class: "muted all-tools-note",
-            text: "Every Agent Gets Every Tool is on (Settings, Studio), so this agent can use every tool. The ticks below are what it keeps if you turn that off.",
-          })
+        ? el("label", { class: "check all-tools-note" }, [
+            everyTool,
+            el("span", { text: "Give it every tool (uses more tokens on every message; the ticks below are its own tools)" }),
+          ])
         : null,
       ...groups,
       el("button", {
@@ -1261,6 +1286,7 @@
               model: model.value.trim(),
               system_prompt: prompt.value.trim(),
               tools: [...tools, "finish"],
+              all_tools: options.all_tools ? everyTool.checked : true,
             });
             closeSheet();
             notify(`${agent.name} joined the team.`);
@@ -1317,6 +1343,94 @@
     ];
   }
 
+  // Who gets every tool: one switch per agent, with what it costs in tokens.
+  function everyToolSwitch(agent, onChange) {
+    const box = el("input", {
+      type: "checkbox",
+      checked: agent.all_tools,
+      disabled: !agent.every_tool_allowed,
+      "aria-label": `Every tool for ${agent.name}`,
+    });
+    const cost = el("small", {
+      class: "muted",
+      text: agent.every_tool_allowed
+        ? `About ${agent.tool_tokens.toLocaleString()} tokens of tools on every message (${agent.every_tool_tokens.toLocaleString()} with every tool, ${agent.own_tool_tokens.toLocaleString()} with its own).`
+        : agent.role === "guide"
+          ? "The Guide keeps its few tools: it runs on the smallest model."
+          : "Every Agent Gets Every Tool is off in Settings, Studio.",
+    });
+    box.addEventListener("change", async () => {
+      box.disabled = true;
+      try {
+        await patch(`/studio/api/agents/${agent.id}`, { updates: { all_tools: box.checked } });
+        notify(box.checked ? `${agent.name} has every tool.` : `${agent.name} uses only its own tools.`);
+        if (onChange) onChange();
+      } catch (error) {
+        box.checked = !box.checked;
+        notify(error.message);
+      } finally {
+        box.disabled = !agent.every_tool_allowed;
+      }
+    });
+    return el("div", { class: "every-tool" }, [
+      el("label", { class: "check" }, [box, el("span", { text: "Every tool" })]),
+      cost,
+    ]);
+  }
+
+  function memoryAreaCard(agent, entries) {
+    const input = el("input", { type: "text", placeholder: "Add a note to its own memory", "aria-label": "Note for its memory area" });
+    return card(`${agent.name}'s own memory area`, [
+      el("p", {
+        class: "muted",
+        text: `${agent.name} thinks on a server AI, so it never sees your memory, Obsidian, or earlier chats. It keeps what it learns here instead, and only here. Jarvis can read, add to, and clear it too.`,
+      }),
+      el("div", { class: "row" }, [
+        el("div", { class: "grow" }, [input]),
+        el("button", {
+          class: "secondary",
+          text: "Add",
+          onclick: async () => {
+            if (!input.value.trim()) return;
+            await post(`/studio/api/memory/${encodeURIComponent(agent.memory_area)}`, { text: input.value.trim() });
+            render();
+          },
+        }),
+      ]),
+      ...(entries.length
+        ? entries.map((entry) =>
+            el("div", { class: "list-item" }, [
+              el("span", { class: "grow" }, [
+                el("strong", { text: entry.text }),
+                el("span", { text: `${entry.scope}${entry.author ? ` · from ${entry.author}` : ""}` }),
+              ]),
+              el("button", {
+                class: "danger",
+                text: "✕",
+                "aria-label": "Forget this",
+                onclick: async () => {
+                  await remove(`/studio/api/memory/entry/${entry.id}`);
+                  render();
+                },
+              }),
+            ])
+          )
+        : [empty("Nothing in its memory area yet.")]),
+      entries.length
+        ? el("button", {
+            class: "danger",
+            type: "button",
+            text: "Clear its memory area",
+            onclick: async () => {
+              const done = await remove(`/studio/api/agents/${agent.id}/memory-area`);
+              notify(`Cleared ${done.removed} memories.`);
+              render();
+            },
+          })
+        : null,
+    ]);
+  }
+
   async function renderAgent(agentId) {
     const generation = renderGeneration;
     const [{ agents }, { memories }, { skills }] = await Promise.all([
@@ -1326,6 +1440,9 @@
     ]);
     const agent = agents.find((item) => item.id === agentId);
     if (!agent) return go("agents");
+    const area = agent.private
+      ? (await api(`/studio/api/memory/${encodeURIComponent(agent.memory_area)}`)).memories
+      : null;
     setChrome("agent", agent.name);
     const memoryInput = el("input", { type: "text", placeholder: "Teach it a fact" });
     if (generation !== renderGeneration) return;
@@ -1344,8 +1461,15 @@
               ])
             : el("span", { text: (agent.tools_in_use || agent.tools || []).join(", ") || "none" }),
           el("span", { text: "Memory" }),
-          el("span", { text: agent.memory_enabled ? "on" : "off" }),
+          el("span", {
+            text: agent.private
+              ? "its own memory area (it runs on a server AI)"
+              : agent.memory_enabled
+                ? "on"
+                : "off",
+          }),
         ]),
+        everyToolSwitch(agent, () => render()),
         modelEditor(agent),
         PERMANENT_ROLES.includes(agent.role)
           ? null
@@ -1382,8 +1506,9 @@
         ]),
       ]),
       teachCard(agent, skills),
+      ...(area ? [memoryAreaCard(agent, area)] : []),
       card(
-        "Memory",
+        agent.private ? "Memory from when it ran on this PC" : "Memory",
         [
           el("div", { class: "row" }, [
             el("div", { class: "grow" }, [memoryInput]),

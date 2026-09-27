@@ -3,10 +3,13 @@
 import httpx
 import pytest
 
-from free_claude_code.studio.agents import PRIVATE_TOOLS, TEAM_PROMPT
+from free_claude_code.studio.agents import SEALED_TOOLS, TEAM_PROMPT
 from free_claude_code.studio.llm import ToolCall
-from free_claude_code.studio.tools import ALL_TOOL_NAMES, ToolContext
+from free_claude_code.studio.tools import ALL_TOOL_NAMES, MAIN_ONLY_TOOLS, ToolContext
 from tests.api.support import create_test_app
+
+TEAM_TOOLS = [name for name in ALL_TOOL_NAMES if name not in MAIN_ONLY_TOOLS]
+"""Every tool but the ones only the main AI has."""
 
 
 async def team(make_studio, replies=("Done.",), **settings):
@@ -26,7 +29,7 @@ async def test_every_agent_gets_every_tool(make_studio):
     for name in ("Builder", "Researcher", "Helper", "Tester"):
         chat = await studio.create_chat(agent_id=agents[name].id)
         await studio.send(chat.id, "hello")
-        assert offered(model.calls[-1]) == set(ALL_TOOL_NAMES), name
+        assert offered(model.calls[-1]) == set(TEAM_TOOLS), name
         assert TEAM_PROMPT in str(model.calls[-1]["system"])
 
     await studio.main_say("hello", background=False)
@@ -65,9 +68,9 @@ async def test_server_agents_still_get_no_memory_tools(make_studio):
     assert await studio.is_private_from(builder)
     chat = await studio.create_chat(agent_id=builder.id)
     await studio.send(chat.id, "hello")
-    assert not offered(model.calls[-1]) & PRIVATE_TOOLS
+    assert not offered(model.calls[-1]) & SEALED_TOOLS
     assert {"weather", "calculate", "ask_agent"} <= offered(model.calls[-1])
-    assert not set(await studio.tools_in_use(builder)) & PRIVATE_TOOLS
+    assert not set(await studio.tools_in_use(builder)) & SEALED_TOOLS
 
 
 @pytest.mark.asyncio
@@ -99,6 +102,7 @@ async def test_agents_hand_parts_on_but_never_in_a_circle(make_studio):
                 chat_id=chat_id,
                 agent_name=who.name,
                 agent_role=who.role,
+                can_delegate=True,
             ),
         )
 
@@ -138,7 +142,7 @@ async def test_the_agent_page_shows_every_tool(make_studio):
                 for agent in (await client.get("/studio/api/agents")).json()["agents"]
             }
             assert listed["Builder"]["all_tools"] is True
-            assert listed["Builder"]["tools_in_use"] == list(ALL_TOOL_NAMES)
+            assert set(listed["Builder"]["tools_in_use"]) == set(TEAM_TOOLS)
             assert listed["Guide"]["all_tools"] is False
             options = (await client.get("/studio/api/agent-options")).json()
             assert options["all_tools"] is True

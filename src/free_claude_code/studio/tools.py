@@ -2,6 +2,7 @@
 
 import asyncio
 import fnmatch
+import json
 import re
 import shutil
 import sys
@@ -44,6 +45,7 @@ CONVERSATION_TOOL = "conversation"
 LEARN_TOOL = "learn"
 KNOWLEDGE_TOOL = "knowledge"
 AGENT_MODEL_TOOL = "agent_model"
+MANAGE_AGENT_TOOL = "manage_agent"
 WEATHER_TOOL = "weather"
 CALCULATE_TOOL = "calculate"
 PROJECTS_TOOL = "list_projects"
@@ -505,6 +507,42 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=MANAGE_AGENT_TOOL,
+        description=(
+            "Control any agent on the team. action 'show' lists every agent with "
+            "its model, whether it has every tool, and its memory (for one agent, "
+            "what it remembers). 'every_tool_on' or 'every_tool_off' gives an "
+            "agent every tool or only its own (fewer tools uses fewer tokens). "
+            "'add_memory' saves text into an agent's memory; for an agent on a "
+            "server AI that is its own memory area, so write only what it needs, "
+            "never the user's private details. 'forget' clears that memory."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "show",
+                        "every_tool_on",
+                        "every_tool_off",
+                        "add_memory",
+                        "forget",
+                    ],
+                },
+                "agent": {
+                    "type": "string",
+                    "description": "Agent name; leave out with show for everyone.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "What to save, for add_memory.",
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
         name=KNOWLEDGE_TOOL,
         description=(
             "The knowledge library of subjects the team taught itself: search "
@@ -753,7 +791,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 
 TOOL_SPEC_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
 ALL_TOOL_NAMES: tuple[str, ...] = tuple(spec.name for spec in TOOL_SPECS)
-"""Every tool Studio has, for agents when Every Agent Gets Every Tool is on."""
+"""Every tool Studio has."""
+MAIN_ONLY_TOOLS = frozenset({MANAGE_AGENT_TOOL})
+"""Tools only the main AI has, even for agents given every tool: it runs the team."""
 DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
     spec.name
     for spec in TOOL_SPECS
@@ -766,6 +806,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         SYSTEM_STATUS_TOOL,
         LEARN_TOOL,
         AGENT_MODEL_TOOL,
+        MANAGE_AGENT_TOOL,
         WEATHER_TOOL,
     }
 )
@@ -784,6 +825,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     LEARN_TOOL,
     KNOWLEDGE_TOOL,
     AGENT_MODEL_TOOL,
+    MANAGE_AGENT_TOOL,
     WEATHER_TOOL,
     STUDY_VIDEO_TOOL,
     VIDEO_NOTES_TOOL,
@@ -826,6 +868,10 @@ class ToolContext:
     site_id: str | None = None
     agent_name: str = "Agent"
     agent_role: str = "assistant"
+    memory_owner: str = ""
+    """Set for an agent on a server AI: the memory area it reads and writes
+    instead of the user's memory."""
+    can_delegate: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -880,6 +926,22 @@ class TeamDelegate(Protocol):
     ) -> ToolOutcome:
         """Run one goal with several agents in a room and report the result."""
         ...
+
+
+def tool_tokens(names: Sequence[str]) -> int:
+    """About how many tokens these tools' descriptions add to every message."""
+    specs = [TOOL_SPEC_BY_NAME[name] for name in names if name in TOOL_SPEC_BY_NAME]
+    text = json.dumps(
+        [
+            {
+                "name": spec.name,
+                "description": spec.description,
+                "parameters": spec.parameters,
+            }
+            for spec in specs
+        ]
+    )
+    return len(text) // 4
 
 
 def tool_specs(
@@ -956,15 +1018,23 @@ class AgentToolbox:
         self._assistant = assistant
         self._all_tools = all_tools
 
-    def granted(self, names: Sequence[str], *, role: str) -> tuple[str, ...]:
-        """The tools an agent may use: its own, or every tool when that is on.
+    def granted(
+        self, names: Sequence[str], *, role: str, chosen: bool = True
+    ) -> tuple[str, ...]:
+        """The tools an agent may use: its own, or every tool when it was
+        chosen for every tool and the setting allows it.
 
         The Guide keeps its own few: it runs on the smallest model and only
-        explains the app.
+        explains the app. Only the main AI manages the team.
         """
-        if not self._all_tools or role == "guide":
+        if not self._all_tools or not chosen or role == "guide":
             return tuple(names)
-        return (*names, *(name for name in ALL_TOOL_NAMES if name not in names))
+        extra = (
+            name
+            for name in ALL_TOOL_NAMES
+            if name not in names and (role == MAIN_ROLE or name not in MAIN_ONLY_TOOLS)
+        )
+        return (*names, *extra)
 
     @property
     def commands_enabled(self) -> bool:
@@ -1009,11 +1079,12 @@ class AgentToolbox:
             chosen.extend(name for name in WEB_TOOLS if name not in chosen)
         return tuple(chosen)
 
-    def delegation_allowed(self, role: str) -> bool:
-        """The main agent hands work on; so does every agent with every tool."""
+    def delegation_allowed(self, role: str, names: Sequence[str] = ()) -> bool:
+        """The main agent hands work on; so does any agent given ask_agent
+        while agents may have every tool."""
         if self._delegate is None or role == "guide":
             return False
-        return role == MAIN_ROLE or self._all_tools
+        return role == MAIN_ROLE or (self._all_tools and ASK_AGENT_TOOL in names)
 
     async def run(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         """Execute one tool call, converting every failure into tool output."""
@@ -1079,6 +1150,7 @@ class AgentToolbox:
                     | "learn"
                     | "knowledge"
                     | "agent_model"
+                    | "manage_agent"
                     | "weather"
                 ):
                     if self._assistant is None:
@@ -1720,7 +1792,7 @@ class AgentToolbox:
         text = str(call.arguments.get("text", ""))
         raw_tags = call.arguments.get("tags")
         tags = [str(tag) for tag in raw_tags] if isinstance(raw_tags, list) else []
-        private = call.arguments.get("private") is True
+        private = call.arguments.get("private") is True or bool(context.memory_owner)
         shared = self._memory.shared_enabled and not private
         if shared:
             entry = await self._memory.share(
@@ -1732,7 +1804,7 @@ class AgentToolbox:
             )
         else:
             entry = await self._memory.remember(
-                context.agent_id,
+                context.memory_owner or context.agent_id,
                 text,
                 tags=tags,
                 source="tool",
@@ -1740,7 +1812,13 @@ class AgentToolbox:
             )
         if entry is None:
             raise ValueError("Nothing to remember.")
-        where = "team memory" if shared else "your memory"
+        where = (
+            "team memory"
+            if shared
+            else "your own memory area"
+            if context.memory_owner
+            else "your memory"
+        )
         return ToolOutcome(
             text=f"Saved to {where}: {entry.text}",
             data={"tool": "remember", "memory_id": entry.id, "shared": shared},
@@ -1748,7 +1826,11 @@ class AgentToolbox:
 
     async def _recall(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         query = str(call.arguments.get("query", ""))
-        entries = await self._memory.recall(context.agent_id, query)
+        entries = await self._memory.recall(
+            context.memory_owner or context.agent_id,
+            query,
+            own_only=bool(context.memory_owner),
+        )
         if not entries:
             return ToolOutcome(
                 text="Nothing relevant in memory.",
@@ -1764,7 +1846,9 @@ class AgentToolbox:
         )
 
     async def _delegate_call(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
-        if self._delegate is None or not self.delegation_allowed(context.agent_role):
+        if self._delegate is None or not (
+            context.agent_role == MAIN_ROLE or context.can_delegate
+        ):
             raise ValueError("Only the main agent can hand work to other agents here.")
         project = str(call.arguments.get("project") or "").strip()
         if call.name == TEAM_STATUS_TOOL:

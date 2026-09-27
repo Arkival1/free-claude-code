@@ -2,7 +2,7 @@
 
 import pytest
 
-from free_claude_code.studio.agents import SEALED_PROMPT
+from free_claude_code.studio.agents import SEALED_PROMPT, SEALED_TOOLS
 from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.memory import SHARED_MEMORY_ID
 from free_claude_code.studio.models import AgentRun
@@ -63,7 +63,8 @@ async def test_a_server_agent_never_sees_memory(make_studio):
     assert is_sealed(call)
     assert call["memory"] == ""
     assert "Biscuit" not in everything_sent(call)
-    assert not {"remember", "recall", "knowledge", "conversation"} & set(call["tools"])
+    assert not SEALED_TOOLS & set(call["tools"])
+    assert {"remember", "recall"} <= set(call["tools"]), "its own memory area"
     assert "write_file" in call["tools"], "it keeps its working tools"
 
 
@@ -96,7 +97,7 @@ async def test_other_local_runtimes_count_as_this_pc(make_studio):
 
 @pytest.mark.asyncio
 async def test_a_server_agent_cannot_call_memory_tools_anyway(make_studio):
-    replies = iter([tool_reply("recall", {"query": "dog"}), LLMReply(text="ok")])
+    replies = iter([tool_reply("knowledge", {"query": "dog"}), LLMReply(text="ok")])
 
     def respond(system: str, prompt: str):
         if "running notes" in system:

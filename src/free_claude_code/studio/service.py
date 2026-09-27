@@ -25,7 +25,7 @@ from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject, JsonValue
 
 from . import system_monitor
-from .agents import PRIVATE_TOOLS, AgentRunner, TurnResult
+from .agents import SEALED_TOOLS, AgentRunner, TurnResult
 from .assistant_tools import describe_time, now_line, parse_when
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
@@ -65,7 +65,14 @@ from .local_voice import (
     speech_package_ready,
 )
 from .lora import LoraTrainer
-from .memory import SHARED_MEMORY_ID, SKILL_TAG, MemoryService, keywords
+from .memory import (
+    SERVER_AREA_PREFIX,
+    SHARED_MEMORY_ID,
+    SKILL_TAG,
+    MemoryService,
+    keywords,
+    server_area,
+)
 from .model_files import (
     ModelFileError,
     check_model_file,
@@ -136,12 +143,14 @@ from .team_models import (
 from .tools import (
     ALL_TOOL_NAMES,
     DEFAULT_TOOL_NAMES,
+    MAIN_ONLY_TOOLS,
     MAIN_ROLE,
     MAIN_TOOL_NAMES,
     TOOL_SPEC_BY_NAME,
     AgentToolbox,
     ToolContext,
     ToolOutcome,
+    tool_tokens,
 )
 from .tuning import CloudTuner, LightTuner, TuningError
 from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
@@ -1125,16 +1134,61 @@ class StudioService:
         """Return every agent, oldest first."""
         return await self._store.find(Agent, order_by="created_at ASC")
 
+    def has_every_tool(self, agent: Agent) -> bool:
+        """Whether the agent gets every tool: chosen for it, and allowed."""
+        return (
+            self.settings.studio_all_tools and agent.all_tools and agent.role != "guide"
+        )
+
     async def tools_in_use(self, agent: Agent) -> tuple[str, ...]:
         """The tools an agent really gets on its next turn."""
-        granted = (
-            ALL_TOOL_NAMES
-            if self.settings.studio_all_tools and agent.role != "guide"
-            else agent.tools
-        )
+        granted = agent.tools
+        if self.has_every_tool(agent):
+            granted = (
+                *agent.tools,
+                *(
+                    name
+                    for name in ALL_TOOL_NAMES
+                    if name not in agent.tools
+                    and (agent.role == MAIN_ROLE or name not in MAIN_ONLY_TOOLS)
+                ),
+            )
         if await self.is_private_from(agent):
-            granted = tuple(t for t in granted if t not in PRIVATE_TOOLS)
+            granted = tuple(t for t in granted if t not in SEALED_TOOLS)
         return granted
+
+    async def agent_view(self, agent: Agent) -> JsonObject:
+        """One agent for the app: its tools, their token cost, and its memory."""
+        using = await self.tools_in_use(agent)
+        private = await self.is_private_from(agent)
+        area = (
+            await self._store.count(
+                MemoryEntry, where={"agent_id": server_area(agent.id)}
+            )
+            if private
+            else 0
+        )
+        return agent.model_dump() | {
+            "tools_in_use": list(using),
+            "all_tools": self.has_every_tool(agent),
+            "every_tool_allowed": self.settings.studio_all_tools
+            and agent.role != "guide",
+            "tool_tokens": tool_tokens(using),
+            "every_tool_tokens": tool_tokens(ALL_TOOL_NAMES),
+            "own_tool_tokens": tool_tokens(agent.tools),
+            "private": private,
+            "memory_area": server_area(agent.id),
+            "memory_area_count": area,
+        }
+
+    async def set_every_tool(self, agent_id: str, on: bool) -> Agent:
+        """Give one agent every tool, or only its own."""
+        agent = await self._store.require(Agent, agent_id)
+        if agent.role == "guide" and on:
+            raise StudioError(
+                "The Guide keeps its few tools: it runs on the smallest model."
+            )
+        return await self.update_agent(agent_id, {"all_tools": on})
 
     async def agent(self, agent_id: str) -> Agent:
         """Return one agent or raise."""
@@ -1157,6 +1211,7 @@ class StudioService:
         tools: Sequence[str] | None = None,
         memory_enabled: bool = True,
         description: str = "",
+        all_tools: bool = True,
     ) -> Agent:
         """Create one agent with its own role, model, tools, and memory."""
         if not name.strip():
@@ -1176,6 +1231,7 @@ class StudioService:
                 "description": description or system_prompt[:200],
                 "tools": chosen,
                 "memory_enabled": memory_enabled,
+                "all_tools": all_tools,
                 "local_only": (model or "").startswith("local/"),
             }
         )
@@ -1199,8 +1255,11 @@ class StudioService:
                 "memory_enabled",
                 "tune_pack_id",
                 "archived",
+                "all_tools",
             }
         }
+        if "all_tools" in allowed:
+            allowed["all_tools"] = allowed["all_tools"] is True
         if "tools" in allowed and isinstance(allowed["tools"], list):
             allowed["tools"] = tuple(str(item) for item in allowed["tools"])
         updated = agent.model_copy(update={**allowed, "updated_at": now_ms()})
@@ -1261,8 +1320,10 @@ class StudioService:
         await self._store.delete_where(
             CommandRequest, {"agent_id": agent_id, "status": "pending"}
         )
-        memories = await self._store.count(MemoryEntry, where={"agent_id": agent_id})
-        await self._store.delete_where(MemoryEntry, {"agent_id": agent_id})
+        memories = 0
+        for owner in (agent_id, server_area(agent_id)):
+            memories += await self._store.count(MemoryEntry, where={"agent_id": owner})
+            await self._store.delete_where(MemoryEntry, {"agent_id": owner})
         await self._store.delete(Agent, agent_id)
         self._console_extras = None
         return {
@@ -1891,6 +1952,8 @@ class StudioService:
                 return await self._knowledge_tool(call)
             case "agent_model":
                 return await self._agent_model_tool(call)
+            case "manage_agent":
+                return await self._manage_agent_tool(call)
             case "weather":
                 place = str(call.arguments.get("place") or "").strip()
                 if not place:
@@ -2208,6 +2271,99 @@ class StudioService:
                 + "."
             )
         return agent
+
+    async def _manage_agent_tool(self, call: ToolCall) -> ToolOutcome:
+        """The main AI's control over every agent: tools and memory."""
+        action = str(call.arguments.get("action") or "show").strip().lower()
+        spoken = str(call.arguments.get("agent") or "").strip()
+        if action == "show" and not spoken:
+            lines = []
+            for member in await self.agents():
+                if member.archived:
+                    continue
+                using = await self.tools_in_use(member)
+                where = (
+                    "server AI, own memory area"
+                    if await self.is_private_from(member)
+                    else "this PC"
+                )
+                lines.append(
+                    f"- {member.name} ({member.role}): {member.model}, {where}; "
+                    + (
+                        "every tool"
+                        if self.has_every_tool(member)
+                        else f"its own {len(using)} tools"
+                    )
+                    + f", about {tool_tokens(using):,} tokens of tools"
+                )
+            return ToolOutcome(
+                text="The team:\n" + "\n".join(lines),
+                data={"tool": "manage_agent", "action": "show"},
+            )
+        member = await self._find_team_member(spoken)
+        private = await self.is_private_from(member)
+        owner = server_area(member.id) if private else member.id
+        where = (
+            f"{member.name}'s own memory area" if private else f"{member.name}'s memory"
+        )
+        data: JsonObject = {
+            "tool": "manage_agent",
+            "action": action,
+            "agent": member.name,
+            "agent_id": member.id,
+        }
+        match action:
+            case "show":
+                entries = await self._memory().entries(owner)
+                text = (
+                    f"{member.name} ({member.role}) thinks with {member.model} "
+                    + ("on a server AI. " if private else "on this PC. ")
+                    + (
+                        "It has every tool. "
+                        if self.has_every_tool(member)
+                        else f"It has its own tools: {', '.join(member.tools)}. "
+                    )
+                    + (
+                        f"{where.capitalize()}:\n"
+                        + "\n".join(f"- {entry.text[:200]}" for entry in entries[:20])
+                        if entries
+                        else f"{where.capitalize()} is empty."
+                    )
+                )
+            case "every_tool_on" | "every_tool_off":
+                on = action == "every_tool_on"
+                await self.set_every_tool(member.id, on)
+                text = (
+                    f"{member.name} now has every tool."
+                    if on
+                    else f"{member.name} now uses only its own tools, which "
+                    "uses fewer tokens."
+                )
+                if on and not self.settings.studio_all_tools:
+                    text += (
+                        " Every Agent Gets Every Tool is off in Settings, so it "
+                        "takes effect when that is turned on."
+                    )
+            case "add_memory":
+                note = str(call.arguments.get("text") or "").strip()
+                if not note:
+                    raise ValueError("Say what to save.")
+                entry = await self._memory().remember(
+                    owner, note, source="main_ai", author="Jarvis"
+                )
+                if entry is None:
+                    raise ValueError("Nothing to save.")
+                await self._after_memory_change([owner])
+                text = f"Saved to {where}: {entry.text}"
+            case "forget":
+                removed = await self._memory().clear(owner)
+                await self._after_memory_change([owner])
+                text = f"Cleared {where} ({removed} memories)."
+            case _:
+                raise ValueError(
+                    "Use show, every_tool_on, every_tool_off, add_memory, or forget."
+                )
+        return ToolOutcome(text=text, data=data)
 
     async def _agent_model_tool(self, call: ToolCall) -> ToolOutcome:
         spoken = str(call.arguments.get("agent") or "").strip()
@@ -3665,11 +3821,22 @@ class StudioService:
         """Return one agent's memories."""
         return await self._memory().entries(agent_id, scope=scope)
 
+    async def clear_memory_area(self, agent_id: str) -> int:
+        """Empty the memory area an agent keeps while it runs on a server AI."""
+        await self._store.require(Agent, agent_id)
+        owner = server_area(agent_id)
+        removed = await self._memory().clear(owner)
+        await self._after_memory_change([owner])
+        return removed
+
     async def remember(
         self, agent_id: str, text: str, *, scope: str = "long_term"
     ) -> MemoryEntry | None:
         """Write one memory by hand; ``shared`` writes to the team memory."""
         if agent_id == SHARED_MEMORY_ID:
+            scope = "long_term"
+        elif agent_id.startswith(SERVER_AREA_PREFIX):
+            await self._store.require(Agent, agent_id.removeprefix(SERVER_AREA_PREFIX))
             scope = "long_term"
         else:
             await self._store.require(Agent, agent_id)

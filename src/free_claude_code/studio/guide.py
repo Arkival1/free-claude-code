@@ -837,8 +837,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
     ),
     GuideTopic(
         title="Every tool for every agent",
-        route="/studio#settings",
-        where="Settings, Studio, Every Agent Gets Every Tool (on by default).",
+        route="/studio#agents",
+        where=(
+            "Agents, Who gets every tool (a switch per agent), the Every tool "
+            "switch on an agent's page, or ask Jarvis. The master switch is "
+            "Every Agent Gets Every Tool in Settings, Studio."
+        ),
         terms=(
             "all tools",
             "every tool",
@@ -848,6 +852,10 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "give tools",
             "more tools",
             "tool list",
+            "who gets",
+            "tokens",
+            "token usage",
+            "fewer tokens",
         ),
         body=(
             "Every agent but the Guide can use every tool Studio has: building "
@@ -859,11 +867,40 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "(Jarvis to the Builder to the Researcher), never back to whoever "
             "gave it, and agents in a room hand over with @Name, so work never "
             "goes in circles. Agents on a server or cloud AI still get no "
-            "memory tools. Each agent's page lists the tools it really has; "
-            "turn the setting off to give each agent only its ticked tools. "
-            "The Guide keeps its few: it runs on the smallest model."
+            "memory tools. Each agent's page lists the tools it really has. "
+            "Every tool costs tokens: the tool list rides on every message "
+            "(about 4,000 tokens for every tool, far fewer for an agent's own), "
+            "so choose who gets every tool in Agents, Who gets every tool, "
+            "where each switch shows its cost, or tell Jarvis ('give the Tester "
+            "only its own tools'). New agents ask as you create them. Turn the "
+            "Settings switch off and nobody gets every tool. The Guide keeps "
+            "its few: it runs on the smallest model."
         ),
         asks=("How do I add an agent?", "Who can see my memory?"),
+    ),
+    GuideTopic(
+        title="Jarvis controls the team",
+        route="/studio#home",
+        where="Ask Jarvis on the HUD: 'show me the team', 'clear the Builder's memory'.",
+        terms=(
+            "control",
+            "manage",
+            "manage agents",
+            "jarvis control",
+            "in charge",
+            "boss",
+        ),
+        body=(
+            "Jarvis runs every agent. With manage_agent he shows the team (each "
+            "agent's model, whether it runs on this PC or a server, its tools, "
+            "and their token cost), shows what one agent remembers, gives an "
+            "agent every tool or only its own, and adds to or clears an agent's "
+            "memory, including a server agent's own memory area (he only puts "
+            "there what its job needs). He also hands out jobs, checks on them "
+            "with team_status, stops them with stop_agent, and switches models "
+            "with agent_model. Only Jarvis has manage_agent."
+        ),
+        asks=("Who gets every tool?", "Who can see my memory?"),
     ),
     GuideTopic(
         title="Delete an agent",
@@ -921,13 +958,24 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "memory bank",
             "who can see",
             "share",
+            "memory area",
+            "own memory",
+            "server memory",
+            "server agents",
+            "server agents have memory",
+            "cloud agents",
         ),
         body=(
             "Your memory bank, Obsidian vault, knowledge library, to-dos, and "
             "earlier conversations stay on this PC. Agents whose AI runs on a "
             "server or in the cloud cannot read any of it: they get no memory "
-            "notes, no memory tools, and no earlier chats, and Studio blocks "
-            "them if they try. Agents on this PC (LM Studio, Ollama, llama.cpp) "
+            "notes from it, no knowledge, to-do, or conversation tools, and no "
+            "earlier chats, and Studio blocks them if they try. Instead each "
+            "server agent has its own memory area: remember and recall work "
+            "only there, it only ever holds what that agent saved on a server "
+            "(or what Jarvis or you put there), and nobody else reads it. See "
+            "and clear it on the agent's page. Agents on this PC (LM Studio, "
+            "Ollama, llama.cpp) "
             "use memory as before. When you give a server agent a job through "
             "Jarvis, Jarvis (on this PC) writes it a briefing with only what the "
             "job needs from the conversation and memory, leaving out personal "

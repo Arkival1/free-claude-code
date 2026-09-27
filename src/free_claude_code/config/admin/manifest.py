@@ -1060,11 +1060,13 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         "boolean",
         settings_attr="studio_all_tools",
         description=(
-            "Every agent but the Guide can use every tool Studio has: files, "
+            "Agents chosen for every tool (Agents, Who gets every tool, or the "
+            "switch on each agent's page) can use every tool Studio has: files, "
             "code, commands (still with your approval), the web, research, "
             "videos, memory, to-dos, maths, weather, projects, the PC's status, "
-            "and handing parts of a job to teammates. Turn off to give each "
-            "agent only the tools ticked on its page."
+            "and handing parts of a job to teammates. Fewer tools use fewer "
+            "tokens on every message. Turn off to give every agent only the "
+            "tools ticked for it."
         ),
     ),
     ConfigFieldSpec(

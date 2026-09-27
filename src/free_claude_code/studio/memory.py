@@ -104,6 +104,18 @@ def _score(entry: MemoryEntry, terms: Sequence[str], *, now: int) -> float:
     return overlap + 0.5 * math.log1p(entry.hits) + recency
 
 
+SERVER_AREA_PREFIX = "server:"
+
+
+def server_area(agent_id: str) -> str:
+    """The memory owner for what an agent on a server AI keeps for itself.
+
+    It is apart from the agent's own memory on this PC and from the team's,
+    so a server AI only ever reads back what it saved while on a server.
+    """
+    return f"{SERVER_AREA_PREFIX}{agent_id}"
+
+
 class MemoryService:
     """Give each agent its own memory and, when enabled, a team memory."""
 
@@ -232,23 +244,34 @@ class MemoryService:
             agent_id, text, tags=tags, source=source, chat_id=chat_id
         )
 
-    def _owners(self, agent_id: str) -> tuple[str, ...]:
-        if self._shared and agent_id != SHARED_MEMORY_ID:
+    def _owners(self, agent_id: str, *, own_only: bool = False) -> tuple[str, ...]:
+        if (
+            self._shared
+            and not own_only
+            and agent_id != SHARED_MEMORY_ID
+            and not agent_id.startswith(SERVER_AREA_PREFIX)
+        ):
             return (agent_id, SHARED_MEMORY_ID)
         return (agent_id,)
 
     async def recall(
-        self, agent_id: str, query: str, *, limit: int | None = None
+        self,
+        agent_id: str,
+        query: str,
+        *,
+        limit: int | None = None,
+        own_only: bool = False,
     ) -> tuple[MemoryEntry, ...]:
         """Return the long-term memories most relevant to a query.
 
-        Agents recall from their own memory and, when it is on, the team's.
+        Agents recall from their own memory and, when it is on, the team's; a
+        server memory area only ever recalls from itself.
         """
         terms = keywords(query)
         if not terms:
             return ()
         candidates = await self._store.search_memory(
-            self._owners(agent_id), terms, limit=40
+            self._owners(agent_id, own_only=own_only), terms, limit=40
         )
         now = now_ms()
         ranked = sorted(

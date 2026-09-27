@@ -701,9 +701,17 @@ and it mirrors into Obsidian as a **Team memory** hub.
 **Keep Memory on This PC** in settings), only agents whose model runs on this
 PC (`local/…`, LM Studio, Ollama, llama.cpp) can use the memory bank. An agent
 on a server or cloud AI gets no memory notes, no taught skills, no recall of
-earlier conversations, and no `remember`, `recall`, `knowledge`,
-`video_notes`, `conversation`, `todo`, or `learn` tools; Studio refuses those
-calls even if the model tries. The Obsidian vault only reaches agents through
+earlier conversations, and no `knowledge`, `video_notes`, `conversation`,
+`todo`, or `learn` tools; Studio refuses those calls even if the model tries.
+
+**Server agents' own memory areas.** Each server agent gets a memory area of
+its own instead. Its `remember` and `recall` work only there, the memory note
+on its messages comes only from there, and it only ever holds what that agent
+saved while on a server, what Jarvis put there for it, or what you added. It
+never includes the team's memory, Obsidian, or what the agent remembered back
+when it ran on this PC, and no other agent reads it. The agent's page shows the
+area (**<name>'s own memory area**) where you can add notes, forget one, or
+clear it; deleting the agent deletes it too. The Obsidian vault only reaches agents through
 memory, so it stays private too. If a server agent's model has no key and it
 borrows the model loaded in LM Studio, it counts as local while it does.
 
@@ -1068,9 +1076,15 @@ agent. Start from a preset (Builder, Researcher, Helper, Designer, Tester,
 Assistant, or Custom), then set its name, role, and model, and choose its
 tools: Internet, Code and files, Run and test code, Ask teammates, and Memory.
 
-**Every agent gets every tool.** With **Every Agent Gets Every Tool**
-(`STUDIO_ALL_TOOLS`, on by default) every agent but the Guide can use all of
-Studio's tools, whatever is ticked on its page: files and code, `run_command`
+**Choose who gets every tool.** The tool list rides on every message an agent
+sends: about 4,000 tokens with every tool, often under half that with an
+agent's own tools. **Agents → Who gets every tool** has a switch per agent
+showing what each costs; the same **Every tool** switch is on each agent's
+page, the new-agent sheet asks, and Jarvis can do it (*"give the Tester only
+its own tools"*). Existing agents start with every tool. **Every Agent Gets
+Every Tool** (`STUDIO_ALL_TOOLS`, on by default) is the master switch: off, and
+nobody gets every tool. An agent with every tool (every agent but the Guide)
+can use all of Studio's tools, whatever is ticked on its page: files and code, `run_command`
 (still only when Agent Commands allows it, and with your approval),
 web search and deep research, videos, memory and knowledge, `todo`,
 `calculate`, `weather`, `list_projects`, `system_status`, `learn`,
@@ -1080,8 +1094,13 @@ a job is passed on at most twice (Jarvis to the Builder to the Researcher),
 never back to whoever gave it, and agents in a room hand over with `@Name`
 instead, so work never goes in circles. Agents on a server or cloud AI still
 get no memory tools. Each agent's page lists the tools it really has. The
-Guide keeps its own few because it runs on the smallest model. Turn the
-setting off to give each agent only the tools ticked for it.
+Guide keeps its own few because it runs on the smallest model.
+
+**Jarvis controls the team.** Only Jarvis has `manage_agent`: he shows the
+team (models, this PC or server, tools and their token cost), shows what one
+agent remembers, gives an agent every tool or only its own, and adds to or
+clears any agent's memory, a server agent's own memory area included, where he
+saves only what its job needs.
 
 To delete an agent, press 🗑 beside it on the Agents tab (or **Delete this
 agent** on its page) and confirm. It stops any work it is doing; its chats,

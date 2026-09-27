@@ -2684,3 +2684,24 @@ body[data-page="settings"] .view {
   border-left: 2px solid var(--good, #4ade80);
   padding-left: 10px;
 }
+
+.every-tool {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0;
+}
+.every-tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+}
+.every-tool-row .every-tool {
+  flex: 1 1 260px;
+  margin: 0;
+}
+.every-tool-row .pill {
+  margin-left: 8px;
+}

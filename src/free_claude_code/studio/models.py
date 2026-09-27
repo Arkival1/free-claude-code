@@ -88,6 +88,8 @@ class Agent(Record):
     archived: bool = False
     model_setting: str = ""
     """The Main AI Model setting this agent last followed (main AI only)."""
+    all_tools: bool = True
+    """Whether this agent gets every tool (when the setting allows it)."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 
