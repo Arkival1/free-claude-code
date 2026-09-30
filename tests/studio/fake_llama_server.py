@@ -13,6 +13,13 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
+def read_presets(path: str) -> configparser.ConfigParser:
+    presets = configparser.ConfigParser(strict=False)
+    with open(path, encoding="utf-8") as handle:
+        presets.read_string("[top]\n" + handle.read())
+    return presets
+
+
 def main() -> None:
     if "--list-devices" in sys.argv:
         print("Available devices:")
@@ -24,9 +31,7 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
-    presets = configparser.ConfigParser(strict=False)
-    with open(args.models_preset, encoding="utf-8") as handle:
-        presets.read_string("[top]\n" + handle.read())
+    presets = read_presets(args.models_preset)
     models = [name for name in presets.sections() if name not in {"top", "*"}]
     states = dict.fromkeys(models, "unloaded")
 
@@ -90,6 +95,18 @@ def main() -> None:
                 os._exit(3)
             if self.path == "/v1/chat/completions":
                 states[name] = "loaded"
+                # Like a real card, the settings change the speed: flash
+                # attention and a bigger reading batch help this one; a
+                # quantized context memory slows its writing.
+                now = read_presets(args.models_preset)
+                preset = now[name] if now.has_section(name) else {}
+                writing = 42.5 + (8.0 if preset.get("flash-attn") == "on" else 0.0)
+                writing -= 4.0 if preset.get("cache-type-k") == "q8_0" else 0.0
+                reading = {"1024": 400.0, "2048": 420.0}.get(
+                    str(preset.get("ubatch-size")), 250.0
+                )
+                if preset.get("flash-attn") == "off":
+                    writing -= 2.0
                 return self._send(
                     {
                         "model": name,
@@ -100,8 +117,8 @@ def main() -> None:
                             }
                         ],
                         "timings": {
-                            "prompt_per_second": 250.0,
-                            "predicted_per_second": 42.5,
+                            "prompt_per_second": reading,
+                            "predicted_per_second": writing,
                             "predicted_n": 5,
                         },
                     }

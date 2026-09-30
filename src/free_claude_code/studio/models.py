@@ -478,6 +478,8 @@ class EngineModelSettings(Record):
     kv_cache: str = "f16"
     threads: int = 0
     """CPU threads; 0 lets the engine choose."""
+    batch: int = 512
+    """Tokens read per step on the graphics card (llama.cpp's ubatch)."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 

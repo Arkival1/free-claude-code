@@ -553,6 +553,8 @@ change:
 - **Flash attention**: auto, on, or off.
 - **Memory for context**: full quality, q8 (half the memory), or q4.
 - **CPU threads**: 0 lets llama.cpp choose.
+- **Reading batch**: how many tokens it reads per step (512 standard; bigger
+  reads long agent prompts faster on many cards, for a little more memory).
 
 The memory estimate updates as you change these, before saving. The engine
 finds your graphics card itself (`llama-server --list-devices`) and uses its
@@ -568,6 +570,27 @@ so runs on the processor), when it stopped unexpectedly (and why: a busy port,
 say), when a model failed to load or doesn't fit, when a card can't use
 compressed context memory, and when LM Studio is also running and may be
 holding graphics memory.
+
+**Make it fastest.** Press **⚡ Make it fastest** on a model and Studio tunes
+it by measuring instead of guessing: it times a real reply (about a thousand
+tokens read, 128 written) with your settings now, then with flash attention on
+and off, bigger reading batches, full or q8 context memory, and, for a model
+that doesn't fit whole, more layers on the graphics card. A change is kept only
+when it makes a typical agent turn at least 3% faster, the winner is saved for
+every agent on that model, and the card shows each try with its tokens per
+second. It also says what would help beyond settings: a Q8 or F16 file of the
+same model as Q4_K_M writes about 1.8x or 3.3x faster, and a model that doesn't
+fit on the card is held back most by the part on the processor. Agents using
+the model wait a few seconds each time it reloads. The engine also keeps its
+reading of each agent's instructions between turns (prompt caching with
+`cache-reuse`), so only the new part of a conversation is read each time.
+
+How fast is possible depends on the card: writing speed is roughly the card's
+memory speed divided by the model file's size. A 4B model at Q4_K_M (about
+2.5 GB) writes roughly 40 to 60 tokens a second on an RX 580 8 GB, 80 to 100
+on an RTX 3060, and 150 or more on an RTX 4090; a 0.6 to 1B model can pass 150
+on a mid-range card. LM Studio runs the same llama.cpp engine, so it is no
+faster at the same settings.
 
 **Add any file.** Drop a file on the box at the top of **Models on this PC**
 (or tap it to choose one). Studio reads the first bytes and says what it is

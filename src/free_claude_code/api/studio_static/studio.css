@@ -2791,3 +2791,11 @@ h3.subhead {
   display: grid;
   gap: 6px;
 }
+
+/* Model Control: Make it fastest */
+.speed-hunt { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: rgba(255, 200, 97, 0.06); }
+.speed-hunt.good { border-left-color: var(--good); background: rgba(77, 255, 166, 0.06); }
+.speed-hunt.bad { border-left-color: var(--bad); }
+.speed-trials { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+.speed-trials li.won { color: var(--good); font-weight: 600; }
+.speed-advice { color: var(--accent); }

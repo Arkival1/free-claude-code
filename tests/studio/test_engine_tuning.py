@@ -184,3 +184,50 @@ async def test_tune_through_the_routes(make_studio, tmp_path):
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="runs a POSIX script as the engine")
+@pytest.mark.asyncio
+async def test_make_it_fastest_measures_each_setting_and_keeps_the_best(
+    tmp_path, studio_settings
+):
+    studio = engine_studio(tmp_path, studio_settings, port=free_port())
+    name = "qwen2.5-coder-1.5b-instruct"
+    try:
+        started = await studio.engine_find_fastest(name)
+        assert started["model"] == name
+        for _ in range(400):
+            hunt = (await studio.engine_status())["models"][0]["speed_hunt"]
+            if hunt and hunt["state"] != "running":
+                break
+            await asyncio.sleep(0.05)
+        assert hunt["state"] == "done", hunt
+        labels = [trial["label"] for trial in hunt["trials"]]
+        assert labels[0] == "Your settings now"
+        assert "Flash attention on" in labels and "Reading batch 1024" in labels
+        # On this card flash attention and a bigger batch win; q8 memory loses.
+        settings = hunt["best"]["settings"]
+        assert settings["flash_attention"] == "on"
+        assert settings["batch"] in {1024, 2048}
+        assert settings["kv_cache"] == "f16"
+        assert hunt["best"]["predicted_per_second"] == 50.5
+        assert hunt["best"]["turn_seconds"] < hunt["before"]["turn_seconds"]
+        saved = (await studio.engine_status())["models"][0]
+        assert not saved["auto"] and saved["settings"]["flash_attention"] == "on"
+        presets = studio._engine.presets_path.read_text()
+        assert "flash-attn = on" in presets and "ubatch-size = " in presets
+        assert "cache-reuse = 256" in presets
+    finally:
+        await studio.shutdown()
+
+
+def test_advice_on_slow_files():
+    from free_claude_code.studio.engine_speed import quant_advice, split_advice
+    from free_claude_code.studio.models import EngineModelSettings
+
+    assert "about 3.3x smaller" in quant_advice("F16")
+    assert "about 1.8x" in quant_advice("q8_0")
+    assert quant_advice("Q4_K_M") == "" and quant_advice("Q3_K_S") == ""
+    split = EngineModelSettings(id="big", gpu_layers=30)
+    assert "Only 30 of 48 layers" in split_advice(split, 48)
+    assert split_advice(EngineModelSettings(id="small"), 28) == ""

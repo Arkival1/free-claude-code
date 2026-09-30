@@ -787,6 +787,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "can see images",
             "run ai faster",
             "smoother",
+            "fastest",
+            "make it fastest",
+            "tokens per second",
+            "tokens a second",
+            "too slow",
+            "faster",
         ),
         body=(
             "Model Control is LM Studio inside Studio. Press Install engine once: "
@@ -811,7 +817,14 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "words when the card is not being used, the engine crashed, a model "
             "failed to load or is too big, or LM Studio is holding memory too. "
             "A driver update is not needed: the speed comes from these settings "
-            "and the model's size."
+            "and the model's size. Make it fastest does the tuning by "
+            "measuring: it tries flash attention on and off, bigger reading "
+            "batches, context memory types, and (for a model that doesn't fit "
+            "whole) more layers on the card, times a real reply for each on "
+            "your card, keeps the fastest, and says what else would help, such "
+            "as a Q4_K_M file instead of Q8 or F16. The top speed is set by the "
+            "card: a 4B model at Q4_K_M writes roughly 40 to 60 tokens a second "
+            "on an RX 580 and over 100 on a fast NVIDIA card."
         ),
         asks=("How do I give each agent its own model?", "How do I set up LM Studio?"),
     ),

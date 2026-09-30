@@ -2484,7 +2484,9 @@
       folders,
       logs
     );
-    const busy = installing || data.models.some((model) => model.state === "loading");
+    const busy =
+      installing ||
+      data.models.some((model) => model.state === "loading" || (model.speed_hunt && model.speed_hunt.state === "running"));
     engineTimer = setTimeout(() => {
       if (generation === renderGeneration && location.hash === "#engine") render();
     }, busy ? 1500 : 6000);
@@ -2547,6 +2549,9 @@
       ["f16", "Full quality"], ["q8_0", "Half the memory (q8)"], ["q4_0", "Quarter memory (q4)"],
     ].map(([value, text]) => el("option", { value, text, selected: settings.kv_cache === value })));
     const threads = el("input", { type: "number", min: "0", max: "256", value: String(settings.threads), "aria-label": `CPU threads for ${model.name}` });
+    const batch = el("select", { "aria-label": `Reading batch for ${model.name}` }, [256, 512, 1024, 2048].map((size) =>
+      el("option", { value: String(size), text: size === 512 ? "512 (standard)" : String(size), selected: (settings.batch || 512) === size })
+    ));
     const save = el("button", {
       class: "primary",
       type: "button",
@@ -2559,6 +2564,7 @@
             flash_attention: flash.value,
             kv_cache: kv.value,
             threads: Number(threads.value) || 0,
+            batch: Number(batch.value),
           })
         ),
     });
@@ -2623,7 +2629,19 @@
           })
         : null,
       model.advice ? el("small", { class: "muted", text: `Best for your PC: ${model.advice}` }) : null,
+      speedHuntView(model.speed_hunt),
       el("div", { class: "row" }, [
+        el("button", {
+          class: "primary",
+          type: "button",
+          text: "⚡ Make it fastest",
+          "aria-label": `Make ${model.name} run as fast as it can`,
+          disabled: !data.installed || (model.speed_hunt && model.speed_hunt.state === "running"),
+          onclick: () =>
+            act(`Finding the fastest settings for ${model.name}`, () =>
+              post(`/studio/api/engine/models/${encodeURIComponent(model.name)}/fastest`)
+            ),
+        }),
         el("button", {
           class: "secondary",
           type: "button",
@@ -2666,8 +2684,45 @@
         el("label", {}, ["Flash attention", flash]),
         el("label", {}, ["Memory for context", kv]),
         el("label", {}, ["CPU threads (0 = automatic)", threads]),
+        el("label", {}, ["Reading batch (bigger reads long prompts faster, uses a little more memory)", batch]),
         save,
       ]),
+    ]);
+  }
+
+  // "Make it fastest": each setting tried on this card, and what won.
+  function speedHuntView(hunt) {
+    if (!hunt) return null;
+    const writing = (trial) => (trial && trial.predicted_per_second ? `${trial.predicted_per_second} tokens/s` : "—");
+    if (hunt.state === "running") {
+      return el("div", { class: "speed-hunt", role: "status" }, [
+        el("strong", { text: `Finding the fastest settings… ${hunt.done} of ${hunt.total}` }),
+        meter(hunt.total ? hunt.done / hunt.total : 0),
+        el("small", { class: "muted", text: `Trying: ${hunt.step}. Agents using this model wait a few seconds while it reloads.` }),
+      ]);
+    }
+    if (hunt.state === "failed") {
+      return el("div", { class: "speed-hunt bad", role: "status" }, [el("strong", { text: "Couldn't time it" }), el("small", { text: hunt.error })]);
+    }
+    const best = hunt.best || {};
+    const before = hunt.before || {};
+    const gain = before.predicted_per_second && best.predicted_per_second
+      ? Math.round((best.predicted_per_second / before.predicted_per_second - 1) * 100)
+      : 0;
+    return el("div", { class: "speed-hunt good", role: "status" }, [
+      el("strong", {
+        text: `Fastest on your card: ${writing(best)} writing, ${Math.round(best.prompt_per_second || 0)} tokens/s reading${gain > 0 ? ` (${gain}% faster writing than before)` : ""}. Saved.`,
+      }),
+      el("details", {}, [
+        el("summary", { text: "What it tried" }),
+        el("ul", { class: "speed-trials" }, hunt.trials.map((trial) =>
+          el("li", { class: trial === hunt.best || trial.label === best.label ? "won" : "" }, [
+            el("span", { text: trial.label }),
+            el("span", { class: "muted", text: trial.failed ? ` — didn't load: ${trial.failed}` : ` — ${writing(trial)} writing · ${Math.round(trial.prompt_per_second || 0)} reading · ${trial.turn_seconds}s per turn` }),
+          ])
+        )),
+      ]),
+      ...hunt.advice.map((text) => el("small", { class: "speed-advice", text: `Faster still: ${text}` })),
     ]);
   }
 

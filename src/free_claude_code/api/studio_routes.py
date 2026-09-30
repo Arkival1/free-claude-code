@@ -1313,6 +1313,17 @@ async def engine_benchmark(
     return dict(await studio.engine_benchmark(name))
 
 
+@router.post("/studio/api/engine/models/{name}/fastest", status_code=202)
+async def engine_find_fastest(
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Try the settings that change speed on this card and keep the fastest;
+    progress shows on the model in the engine status."""
+    return await studio.engine_find_fastest(name)
+
+
 @router.post("/studio/api/engine/identify")
 async def engine_identify(
     request: Request,

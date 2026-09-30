@@ -985,6 +985,34 @@ class StudioService:
         self._loaded_probe = None
         return result
 
+    async def engine_find_fastest(self, name: str) -> JsonObject:
+        """Search for the model's fastest settings in the background."""
+        models = await self._engine.models()
+        if name not in {model.name for model in models}:
+            raise StudioError(f"No model called {name} on this PC.")
+        if self._engine.binary() is None:
+            raise StudioError(
+                "The built-in engine is not installed yet. Press Install engine."
+            )
+        hunt = self._engine.speed_hunts.get(name)
+        if hunt is not None and hunt.state == "running":
+            return hunt.view()
+
+        async def search() -> None:
+            try:
+                await self._engine.find_fastest(name)
+            except EngineError as error:
+                logger.warning("Studio: the speed search stopped: {}", error)
+            finally:
+                self._loaded_probe = None
+
+        self.spawn(search())
+        await asyncio.sleep(0)
+        found = self._engine.speed_hunts.get(name)
+        return (
+            found.view() if found is not None else {"model": name, "state": "running"}
+        )
+
     def engine_install(self) -> JsonObject:
         """Download the engine in the background; progress shows in the status."""
 

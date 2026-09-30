@@ -9,6 +9,7 @@ adds, so nothing has to be downloaded twice.
 """
 
 import asyncio
+import contextlib
 import os
 import platform
 import re
@@ -31,6 +32,20 @@ from loguru import logger
 
 from free_claude_code.core.json_types import JsonObject, JsonValue
 
+from .engine_speed import (
+    BATCH_CHOICES,
+    BETTER_BY,
+    DEFAULT_BATCH,
+    STAGES,
+    SpeedHunt,
+    alternatives,
+    filler_prompt,
+    plan_size,
+    quant_advice,
+    record,
+    split_advice,
+    turn_seconds,
+)
 from .engine_tuning import Device, diagnose, parse_devices, suggest_settings
 from .gguf_info import GGUFError, GGUFInfo, estimate_memory, read_gguf_info
 from .model_inspect import HEAD_BYTES, file_advice, identify, model_report
@@ -145,6 +160,9 @@ def presets_text(
         "",
         "[*]",
         "jinja = true",
+        # Reuse cached reading of a prompt even when a middle part changed
+        # (a new memory note), instead of reading it all again.
+        "cache-reuse = 256",
         "",
     ]
     for model in models:
@@ -160,6 +178,9 @@ def presets_text(
             lines.append(f"cache-type-v = {chosen.kv_cache}")
         if chosen.threads > 0:
             lines.append(f"threads = {chosen.threads}")
+        if chosen.batch != DEFAULT_BATCH:
+            lines.append(f"ubatch-size = {chosen.batch}")
+            lines.append(f"batch-size = {max(2048, chosen.batch)}")
         lines.append("")
     return "\n".join(lines)
 
@@ -199,6 +220,7 @@ class Engine:
         self.crashed = ""
         """Why the engine stopped when nobody asked it to, until it starts again."""
         self.benchmarks: dict[str, dict[str, float]] = {}
+        self.speed_hunts: dict[str, SpeedHunt] = {}
         self.install_state = InstallState()
 
     # ---------------------------------------------------------------- places
@@ -526,8 +548,12 @@ class Engine:
         await self._reload([str(item["name"]) for item in done])
         return done
 
-    async def benchmark(self, name: str) -> dict[str, float]:
-        """Load one model and time a short reply: reading and writing speed."""
+    async def benchmark(self, name: str, *, long: bool = False) -> dict[str, float]:
+        """Load one model and time a reply: reading and writing speed.
+
+        long reads about a thousand tokens first, like an agent's turn, so
+        the reading speed is measured on a realistic prompt.
+        """
         if name not in {model.name for model in await self.models()}:
             raise EngineError(f"No model called {name} on this PC.")
         await self.load(name)
@@ -537,8 +563,10 @@ class Engine:
                 raise EngineError(f"{name} did not load; the Engine log shows why.")
             await asyncio.sleep(0.5)
         prompt = (
-            "Write a short paragraph about why fresh bread smells good, then list "
-            "three tips for keeping it fresh."
+            filler_prompt()
+            if long
+            else "Write a short paragraph about why fresh bread smells good, then "
+            "list three tips for keeping it fresh."
         )
         started = time.monotonic()
         try:
@@ -551,6 +579,10 @@ class Engine:
                     "max_tokens": 128,
                     "temperature": 0,
                     "cache_prompt": False,
+                    # Always write all 128 tokens, so the speed is measured
+                    # on the same amount of writing every time.
+                    "ignore_eos": True,
+                    "chat_template_kwargs": {"enable_thinking": False},
                 },
                 timeout=300.0,
             )
@@ -568,6 +600,104 @@ class Engine:
         result["seconds"] = round(time.monotonic() - started, 1)
         self.benchmarks[name] = result
         return result
+
+    async def find_fastest(self, name: str) -> SpeedHunt:
+        """Try the settings that change speed on this card and keep the best.
+
+        Each try reloads the model and times a real reply; a setting is kept
+        only when it makes a typical agent turn faster. The winner is saved,
+        so every agent on the model uses it from then on.
+        """
+        models = {model.name: model for model in await self.models(fresh=True)}
+        model = models.get(name)
+        if model is None:
+            raise EngineError(f"No model called {name} on this PC.")
+        if self.binary() is None:
+            raise EngineError(
+                "The built-in engine is not installed yet. Press Install on "
+                "Model Control."
+            )
+        running = self.speed_hunts.get(name)
+        if running is not None and running.state == "running":
+            return running
+        saved = (await self.model_settings()).get(name)
+        suggestion, _ = suggest_settings(
+            name, model.info, size=model.size, gpu_gb=await self.budget_gb()
+        )
+        start = saved or suggestion
+        layers = model.info.layers or 0
+        hunt = SpeedHunt(model=name, total=plan_size(start, layers))
+        self.speed_hunts[name] = hunt
+
+        async def timed(label: str, settings: EngineModelSettings) -> float | None:
+            hunt.step = label
+            await self._store.put(settings.model_copy(update={"updated_at": now_ms()}))
+            try:
+                await self._reload([name])
+                result = await self.benchmark(name, long=True)
+            except EngineError as error:
+                hunt.trials.append(record(label, settings, None, str(error)))
+                hunt.done += 1
+                return None
+            hunt.trials.append(record(label, settings, result))
+            hunt.done += 1
+            return turn_seconds(result)
+
+        best = start
+        best_time = await timed("Your settings now", start)
+        if best_time is not None:
+            hunt.before = hunt.trials[-1]
+        try:
+            for stage in STAGES:
+                for label, change in alternatives(stage, best, layers=layers):
+                    trying = best.model_copy(update=change)
+                    took = await timed(label, trying)
+                    if took is not None and (
+                        best_time is None or took * BETTER_BY < best_time
+                    ):
+                        best, best_time = trying, took
+        finally:
+            if best_time is None:
+                # Nothing ran: put back what was there.
+                if saved is not None:
+                    await self._store.put(saved)
+                else:
+                    await self._store.delete(EngineModelSettings, name)
+            else:
+                await self._store.put(best.model_copy(update={"updated_at": now_ms()}))
+            with contextlib.suppress(EngineError, httpx.HTTPError):
+                await self._reload([name])
+        if best_time is None:
+            hunt.state = "failed"
+            hunt.error = (
+                str(hunt.trials[0].get("failed") or "The model did not load.")
+                if hunt.trials
+                else "The model did not load."
+            )
+            hunt.step = "Could not time it"
+            return hunt
+        hunt.best = next(
+            (
+                trial
+                for trial in hunt.trials
+                if trial.get("settings")
+                == best.model_dump(exclude={"id", "created_at", "updated_at"})
+                and "failed" not in trial
+            ),
+            None,
+        )
+        quant = _QUANT.search(_SHARD.sub("", model.path.stem))
+        hunt.advice = [
+            text
+            for text in (
+                split_advice(best, layers),
+                quant_advice(quant.group(1)) if quant else "",
+            )
+            if text
+        ]
+        hunt.state = "done"
+        hunt.step = "Saved the fastest settings"
+        return hunt
 
     async def _reload(self, names: Sequence[str]) -> None:
         """Write the presets and reload any of these models that are loaded."""
@@ -616,6 +746,15 @@ class Engine:
             update["kv_cache"] = _choice(values["kv_cache"], KV_CHOICES, "KV cache")
         if "threads" in values:
             update["threads"] = max(0, min(256, _whole(values["threads"], "Threads")))
+        if "batch" in values:
+            batch = _whole(values["batch"], "Reading batch")
+            if batch not in BATCH_CHOICES:
+                raise EngineError(
+                    "Reading batch must be one of "
+                    + ", ".join(str(choice) for choice in BATCH_CHOICES)
+                    + "."
+                )
+            update["batch"] = batch
         saved = current.model_copy(update=update)
         await self._store.put(saved)
         await self._reload([name])
@@ -850,6 +989,9 @@ class Engine:
                     "fits": estimate["gpu_gb"] <= gpu_budget_gb,
                     "speed": speeds.get(model.name, {}),
                     "benchmark": self.benchmarks.get(model.name, {}),
+                    "speed_hunt": self.speed_hunts[model.name].view()
+                    if model.name in self.speed_hunts
+                    else None,
                     "capabilities": {
                         "tools": model.info.tools,
                         "vision": model.vision is not None,
