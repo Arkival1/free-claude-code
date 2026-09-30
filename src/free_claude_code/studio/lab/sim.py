@@ -14,8 +14,8 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from . import LabData
 from .chemicals import HAZARDS, Chemical, resolve
+from .data import LabData
 from .elements import FLAME_COLOURS
 from .formula import FormulaError, molar_mass, pretty
 
@@ -855,7 +855,9 @@ def _redox(mix: Mix) -> None:
         mix.gas("O2", "oxygen", moles / 2, "#ffffff")
         mix.make("H2O", "water", moles, "liquid")
         mix.heat_kj += 98 * moles
-        catalyst = catalysts[0].chemical.name.lower() if catalysts else "heat"
+        catalyst = (
+            catalysts[0].chemical.name.split(" (")[0].lower() if catalysts else "heat"
+        )
         mix.react(
             "2H₂O₂(aq) → 2H₂O(l) + O₂↑",
             "decomposition",

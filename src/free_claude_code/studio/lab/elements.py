@@ -7,7 +7,7 @@ lanthanides and actinides drawn in their own rows below it.
 
 from dataclasses import dataclass
 
-from . import LabData
+from .data import LabData
 
 # number, symbol, name, mass, category, group (0 = f-block), period, state
 _TABLE = """

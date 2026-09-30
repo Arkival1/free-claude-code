@@ -1,7 +1,8 @@
 """What the agents read back from the Lab: short, factual summaries."""
 
-from . import LabData, chemicals, materials, tech
+from . import chemicals, materials, tech
 from .bench import LabBench
+from .data import LabData
 from .elements import BY_SYMBOL, ELEMENTS
 from .formula import pretty
 from .sim import LabError

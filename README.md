@@ -490,6 +490,15 @@ to llama 3.1 8b"*, *"use gemma for the Guide"*; he switches it at once, and his
 the agent borrows the loaded one; Team brains and the HUD say which it is
 really using.
 
+**Who thinks where.** Studio starts the team split in two: Jarvis, the
+Guide, and the Helper think on this PC (the Helper shares Jarvis's local
+model), and the Builder, Researcher, and Tester think on a server AI (the
+Studio default model when it is a server model, otherwise the proxy's
+`MODEL`). Jarvis directs everyone: he hands the server agents jobs with a
+briefing, checks on them, and stops or re-tools them. Existing installs are
+moved to this layout once; after that, any change you make in Team brains
+sticks. Class students keep their own models.
+
 **Which brain for the Builder?** The templates, photos, and checks help any
 model, but a whole multi-page site is a lot of careful writing. A small
 model (the 0.5–3B ones that fit a phone, or a 7B on an 8 GB graphics card)
@@ -774,6 +783,68 @@ height), uses your notes as facts, and only fills gaps with free stock
 photos. Your own photos need no credit line. iPhone HEIC photos open in FCC
 Phone; on the PC, send them as JPEG (iPhone: Settings → Camera → Formats →
 Most Compatible).
+
+</details>
+
+<details>
+<summary><strong>The Lab: mix, make, forge, and build with real results</strong></summary>
+
+Open **Lab** in the tab bar (or the HUD menu). It is a science sandbox that
+works like a game but answers with real chemistry and physics. Benches run
+along the top, and the **Lab chat** with Jarvis sits on the right.
+
+- **Chemistry.** The shelf holds about 130 real chemicals (acids, bases, salts,
+  metals, oxidisers, indicators, household products, oils, soaps, cosmetic
+  ingredients) plus all 118 elements. Tap a bottle, or drag it, and it pours
+  into the beaker; set the millilitres or grams, then press **Mix**. **Heat**
+  and **Flame test** are switches. The bench animates what really happens:
+  the colour change, bubbles of gas, a precipitate clouding and settling in
+  its true colour (lead nitrate + potassium iodide rains bright yellow), foam
+  (elephant toothpaste erupts over the top), heat or cold on the thermometer,
+  the pH meter, oil floating in a layer, a coloured flame. Underneath are the
+  balanced equations, what you would see, what was made (in grams), what is
+  still dissolved, and safety warnings. The rules cover neutralisation (with
+  its heat), carbonates fizzing, metals in acid and in water, precipitation by
+  the solubility rules, metal displacement, ammonia complexes, catalysed
+  peroxide, bleach mixes, starch-iodine, permanganate, indicators, dissolving
+  heat and saturation, saponification (soap), slime, curdling, emulsions, and
+  what heating does to crystals, baking soda, and sugar. Not on the shelf?
+  Type any name under **Look it up**: the Lab learns it from PubChem (formula
+  and molar mass) and keeps it. When a mix goes beyond the rules, the Lab's
+  AI (a server model) predicts it, labelled **AI prediction**.
+- **Make.** Type *shampoo* (or tap one of 17 products: conditioner, body
+  wash, hand soap, cold-process bar soap, toothpaste, the WHO hand sanitiser,
+  lotion, lip balm, dish soap, bath bomb, slime, candle, perfume, mineral sun
+  cream, glass cleaner, elephant toothpaste). You get the real formula with
+  every ingredient, its percentage and grams for the batch, and why it's
+  there; the bottle shows each ingredient as a layer inside it (**Show it
+  mixed** blends them); tap any ingredient to see its molecule and elements,
+  and the whole product is broken down element by element. Anything without a
+  recipe is written by the Lab's AI from the shelf. Products with a reaction
+  (bath bomb, slime) have **Test it on the bench**.
+- **Materials.** Pick materials (metals, alloys, plastics, ceramics,
+  composites, woods, fibres, semiconductors), set the percentages, and
+  **Forge**. Known recipes become the real alloy (88% copper + 12% tin is
+  bronze; iron with 0.25% carbon is mild steel); anything else is estimated
+  with the rule of mixtures and says so. Then run the **pull**, **float**,
+  **heat**, and **electric** test rigs.
+- **Tech.** Put batteries, LEDs, motors, fans, sensors, microcontrollers,
+  regulators, and more on the board and press **Power on**: it works out the
+  voltage, the resistor each LED needs, the current, how long the battery
+  lasts, and what would burn out, won't switch on, or needs a driver, and
+  lights, spins, or smokes each part to match. Nine ready builds (flashlight,
+  power bank, weather station, robot car, plant waterer…) are one tap away.
+- **Elements** is the periodic table: tap an element for its facts, flame
+  colour, and uses, and add it to the beaker. **Made** keeps everything you
+  and the agents made.
+
+In the **Lab chat**, say *"Hey Jarvis, make a shampoo"*: Jarvis uses his `lab`
+tool, the bench shows the result as it arrives, and he tells you what's inside.
+He can mix, forge, build, and look things up the same way, and he can still
+search the web, run deep research, learn a topic, and study videos when he
+needs to know more. The Lab refuses weapons, explosives, drugs, and poisons;
+dangerous household mixes (bleach with acid or ammonia) still simulate, with
+the warning, so you know never to do them.
 
 </details>
 

@@ -3,7 +3,7 @@
 import re
 from collections import defaultdict
 
-from . import LabData
+from .data import LabData
 from .elements import BY_SYMBOL
 
 _TOKEN = re.compile(r"([A-Z][a-z]?)|(\d+(?:\.\d+)?)|([()\[\]])|([·.*+])")

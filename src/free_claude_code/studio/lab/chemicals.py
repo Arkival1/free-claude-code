@@ -8,7 +8,7 @@ and its hazards. Anything not here can be looked up on PubChem.
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import LabData
+from .data import LabData
 from .formula import FormulaError, molar_mass
 
 HAZARDS = {

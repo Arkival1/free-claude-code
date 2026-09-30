@@ -54,6 +54,8 @@ _ASSET_FILENAMES = frozenset(
     {
         "studio.css",
         "studio.js",
+        "lab.css",
+        "lab.js",
         "icon.svg",
         "icon-180.png",
         "icon-192.png",

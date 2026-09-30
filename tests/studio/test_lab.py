@@ -213,6 +213,7 @@ def test_tests_colours_and_heat():
 def test_shampoo_lists_every_ingredient_and_element():
     assert recipes.product_key("hey jarvis make a shampoo") == "shampoo"
     assert recipes.product_key("sun cream") == "sunscreen"
+    assert recipes.product_key("Elephant toothpaste (demo)") == "elephant-toothpaste"
     assert recipes.build_key("a torch") == "flashlight"
     shampoo = recipes.template_product("shampoo")
     percents = [row["percent"] for row in shampoo["ingredients"]]

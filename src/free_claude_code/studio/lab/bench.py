@@ -15,8 +15,9 @@ from loguru import logger
 from ..jsonish import extract_object
 from ..models import LabChemical, LabProject, now_ms
 from ..store import StudioStore
-from . import LabData, chemicals, materials, recipes, tech
+from . import chemicals, materials, recipes, tech
 from .chemicals import Chemical
+from .data import LabData
 from .elements import ELEMENTS
 from .pubchem import PubChemError, lookup
 from .safety import refusal

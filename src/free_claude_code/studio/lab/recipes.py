@@ -9,8 +9,8 @@ element. Tech builds are lists of parts for the circuit bench.
 import re
 from collections import defaultdict
 
-from . import LabData
 from .chemicals import TYPICAL, Chemical, resolve
+from .data import LabData
 from .elements import BY_SYMBOL
 from .formula import FormulaError, parse
 from .sim import blend
@@ -548,7 +548,8 @@ def _key(text: str, table: dict[str, LabData], aliases: dict[str, str]) -> str |
     for alias, key in sorted(aliases.items(), key=lambda pair: -len(pair[0])):
         if re.search(rf"\b{re.escape(alias)}\b", wanted):
             return key
-    for key, entry in table.items():
+    # The longest match wins: "elephant toothpaste" before "toothpaste".
+    for key, entry in sorted(table.items(), key=lambda pair: -len(pair[0])):
         if key.replace("-", " ") in wanted or str(entry["name"]).lower() in wanted:
             return key
     return None

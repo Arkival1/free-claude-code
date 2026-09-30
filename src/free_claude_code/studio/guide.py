@@ -622,6 +622,52 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="The Lab",
+        route="/studio#lab",
+        where=(
+            "Lab in the tab bar (or MENU, Lab). Benches along the top: "
+            "Chemistry, Make, Materials, Tech, Elements, Made; the Lab chat "
+            "is on the right."
+        ),
+        terms=(
+            "lab",
+            "chemistry",
+            "chemical",
+            "chemicals",
+            "mix",
+            "beaker",
+            "element",
+            "elements",
+            "periodic table",
+            "shampoo",
+            "soap",
+            "ingredients",
+            "material",
+            "alloy",
+            "circuit",
+            "electronics",
+            "synthesise",
+            "synthesize",
+        ),
+        body=(
+            "The Lab is a science sandbox with real results. Chemistry: tap or "
+            "drag bottles from the shelf into the beaker, set amounts, and press "
+            "Mix; Heat and Flame test are toggles. It shows colour changes, "
+            "bubbles, precipitates, foam, heat, pH, the balanced equations, and "
+            "safety warnings. Any chemical not on the shelf can be looked up "
+            "(from PubChem). Make: type 'shampoo' or tap a chip; it lists every "
+            "ingredient with its molecule, shows each one as a layer inside the "
+            "bottle, and breaks the product down element by element. Materials: "
+            "blend metals, plastics, and more, then run pull, float, heat, and "
+            "electric tests. Tech: put parts on the board and Power on; it works "
+            "out volts, resistors, runtime, and what would burn out. Elements: "
+            "all 118, tap one for its facts. Made keeps what you and the agents "
+            "made. In the Lab chat, say 'Hey Jarvis, make a shampoo' and he "
+            "makes it on the bench while you watch. The Lab won't make weapons, "
+            "explosives, drugs, or poisons."
+        ),
+    ),
+    GuideTopic(
         title="Learn mode",
         route="/studio#more",
         where=(

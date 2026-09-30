@@ -3,7 +3,7 @@
   "use strict";
 
   const TOKEN_KEY = "fcc.studio.token";
-  const TAB_ROUTES = ["home", "chats", "agents", "learn", "more"];
+  const TAB_ROUTES = ["home", "chats", "agents", "lab", "learn", "more"];
   const POLL_MS = 2500;
   const HIDDEN_POLL_MS = 10000;
 
@@ -4838,6 +4838,7 @@
     ["Command Center", "home", "◈"],
     ["Agents", "agents", "◎"],
     ["Chats", "chats", "◌"],
+    ["Lab", "lab", "⚗"],
     ["Classroom", "learn", "✎"],
     ["Models", "models", "▣"],
     ["Model Control", "engine", "⚡"],
@@ -6002,6 +6003,7 @@
         case "tune": return await renderTuning(id);
         case "job": return await renderJob(id);
         case "lora": return await renderLoraJob(id);
+        case "lab": return await renderLab(generation);
         case "more": return await renderMore();
         case "settings": return await renderSettings();
         default: return go("home");
@@ -6012,6 +6014,21 @@
         error instanceof OfflineError ? offlineCard() : errorCard(error)
       );
     }
+  }
+
+  // The Lab lives in lab.js; it gets the same helpers as every page.
+  async function renderLab(generation) {
+    if (!window.FCCLab) throw new Error("The Lab didn't load. Reload the page.");
+    await window.FCCLab.render({
+      view,
+      el,
+      api,
+      post,
+      remove,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
   }
 
   function connectCard(connect) {
@@ -6232,6 +6249,7 @@
         tune: "Tuning",
         job: "Tuning run",
         lora: "LoRA training",
+        lab: "Lab",
         more: "More",
         settings: "Settings",
       }[name] || "Studio"

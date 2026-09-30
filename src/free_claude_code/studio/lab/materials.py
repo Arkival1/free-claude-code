@@ -7,7 +7,7 @@ mixtures (with its honest limits) when it doesn't.
 
 from dataclasses import dataclass
 
-from . import LabData
+from .data import LabData
 
 
 @dataclass(frozen=True, slots=True)
