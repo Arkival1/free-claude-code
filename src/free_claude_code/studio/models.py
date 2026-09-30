@@ -513,3 +513,11 @@ class Photo(Record):
     chat_id: str | None = None
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
+
+
+class StudioFlag(Record):
+    """A one-time change Studio has made, so it never repeats (by name)."""
+
+    id: str
+    value: str = ""
+    updated_at: int = Field(default_factory=now_ms)

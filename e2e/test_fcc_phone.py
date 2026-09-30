@@ -486,3 +486,43 @@ def test_a_backup_can_be_saved(page: Page, admin_base_url: str) -> None:
         saved = json.load(handle)
     assert saved["app"] == "FCC Phone" and len(saved["agents"]) == 5
     assert "keys" not in saved["settings"] and "pc" not in saved["settings"]
+
+
+def test_a_reply_cut_off_by_ios_is_explained_and_the_model_made_lighter(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    # As if iOS closed the app while a big model was answering Jarvis.
+    page.evaluate(
+        """async () => {
+            const f = window.fccPhone;
+            f.state.models.push({id: 'big', name: 'Big Model', ready: true, size: 1,
+                settings: {context: 4096, gpu: true}});
+            await f.save.models();
+            f.state.chats.jarvis = [{role: 'user', text: 'Hello', at: Date.now()}];
+            await f.save.chat('jarvis');
+            localStorage.setItem('fcc-engine-work', JSON.stringify(
+                {stage: 'answer', id: 'big', name: 'Big Model', context: 4096}));
+        }"""
+    )
+    reopen(page)
+    line = page.locator(".hud-line").last
+    expect(line).to_contain_text("No reply to your last message.")
+    expect(line).to_contain_text("closed FCC Phone while Big Model was answering")
+    expect(line).to_contain_text("lowered its context to 2,048 tokens")
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'big')"
+    )
+    assert model["settings"]["context"] == 2048 and model["crashes"] == 1
+    assert page.evaluate("() => localStorage.getItem('fcc-engine-work')") is None
+
+    # Opening again doesn't repeat it: the note was cleared and answered.
+    reopen(page)
+    expect(page.locator(".hud-line.error")).to_have_count(1)
+
+
+def reopen(page: Page) -> None:
+    """Close and open the app again, as iOS does after it stops it."""
+    page.reload()
+    page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
+    page.evaluate("() => window.fccPhone.ready")

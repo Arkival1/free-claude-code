@@ -100,6 +100,7 @@ from .models import (
     PhoneLink,
     Photo,
     SiteProject,
+    StudioFlag,
     Study,
     StudyLesson,
     TodoItem,
@@ -216,6 +217,11 @@ _DEFAULT_ROLES = {
     TESTER_AGENT_NAME: "tester",
 }
 SHARED_MEMORY_NAME = "Team memory"
+TEAM_LAYOUT_FLAG = "team_layout_v1"
+LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper"})
+"""Roles that think on this PC; every other agent thinks on a server."""
+CLASS_ROLES = frozenset({"teacher", "student"})
+"""Classes keep their own choice: a server teacher and a local student."""
 MAIN_CONSOLE_SETTING = "console"
 MAIN_PROMPT_NOTE = (
     "Run the team for the user: answer directly when you can, and hand work "
@@ -1030,35 +1036,35 @@ class StudioService:
             (
                 BUILDER_AGENT_NAME,
                 "builder",
-                self.default_model,
+                self.server_model,
                 BUILDER_PROMPT,
                 _default_tools(),
             ),
             (
                 RESEARCHER_AGENT_NAME,
                 "researcher",
-                self.default_model,
+                self.server_model,
                 RESEARCHER_PROMPT,
                 RESEARCHER_TOOLS,
             ),
             (
                 HELPER_AGENT_NAME,
                 "helper",
-                self.default_model,
+                self._local_team_model(existing),
                 HELPER_PROMPT,
                 HELPER_TOOLS,
             ),
             (
                 TESTER_AGENT_NAME,
                 "tester",
-                self.default_model,
+                self.server_model,
                 TESTER_PROMPT,
                 TESTER_TOOLS,
             ),
             (
                 TEACHER_AGENT_NAME,
                 "teacher",
-                settings.studio_teacher_model or self.default_model,
+                settings.studio_teacher_model or self.server_model,
                 "Plan lessons, teach them one at a time, and test the student.",
                 (),
             ),
@@ -1116,17 +1122,75 @@ class StudioService:
             "web_for_all": self.settings.studio_web_access == "all",
         }
 
+    def _is_local(self, model: str) -> bool:
+        try:
+            return self.runs_on_this_pc(model)
+        except ValueError:
+            return False
+
+    @property
+    def server_model(self) -> str:
+        """The model agents think with on a server: the Studio default, or the
+        proxy's model when the Studio default runs on this PC."""
+        default = self.default_model
+        return self.settings.model if self._is_local(default) else default
+
+    def _local_team_model(self, existing: Sequence[Agent] = ()) -> str:
+        """The model on this PC that the Helper shares with the main AI."""
+        wanted = self.settings.studio_main_agent_model or ""
+        if wanted and self._is_local(wanted):
+            return wanted
+        for agent in existing:
+            if agent.role == MAIN_ROLE and self._is_local(agent.model):
+                return agent.model
+        return self.default_model
+
+    async def _apply_team_layout(self, existing: Sequence[Agent]) -> list[Agent]:
+        """Once: the main AI, Guide, and Helper think on this PC; every other
+        agent on a server. Choices made afterwards are kept."""
+        if await self._store.get(StudioFlag, TEAM_LAYOUT_FLAG) is not None:
+            return list(existing)
+        local = self._local_team_model(existing)
+        server = self.server_model
+        result: list[Agent] = []
+        for agent in existing:
+            model = agent.model
+            if agent.role in CLASS_ROLES:
+                pass  # Classes pair a server teacher with a local student.
+            elif agent.role == "helper" and not self._is_local(model):
+                model = local
+            elif agent.role not in LOCAL_TEAM_ROLES and self._is_local(model):
+                model = server
+            if model != agent.model:
+                agent = agent.model_copy(
+                    update={
+                        "model": model,
+                        "local_only": model.startswith(LOCAL_MODEL_PREFIX),
+                        "updated_at": now_ms(),
+                    }
+                )
+                await self._store.put(agent)
+            result.append(agent)
+        await self._store.put(StudioFlag(id=TEAM_LAYOUT_FLAG, value="1"))
+        return result
+
     async def _upgrade_defaults(self, existing: Sequence[Agent]) -> None:
         """Give starter agents from older versions their newer tools and roles.
 
         Starter agents made before a Studio Default Model was set were given
-        the server's model; once one is set, they move to it.
+        the server's model; once one is set, they move to it (the server
+        agents only, when it is a model on this PC).
         """
         settings = self.settings
         studio_default = settings.studio_default_model
+        existing = await self._apply_team_layout(existing)
         for agent in existing:
             if (
                 studio_default
+                and (
+                    not self._is_local(studio_default)
+                    or agent.role in LOCAL_TEAM_ROLES | CLASS_ROLES
+                )
                 and agent.name in _DEFAULT_ROLES
                 and agent.role != "guide"
                 and agent.model == settings.model

@@ -144,12 +144,22 @@ async def test_starter_agents_follow_a_studio_default_set_later(
     mine = await studio.create_agent(name="Mine", model="nvidia_nim/test-model")
     assert (await studio.agent_by_name("Builder")).model == "nvidia_nim/test-model"
 
+    # A default on this PC reaches the local team only: the Builder and the
+    # Researcher stay on the server.
     holder["settings"] = studio_settings(STUDIO_DEFAULT_MODEL="local/qwen-4b")
     await studio.ensure_defaults()
-
-    for name in ("Builder", "Researcher", "Helper"):
+    helper = await studio.agent_by_name("Helper")
+    assert helper is not None and helper.model == "local/qwen-4b"
+    for name in ("Builder", "Researcher"):
         agent = await studio.agent_by_name(name)
-        assert agent is not None and agent.model == "local/qwen-4b", name
+        assert agent is not None and agent.model == "nvidia_nim/test-model", name
+
+    # A new server default reaches the server agents.
+    holder["settings"] = studio_settings(STUDIO_DEFAULT_MODEL="open_router/some-model")
+    await studio.ensure_defaults()
+    for name in ("Builder", "Researcher"):
+        agent = await studio.agent_by_name(name)
+        assert agent is not None and agent.model == "open_router/some-model", name
     assert (await studio.agent(mine.id)).model == "nvidia_nim/test-model"
 
 

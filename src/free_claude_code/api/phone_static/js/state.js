@@ -1,7 +1,7 @@
 // Everything the app knows, loaded from the phone and saved back as it changes.
 import { store } from "./store.js";
 
-export const VERSION = "2.3.0";
+export const VERSION = "2.3.1";
 
 export const PHONE_TOOLS = {
   remember: "Memory",

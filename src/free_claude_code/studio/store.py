@@ -26,6 +26,7 @@ from .models import (
     Photo,
     Record,
     SiteProject,
+    StudioFlag,
     Study,
     StudyLesson,
     TodoItem,
@@ -82,6 +83,7 @@ TABLES: Mapping[type[Record], str] = {
     EngineModelSettings: "studio_engine_models",
     PhoneLink: "studio_phone_links",
     Photo: "studio_photos",
+    StudioFlag: "studio_flags",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (

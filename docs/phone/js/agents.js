@@ -74,6 +74,20 @@ async function loop(agent, system, convo, ctx, { maxRounds, onTool }) {
   return "I went round in circles there. Ask me again more simply?";
 }
 
+/** When the app starts, a message it closed on before answering gets a note
+ * saying so (and why, when known) instead of silence. */
+export async function markUnanswered(reason = "") {
+  for (const agent of state.agents) {
+    const chat = await chatOf(agent.id);
+    const last = chat[chat.length - 1];
+    if (!last || !["user", "tool", "task"].includes(last.role)) continue;
+    await addTurn(agent, {
+      role: "error",
+      text: reason ? `No reply to your last message. ${reason}` : "No reply to your last message: the app closed before the answer came. Send it again.",
+    });
+  }
+}
+
 /** Answer one message in the agent's chat. */
 export async function answer(agent, text, { project } = {}) {
   setBusy(agent, true);

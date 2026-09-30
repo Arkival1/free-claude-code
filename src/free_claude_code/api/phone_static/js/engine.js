@@ -78,6 +78,83 @@ let loading = null;
 let queue = Promise.resolve();
 export const status = { loadedId: null, loading: null, lastSpeed: null, error: "" };
 
+// How long the engine may take before it's stopped and the agent says so.
+export const LOAD_LIMIT_MS = 4 * 60 * 1000;
+export const ANSWER_LIMIT_MS = 6 * 60 * 1000;
+
+// While the engine loads or answers, a note says what it's doing. If the app
+// starts and finds it, iOS closed the app mid-way: almost always because the
+// model needed more memory than the phone gives a web app.
+const WORK_NOTE = "fcc-engine-work";
+
+function noteWork(stage, model) {
+  try {
+    const chosen = settingsFor(model);
+    localStorage.setItem(WORK_NOTE, JSON.stringify({ stage, id: model.id, name: model.name, context: chosen.context, gpu: chosen.gpu, at: Date.now() }));
+  } catch {
+    /* private mode: no crash detection */
+  }
+}
+
+function clearWork() {
+  try {
+    localStorage.removeItem(WORK_NOTE);
+  } catch {
+    /* nothing to clear */
+  }
+}
+
+/** After iOS closed the app mid-work: explain it, and make that model lighter
+ * (a smaller context first, then no graphics chip) so the next try fits. */
+export async function recoverFromCrash() {
+  let work = null;
+  try {
+    work = JSON.parse(localStorage.getItem(WORK_NOTE) || "null");
+  } catch {
+    work = null;
+  }
+  clearWork();
+  if (!work || !work.id) return "";
+  const model = modelById(work.id);
+  let change = "";
+  if (model) {
+    model.settings = model.settings || {};
+    const chosen = settingsFor(model);
+    if (chosen.context > 2048) {
+      model.settings.context = 2048;
+      change = ` Studio lowered its context to 2,048 tokens so it needs less memory; send your message again.`;
+    } else if (chosen.gpu) {
+      model.settings.gpu = false;
+      change = " Studio turned off the graphics chip for it; send your message again.";
+    }
+    model.crashes = (model.crashes || 0) + 1;
+    await save.models();
+  }
+  status.error =
+    `The phone closed FCC Phone while ${work.name} was ${work.stage === "load" ? "loading" : "answering"}, most likely because it needed more memory than iOS allows.` +
+    (change || " Use a smaller model (Qwen3 0.6B on Models) or a free cloud brain (More, Settings).");
+  feed("Model Control", status.error, "error");
+  changed("engine");
+  return status.error;
+}
+
+function limited(promise, ms, message) {
+  let timer = 0;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+}
+
+/** Drop a stuck engine; the next message starts a fresh one. */
+function resetEngine() {
+  const old = wllama;
+  wllama = null;
+  loaded = null;
+  status.loadedId = null;
+  if (old) old.exit().catch(() => {});
+}
+
 function engine() {
   if (!wllama) {
     wllama = new Wllama({ default: ENGINE_FILES.default }, { suppressNativeLog: true, allowOffline: true, parallelDownloads: 2 });
@@ -202,18 +279,25 @@ async function load(model) {
     loaded = null;
     status.loadedId = null;
     const blobs = await blobsOf(model);
-    await w.loadModel(blobs, {
-      n_ctx: chosen.context,
-      n_gpu_layers: chosen.gpu && webgpu() ? 999 : 0,
-      jinja: true,
-    });
+    noteWork("load", model);
+    await limited(
+      w.loadModel(blobs, {
+        n_ctx: chosen.context,
+        n_gpu_layers: chosen.gpu && webgpu() ? 999 : 0,
+        jinja: true,
+      }),
+      LOAD_LIMIT_MS,
+      `${model.name} took more than 4 minutes to load, so it was stopped. Try a smaller model or a smaller context on Models.`
+    );
     loaded = { id: model.id, key };
     status.loadedId = model.id;
     feed("Model Control", `${model.name} loaded${chosen.gpu && webgpu() ? " on the graphics chip" : ""}.`);
   } catch (error) {
+    resetEngine();
     status.error = friendly(error);
     throw new Error(status.error);
   } finally {
+    clearWork();
     status.loading = null;
     changed("engine");
   }
@@ -239,13 +323,28 @@ export function chat(model, { messages, tools, maxTokens = 1024, temperature = 0
   const run = queue.then(async () => {
     await load(model);
     const started = performance.now();
-    const response = await engine().createChatCompletion({
-      messages,
-      tools: tools && tools.length && model.info && model.info.tools ? tools : undefined,
-      tool_choice: tools && tools.length && model.info && model.info.tools ? "auto" : undefined,
-      max_tokens: maxTokens,
-      temperature,
-    });
+    noteWork("answer", model);
+    let response;
+    try {
+      response = await limited(
+        engine().createChatCompletion({
+          messages,
+          tools: tools && tools.length && model.info && model.info.tools ? tools : undefined,
+          tool_choice: tools && tools.length && model.info && model.info.tools ? "auto" : undefined,
+          max_tokens: maxTokens,
+          temperature,
+        }),
+        ANSWER_LIMIT_MS,
+        `${model.name} took more than 6 minutes to answer on this phone, so it was stopped. A smaller model (Qwen3 0.6B) or a free cloud brain (More, Settings) answers much faster.`
+      );
+    } catch (error) {
+      resetEngine();
+      status.error = friendly(error);
+      changed("engine");
+      throw new Error(status.error);
+    } finally {
+      clearWork();
+    }
     const timings = response.timings || {};
     status.lastSpeed = {
       tokensPerSecond: timings.predicted_per_second || (response.usage && response.usage.completion_tokens / ((performance.now() - started) / 1000)) || 0,

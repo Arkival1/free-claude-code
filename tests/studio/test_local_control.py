@@ -65,7 +65,9 @@ async def test_a_local_agent_gets_to_direct_the_server_agents(make_studio):
     assert set(call["tools"]) >= LEAD
     system = str(call["system"])
     under = system.split("work under you: ")[1].split(".")[0]
-    assert under.startswith("Researcher, Helper")
+    # The Helper thinks on this PC with Jarvis's model, like the Guide.
+    assert under.startswith("Researcher, Teacher")
+    assert "Helper" not in under
     assert "Tester" not in under and "Jarvis" not in under
     assert "orders from the main AI only" in system
 
@@ -99,7 +101,7 @@ async def test_hand_offs_reach_server_agents_but_not_local_ones(make_studio):
     said = [m for m in await studio.transcript(chat.id) if m.role == "tool"]
     assert "Researcher" in said[0].text and not said[0].data.get("failed")
     assert said[1].data.get("failed") and "only the main AI directs" in said[1].text
-    assert "Researcher, Helper" in said[1].text
+    assert "Researcher, Teacher" in said[1].text
     assert said[2].data.get("failed") and said[2].data["outside"] == ["Tester"]
 
 
@@ -146,7 +148,7 @@ async def test_switching_models_moves_agents_between_the_groups(make_studio):
     await studio.send(chat.id, "hello")
     system = str(builder_calls(model)[-1]["system"])
     under = system.split("work under you: ")[1].split(".")[0]
-    assert "Helper" in under and "Researcher" not in under
+    assert "Teacher" in under and "Researcher" not in under
 
     # The Builder moves to a server AI: it directs nobody.
     await studio.update_agent(agents["Builder"].id, {"model": "nvidia_nim/test-model"})

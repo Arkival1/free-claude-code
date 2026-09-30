@@ -7,6 +7,8 @@ import { calculate, findImages, remember, recall, canRead } from "./tools.js";
 import { bestModel } from "./brains.js";
 import { readGguf } from "./gguf.js";
 import { checkProject, bundle, previewHtml, zipProject } from "./projects.js";
+import { recoverFromCrash } from "./engine.js";
+import { markUnanswered } from "./agents.js";
 import { polishNotes } from "./polish.js";
 import { lookAtSite, describeLook } from "./inspect.js";
 import { templateFiles } from "./templates.js";
@@ -155,13 +157,18 @@ window.fccPhone = {
   recall,
   canRead,
   upgradeAgent,
+  save,
   state,
   checkReminders,
 };
 
 // Resolves once saved data is loaded and the first screen is drawn.
 window.fccPhone.ready = load().then(async () => {
+  // If iOS closed the app mid-reply last time, say what happened.
+  const crash = await recoverFromCrash().catch(() => "");
+  await markUnanswered(crash).catch(() => {});
   await render();
+  if (crash) notify(crash);
   setInterval(checkReminders, 20000);
   checkReminders();
   if (state.settings.pc) sync({ quiet: true }).catch(() => {});
