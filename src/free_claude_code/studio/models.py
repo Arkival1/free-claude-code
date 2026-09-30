@@ -515,6 +515,36 @@ class Photo(Record):
     updated_at: int = Field(default_factory=now_ms)
 
 
+class LabProject(Record):
+    """Something made in the Lab: a mix, a product, a material, or a build."""
+
+    id: str = Field(default_factory=lambda: new_id("lab"))
+    name: str
+    kind: str = "mix"
+    """mix, product, material, or build."""
+    request: str = ""
+    """What was asked for, e.g. 'make shampoo'."""
+    data: JsonObject = Field(default_factory=dict)
+    made_by: str = "You"
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
+class LabChemical(Record):
+    """A chemical the Lab looked up (on PubChem) and keeps on its shelf."""
+
+    id: str = Field(default_factory=lambda: new_id("chm"))
+    name: str
+    formula: str = ""
+    molar_mass: float = 0.0
+    iupac: str = ""
+    cid: int = 0
+    state: str = "solid"
+    colour: str = "#e8f4ff"
+    note: str = ""
+    created_at: int = Field(default_factory=now_ms)
+
+
 class StudioFlag(Record):
     """A one-time change Studio has made, so it never repeats (by name)."""
 

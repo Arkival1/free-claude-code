@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 from .convo_notes import NOTES_HEADER, NotesKeeper
+from .lab.bench import LAB_PROMPT
 from .llm import (
     ChatMessage,
     LLMReply,
@@ -698,6 +699,7 @@ class AgentRunner:
             max_steps=self._steps_for(agent),
             turn_note=note,
             sealed=sealed,
+            extra_system=LAB_PROMPT if chat.settings.get("lab") else "",
         )
         self._keep_notes(agent, chat, await self._history_start(chat))
         if (agent.memory_enabled or sealed) and not result.failed and result.text:

@@ -17,6 +17,8 @@ from .models import (
     Course,
     EngineModelSettings,
     ExamQuestion,
+    LabChemical,
+    LabProject,
     Lesson,
     LoraJob,
     MemoryEntry,
@@ -83,6 +85,8 @@ TABLES: Mapping[type[Record], str] = {
     EngineModelSettings: "studio_engine_models",
     PhoneLink: "studio_phone_links",
     Photo: "studio_photos",
+    LabProject: "studio_lab_projects",
+    LabChemical: "studio_lab_chemicals",
     StudioFlag: "studio_flags",
 }
 

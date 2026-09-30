@@ -25,6 +25,7 @@ from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
 from free_claude_code.studio.downloads import DownloadError
 from free_claude_code.studio.file_text import MAX_UPLOAD, read_file_text
+from free_claude_code.studio.lab.sim import LabError
 from free_claude_code.studio.llm import ChatMessage
 from free_claude_code.studio.local_voice import LocalVoiceError
 from free_claude_code.studio.lora import (
@@ -2269,3 +2270,191 @@ def phone_file(name: str = "index.html") -> FileResponse:
     if kind is None or not path.is_relative_to(root) or not path.is_file():
         raise HTTPException(status_code=404, detail="Not part of FCC Phone.")
     return FileResponse(path, media_type=kind, headers={"Cache-Control": "no-cache"})
+
+
+# ---------------------------------------------------------------- the Lab
+
+
+class LabMixPayload(BaseModel):
+    items: list[JsonObject] = Field(default_factory=list, max_length=12)
+    heat: bool = False
+    flame: bool = False
+
+
+class LabMakePayload(BaseModel):
+    request: str = Field(min_length=1, max_length=400)
+    batch_g: float | None = Field(default=None, gt=0, le=100_000)
+
+
+class LabPartsPayload(BaseModel):
+    parts: list[JsonObject] = Field(default_factory=list, max_length=60)
+    series: bool = True
+    name: str = Field(default="", max_length=120)
+    save: bool = False
+
+
+class LabLookupPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class LabSavePayload(BaseModel):
+    name: str = Field(default="", max_length=120)
+    kind: str = "mix"
+    request: str = Field(default="", max_length=400)
+    data: JsonObject = Field(default_factory=dict)
+
+
+class LabRenamePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+def _lab_failed(error: LabError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(error))
+
+
+@router.get("/studio/api/lab")
+async def lab_catalogue(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Everything on the Lab's shelves: elements, chemicals, materials, parts."""
+    return await studio.lab.catalogue()
+
+
+@router.post("/studio/api/lab/mix")
+async def lab_mix(
+    payload: LabMixPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Pour things together and see what happens."""
+    try:
+        return await studio.lab.mix(
+            payload.items, heat=payload.heat, flame=payload.flame
+        )
+    except LabError as error:
+        raise _lab_failed(error) from error
+
+
+@router.post("/studio/api/lab/make")
+async def lab_make(
+    payload: LabMakePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Make a product or gadget from a plain request."""
+    try:
+        return await studio.lab.make(payload.request, batch_g=payload.batch_g)
+    except LabError as error:
+        raise _lab_failed(error) from error
+
+
+@router.post("/studio/api/lab/build")
+async def lab_build(
+    payload: LabPartsPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Power a set of electronics parts on the circuit bench."""
+    try:
+        return await studio.lab.build(
+            payload.parts, series=payload.series, name=payload.name, save=payload.save
+        )
+    except LabError as error:
+        raise _lab_failed(error) from error
+
+
+@router.post("/studio/api/lab/material")
+async def lab_material(
+    payload: LabPartsPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Blend materials and run the test rigs."""
+    try:
+        return await studio.lab.material(
+            payload.parts, name=payload.name, save=payload.save
+        )
+    except LabError as error:
+        raise _lab_failed(error) from error
+
+
+@router.post("/studio/api/lab/lookup")
+async def lab_lookup(
+    payload: LabLookupPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """A chemical from the shelf, or learned from PubChem."""
+    try:
+        return await studio.lab.lookup(payload.name)
+    except LabError as error:
+        raise _lab_failed(error) from error
+
+
+@router.get("/studio/api/lab/projects")
+async def lab_projects(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"projects": await studio.lab.projects()}
+
+
+@router.post("/studio/api/lab/projects")
+async def lab_save(
+    payload: LabSavePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        return await studio.lab.save(
+            name=payload.name,
+            kind=payload.kind,
+            data=payload.data,
+            request=payload.request,
+        )
+    except LabError as error:
+        raise _lab_failed(error) from error
+
+
+@router.get("/studio/api/lab/projects/{project_id}")
+async def lab_project(
+    project_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return await studio.lab.project(project_id)
+
+
+@router.patch("/studio/api/lab/projects/{project_id}")
+async def lab_rename(
+    project_id: str,
+    payload: LabRenamePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    return await studio.lab.rename(project_id, payload.name)
+
+
+@router.delete("/studio/api/lab/projects/{project_id}")
+async def lab_delete(
+    project_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"deleted": await studio.lab.delete(project_id)}
+
+
+@router.get("/studio/api/lab/chat")
+async def lab_chat(
+    after: int = 0,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The Lab chat with the main AI; poll while it works."""
+    return await studio.lab_console(after=after)
+
+
+@router.post("/studio/api/lab/chat", status_code=202)
+async def lab_say(
+    payload: MessagePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Ask the main AI to make or test something in the Lab."""
+    chat = await studio.lab_say(payload.text)
+    return {"accepted": True, "chat_id": chat.id}

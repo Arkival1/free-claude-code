@@ -527,7 +527,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Everyday",
-        ("calculate", "todo", "list_projects", "system_status", "app_help"),
+        ("calculate", "todo", "list_projects", "system_status", "app_help", "lab"),
     ),
 )
 """Every tool but finish (always on), in the groups the app shows them."""

@@ -82,6 +82,7 @@ FIND_IMAGES_TOOL = "find_images"
 LIST_PHOTOS_TOOL = "list_photos"
 USE_PHOTO_TOOL = "use_photo"
 SAVE_IMAGE_TOOL = "save_image"
+LAB_TOOL = "lab"
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
 MAX_LISTED_PHOTOS = 30
@@ -447,6 +448,60 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "versions_back": {"type": "integer"},
             },
             "required": ["path"],
+        },
+    ),
+    ToolSpec(
+        name=LAB_TOOL,
+        description=(
+            "The Lab: a science sandbox with every element, a shelf of real "
+            "chemicals, materials, and electronics parts, where results follow "
+            "real chemistry and physics. The user watches it on the Lab page. "
+            "action make: make a product or gadget from a request ('shampoo', "
+            "'bath bomb', 'flashlight'); it lists every ingredient, its "
+            "molecule and elements. mix: pour chemicals together (items with "
+            "amounts in mL or g; heat or flame optional) and see colours, gas, "
+            "solids, heat, and pH. build: power electronics parts and see what "
+            "works. material: blend materials into an alloy or composite and "
+            "test it. find: look up a chemical, element, material, or part "
+            "(unknown chemicals are learned from PubChem). list: what has "
+            "been made."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["make", "mix", "build", "material", "find", "list"],
+                },
+                "request": {
+                    "type": "string",
+                    "description": "make: what to make. find: what to look up.",
+                },
+                "items": {
+                    "type": "array",
+                    "description": "mix: chemicals, e.g. {id: 'vinegar', amount: 50}.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "amount": {"type": "number"},
+                        },
+                    },
+                },
+                "parts": {
+                    "type": "array",
+                    "description": "build: parts, e.g. {id: 'aa', count: 2}. "
+                    "material: materials, e.g. {id: 'copper', percent: 88}.",
+                    "items": {"type": "object"},
+                },
+                "heat": {"type": "boolean"},
+                "flame": {"type": "boolean"},
+                "series": {
+                    "type": "boolean",
+                    "description": "build: batteries in series (default) or side by side.",
+                },
+            },
+            "required": ["action"],
         },
     ),
     ToolSpec(
@@ -922,6 +977,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         AGENT_MODEL_TOOL,
         MANAGE_AGENT_TOOL,
         WEATHER_TOOL,
+        LAB_TOOL,
     }
 )
 MAIN_TOOL_NAMES: tuple[str, ...] = (
@@ -949,6 +1005,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     SYSTEM_STATUS_TOOL,
     APP_HELP_TOOL,
     LIST_PHOTOS_TOOL,
+    LAB_TOOL,
     FINISH_TOOL,
 )
 SHARED_REMEMBER_SPEC = ToolSpec(
@@ -1327,6 +1384,7 @@ class AgentToolbox:
                     | "agent_model"
                     | "manage_agent"
                     | "weather"
+                    | "lab"
                 ):
                     if self._assistant is None:
                         raise ValueError(f"{call.name} is not available here.")

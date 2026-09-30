@@ -45,6 +45,9 @@ from .guide import (
     offline_answer,
     page_name,
 )
+from .lab import text as lab_text
+from .lab.bench import LabBench
+from .lab.sim import LabError
 from .learning import (
     LearnEngine,
     StudyStopped,
@@ -223,6 +226,7 @@ LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper"})
 CLASS_ROLES = frozenset({"teacher", "student"})
 """Classes keep their own choice: a server teacher and a local student."""
 MAIN_CONSOLE_SETTING = "console"
+LAB_CHAT_SETTING = "lab"
 MAIN_PROMPT_NOTE = (
     "Run the team for the user: answer directly when you can, and hand work "
     "that needs building, research, or commands to the right agents."
@@ -267,6 +271,13 @@ BRIEFING_PROMPT = (
     "details, health, money, passwords, and keys. Write it as direct "
     "instructions to {agent}, under 220 words. Write only the briefing."
 )
+
+
+def _dict_list(value: object) -> list[JsonObject]:
+    """The objects in a tool argument that should be a list of them."""
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
 
 
 def _study_started(study: Study) -> str:
@@ -390,6 +401,9 @@ class StudioService:
         self._memory_sync_lock = asyncio.Lock()
         self._main_busy = 0
         self._main_error: str | None = None
+        self._lab = LabBench(store, think=self._lab_think, transport=search_transport)
+        self._lab_busy = 0
+        self._lab_error: str | None = None
         self._local_probe: tuple[float, JsonObject] | None = None
         self._loaded_probe: tuple[float, tuple[str, ...] | None] | None = None
         self._agent_busy: dict[str, int] = {}
@@ -1344,6 +1358,165 @@ class StudioService:
     async def delete_photo(self, photo_id: str) -> bool:
         return await self._photos.delete(photo_id)
 
+    # ------------------------------------------------------------ the Lab
+
+    @property
+    def lab(self) -> LabBench:
+        """The Lab: mixing, products, materials, and electronics."""
+        return self._lab
+
+    async def _lab_think(self, system: str, prompt: str) -> str:
+        """The Lab's own questions go to a server AI: it knows more chemistry."""
+        reply = await self._router.complete(
+            [ChatMessage.user(prompt)],
+            model=await self.effective_model(self.server_model),
+            system=system,
+            temperature=0.2,
+            max_tokens=900,
+        )
+        return reply.text
+
+    async def lab_chat(self) -> Chat:
+        """The Lab's chat with the main AI, opening one if needed."""
+        agent = await self.main_agent()
+        for chat in await self._store.find(
+            Chat, where={"agent_id": agent.id}, order_by="updated_at DESC"
+        ):
+            if chat.settings.get(LAB_CHAT_SETTING):
+                return chat
+        return await self.create_chat(
+            agent_id=agent.id,
+            title=f"{agent.name} in the Lab",
+            settings={LAB_CHAT_SETTING: True},
+        )
+
+    async def lab_say(self, text: str, *, background: bool = True) -> Chat:
+        """Ask the main AI to make or test something in the Lab."""
+        if not text.strip():
+            raise StudioError("Say what to make or test.")
+        chat = await self.lab_chat()
+        self._lab_busy += 1
+        self._lab_error = None
+        if background:
+            self.spawn(self._lab_turn(chat.id, text))
+        else:
+            await self._lab_turn(chat.id, text)
+        return chat
+
+    async def _lab_turn(self, chat_id: str, text: str) -> None:
+        try:
+            result = await self.send(chat_id, text)
+            if result.failed:
+                self._lab_error = result.error or "The main AI did not finish."
+        except (StudioError, StudioNotFoundError) as error:
+            self._lab_error = str(error)
+            await self._store.append_message(
+                chat_id=chat_id,
+                role="event",
+                text=f"Could not answer: {error}",
+                author="studio",
+                data={"kind": "error"},
+            )
+        finally:
+            self._lab_busy = max(0, self._lab_busy - 1)
+
+    async def lab_console(self, *, after: int = 0) -> JsonObject:
+        """The Lab chat so far, and whether the main AI is still working."""
+        chat = await self.lab_chat()
+        messages = await self._store.transcript(chat.id, after=after)
+        agent = await self.main_agent()
+        return {
+            "chat_id": chat.id,
+            "agent": agent.name,
+            "busy": self._lab_busy > 0,
+            "error": self._lab_error,
+            "messages": [message.model_dump() for message in messages],
+        }
+
+    async def _lab_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        arguments = call.arguments
+        action = str(arguments.get("action") or "").strip().lower()
+        request = str(arguments.get("request") or "").strip()
+        made_by = context.agent_name or "An agent"
+        try:
+            if action == "make":
+                project = await self._lab.make(request, made_by=made_by)
+                return ToolOutcome(
+                    text=lab_text.describe_project(project),
+                    data={"tool": "lab", "action": "make", "project_id": project["id"]},
+                )
+            if action == "mix":
+                items = _dict_list(arguments.get("items"))
+                result = await self._lab.mix(
+                    items,
+                    heat=bool(arguments.get("heat")),
+                    flame=bool(arguments.get("flame")),
+                )
+                names = (
+                    " + ".join(str(item.get("name")) for item in result["ingredients"])
+                    or "Mix"
+                )
+                project = await self._lab.save(
+                    name=names[:80],
+                    kind="mix",
+                    data=result,
+                    request=request,
+                    made_by=made_by,
+                )
+                return ToolOutcome(
+                    text=lab_text.describe_mix(result),
+                    data={"tool": "lab", "action": "mix", "project_id": project["id"]},
+                )
+            if action == "build":
+                parts = _dict_list(arguments.get("parts"))
+                series = arguments.get("series")
+                result = await self._lab.build(
+                    parts,
+                    series=series if isinstance(series, bool) else True,
+                    name=request,
+                    save=True,
+                    made_by=made_by,
+                )
+                return ToolOutcome(
+                    text=lab_text.describe_build(result),
+                    data={"tool": "lab", "action": "build", "project_id": result["id"]},
+                )
+            if action == "material":
+                parts = _dict_list(arguments.get("parts"))
+                result = await self._lab.material(
+                    parts, name=request, save=True, made_by=made_by
+                )
+                return ToolOutcome(
+                    text=lab_text.describe_material(result),
+                    data={
+                        "tool": "lab",
+                        "action": "material",
+                        "project_id": result["id"],
+                    },
+                )
+            if action == "find":
+                return ToolOutcome(
+                    text=await lab_text.find(self._lab, request),
+                    data={"tool": "lab", "action": "find"},
+                )
+            if action == "list":
+                projects = await self._lab.projects()
+                lines = [
+                    f"- {p['name']} ({p['kind']}, by {p['made_by']})"
+                    for p in projects[:20]
+                ]
+                return ToolOutcome(
+                    text="\n".join(lines) or "Nothing has been made in the Lab yet.",
+                    data={"tool": "lab", "action": "list"},
+                )
+        except LabError as error:
+            return ToolOutcome(text=str(error), data={"tool": "lab"}, failed=True)
+        return ToolOutcome(
+            text="Use action make, mix, build, material, find, or list.",
+            data={"tool": "lab"},
+            failed=True,
+        )
+
     async def agent(self, agent_id: str) -> Agent:
         """Return one agent or raise."""
         return await self._store.require(Agent, agent_id)
@@ -2113,6 +2286,8 @@ class StudioService:
                 return await self._agent_model_tool(call)
             case "manage_agent":
                 return await self._manage_agent_tool(call, context)
+            case "lab":
+                return await self._lab_tool(call, context)
             case "weather":
                 place = str(call.arguments.get("place") or "").strip()
                 if not place:
