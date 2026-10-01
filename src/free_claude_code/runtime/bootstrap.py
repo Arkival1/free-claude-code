@@ -122,6 +122,9 @@ def _build_studio(
         settings_provider=provider_manager.current_settings,
         models_dir=models_dir,
         sites_dir=studio_sites_dir_path(),
+        server_models=lambda: [
+            info.model_id for info in provider_manager.cached_prefixed_model_infos()
+        ],
     )
 
 

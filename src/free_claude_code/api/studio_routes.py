@@ -1483,7 +1483,11 @@ async def team_models(
     _: None = Access,
 ) -> JsonObject:
     """Which model each agent thinks with, and the models to choose from."""
-    return await studio.team_models() | {"server": await _server_models(services)}
+    found = await studio.team_models()
+    found["server"] = sorted(
+        set(await _server_models(services)) | set(studio.server_model_list())
+    )
+    return found
 
 
 @router.post("/studio/api/team-models")

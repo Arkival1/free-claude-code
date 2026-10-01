@@ -1188,9 +1188,19 @@
     const status = el("p", { class: "muted", role: "status" });
     const picker = (row) => {
       const known = new Set([...localModels, ...serverModels]);
+      // Server models grouped by provider (NVIDIA NIM, OpenRouter, …), so a
+      // list of 80 models from one key is easy to scan.
+      const byProvider = new Map();
+      for (const model of serverModels) {
+        const provider = model.split("/")[0];
+        if (!byProvider.has(provider)) byProvider.set(provider, []);
+        byProvider.get(provider).push(model);
+      }
       const groups = [
         el("optgroup", { label: "On this PC (LM Studio)" }, localModels.map((model) => el("option", { value: model, text: label(model) }))),
-        el("optgroup", { label: "Server (needs a key)" }, serverModels.map((model) => el("option", { value: model, text: model }))),
+        ...[...byProvider.entries()].map(([provider, models]) =>
+          el("optgroup", { label: `Server: ${provider} (${models.length})` }, models.map((model) => el("option", { value: model, text: model.slice(provider.length + 1) })))
+        ),
       ];
       if (!known.has(row.model)) groups.unshift(el("option", { value: row.model, text: `${label(row.model)} (not found)` }));
       const select = el("select", { "aria-label": `Model for ${row.name}` }, groups);

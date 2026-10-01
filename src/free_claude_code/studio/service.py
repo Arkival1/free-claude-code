@@ -365,8 +365,10 @@ class StudioService:
         router: StudioModelRouter | None = None,
         search_transport: httpx.AsyncBaseTransport | None = None,
         voice_transport: httpx.AsyncBaseTransport | None = None,
+        server_models: Callable[[], Sequence[str]] | None = None,
     ) -> None:
         self._store = store
+        self._server_models = server_models or (lambda: ())
         self._web_tools = web_tools
         self._search_transport = search_transport
         self._voice_transport = voice_transport
@@ -2716,10 +2718,19 @@ class StudioService:
             settings.model,
             *(settings.model_fallbacks or ()),
             *(agent.model for agent in await self.agents()),
+            *self.server_model_list(),
         ):
             if model and model not in known:
                 known.append(model)
         return known
+
+    def server_model_list(self) -> list[str]:
+        """Models on the server AIs that have a key (from the provider list)."""
+        try:
+            return sorted(set(self._server_models()))
+        except Exception as error:  # the list is a convenience, never fatal
+            logger.info("Studio: server models unavailable: {}", error)
+            return []
 
     async def team_models(self) -> JsonObject:
         """Which model each agent thinks with, and what it actually reaches."""
@@ -2745,6 +2756,7 @@ class StudioService:
             )
         turns = self._router.turns
         return {
+            "server": self.server_model_list(),
             "agents": rows,
             "local": await self.local_models(),
             "turns": self.settings.studio_local_model_turns,

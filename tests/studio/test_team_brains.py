@@ -5,7 +5,7 @@ import asyncio
 import httpx
 import pytest
 
-from free_claude_code.studio.llm import LLMReply
+from free_claude_code.studio.llm import LLMReply, ToolCall
 from free_claude_code.studio.model_turns import ModelTurns
 from free_claude_code.studio.team_models import (
     match_model,
@@ -394,3 +394,39 @@ async def test_team_brains_through_the_routes(make_studio):
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()
+
+
+@pytest.mark.asyncio
+async def test_server_models_from_a_new_key_are_listed_and_can_be_picked(
+    make_studio,
+):
+    studio, _ = make_studio([])
+    nvidia = [
+        "nvidia_nim/moonshotai/kimi-k3",
+        "nvidia_nim/z-ai/glm-5-3",
+        "nvidia_nim/deepseek-ai/deepseek-v4.1-flash",
+    ]
+    studio._server_models = lambda: nvidia
+    await studio.ensure_defaults()
+    brains = await studio.team_models()
+    assert set(nvidia) <= set(brains["server"])
+    # Jarvis can switch the Builder by a short name, too.
+    builder = await studio.agent_by_name("Builder")
+    assert builder is not None
+    outcome = await studio._agent_model_tool(
+        ToolCall(
+            id="m", name="agent_model", arguments={"agent": "Builder", "model": "kimi"}
+        )
+    )
+    assert not outcome.failed, outcome.text
+    assert (await studio.agent(builder.id)).model == "nvidia_nim/moonshotai/kimi-k3"
+
+
+def test_a_broken_provider_list_never_breaks_studio(make_studio):
+    studio, _ = make_studio([])
+
+    def broken() -> list[str]:
+        raise RuntimeError("catalog not ready")
+
+    studio._server_models = broken
+    assert studio.server_model_list() == []
