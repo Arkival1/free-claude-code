@@ -403,6 +403,9 @@ class StudioService:
         )
         self._room_activity: dict[str, int] = {}
         self._memory_sync_lock = asyncio.Lock()
+        # The app's first page load asks for the starter team from several
+        # requests at once; without this each one creates its own copy.
+        self._defaults_lock = asyncio.Lock()
         self._main_busy = 0
         self._main_error: str | None = None
         self._lab = LabBench(store, think=self._lab_think, transport=search_transport)
@@ -1123,6 +1126,10 @@ class StudioService:
 
     async def ensure_defaults(self) -> tuple[Agent, ...]:
         """Create the starter agents the app expects on first run."""
+        async with self._defaults_lock:
+            return await self._ensure_defaults()
+
+    async def _ensure_defaults(self) -> tuple[Agent, ...]:
         existing = await self._store.find(Agent)
         by_name = {agent.name: agent for agent in existing}
         settings = self.settings

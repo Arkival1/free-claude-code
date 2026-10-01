@@ -1,5 +1,7 @@
 """Agents search the web, build a site, and stop inside their step budget."""
 
+import asyncio
+
 import pytest
 
 from free_claude_code.studio.llm import LLMReply
@@ -173,3 +175,14 @@ def test_ordinary_names_that_start_like_reserved_ones_are_fine(tmp_path):
     workspace = SiteWorkspace(tmp_path)
     assert workspace.resolve("site_1", "console.html").name == "console.html"
     assert workspace.resolve("site_1", "contact.html").name == "contact.html"
+
+
+@pytest.mark.asyncio
+async def test_starter_team_is_made_once_when_asked_for_at_the_same_time(make_studio):
+    studio, _ = make_studio([])
+
+    await asyncio.gather(*(studio.ensure_defaults() for _ in range(4)))
+
+    names = [agent.name for agent in await studio.agents()]
+    assert sorted(names) == sorted(set(names))
+    assert "Researcher" in names
