@@ -227,6 +227,8 @@ CLASS_ROLES = frozenset({"teacher", "student"})
 """Classes keep their own choice: a server teacher and a local student."""
 MAIN_CONSOLE_SETTING = "console"
 LAB_CHAT_SETTING = "lab"
+ENGINE_RETRY_SECONDS = 300.0
+"""After the engine fails to start, LM Studio answers this long before a retry."""
 MAIN_PROMPT_NOTE = (
     "Run the team for the user: answer directly when you can, and hand work "
     "that needs building, research, or commands to the right agents."
@@ -404,6 +406,8 @@ class StudioService:
         self._lab = LabBench(store, think=self._lab_think, transport=search_transport)
         self._lab_busy = 0
         self._lab_error: str | None = None
+        self._engine_start_failed = False
+        self._engine_retry_at = 0.0
         self._local_probe: tuple[float, JsonObject] | None = None
         self._loaded_probe: tuple[float, tuple[str, ...] | None] | None = None
         self._agent_busy: dict[str, int] = {}
@@ -889,11 +893,22 @@ class StudioService:
     # ----------------------------------------------------------- the engine
 
     def _local_url(self) -> str:
-        """Where local models are served: the built-in engine, or LM Studio."""
+        """Where local models are served: the built-in engine, or LM Studio.
+
+        With the engine switched on but not installed, or failing to start,
+        LM Studio (or whatever Local Model Server names) answers instead, so
+        a half-finished engine setup never leaves the agents without a brain.
+        """
         settings = self.settings
-        if settings.studio_engine:
+        if settings.studio_engine and self._engine_usable():
             return f"{self._engine.url}/v1"
         return settings.studio_local_base_url
+
+    def _engine_usable(self) -> bool:
+        engine = self._engine
+        return engine.running or (
+            engine.binary() is not None and not self._engine_start_failed
+        )
 
     def _engine_folders(self) -> list[tuple[str, Path]]:
         folders: list[tuple[str, Path]] = [("Studio", self._models_dir)]
@@ -915,11 +930,21 @@ class StudioService:
             return
         if engine.binary() is None:
             return
+        if self._engine_start_failed and time.monotonic() < self._engine_retry_at:
+            return
         try:
             await engine.start()
         except EngineError as error:
-            logger.warning("Studio: the built-in engine did not start: {}", error)
+            logger.warning(
+                "Studio: the built-in engine did not start, using {} instead: {}",
+                self.settings.studio_local_base_url,
+                error,
+            )
+            self._engine_start_failed = True
+            self._engine_retry_at = time.monotonic() + ENGINE_RETRY_SECONDS
+            self._local_probe = None
             return
+        self._engine_start_failed = False
         self._local_probe = None
         self._loaded_probe = None
 
@@ -1063,6 +1088,7 @@ class StudioService:
 
     async def engine_start(self) -> None:
         await self._engine_call(self._engine.start())
+        self._engine_start_failed = False
         self._local_probe = None
         self._loaded_probe = None
 

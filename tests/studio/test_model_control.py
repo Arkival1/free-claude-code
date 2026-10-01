@@ -471,3 +471,14 @@ async def test_a_downloaded_release_file_installs_the_engine(make_studio):
     assert done == {"installed": True, "version": "b9100"}
     status = await studio.engine_status()
     assert status["installed"] and status["version"] == "b9100"
+
+
+def test_lm_studio_answers_while_the_engine_is_not_installed(make_studio):
+    """Ticking 'Use the built-in engine' before installing it keeps LM Studio."""
+    studio, _ = make_studio(
+        [], STUDIO_ENGINE=True, STUDIO_LOCAL_BASE_URL="http://localhost:1234/v1"
+    )
+    assert studio._engine.binary() is None
+    assert studio._local_url() == "http://localhost:1234/v1"
+    studio._engine_start_failed = True
+    assert studio._local_url() == "http://localhost:1234/v1"
