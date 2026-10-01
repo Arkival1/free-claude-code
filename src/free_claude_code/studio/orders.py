@@ -10,7 +10,7 @@ _ANYONE = (
     r"an agent|another agent|one of the agents|one of my agents|someone|somebody|"
     r"one of them|an ai|another ai"
 )
-_POLITE = re.compile(r"^(?:please|pls|then|and|also|now|to|go|,|\s)+", re.I)
+_POLITE = re.compile(r"^(?:(?:please|pls|then|and|also|now|to|go)\b|,|\s)+", re.I)
 _TRAILING = re.compile(
     r"[\s,;]*(?:please|pls|for me|thanks|thank you)?[\s.!,;]*$", re.I
 )
@@ -98,6 +98,55 @@ def parse_orders(text: str, names: Sequence[str]) -> list[Order]:
         if task:
             orders.append(Order(agent=start.agent, task=_as_instruction(task)))
     return orders
+
+
+_ASKING = (
+    r"^\s*(?:(?:hey|ok|okay|yo)\s+)?{main}"
+    r"(?:(?:please|pls)\s+)?"
+    r"(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?|i\s+(?:want|need)\s+you\s+to\s+)?"
+)
+_ON_THE_WEB = re.compile(
+    r"(?:go\s+(?:on|onto|to)\s+(?:the\s+)?(?:web|internet)|go\s+online|get\s+online|"
+    r"get\s+on\s+the\s+(?:web|internet)|hop\s+online)\s+(?:and|to)\s+|"
+    r"use\s+the\s+(?:web|internet)\s+to\s+",
+    re.I,
+)
+_LOOK_IT_UP = re.compile(
+    r"(?:do\s+(?:some\s+|a\s+bit\s+of\s+)?research|research|look\s+(?:up|into)|"
+    r"search|google|browse|find\s+out|"
+    r"find\s+(?:me\s+)?(?:info|information|sources|articles|reviews|videos)|"
+    r"check\s+(?:online|the\s+(?:web|internet)))\b",
+    re.I,
+)
+_NOT_THE_WEB = re.compile(
+    r"\b(?:my|your|our)\s+(?:memory|notes|files|chats?|projects?|photos)\b|"
+    r"\b(?:memory|obsidian|the\s+project|this\s+project|the\s+code)\b",
+    re.I,
+)
+
+# "look into it": what "it" is lives in the conversation, so the main AI
+# answers that one itself.
+_VAGUE = re.compile(r"^\S+(?:\s+\S+)?\s+(?:it|that|this|them|those)$", re.I)
+
+
+def web_request(text: str, main: str = "") -> str:
+    """The job in 'research X' or 'go on the web and find X', said to the
+    main AI without naming an agent; empty when it isn't one.
+
+    The Researcher takes these, so a small model on this PC never has to
+    choose to hand them on (or try the research itself)."""
+    name = rf"(?:{re.escape(main)}\s*[,:!]?\s+)?" if main.strip() else ""
+    lead = re.match(_ASKING.format(main=name), text, re.I)
+    rest = text[lead.end() if lead else 0 :]
+    web = _ON_THE_WEB.match(rest)
+    if web:
+        rest = rest[web.end() :]
+    elif not _LOOK_IT_UP.match(rest):
+        return ""
+    task = _clean(rest).rstrip("?")
+    if len(task.split()) < 2 or _NOT_THE_WEB.search(task) or _VAGUE.search(task):
+        return ""
+    return task
 
 
 def pick_agent(task: str, team: Sequence[tuple[str, str]]) -> str:

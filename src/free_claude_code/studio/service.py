@@ -114,7 +114,7 @@ from .models import (
     now_ms,
 )
 from .obsidian import ObsidianVault, VaultStatus
-from .orders import parse_orders, pick_agent
+from .orders import Order, parse_orders, pick_agent, web_request
 from .phone_link import (
     MAX_MEMORY_CHARS,
     MAX_PULL,
@@ -3392,7 +3392,8 @@ class StudioService:
 
         'Have Builder make a page', '@Researcher look into X', 'get an agent to
         ...', and 'stop Builder' are carried out right away, so an order never
-        depends on a small model choosing to call a tool.
+        depends on a small model choosing to call a tool. So are 'research X'
+        and 'go on the web and find X': the Researcher takes those.
         """
         team = [
             agent
@@ -3400,6 +3401,10 @@ class StudioService:
             if not agent.archived and agent.role not in {MAIN_ROLE, "guide"}
         ]
         orders = parse_orders(text, [agent.name for agent in team])
+        researcher = next((agent for agent in team if agent.role == "researcher"), None)
+        task = "" if orders or researcher is None else web_request(text, main.name)
+        if task and researcher is not None:
+            orders = [Order(agent=researcher.name, task=task)]
         if not orders:
             return ""
         crew = Crew(

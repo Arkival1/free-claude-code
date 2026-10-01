@@ -6,7 +6,7 @@ import pytest
 
 from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun, Chat
-from free_claude_code.studio.orders import Order, parse_orders, pick_agent
+from free_claude_code.studio.orders import Order, parse_orders, pick_agent, web_request
 
 from .conftest import tool_reply
 
@@ -193,3 +193,48 @@ async def test_jarvis_can_check_on_the_team(make_studio):
     await studio.wait_for_background()
     after = await studio.team_report()
     assert "Last task succeeded" in after and "All done." in after
+
+
+@pytest.mark.parametrize(
+    ("text", "task"),
+    [
+        ("research the best budget GPUs", "research the best budget GPUs"),
+        (
+            "Jarvis, go on the web and find cheap flights to Oslo",
+            "find cheap flights to Oslo",
+        ),
+        ("can you look up reviews of the Pixel 10?", "look up reviews of the Pixel 10"),
+        ("use the internet to compare phone cameras", "compare phone cameras"),
+        ("google how to fix a leaky tap", "google how to fix a leaky tap"),
+        ("search my notes for the bakery menu", ""),
+        ("look into it", ""),
+        ("learn about rust", ""),
+        ("what's the weather", ""),
+    ],
+)
+def test_research_and_web_requests_are_spotted(text, task):
+    assert web_request(text, "Jarvis") == task
+
+
+def test_an_order_keeps_words_that_start_like_polite_ones():
+    assert parse_orders("have Builder tone down the colours", TEAM) == [
+        Order("Builder", "tone down the colours")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_asking_jarvis_to_research_hands_it_to_the_researcher(make_studio):
+    studio, model = make_studio(team_script())
+    await studio.ensure_defaults()
+
+    await studio.main_say(
+        "go on the web and find the best rain jackets", background=False
+    )
+    await studio.wait_for_background()
+
+    runs = await studio.runs()
+    assert [run.goal for run in runs] == ["find the best rain jackets"]
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None and runs[0].agent_id == researcher.id
+    jarvis = next(c for c in model.calls if "the user's main AI" in str(c["system"]))
+    assert "Researcher is now working on" in jarvis["studio_note"]
