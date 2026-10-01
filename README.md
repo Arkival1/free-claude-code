@@ -533,6 +533,15 @@ llama.cpp in router mode, so each model loads when asked for, with its own
 settings, and **Models Loaded At Once** (1 by default) unloads the oldest to
 make room.
 
+**If Install engine doesn't download.** Studio asks GitHub's API for the
+newest llama.cpp release, then the last few releases, and when the API is
+blocked or rate limited it reads the version from the release page and
+downloads the file directly. If none of that gets through (a firewall,
+antivirus, or no internet on that PC), Model Control says why and how to do
+it by hand: open github.com/ggml-org/llama.cpp/releases, download the file
+named like `llama-b1234-bin-win-vulkan-x64.zip`, and drop that zip on the
+**Drop a file here** box. Studio unpacks it and the engine is installed.
+
 Every `.gguf` model in Studio's models folder, LM Studio's models folder, and
 any **Extra Model Folders** you add in settings is listed with its size,
 parameters, quantization, and state (loaded, loading, unloaded). Each shows

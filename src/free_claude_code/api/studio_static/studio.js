@@ -2260,6 +2260,18 @@
     status.textContent = `Checking ${file.name}…`;
     const head = await file.slice(0, 64).arrayBuffer();
     const found = await sendFile(`/studio/api/engine/identify?name=${encodeURIComponent(file.name)}`, head);
+    if (found.engine) {
+      bar.hidden = false;
+      const done = await sendFile(`/studio/api/engine/install-file?name=${encodeURIComponent(file.name)}`, file, (sent, total) => {
+        bar.firstChild.style.width = percent(total ? sent / total : 0);
+        status.textContent = `Installing the engine: ${bytes(sent)} of ${bytes(total)}`;
+      });
+      bar.hidden = true;
+      status.textContent = "";
+      notify(`Engine ${done.version} installed.`);
+      await render();
+      return;
+    }
     if (!found.is_model) {
       status.textContent = "";
       showModelReport(found);
@@ -2294,7 +2306,7 @@
     const zone = el("label", { class: "engine-drop" }, [
       input,
       el("strong", { text: "Drop a file here, or tap to choose one" }),
-      el("small", { class: "muted", text: "Any file: Studio says what it is, and for a model (.gguf) what it can do on your PC." }),
+      el("small", { class: "muted", text: "Any file: Studio says what it is, and for a model (.gguf) what it can do on your PC. A llama.cpp release .zip dropped here installs the engine." }),
     ]);
     zone.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -2378,7 +2390,7 @@
             meter(install.total ? install.done / install.total : 0),
           ])
         : null,
-      install.state === "failed" ? el("p", { class: "muted", text: `Download failed: ${install.error}` }) : null,
+      install.state === "failed" ? el("p", { class: "engine-failed", role: "alert", text: `Download failed: ${install.error}` }) : null,
       el("div", { class: "row" }, [
         data.version === "your own build" ? null : el("button", {
           class: data.installed ? "secondary" : "primary",

@@ -15,6 +15,7 @@ import pytest
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.studio.engine import (
     Engine,
+    EngineError,
     asset_pattern,
     find_model_files,
     model_name,
@@ -388,3 +389,85 @@ async def test_a_pid_file_for_another_program_is_left_alone(tmp_path, store):
     (tmp_path / "engine" / "engine.pid").write_text(str(os.getpid()))
     engine._stop_leftover()
     assert not (tmp_path / "engine" / "engine.pid").exists(), "we are still here"
+
+
+def _engine_tar() -> bytes:
+    bundle = io.BytesIO()
+    with tarfile.open(fileobj=bundle, mode="w:gz") as tar:
+        program = b"#!/bin/sh\n"
+        entry = tarfile.TarInfo("llama-b9100/llama-server")
+        entry.size = len(program)
+        tar.addfile(entry, io.BytesIO(program))
+    return bundle.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_install_works_without_githubs_api(tmp_path, store):
+    """When the API is rate limited, the release page gives the version."""
+    from free_claude_code.studio.engine import asset_name
+
+    bundle = _engine_tar()
+    fetched: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        fetched.append(url)
+        if "api.github.com" in url:
+            return httpx.Response(403, json={"message": "API rate limit exceeded"})
+        if url.endswith("/releases/latest"):
+            return httpx.Response(
+                302,
+                headers={
+                    "location": "https://github.com/ggml-org/llama.cpp/releases/tag/b9100"
+                },
+            )
+        if url.endswith("/releases/tag/b9100"):
+            return httpx.Response(200, text="<html>b9100</html>")
+        if "/releases/download/b9100/" in url:
+            return httpx.Response(200, content=bundle)
+        return httpx.Response(404)
+
+    engine = Engine(
+        root=tmp_path / "engine",
+        store=store,
+        folders=lambda: [],
+        port=free_port,
+        transport=httpx.MockTransport(handler),
+    )
+    assert await engine.install() == "b9100"
+    assert engine.binary() is not None
+    assert fetched[-1].endswith(asset_name("vulkan", "b9100"))
+    assert engine.install_state.done == len(bundle)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_download_says_how_to_install_by_hand(tmp_path, store):
+    engine = Engine(
+        root=tmp_path / "engine",
+        store=store,
+        folders=lambda: [],
+        port=free_port,
+        build=lambda: "vulkan",
+        transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+    )
+    with pytest.raises(EngineError):
+        await engine.install()
+    assert engine.install_state.state == "failed"
+    assert "github.com/ggml-org/llama.cpp/releases" in engine.install_state.error
+    assert "drop that file on Model Control" in engine.install_state.error
+
+
+@pytest.mark.asyncio
+async def test_a_downloaded_release_file_installs_the_engine(make_studio):
+    studio, _ = make_studio([])
+    name = "llama-b9100-bin-ubuntu-vulkan-x64.tar.gz"
+    assert studio.engine_identify(name, b"\x1f\x8b")["engine"] is True
+    assert not studio.engine_identify("notes.zip", b"PK")["is_model"]
+
+    async def chunks():
+        yield _engine_tar()
+
+    done = await studio.engine_install_file(name, chunks())
+    assert done == {"installed": True, "version": "b9100"}
+    status = await studio.engine_status()
+    assert status["installed"] and status["version"] == "b9100"

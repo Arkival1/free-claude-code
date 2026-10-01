@@ -53,6 +53,14 @@ from .models import EngineModelSettings, now_ms
 from .store import StudioStore
 
 RELEASES_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+RECENT_RELEASES_URL = (
+    "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=8"
+)
+LATEST_PAGE_URL = "https://github.com/ggml-org/llama.cpp/releases/latest"
+DOWNLOAD_URL = "https://github.com/ggml-org/llama.cpp/releases/download/{tag}/{name}"
+ENGINE_ARCHIVE = re.compile(
+    r"^llama-(b\d+)-bin-[\w.-]+\.(?:zip|tar\.gz)$", re.IGNORECASE
+)
 LOG_LINES = 400
 START_SECONDS = 60.0
 FLASH_CHOICES = ("auto", "on", "off")
@@ -114,6 +122,21 @@ def asset_pattern(
     arch = "arm64" if arm else "x64"
     middle = "" if build == "cpu" else "vulkan-"
     return re.compile(rf"-bin-ubuntu-{middle}{arch}\.tar\.gz$")
+
+
+def asset_name(build: str, tag: str, *, system: str = "", machine: str = "") -> str:
+    """The release file's name for this PC, the same one asset_pattern finds."""
+    system = (system or platform.system()).lower()
+    machine = (machine or platform.machine()).lower()
+    arm = machine in {"arm64", "aarch64"}
+    arch = "arm64" if arm else "x64"
+    if system == "windows":
+        kind = "cpu" if build == "cpu" or arm else "vulkan"
+        return f"llama-{tag}-bin-win-{kind}-{arch}.zip"
+    if system == "darwin":
+        return f"llama-{tag}-bin-macos-{arch}.tar.gz"
+    middle = "" if build == "cpu" else "vulkan-"
+    return f"llama-{tag}-bin-ubuntu-{middle}{arch}.tar.gz"
 
 
 def model_name(path: Path) -> str:
@@ -279,42 +302,18 @@ class Engine:
                 follow_redirects=True,
                 transport=self._transport,
             ) as client:
-                release = await client.get(
-                    RELEASES_URL, headers={"accept": "application/vnd.github+json"}
-                )
-                if release.status_code >= 400:
-                    raise EngineError(
-                        f"GitHub answered {release.status_code} when asked for "
-                        "the latest llama.cpp release."
-                    )
-                body = release.json()
-                tag = str(body.get("tag_name") or "")
-                pattern = asset_pattern(self._build())
-                asset = next(
-                    (
-                        item
-                        for item in body.get("assets") or []
-                        if isinstance(item, dict)
-                        and pattern.search(str(item.get("name") or ""))
-                    ),
-                    None,
-                )
-                if asset is None:
-                    raise EngineError(
-                        f"The llama.cpp release {tag} has no build for this PC "
-                        f"({pattern.pattern})."
-                    )
-                state.state, state.version = "downloading", tag
-                state.total = int(asset.get("size") or 0)
+                tag, url, size = await self._find_download(client)
+                state.state, state.version, state.total = "downloading", tag, size
                 self._root.mkdir(parents=True, exist_ok=True)
-                archive = self._root / str(asset["name"])
-                async with client.stream(
-                    "GET", str(asset["browser_download_url"])
-                ) as response:
+                archive = self._root / url.rsplit("/", 1)[-1]
+                async with client.stream("GET", url) as response:
                     if response.status_code >= 400:
                         raise EngineError(
                             f"The download answered {response.status_code}."
                         )
+                    if not state.total:
+                        length = response.headers.get("content-length", "")
+                        state.total = int(length) if length.isdigit() else 0
                     with archive.open("wb") as handle:
                         async for chunk in response.aiter_bytes(1 << 20):
                             await anyio.to_thread.run_sync(handle.write, chunk)
@@ -326,8 +325,93 @@ class Engine:
             state.state = "ready"
             return tag
         except (httpx.HTTPError, OSError, ValueError, EngineError) as error:
-            state.state, state.error = "failed", str(error)
+            state.state = "failed"
+            state.error = f"{error} {self.manual_hint()}"
             raise EngineError(str(error)) from error
+
+    def manual_hint(self) -> str:
+        """How to install the engine by hand when the download can't run."""
+        name = asset_name(self._build(), "bXXXX")
+        return (
+            "You can also install it yourself: open "
+            "github.com/ggml-org/llama.cpp/releases, download the file named "
+            f"like {name}, and drop that file on Model Control."
+        )
+
+    async def _find_download(self, client: httpx.AsyncClient) -> tuple[str, str, int]:
+        """(tag, url, size) of the build for this PC.
+
+        GitHub's API first (the latest release, then the last few, since a
+        new release can be published before every build is uploaded). When
+        the API is blocked or rate limited, the latest release page gives the
+        tag and the file's address is built from it.
+        """
+        pattern = asset_pattern(self._build())
+        problems: list[str] = []
+        for url in (RELEASES_URL, RECENT_RELEASES_URL):
+            try:
+                answer = await client.get(
+                    url, headers={"accept": "application/vnd.github+json"}
+                )
+            except httpx.HTTPError as error:
+                problems.append(f"GitHub couldn't be reached ({error})")
+                break
+            if answer.status_code >= 400:
+                problems.append(f"GitHub's API answered {answer.status_code}")
+                break
+            body = answer.json()
+            for release in body if isinstance(body, list) else [body]:
+                if not isinstance(release, dict):
+                    continue
+                for item in release.get("assets") or []:
+                    if isinstance(item, dict) and pattern.search(
+                        str(item.get("name") or "")
+                    ):
+                        return (
+                            str(release.get("tag_name") or ""),
+                            str(item["browser_download_url"]),
+                            int(item.get("size") or 0),
+                        )
+            problems.append("no build for this PC in the newest release")
+        try:
+            page = await client.get(LATEST_PAGE_URL)
+        except httpx.HTTPError as error:
+            problems.append(f"github.com couldn't be reached ({error})")
+            raise EngineError("; ".join(problems) + ".") from error
+        found = re.search(r"/releases/tag/(b\d+)", str(page.url)) or re.search(
+            r"/releases/tag/(b\d+)", page.text[:200_000]
+        )
+        if found is None:
+            problems.append("the latest release page didn't name a version")
+            raise EngineError("; ".join(problems) + ".")
+        tag = found.group(1)
+        name = asset_name(self._build(), tag)
+        return tag, DOWNLOAD_URL.format(tag=tag, name=name), 0
+
+    async def install_archive(self, archive: Path) -> str:
+        """Install a llama.cpp release file the user downloaded themselves."""
+        found = ENGINE_ARCHIVE.match(archive.name)
+        if found is None:
+            raise EngineError(
+                "That isn't a llama.cpp release file (llama-b1234-bin-….zip)."
+            )
+        tag = found.group(1).lower()
+        self.install_state = state = InstallState(state="unpacking", version=tag)
+        try:
+            if self.running:
+                await self.stop()
+            await anyio.to_thread.run_sync(lambda: self._unpack(archive, tag))
+        except (
+            OSError,
+            ValueError,
+            EngineError,
+            zipfile.BadZipFile,
+            tarfile.TarError,
+        ) as error:
+            state.state, state.error = "failed", str(error)
+            raise EngineError(f"It couldn't be unpacked: {error}") from error
+        state.state = "ready"
+        return tag
 
     def _unpack(self, archive: Path, tag: str) -> None:
         target = self._root / "bin"

@@ -1340,6 +1340,17 @@ async def engine_identify(
     return studio.engine_identify(name, bytes(head[:4096]))
 
 
+@router.post("/studio/api/engine/install-file")
+async def engine_install_file(
+    request: Request,
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Install a llama.cpp release file downloaded by hand."""
+    return await studio.engine_install_file(name, request.stream())
+
+
 @router.post("/studio/api/engine/upload")
 async def engine_upload(
     request: Request,

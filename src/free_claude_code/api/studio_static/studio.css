@@ -2799,3 +2799,5 @@ h3.subhead {
 .speed-trials { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
 .speed-trials li.won { color: var(--good); font-weight: 600; }
 .speed-advice { color: var(--accent); }
+
+.engine-failed { color: var(--warn); border-left: 3px solid var(--warn); padding: 6px 10px; background: rgba(255, 181, 71, 0.08); }

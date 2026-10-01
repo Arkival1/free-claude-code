@@ -34,7 +34,7 @@ from .connectivity import Connectivity
 from .convo_notes import NotesKeeper
 from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
-from .engine import Engine, EngineError, not_a_model
+from .engine import ENGINE_ARCHIVE, Engine, EngineError, not_a_model
 from .guide import (
     GUIDE_TOPICS,
     STARTER_QUESTIONS,
@@ -946,6 +946,15 @@ class StudioService:
 
     def engine_identify(self, name: str, head: bytes) -> JsonObject:
         """What a file is, from its first bytes, before it is uploaded."""
+        if ENGINE_ARCHIVE.match(Path(name).name):
+            return {
+                "is_model": False,
+                "engine": True,
+                "kind": "engine",
+                "label": "llama.cpp engine",
+                "file": name,
+                "message": "The llama.cpp engine. Installing it…",
+            }
         kind, label = identify(head, name)
         if kind == "gguf":
             return {
@@ -956,6 +965,28 @@ class StudioService:
                 "message": "A model file. Adding it…",
             }
         return not_a_model(kind, label, name)
+
+    async def engine_install_file(
+        self, name: str, chunks: AsyncIterator[bytes]
+    ) -> JsonObject:
+        """Install a llama.cpp release file the user downloaded themselves."""
+        plain = Path(name).name
+        if not ENGINE_ARCHIVE.match(plain):
+            raise StudioError(
+                "Drop the llama.cpp release file itself (llama-b1234-bin-….zip)."
+            )
+        folder = self._models_dir / "engine"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / plain
+        handle = await anyio.to_thread.run_sync(target.open, "wb")
+        try:
+            async for chunk in chunks:
+                await anyio.to_thread.run_sync(handle.write, chunk)
+        finally:
+            await anyio.to_thread.run_sync(handle.close)
+        tag = await self._engine_call(self._engine.install_archive(target))
+        self._local_probe = None
+        return {"installed": True, "version": tag}
 
     async def engine_upload(
         self, name: str, chunks: AsyncIterator[bytes], *, size: int | None
