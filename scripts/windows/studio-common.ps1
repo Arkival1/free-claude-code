@@ -95,7 +95,19 @@ function Install-StudioPackages {
     $syncArgs = @("sync", "--python", $PythonRequest) + $Extras
     Invoke-Step "Installing Python 3.14 and the app's packages ($Note)" {
         & uv @syncArgs
-        if ($LASTEXITCODE -ne 0) { throw "Package install failed (uv exit $LASTEXITCODE)." }
+        if ($LASTEXITCODE -ne 0) {
+            # Usually the package site timed out (slow line, VPN, firewall).
+            Write-Host "The download failed or timed out; trying again with more time..." -ForegroundColor Yellow
+            $env:UV_HTTP_TIMEOUT = "120"
+            & uv @syncArgs
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "Still can't reach the package site; trying the packages already on this PC..." -ForegroundColor Yellow
+            & uv @syncArgs --offline
+        }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Package install failed (uv exit $LASTEXITCODE). Check the internet connection (turn off a VPN if one is on), then run it again."
+        }
     } "uv $($syncArgs -join ' ')"
 }
 
