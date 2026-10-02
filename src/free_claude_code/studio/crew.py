@@ -7,7 +7,7 @@ from typing import Protocol
 from free_claude_code.core.json_types import JsonObject
 
 from .memory import keywords
-from .models import Agent, AgentRun, Chat, SiteProject
+from .models import Agent, AgentRun, Chat, SiteProject, now_ms
 from .rooms import RoomOutcome
 from .sites import slugify
 from .store import StudioStore
@@ -24,6 +24,10 @@ MAX_HANDOFF_DEPTH = 2
 """How far a job may be passed down: the main AI to the Builder to the
 Researcher, and no further, so agents with every tool never pass work in a
 circle."""
+
+
+RECENT_HANDOFF_MS = 120_000
+"""The same job handed out again this soon is the same job, done or not."""
 
 
 class CrewHost(Protocol):
@@ -110,10 +114,14 @@ class Crew:
             return refused
         same = await self._already_on_it(worker, task, context.chat_id)
         if same is not None:
+            busy = same.status in {"queued", "running"}
             return ToolOutcome(
                 text=(
                     f"{worker.name} is already working on this ('{same.goal[:120]}') "
                     "and will report here when done."
+                    if busy
+                    else f"{worker.name} just did this ('{same.goal[:120]}'); its "
+                    "report is in this conversation."
                 ),
                 data={
                     "tool": "ask_agent",
@@ -258,10 +266,12 @@ class Crew:
     async def _already_on_it(
         self, worker: Agent, task: str, chat_id: str
     ) -> AgentRun | None:
-        """A task this conversation already gave this agent that is still going."""
+        """A task this conversation already gave this agent that is still going,
+        or that it gave just now (a fast job may already be done)."""
         wanted = set(keywords(task))
+        recent = now_ms() - RECENT_HANDOFF_MS
         for run in await self._host.runs(agent_id=worker.id):
-            if run.status not in {"queued", "running"}:
+            if run.status not in {"queued", "running"} and run.created_at < recent:
                 continue
             chat = await self._store.get(Chat, run.chat_id)
             if chat is None or chat.parent_chat_id != chat_id:

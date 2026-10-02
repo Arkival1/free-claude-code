@@ -245,6 +245,17 @@ ENGINE_RETRY_SECONDS = 300.0
 """After the engine fails to start, LM Studio answers this long before a retry."""
 
 
+def _plain_error(run: AgentRun) -> str:
+    """Why a job stopped, in words rather than an error code."""
+    error = (run.error or run.status).strip()
+    if error == "step_limit":
+        return (
+            f"Ran out of steps ({run.step}) before finishing. What it made so far "
+            "is saved; ask again to carry on, or with a narrower goal."
+        )
+    return error
+
+
 def _file_rank(path: str) -> tuple[int, str]:
     """The page first, then other pages, styles, scripts, and the rest."""
     if path == "index.html":
@@ -3855,7 +3866,7 @@ class StudioService:
             result = await self._plain_result(run) or "Done, with nothing to report."
             text = f"Done: {goal}\n{result}"
         else:
-            text = f"Couldn't finish: {goal}\n{(run.error or run.status).strip()}"
+            text = f"Couldn't finish: {goal}\n{_plain_error(run)}"
         await self._post_in_room(
             agent.name, text, {"kind": "shared", "run_id": run.id, "status": run.status}
         )

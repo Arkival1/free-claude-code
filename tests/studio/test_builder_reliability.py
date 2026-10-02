@@ -449,3 +449,20 @@ async def test_a_builder_that_never_writes_is_told_to_once(make_studio):
     run = (await studio.runs())[0]
     assert "Arc B580" in await studio.workspace.read(str(run.site_id), "index.html")
     assert any("Nothing is built yet" in str(c["prompt"]) for c in model.calls)
+
+
+def test_a_stopped_job_says_why_in_words():
+    from free_claude_code.studio.models import AgentRun
+    from free_claude_code.studio.service import _plain_error
+
+    run = AgentRun.model_validate(
+        {
+            "agent_id": "a",
+            "chat_id": "c",
+            "goal": "g",
+            "status": "failed",
+            "error": "step_limit",
+            "step": 12,
+        }
+    )
+    assert _plain_error(run).startswith("Ran out of steps (12) before finishing.")
