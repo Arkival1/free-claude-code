@@ -16,6 +16,7 @@ from free_claude_code.core.anthropic import (
 )
 from free_claude_code.core.openai_responses import OpenAIResponsesRequest
 from free_claude_code.core.trace import trace_event
+from free_claude_code.core.version import package_version
 
 from .dependencies import (
     get_services,
@@ -199,9 +200,14 @@ async def probe_root():
     return _probe_response("GET, HEAD, OPTIONS")
 
 
+# The version this server started with: the desktop app compares it with the
+# files on disk and restarts a server left running from an older version.
+_STARTED_VERSION = package_version()
+
+
 @router.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "version": _STARTED_VERSION}
 
 
 @router.api_route("/health", methods=["HEAD", "OPTIONS"])

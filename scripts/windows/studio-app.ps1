@@ -67,6 +67,42 @@ function Test-Server {
     }
 }
 
+function Get-ServerVersion {
+    # $null when nothing answers; "" for a Studio too old to say its version.
+    try {
+        $health = Invoke-RestMethod -TimeoutSec 2 $HealthUrl
+    }
+    catch {
+        return $null
+    }
+    $status = $health.PSObject.Properties["status"]
+    if ($null -eq $status -or $status.Value -ne "healthy") { return $null }
+    $version = $health.PSObject.Properties["version"]
+    if ($null -eq $version) { return "" }
+    return [string] $version.Value
+}
+
+function Get-InstalledVersion {
+    $project = Join-Path $RepoRoot "pyproject.toml"
+    if (-not (Test-Path $project)) { return "" }
+    $found = Select-String -Path $project -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if ($null -eq $found) { return "" }
+    return $found.Matches[0].Groups[1].Value
+}
+
+function Stop-OldServer {
+    # Whatever listens on Studio's port is the old server; stop it and its children.
+    $owners = @(Get-NetTCPConnection -LocalPort $effectivePort -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique)
+    foreach ($owner in $owners) {
+        if ($owner -gt 4) { & taskkill.exe /PID $owner /T /F | Out-Null }
+    }
+    for ($tick = 0; $tick -lt 20; $tick++) {
+        if (-not (Test-Server)) { return }
+        Start-Sleep -Milliseconds 500
+    }
+}
+
 function Show-Splash {
     # A small dark window so double-clicking the icon shows something at once.
     try {
@@ -138,6 +174,16 @@ if ($env:OS -ne "Windows_NT" -and -not $DryRun) {
 $Extras = Get-StudioExtras -NoVoice:$NoVoice
 $server = $null
 $splash = $null
+
+# A server left running from before an update would keep serving the old
+# version, so restart it when its version isn't the one installed here.
+$running = Get-ServerVersion
+$installed = Get-InstalledVersion
+if ($null -ne $running -and $installed -and $running -ne $installed) {
+    $was = if ($running) { "Studio $running" } else { "An older Studio" }
+    Write-Host "$was is still running; restarting it as $installed."
+    if (-not $DryRun) { Stop-OldServer }
+}
 
 if (Test-Server) {
     Write-Host "Studio is already running."
