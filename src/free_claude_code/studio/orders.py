@@ -4,12 +4,24 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-_VERBS = r"have|tell|ask|send|let|order|instruct"
+_VERBS = r"have|tell|ask|send|let|order|instruct|call|use|ping|get"
 _TO_VERBS = r"get|need|want|would like|'d like"
 _ANYONE = (
     r"an agent|another agent|one of the agents|one of my agents|someone|somebody|"
     r"one of them|an ai|another ai"
 )
+_DOING = (
+    r"(?:find|look|search|research|check|compare|make|build|write|fix|plan|test|"
+    r"go|create|design|get|show|give|study|read|figure|google)"
+)
+
+
+def _addressing(main: str) -> str:
+    """'Hey Jarvis, please' before a sentence that is really for an agent."""
+    name = rf"(?:{re.escape(main.strip())}\s*[,:!]?\s+)?" if main.strip() else ""
+    return rf"(?:(?:hey|ok|okay)\s+)?{name}(?:please\s+)?"
+
+
 _POLITE = re.compile(r"^(?:(?:please|pls|then|and|also|now|to|go)\b|,|\s)+", re.I)
 _TRAILING = re.compile(
     r"[\s,;]*(?:please|pls|for me|thanks|thank you)?[\s.!,;]*$", re.I
@@ -51,13 +63,14 @@ class _Start:
     stop: bool = False
 
 
-def parse_orders(text: str, names: Sequence[str]) -> list[Order]:
+def parse_orders(text: str, names: Sequence[str], main: str = "") -> list[Order]:
     """Find orders like 'have Builder make a page' or '@Researcher look into X'."""
     team = sorted({name for name in names if name.strip()}, key=len, reverse=True)
     if not team or not text.strip():
         return []
     who = "|".join(re.escape(name) for name in team)
-    target = rf"(?:the\s+)?@?(?P<name>{who})\b|(?P<anyone>{_ANYONE})"
+    # "the Builder's opinion" talks about an agent; it gives it no job.
+    target = rf"(?:the\s+)?@?(?P<name>{who})\b(?!['\u2019]s)|(?P<anyone>{_ANYONE})"
     patterns = (
         # "have Builder make ...", "can you ask the Researcher to ..."
         re.compile(rf"\b(?:{_VERBS})\s+(?:{target})\s*(?:,\s*)?(?:to\s+)?", re.I),
@@ -68,6 +81,18 @@ def parse_orders(text: str, names: Sequence[str]) -> list[Order]:
         # "Builder, make ..." or "Builder: make ..." at the start of a sentence
         re.compile(
             rf"(?:^|(?<=[.!?\n]\s)|(?<=[.!?\n]))\s*(?P<name>{who})\s*[,:]\s+", re.I
+        ),
+        # "Researcher find cheap TVs": a name, then something to do
+        re.compile(
+            rf"(?:^|(?<=[.!?\n]\s)|(?<=[.!?\n]))\s*(?P<name>{who})\s+(?={_DOING}\b)",
+            re.I,
+        ),
+        # "can the Researcher look up ..." asked as a sentence of its own
+        re.compile(
+            rf"(?:^|(?<=[.!?\n]\s)|(?<=[.!?\n]))\s*{_addressing(main)}"
+            rf"(?:can|could|would|will)\s+(?:the\s+)?@?(?P<name>{who})\b(?!['\u2019]s)\s+"
+            r"(?=\S+\s+\S)",
+            re.I,
         ),
     )
     stop = re.compile(
@@ -115,8 +140,13 @@ _LOOK_IT_UP = re.compile(
     r"(?:do\s+(?:some\s+|a\s+bit\s+of\s+)?research|research|look\s+(?:up|into)|"
     r"search|google|browse|find\s+out|"
     r"find\s+(?:me\s+)?(?:info|information|sources|articles|reviews|videos)|"
+    r"find\s+(?:me\s+)?(?:the\s+|some\s+)?(?:best|cheapest|top|good|cheap|latest|newest)|"
     r"check\s+(?:online|the\s+(?:web|internet)))\b",
     re.I,
+)
+_LOOK_FOR = re.compile(r"(?:look|hunt|shop)\s+(?:around\s+)?for\b", re.I)
+_ONLINE = re.compile(
+    r"\b(?:online|on\s+the\s+(?:web|internet|net)|on\s+google)\b", re.I
 )
 _NOT_THE_WEB = re.compile(
     r"\b(?:my|your|our)\s+(?:memory|notes|files|chats?|projects?|photos)\b|"
@@ -141,7 +171,9 @@ def web_request(text: str, main: str = "") -> str:
     web = _ON_THE_WEB.match(rest)
     if web:
         rest = rest[web.end() :]
-    elif not _LOOK_IT_UP.match(rest):
+    elif not _LOOK_IT_UP.match(rest) and not (
+        _LOOK_FOR.match(rest) and _ONLINE.search(rest)
+    ):
         return ""
     task = _clean(rest).rstrip("?")
     if len(task.split()) < 2 or _NOT_THE_WEB.search(task) or _VAGUE.search(task):
@@ -217,6 +249,34 @@ _OFFER_LEAD = re.compile(
     r"want)\s+me\s+to\s+|i\s+can\s+)",
     re.I,
 )
+
+
+def called_agent(text: str, names: Sequence[str], main: str = "") -> str:
+    """The agent in 'call the Researcher' said with no job yet, or ''."""
+    team = sorted({name for name in names if name.strip()}, key=len, reverse=True)
+    if not team:
+        return ""
+    who = "|".join(re.escape(name) for name in team)
+    bare = re.match(
+        rf"^\s*{_addressing(main)}(?:can\s+you\s+|could\s+you\s+)?"
+        r"(?:call|get|ping|summon|bring|wake|fetch|ask|contact)\s+(?:up\s+|in\s+)?"
+        rf"(?:the\s+)?@?(?P<name>{who})(?:\s+(?:up|in|for\s+me|please))?\s*[.!?]*\s*$",
+        text,
+        re.I,
+    )
+    return _canonical(bare["name"], team) if bare else ""
+
+
+_NOT_A_JOB = re.compile(
+    r"^\s*(?:no|nope|nah|never\s*mind|nevermind|cancel|stop|forget\s+it)\b", re.I
+)
+
+
+def is_job(text: str, main: str = "") -> bool:
+    """Whether a reply could be the job for an agent just called."""
+    return (
+        len(text.split()) >= 2 and not is_yes(text, main) and not _NOT_A_JOB.match(text)
+    )
 
 
 def is_yes(text: str, main: str = "") -> bool:

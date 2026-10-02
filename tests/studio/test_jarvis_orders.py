@@ -8,6 +8,8 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun, Chat
 from free_claude_code.studio.orders import (
     Order,
+    called_agent,
+    is_job,
     is_yes,
     offered_orders,
     parse_orders,
@@ -287,5 +289,76 @@ async def test_saying_yes_to_jarvis_starts_the_job_he_offered_once(make_studio):
 
     runs = await studio.runs()
     assert [run.goal for run in runs] == ["best rain jackets under 100 dollars"]
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None and runs[0].agent_id == researcher.id
+
+
+@pytest.mark.parametrize(
+    ("text", "orders"),
+    [
+        (
+            "call the researcher and find cheap tvs",
+            [Order("Researcher", "find cheap tvs")],
+        ),
+        (
+            "use the researcher to find good headphones",
+            [Order("Researcher", "find good headphones")],
+        ),
+        ("researcher find cheap tvs", [Order("Researcher", "find cheap tvs")]),
+        (
+            "Jarvis can the researcher look up cheap tvs",
+            [Order("Researcher", "look up cheap tvs")],
+        ),
+        (
+            "get the researcher to find cheap flights",
+            [Order("Researcher", "find cheap flights")],
+        ),
+        ("what can the builder do for me", []),
+        ("Researcher is idle why", []),
+        ("get Builder's opinion", []),
+        ("jarvis call the researcher", []),
+    ],
+)
+def test_more_ways_of_calling_an_agent(text, orders):
+    assert parse_orders(text, TEAM, "Jarvis") == orders
+
+
+@pytest.mark.parametrize(
+    ("text", "task"),
+    [
+        ("find me the best gpu", "find me the best gpu"),
+        ("look for cheap flights online", "look for cheap flights online"),
+        ("find the bakery site", ""),
+        ("look for my notes", ""),
+    ],
+)
+def test_more_web_requests(text, task):
+    assert web_request(text, "Jarvis") == task
+
+
+def test_a_bare_call_names_the_agent():
+    assert called_agent("Jarvis, call the researcher", TEAM, "Jarvis") == "Researcher"
+    assert called_agent("can you get the Researcher?", TEAM, "Jarvis") == "Researcher"
+    assert called_agent("call the researcher and find tvs", TEAM, "Jarvis") == ""
+    assert is_job("cheap 4k tvs")
+    assert not is_job("no thanks")
+    assert not is_job("yes")
+
+
+@pytest.mark.asyncio
+async def test_calling_an_agent_then_saying_what_for_starts_it(make_studio):
+    def jarvis(prompt: str) -> LLMReply:
+        return LLMReply(text="Sure, what should the Researcher look into?")
+
+    studio, _ = make_studio(team_script(jarvis=jarvis))
+    await studio.ensure_defaults()
+
+    await studio.main_say("Jarvis call the researcher", background=False)
+    assert await studio.runs() == ()
+    await studio.main_say("cheap 4k tvs under 500", background=False)
+    await studio.wait_for_background()
+
+    runs = await studio.runs()
+    assert [run.goal for run in runs] == ["cheap 4k tvs under 500"]
     researcher = await studio.agent_by_name("Researcher")
     assert researcher is not None and runs[0].agent_id == researcher.id

@@ -117,6 +117,8 @@ from .models import (
 from .obsidian import ObsidianVault, VaultStatus
 from .orders import (
     Order,
+    called_agent,
+    is_job,
     is_yes,
     offered_orders,
     parse_orders,
@@ -3434,13 +3436,15 @@ class StudioService:
             for agent in await self.agents()
             if not agent.archived and agent.role not in {MAIN_ROLE, "guide"}
         ]
-        orders = parse_orders(text, [agent.name for agent in team])
+        orders = parse_orders(text, [agent.name for agent in team], main.name)
         researcher = next((agent for agent in team if agent.role == "researcher"), None)
         task = "" if orders or researcher is None else web_request(text, main.name)
         if task and researcher is not None:
             orders = [Order(agent=researcher.name, task=task)]
         if not orders and is_yes(text, main.name):
             orders = await self._accepted_offer(main, chat, team)
+        if not orders and is_job(text, main.name):
+            orders = await self._job_for_called_agent(main, chat, team, text)
         if not orders:
             return ""
         crew = Crew(
@@ -3510,6 +3514,25 @@ class StudioService:
             "in a sentence or two who is doing what; each agent reports back here "
             "when it finishes. Answer anything else they asked."
         )
+
+    async def _job_for_called_agent(
+        self, main: Agent, chat: Chat, team: Sequence[Agent], text: str
+    ) -> list[Order]:
+        """'Call the Researcher' then, once asked what for, 'cheap TVs': the
+        second message is the called agent's job."""
+        recent = list(await self._store.transcript(chat.id, limit=8))
+        if recent and recent[-1].role == "user":
+            recent.pop()  # This message.
+        said = [m for m in recent if m.role in {"user", "assistant", "tool"}]
+        if not said or said[-1].role != "assistant":
+            return []
+        asked = next(
+            (i for i in range(len(said) - 1, -1, -1) if said[i].role == "user"), None
+        )
+        if asked is None or any(m.data.get("order") for m in said[asked:]):
+            return []
+        name = called_agent(said[asked].text, [agent.name for agent in team], main.name)
+        return [Order(name, text.strip())] if name else []
 
     async def _accepted_offer(
         self, main: Agent, chat: Chat, team: Sequence[Agent]
