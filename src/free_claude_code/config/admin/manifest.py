@@ -1193,6 +1193,19 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_SEARCH_BACKUP_API_KEY",
+        "Backup Web Search API Key",
+        "studio",
+        "secret",
+        settings_attr="studio_search_backup_api_key",
+        secret=True,
+        description=(
+            "A second search service, used when the first one fails or runs out "
+            "of free searches, before DuckDuckGo. Paste a Tavily (tvly-), Brave "
+            "(BSA), or Serper key; Studio tells which from the key."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_YOUTUBE_API_KEY",
         "YouTube API Key",
         "studio",

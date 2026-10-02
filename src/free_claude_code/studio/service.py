@@ -545,6 +545,7 @@ class StudioService:
         return StudioSearch(
             provider=settings.studio_search_provider,
             api_key=settings.studio_search_api_key or "",
+            backup_key=settings.studio_search_backup_api_key or "",
             base_url=settings.studio_search_base_url or "",
             fallback=self._web_tools,
             transport=self._search_transport,

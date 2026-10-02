@@ -4838,12 +4838,20 @@
       web.online === false
         ? "This PC is offline right now, so web tools are paused and agents work from memory and project files. They come back on their own when the internet does."
         : "This PC is online. If the internet drops, agents switch to memory and project files until it is back.";
+    const backup = web.backup_label
+      ? ` Backup: ${web.backup_label}, used when the first one fails or runs out.`
+      : web.backup_problem
+        ? ` ${web.backup_problem}`
+        : "";
     const service =
-      web.provider === "duckduckgo"
-        ? "DuckDuckGo, no key needed. It often blocks automated searches, so a key is more reliable."
+      (web.provider === "duckduckgo"
+        ? web.backup_label
+          ? `${web.backup_label} (the backup key), then DuckDuckGo.`
+          : "DuckDuckGo, no key needed. It often blocks automated searches, so a key is more reliable."
         : web.problem
           ? `${web.label}: ${web.problem} Searches use DuckDuckGo until it is set.`
-          : `${web.label}${web.keyed ? ", key set" : ""}. If it fails, searches fall back to DuckDuckGo.`;
+          : `${web.label}${web.keyed ? ", key set" : ""}. If it fails, searches fall back to DuckDuckGo.`) +
+      (web.provider === "duckduckgo" ? "" : backup);
     return card(
       "Internet access",
       [
@@ -4856,7 +4864,7 @@
         ]),
         el("p", {
           class: "muted",
-          text: "Keys go in admin settings on the computer running Studio, under Studio. Web Search API Key: Brave Search (starts with BSA), Tavily (tvly-), or Serper for Google results. YouTube API Key (optional): from Google Cloud; without it research uses YouTube's own search page. Reddit App ID and Secret: from reddit.com/prefs/apps, a free 'script' app, so Reddit doesn't block research.",
+          text: "Keys go in admin settings on the computer running Studio, under Studio. Web Search API Key: Brave Search (starts with BSA), Tavily (tvly-), or Serper for Google results; Backup Web Search API Key takes a second one, like Tavily beside Brave. YouTube API Key (optional): from Google Cloud; without it research uses YouTube's own search page. Reddit App ID and Secret: from reddit.com/prefs/apps, a free 'script' app, so Reddit doesn't block research.",
         }),
         el("div", { class: "row" }, [
           el("div", { class: "grow" }, [query]),

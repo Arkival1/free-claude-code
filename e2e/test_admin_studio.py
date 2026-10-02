@@ -47,6 +47,7 @@ def test_one_search_box_finds_settings_on_every_page(
 
     search.fill("web search")
     expect(page.locator("#field-STUDIO_SEARCH_API_KEY")).to_be_visible()
+    expect(page.locator("#field-STUDIO_SEARCH_BACKUP_API_KEY")).to_be_visible()
     search.fill("progress timeout")  # an advanced field, shown when it matches
     expect(page.locator("#field-PROVIDER_PROGRESS_TIMEOUT")).to_be_visible()
     search.fill("zzzz-nothing")

@@ -1032,9 +1032,10 @@ full-web search, add a key in **admin → Studio → Web Search API Key**:
 | [Serper](https://serper.dev/) | 40 hex characters | Google results, free trial credits |
 | [SearXNG](https://docs.searxng.org/) | no key | Self-hosted and free: set `STUDIO_SEARCH_BASE_URL` and enable its `json` format |
 
-`STUDIO_SEARCH_PROVIDER=auto` (the default) picks the service from the key. If
-the service rejects the key or runs out of quota, the search falls back to
-DuckDuckGo and the agent is told why. **More → Internet access** shows the setup
+`STUDIO_SEARCH_PROVIDER=auto` (the default) picks the service from the key.
+**Backup Web Search API Key** (`STUDIO_SEARCH_BACKUP_API_KEY`) takes a second key,
+for example Tavily beside Brave. If the first service rejects its key or runs
+out of quota, the backup is used, then DuckDuckGo, and the agent is told why. **More → Internet access** shows the setup
 and has a **Test search** button. The HUD shows the service as a `WEB` pill.
 
 A **Researcher** agent is created for deep research: it searches, reads the

@@ -388,3 +388,60 @@ async def test_brave_invalid_token_reads_as_a_rejected_key():
 
     assert report.provider == "duckduckgo"
     assert report.note.startswith("Brave Search rejected the API key (422)")
+
+
+def _brave_down_tavily_up(seen: list[httpx.Request]) -> httpx.MockTransport:
+    tavily = api_server(seen)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.search.brave.com":
+            seen.append(request)
+            return httpx.Response(429, json={"error": "quota"})
+        return tavily.handle_request(request)
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.asyncio
+async def test_the_backup_key_takes_over_when_the_first_service_fails():
+    seen: list[httpx.Request] = []
+    fallback = RecordingWebTools()
+    search = searcher(
+        "auto",
+        key="BSAmain",
+        backup_key="tvly-backup",
+        fallback=fallback,
+        transport=_brave_down_tavily_up(seen),
+    )
+
+    report = await search.search("tides")
+
+    assert report.provider == "tavily"
+    assert report.hits
+    assert "quota or rate limit" in report.note and "backup, Tavily" in report.note
+    assert [r.url.host for r in seen] == ["api.search.brave.com", "api.tavily.com"]
+    assert seen[1].headers["authorization"] == "Bearer tvly-backup"
+    assert fallback.searches == []
+
+
+@pytest.mark.asyncio
+async def test_a_backup_key_alone_is_used_before_duckduckgo():
+    seen: list[httpx.Request] = []
+    fallback = RecordingWebTools()
+    search = searcher(
+        "auto", backup_key="tvly-only", fallback=fallback, transport=api_server(seen)
+    )
+
+    report = await search.search("tides")
+
+    assert report.provider == "tavily" and report.note == ""
+    assert fallback.searches == []
+    status = search.status()
+    assert status["backup_label"] == "Tavily"
+    assert "tvly-only" not in json.dumps(status)
+
+
+def test_a_backup_key_from_an_unknown_service_is_flagged():
+    status = searcher("auto", key="BSAmain", backup_key="mystery").status()
+    assert status["backup"] == ""
+    assert "isn't a Tavily, Brave, or Serper key" in str(status["backup_problem"])

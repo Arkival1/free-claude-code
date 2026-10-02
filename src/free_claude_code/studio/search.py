@@ -120,7 +120,8 @@ def _failure(provider: str, error: Exception) -> str:
 
 
 class StudioSearch:
-    """Search with the configured provider, falling back to DuckDuckGo."""
+    """Search with the configured provider, then a backup key's service, then
+    DuckDuckGo."""
 
     def __init__(
         self,
@@ -129,6 +130,7 @@ class StudioSearch:
         api_key: str,
         base_url: str,
         fallback: WebToolsPort,
+        backup_key: str = "",
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = 15.0,
         retry_delay: float = 1.0,
@@ -136,6 +138,10 @@ class StudioSearch:
         self._provider = detect_provider(provider, api_key, base_url)
         self._api_key = api_key.strip()
         self._base_url = base_url.strip().rstrip("/")
+        self._backup_key = backup_key.strip()
+        # A backup only counts when its key says which keyed service it is.
+        backup = detect_provider("auto", self._backup_key, "")
+        self._backup = backup if backup in KEYED_PROVIDERS else ""
         self._fallback = fallback
         self._transport = transport
         self._timeout = timeout
@@ -162,6 +168,13 @@ class StudioSearch:
             "key_set": bool(self._api_key),
             "base_url": self._base_url,
             "problem": self.problem(),
+            "backup": self._backup,
+            "backup_label": PROVIDER_LABELS.get(self._backup, ""),
+            "backup_problem": (
+                "The backup search key isn't a Tavily, Brave, or Serper key."
+                if self._backup_key and not self._backup
+                else ""
+            ),
         }
 
     async def search(self, query: str, *, limit: int = 6) -> SearchReport:
@@ -169,14 +182,16 @@ class StudioSearch:
         cleaned = query.strip()
         if not cleaned:
             raise ValueError("A search query is required.")
-        note = ""
+        tried: list[str] = []
         if self._provider != "duckduckgo":
             problem = self.problem()
             if problem:
-                note = f"{problem} Used DuckDuckGo instead."
+                tried.append(problem.rstrip("."))
             else:
                 try:
-                    hits = await self._primary(cleaned, limit)
+                    hits = await self._primary(
+                        self._provider, self._api_key, cleaned, limit
+                    )
                     return SearchReport(provider=self._provider, hits=hits[:limit])
                 except (
                     httpx.HTTPError,
@@ -184,9 +199,22 @@ class StudioSearch:
                     TypeError,
                     AttributeError,
                 ) as error:
-                    note = (
-                        f"{_failure(self._provider, error)}. Used DuckDuckGo instead."
-                    )
+                    tried.append(_failure(self._provider, error))
+        if self._backup and self._backup_key != self._api_key:
+            try:
+                hits = await self._primary(
+                    self._backup, self._backup_key, cleaned, limit
+                )
+                note = (
+                    f"{'; '.join(tried)}. Used the backup, "
+                    f"{PROVIDER_LABELS[self._backup]}."
+                    if tried
+                    else ""
+                )
+                return SearchReport(provider=self._backup, hits=hits[:limit], note=note)
+            except (httpx.HTTPError, ValueError, TypeError, AttributeError) as error:
+                tried.append(f"backup {_failure(self._backup, error)}")
+        note = f"{'; '.join(tried)}. Used DuckDuckGo instead." if tried else ""
         return await self._keyless(cleaned, limit, note)
 
     async def _keyless(self, query: str, limit: int, note: str) -> SearchReport:
@@ -257,18 +285,20 @@ class StudioSearch:
             if isinstance(row, dict) and row.get("title")
         )
 
-    async def _primary(self, query: str, limit: int) -> tuple[SearchHit, ...]:
+    async def _primary(
+        self, provider: str, api_key: str, query: str, limit: int
+    ) -> tuple[SearchHit, ...]:
         async with httpx.AsyncClient(
             timeout=self._timeout, transport=self._transport
         ) as client:
-            match self._provider:
+            match provider:
                 case "brave":
                     response = await client.get(
                         "https://api.search.brave.com/res/v1/web/search",
                         params={"q": query, "count": limit},
                         headers={
                             "accept": "application/json",
-                            "x-subscription-token": self._api_key,
+                            "x-subscription-token": api_key,
                         },
                     )
                     response.raise_for_status()
@@ -284,7 +314,7 @@ class StudioSearch:
                             "max_results": limit,
                             "search_depth": "basic",
                         },
-                        headers={"authorization": f"Bearer {self._api_key}"},
+                        headers={"authorization": f"Bearer {api_key}"},
                     )
                     response.raise_for_status()
                     return _hits(
@@ -296,7 +326,7 @@ class StudioSearch:
                     response = await client.post(
                         "https://google.serper.dev/search",
                         json={"q": query, "num": limit},
-                        headers={"x-api-key": self._api_key},
+                        headers={"x-api-key": api_key},
                     )
                     response.raise_for_status()
                     return _hits(
@@ -317,4 +347,4 @@ class StudioSearch:
                         snippet_key="content",
                     )
                 case _:
-                    raise ValueError(f"unknown search provider {self._provider!r}")
+                    raise ValueError(f"unknown search provider {provider!r}")

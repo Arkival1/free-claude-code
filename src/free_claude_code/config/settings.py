@@ -825,6 +825,9 @@ class Settings(BaseModel):
     studio_search_api_key: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_SEARCH_API_KEY"
     )
+    studio_search_backup_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_SEARCH_BACKUP_API_KEY"
+    )
     studio_search_base_url: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_SEARCH_BASE_URL"
     )
