@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlparse
 
 import aiohttp
 import httpx
@@ -1063,6 +1064,25 @@ LEAD_TOOLS: tuple[str, ...] = (
 """What an agent on this PC gets to direct the agents on server AIs."""
 
 
+_BLOCKING_STATUSES = frozenset({401, 403, 429, 451})
+
+
+def _blocked_page(call: ToolCall, error: Exception) -> str:
+    """Plain words for a site that turns automated readers away."""
+    status = getattr(error, "status", None)
+    if status is None and isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+    if call.name != "web_fetch" or status not in _BLOCKING_STATUSES:
+        return ""
+    url = str(call.arguments.get("url", ""))
+    site = urlparse(url).hostname or "This site"
+    site = site.removeprefix("www.")
+    return (
+        f"{site} blocks automated reading ({status}), so that page can't be "
+        "read. Use another search result instead."
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ToolContext:
     """Everything one tool call is allowed to touch."""
@@ -1413,7 +1433,7 @@ class AgentToolbox:
             RuntimeError,
             ValueError,
         ) as error:
-            text = f"{call.name} failed: {error}"
+            text = _blocked_page(call, error) or f"{call.name} failed: {error}"
             if call.name in NETWORK_TOOLS and _connection_lost(error):
                 if self._connectivity is not None:
                     self._connectivity.mark_offline(str(error))

@@ -135,7 +135,8 @@ async def test_main_ai_hands_a_build_to_an_agent(make_studio):
     studio, model = make_studio(respond)
     await studio.ensure_defaults()
 
-    chat = await studio.main_say("Make the bakery a landing page", background=False)
+    # Worded so Studio leaves the hand-off to the main AI's own ask_agent call.
+    chat = await studio.main_say("The bakery needs a landing page", background=False)
 
     transcript = await studio.transcript(chat.id)
     assert transcript[-1].text == "Done. The bakery page is ready."

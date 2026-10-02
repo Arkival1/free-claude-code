@@ -311,6 +311,28 @@ def offered_orders(question: str, names: Sequence[str]) -> list[Order]:
     return []
 
 
+_MAKE_SOMETHING = re.compile(
+    r"(?:make|build|create|design|code|write)\s+(?:me\s+|us\s+)?(?:a|an|the|my|our)?\s*"
+    r"(?:[\w'-]+\s+){0,5}?"
+    r"(?:website|web\s*site|site|web\s*page|webpage|landing\s+page|home\s*page|"
+    r"app|web\s*app|game|portfolio|blog|online\s+store|store\s+page)\b",
+    re.I,
+)
+
+
+def build_request(text: str, main: str = "") -> str:
+    """The job in 'make me a Spider-Man website', said to the main AI with no
+    agent named; empty when it isn't one. The Builder takes these, so a small
+    model never tries to write the files itself."""
+    name = rf"(?:{re.escape(main)}\s*[,:!]?\s+)?" if main.strip() else ""
+    lead = re.match(_ASKING.format(main=name), text, re.I)
+    rest = text[lead.end() if lead else 0 :]
+    if not _MAKE_SOMETHING.match(rest):
+        return ""
+    task = _clean(rest).rstrip("?")
+    return task if len(task.split()) >= 3 else ""
+
+
 def pick_agent(task: str, team: Sequence[tuple[str, str]]) -> str:
     """Choose who should do a job the user left open: (name, role) pairs."""
     by_role: dict[str, str] = {}

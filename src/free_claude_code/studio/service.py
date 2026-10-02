@@ -117,6 +117,7 @@ from .models import (
 from .obsidian import ObsidianVault, VaultStatus
 from .orders import (
     Order,
+    build_request,
     called_agent,
     is_job,
     is_yes,
@@ -3441,6 +3442,10 @@ class StudioService:
         task = "" if orders or researcher is None else web_request(text, main.name)
         if task and researcher is not None:
             orders = [Order(agent=researcher.name, task=task)]
+        builder = next((agent for agent in team if agent.role == "builder"), None)
+        job = "" if orders or builder is None else build_request(text, main.name)
+        if job and builder is not None:
+            orders = [Order(agent=builder.name, task=job)]
         if not orders and is_yes(text, main.name):
             orders = await self._accepted_offer(main, chat, team)
         if not orders and is_job(text, main.name):

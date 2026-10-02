@@ -350,3 +350,21 @@ async def test_an_empty_answer_is_asked_again_then_explained(make_studio):
 
     assert "(no reply)" not in blank.text
     assert "spent its whole reply thinking" in blank.text
+
+
+@pytest.mark.asyncio
+async def test_a_garbled_tool_call_is_never_shown_as_the_answer(make_studio):
+    cut = (
+        '{"tool": "write_file", "arguments": {"path": "index.html", "content": "<html>'
+    )
+    studio, _ = make_studio([LLMReply(text=cut)] * 4)
+    await studio.ensure_defaults()
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None
+    chat = await studio.create_chat(agent_id=researcher.id)
+
+    result = await studio.send(chat.id, "make a spider-man page")
+
+    assert '"tool"' not in result.text
+    assert "tried to use write_file" in result.text
+    assert "nothing ran" in result.text

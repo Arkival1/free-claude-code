@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from collections.abc import Awaitable, Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 
@@ -103,6 +104,25 @@ def empty_reply_note(agent: str, model: str, stop_reason: str) -> str:
             "loaded in LM Studio, or pick another in Team brains"
         )
     return f"(Studio: {agent} got no answer from {model_label(model)}: {why}.)"
+
+
+_CALLED_TOOL = re.compile(r'"(?:tool|name)"\s*:\s*"([\w-]+)"')
+
+
+def garbled_call_note(agent: str, text: str, names: Sequence[str]) -> str:
+    """What to say instead of a tool call that was cut off or garbled."""
+    found = _CALLED_TOOL.search(text)
+    tool = found.group(1) if found else "a tool"
+    if tool in WRITE_TOOLS and tool not in names:
+        return (
+            f"(Studio: {agent} tried to write files itself ({tool}), which it "
+            "can't do. Ask the Builder instead, e.g. 'have Builder make ...'.)"
+        )
+    return (
+        f"(Studio: {agent} tried to use {tool}, but its reply was cut off or "
+        "garbled, so nothing ran. Ask again, or give this agent a bigger model "
+        "in Team brains.)"
+    )
 
 
 SWAPPED_NOTE = (
@@ -1092,6 +1112,9 @@ class AgentRunner:
                 text = reply.text.strip() or empty_reply_note(
                     agent.name, model, reply.stop_reason
                 )
+                if unreadable_tool_call(text):
+                    # Never show a half-written tool call as the answer.
+                    text = garbled_call_note(agent.name, text, names)
                 if prodded and not used and WEB_TOOLS & set(names):
                     # Told to start and still only talking: its model most
                     # likely can't call tools at all.

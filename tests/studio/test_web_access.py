@@ -445,3 +445,24 @@ def test_a_backup_key_from_an_unknown_service_is_flagged():
     status = searcher("auto", key="BSAmain", backup_key="mystery").status()
     assert status["backup"] == ""
     assert "isn't a Tavily, Brave, or Serper key" in str(status["backup_problem"])
+
+
+def test_a_site_that_blocks_readers_is_explained_plainly():
+    from free_claude_code.studio.llm import ToolCall
+    from free_claude_code.studio.tools import _blocked_page
+
+    request = httpx.Request("GET", "https://www.britannica.com/animal/cat")
+    error = httpx.HTTPStatusError(
+        "403", request=request, response=httpx.Response(403, request=request)
+    )
+    call = ToolCall(
+        id="f",
+        name="web_fetch",
+        arguments={"url": "https://www.britannica.com/animal/cat"},
+    )
+
+    assert _blocked_page(call, error) == (
+        "britannica.com blocks automated reading (403), so that page can't be "
+        "read. Use another search result instead."
+    )
+    assert _blocked_page(ToolCall(id="s", name="web_search", arguments={}), error) == ""

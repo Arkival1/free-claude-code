@@ -8,6 +8,7 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun, Chat
 from free_claude_code.studio.orders import (
     Order,
+    build_request,
     called_agent,
     is_job,
     is_yes,
@@ -362,3 +363,37 @@ async def test_calling_an_agent_then_saying_what_for_starts_it(make_studio):
     assert [run.goal for run in runs] == ["cheap 4k tvs under 500"]
     researcher = await studio.agent_by_name("Researcher")
     assert researcher is not None and runs[0].agent_id == researcher.id
+
+
+@pytest.mark.parametrize(
+    ("text", "task"),
+    [
+        ("make me a spider-man website", "make me a spider-man website"),
+        (
+            "Jarvis, build a landing page for my bakery",
+            "build a landing page for my bakery",
+        ),
+        ("can you make a snake game", "make a snake game"),
+        ("make a plan for my week", ""),
+        ("write me a poem", ""),
+        ("what makes a good website", ""),
+    ],
+)
+def test_make_something_requests_are_spotted(text, task):
+    assert build_request(text, "Jarvis") == task
+
+
+@pytest.mark.asyncio
+async def test_asking_jarvis_for_a_website_hands_it_to_the_builder(make_studio):
+    studio, _ = make_studio(team_script())
+    await studio.ensure_defaults()
+
+    await studio.main_say("make me a spider-man website", background=False)
+    await studio.wait_for_background()
+
+    runs = await studio.runs()
+    builder = await studio.agent_by_name("Builder")
+    assert builder is not None
+    assert [(run.agent_id, run.goal) for run in runs] == [
+        (builder.id, "make me a spider-man website")
+    ]
