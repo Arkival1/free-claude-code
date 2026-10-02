@@ -243,6 +243,15 @@ MAIN_CONSOLE_SETTING = "console"
 LAB_CHAT_SETTING = "lab"
 ENGINE_RETRY_SECONDS = 300.0
 """After the engine fails to start, LM Studio answers this long before a retry."""
+FOLLOW_UP_PROMPT = (
+    "(Studio) {agent} {status} the job you gave it: {job}\n"
+    "Its report:\n{result}\n\n"
+    "Tell the user in a few sentences what it found or made and what that means "
+    "for them, in your own words, with the links that matter. Then suggest the "
+    "next step, if there is one; the user decides."
+)
+FOLLOW_UP_REPORT_CHARS = 6_000
+"""How much of a teammate's report the main AI reads when it follows up."""
 ROOM_POST_CHARS = 1_500
 """How much of a result an agent posts in the team room."""
 ROOM_NOTE_CHARS = 400
@@ -427,6 +436,8 @@ class StudioService:
         # The app's first page load asks for the starter team from several
         # requests at once; without this each one creates its own copy.
         self._defaults_lock = asyncio.Lock()
+        self._room_lock = asyncio.Lock()
+        self._chat_turns: dict[str, asyncio.Lock] = {}
         self._main_busy = 0
         self._main_error: str | None = None
         self._lab = LabBench(store, think=self._lab_think, transport=search_transport)
@@ -1539,7 +1550,8 @@ class StudioService:
 
     async def _lab_turn(self, chat_id: str, text: str) -> None:
         try:
-            result = await self.send(chat_id, text)
+            async with self._turn_lock(chat_id):
+                result = await self.send(chat_id, text)
             if result.failed:
                 self._lab_error = result.error or "The main AI did not finish."
         except (StudioError, StudioNotFoundError) as error:
@@ -2224,6 +2236,54 @@ class StudioService:
         parent_id = chat.parent_chat_id
         if parent_id is None or await self._store.get(Chat, parent_id) is None:
             return
+        await self._note_report(parent_id, chat, agent, run)
+        await self._main_follows_up(parent_id, agent, run)
+
+    def _turn_lock(self, chat_id: str) -> asyncio.Lock:
+        """One turn at a time in a chat: an answer and a follow-up never mix."""
+        return self._chat_turns.setdefault(chat_id, asyncio.Lock())
+
+    async def _main_follows_up(
+        self, parent_id: str, agent: Agent, run: AgentRun
+    ) -> None:
+        """The main AI reads a teammate's full report and tells the user what
+        it found, in its own words, without waiting to be asked."""
+        parent = await self._store.get(Chat, parent_id)
+        main = await self.main_agent()
+        if parent is None or parent.agent_id != main.id:
+            return  # An agent's own helper reported back; it reads it itself.
+        result = (run.result or run.error or "").strip()
+        job = " ".join(
+            run.goal.split("\n\nBriefing from ")[0].removeprefix("The job: ").split()
+        )
+        report = FOLLOW_UP_PROMPT.format(
+            agent=agent.name,
+            status="finished"
+            if run.status == "succeeded"
+            else f"stopped ({run.status})",
+            job=job[:300],
+            result=result[:FOLLOW_UP_REPORT_CHARS] or "(no report)",
+        )
+        lab = bool(parent.settings.get(LAB_CHAT_SETTING))
+        if lab:
+            self._lab_busy += 1
+        else:
+            self._main_busy += 1
+        try:
+            # Wait until the main AI has finished what it is saying now.
+            async with self._turn_lock(parent.id), self._working(main.id):
+                await self._runner().follow_up(main, parent, report)
+        except (StudioError, StudioNotFoundError) as error:
+            logger.warning("Studio: the main AI could not follow up: {}", error)
+        finally:
+            if lab:
+                self._lab_busy = max(0, self._lab_busy - 1)
+            else:
+                self._main_busy = max(0, self._main_busy - 1)
+
+    async def _note_report(
+        self, parent_id: str, chat: Chat, agent: Agent, run: AgentRun
+    ) -> None:
         summary = (run.result or run.error or "").strip()[:600]
         await self._store.append_message(
             chat_id=parent_id,
@@ -3672,10 +3732,12 @@ class StudioService:
 
     async def _team_room(self) -> Chat:
         """The room the team shares: the latest one, or a new Team room."""
-        rooms = await self._store.find(
-            Chat, where={"kind": "room"}, order_by="updated_at DESC", limit=1
-        )
-        return rooms[0] if rooms else await self.create_room(title="Team room")
+        # A job's post and its result can arrive together; open one room only.
+        async with self._room_lock:
+            rooms = await self._store.find(
+                Chat, where={"kind": "room"}, order_by="updated_at DESC", limit=1
+            )
+            return rooms[0] if rooms else await self.create_room(title="Team room")
 
     async def _post_in_room(self, author: str, text: str, data: JsonObject) -> None:
         """Write in the team room for everyone to read. Only a note: it starts
@@ -3954,7 +4016,8 @@ class StudioService:
 
     async def _main_turn(self, chat_id: str, text: str) -> None:
         try:
-            result = await self.send(chat_id, text)
+            async with self._turn_lock(chat_id):
+                result = await self.send(chat_id, text)
             if result.failed:
                 self._main_error = result.error or "The main AI did not finish."
         except (StudioError, StudioNotFoundError) as error:

@@ -5083,7 +5083,9 @@
         const meta = message.data || {};
         const fromMain = message.role === "assistant" && !meta.partial && message.author === hud.name;
         const finishedWork = message.role === "event" && meta.kind === "background_done";
-        if ((fromMain || finishedWork) && message.sequence > hud.spokenSeq) {
+        if (finishedWork) hud.orb?.burst();
+        // A finished job is spoken by the main AI's follow-up, in its own words.
+        if (fromMain && message.sequence > hud.spokenSeq) {
           hud.spokenSeq = message.sequence;
           hud.orb?.burst();
           const said = hud.liveSpoken;

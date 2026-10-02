@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable, MutableMapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from loguru import logger
 
@@ -80,6 +80,8 @@ START_NOTE = (
     "you found."
 )
 WEB_TOOLS = frozenset({"web_search", "web_fetch", "research"})
+FOLLOW_UP_STEPS = 4
+"""Turns the main AI may take to digest a teammate's report."""
 EMPTY_NOTE = (
     "(Studio) Your reply came back empty. Answer now in plain words, and keep "
     "any thinking short."
@@ -808,6 +810,28 @@ class AgentRunner:
             )
         return result
 
+    async def follow_up(self, agent: Agent, chat: Chat, report: str) -> TurnResult:
+        """Take a turn without a new user message: a teammate just reported
+        back, and the agent tells the user what it means."""
+        agent, sealed, directs = await self._private_view(agent)
+        history = await self._history(agent, chat)
+        history.append(ChatMessage.user(report))
+        context = self._context(
+            agent, chat, site_id=chat.site_id, sealed=sealed, directs=directs
+        )
+        return await self._loop(
+            agent,
+            chat,
+            history=history,
+            context=context,
+            query=report[:500],
+            max_steps=FOLLOW_UP_STEPS,
+            sealed=sealed,
+            extra_system=LAB_PROMPT if chat.settings.get("lab") else "",
+            # Talking only: a small model must not hand the same job out again.
+            talk_only=True,
+        )
+
     async def run_task(
         self, agent: Agent, chat: Chat, run: AgentRun, *, note: str = ""
     ) -> AgentRun:
@@ -923,10 +947,14 @@ class AgentRunner:
         turn_note: str = "",
         sealed: bool = False,
         alone: bool = False,
+        talk_only: bool = False,
     ) -> TurnResult:
-        """``alone``: a background job, so nobody is there to answer questions."""
+        """``alone``: a background job, so nobody is there to answer questions.
+        ``talk_only``: no tools this turn (a follow-up that only reports)."""
         await self._toolbox.check_online()
-        names = self._toolbox.tool_names(agent.tools, role=agent.role)
+        names = (
+            () if talk_only else self._toolbox.tool_names(agent.tools, role=agent.role)
+        )
         specs = tool_specs(
             names,
             commands_enabled=self._toolbox.commands_enabled,
@@ -1010,6 +1038,10 @@ class AgentRunner:
                     error=hint or str(error),
                 )
             self._clear_live(chat.id)
+            if talk_only and reply.tool_calls:
+                # A report back is talk only: a tool asked for anyway (a small
+                # model handing the job out again) never runs.
+                reply = replace(reply, tool_calls=())
             swapped = self._router.swaps.get(model)
             if swapped and swapped != model:
                 await self._store.append_message(

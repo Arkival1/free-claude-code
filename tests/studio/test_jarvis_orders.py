@@ -543,3 +543,53 @@ async def test_jobs_and_results_are_shared_in_the_team_room(make_studio):
         or c["prompt"].startswith("make a laptop")
         for c in model.calls
     )
+
+
+LONG_REPORT = "Best budget GPU: the Arc B580 [1]. " + "More detail. " * 80
+
+
+@pytest.mark.asyncio
+async def test_jarvis_reads_the_full_report_and_tells_the_user(make_studio):
+    async def respond(system: str, prompt: str):
+        if "the user's main AI" in system:
+            if "finished the job you gave it" in prompt:
+                return LLMReply(text="The Researcher's back: the Arc B580 is the pick.")
+            return LLMReply(text="On it.")
+        return tool_reply("finish", {"summary": LONG_REPORT})
+
+    studio, model = make_studio(respond)
+    await studio.ensure_defaults()
+
+    chat = await studio.main_say("research the best budget gpu", background=False)
+    await studio.wait_for_background()
+
+    said = [m.text for m in await studio.transcript(chat.id) if m.role == "assistant"]
+    assert said == ["On it.", "The Researcher's back: the Arc B580 is the pick."]
+    follow = next(
+        c for c in model.calls if "finished the job you gave it" in str(c["prompt"])
+    )
+    assert LONG_REPORT.strip() in str(follow["prompt"]), (
+        "the whole report, not 600 chars"
+    )
+    assert follow["tools"] == [], "talk only"
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_never_hands_the_job_out_again(make_studio):
+    async def respond(system: str, prompt: str):
+        if "the user's main AI" in system:
+            if "finished the job you gave it" in prompt:
+                # A small model reaching for the hand-off tool again.
+                return tool_reply(
+                    "ask_agent", {"agent": "Researcher", "task": "research gpus again"}
+                )
+            return LLMReply(text="On it.")
+        return tool_reply("finish", {"summary": "Arc B580."})
+
+    studio, _ = make_studio(respond)
+    await studio.ensure_defaults()
+
+    await studio.main_say("have Researcher research gpus", background=False)
+    await studio.wait_for_background()
+
+    assert [run.goal for run in await studio.runs()] == ["research gpus"]
