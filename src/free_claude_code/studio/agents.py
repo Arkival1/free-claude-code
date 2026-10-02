@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from collections.abc import Awaitable, Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 
@@ -114,6 +115,25 @@ KEEP_RECENT = 6
 REPLY_TOKENS = 2048
 BUILD_REPLY_TOKENS = 4096
 """Builders write whole files in one reply, so they get more room."""
+
+
+_MODEL_MISSING = re.compile(
+    r"Function '[^']*': Not found for account|model[^.\n]{0,80}(?:not found|does not exist)"
+    r"|(?:unknown|invalid) model|no such model",
+    re.I,
+)
+
+
+def model_missing_hint(error: str, model: str, agent: str) -> str:
+    """Plain words for 'this provider won't run that model for your key'."""
+    if not _MODEL_MISSING.search(error):
+        return ""
+    return (
+        f"{agent} can't use {model}: the provider lists it, but it doesn't run "
+        "it for your key (it may be retired or need other access). Open Team "
+        f"brains and give {agent} another model, such as one your other agents "
+        "already use."
+    )
 
 
 def _search_for(goal: str, names: Sequence[str]) -> ToolCall:
@@ -919,10 +939,12 @@ class AgentRunner:
                     history = compact_history(history, budget=HISTORY_BUDGET // 3)
                     continue
                 logger.warning("Studio agent call failed: {}", error)
+                hint = model_missing_hint(str(error), model, agent.name)
                 await self._store.append_message(
                     chat_id=chat.id,
                     role="event",
-                    text=f"Model call failed: {error}",
+                    text=(f"{hint}\n\n" if hint else "")
+                    + f"Model call failed: {error}",
                     author=agent.name,
                     data={"kind": "error"},
                 )
@@ -931,7 +953,7 @@ class AgentRunner:
                     steps=step - 1,
                     tool_calls=tuple(used),
                     failed=True,
-                    error=str(error),
+                    error=hint or str(error),
                 )
             self._clear_live(chat.id)
             if (

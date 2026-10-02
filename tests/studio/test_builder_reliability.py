@@ -298,3 +298,28 @@ async def test_a_thin_stylesheet_keeps_the_designed_base_underneath(make_studio)
     assert css.startswith("@layer studio-base {") and css.count("@layer") == 1
     assert css.endswith("/* Project styles */\nh1 { color: red; }")
     assert "gold" not in css, "the rewrite replaces the project's own rules"
+
+
+@pytest.mark.asyncio
+async def test_a_model_the_provider_wont_run_is_explained_in_plain_words(make_studio):
+    def respond(system: str, prompt: str):
+        raise StudioLLMError(
+            "Model endpoint returned 404: Upstream provider NIM returned HTTP 404. "
+            '{"status":404,"title":"Not Found","detail":"Function '
+            "'ee47df99-c92b': Not found for account 'abc'\"}"
+        )
+
+    studio, _ = make_studio(respond)
+    await studio.ensure_defaults()
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None
+    chat = await studio.create_chat(agent_id=researcher.id)
+
+    result = await studio.send(chat.id, "hello")
+
+    assert result.failed
+    assert "Researcher can't use" in result.error
+    assert "Team brains" in result.error
+    event = (await studio.transcript(chat.id))[-1]
+    assert event.text.startswith("Researcher can't use")
+    assert "Model call failed: Model endpoint returned 404" in event.text
