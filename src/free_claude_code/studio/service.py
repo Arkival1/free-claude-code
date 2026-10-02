@@ -168,7 +168,7 @@ from .recall_messages import line as message_line
 from .research import DeepResearch, ResearchMix, ResearchReport, relevance
 from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
-from .search import SearchError, StudioSearch
+from .search import SearchBudget, SearchError, StudioSearch
 from .sites import SiteWorkspace, slugify
 from .store import StudioNotFoundError, StudioStore
 from .team_models import (
@@ -458,6 +458,7 @@ class StudioService:
         # requests at once; without this each one creates its own copy.
         self._defaults_lock = asyncio.Lock()
         self._room_lock = asyncio.Lock()
+        self._budget = SearchBudget()
         self._chat_turns: dict[str, asyncio.Lock] = {}
         self._main_busy = 0
         self._main_error: str | None = None
@@ -587,12 +588,19 @@ class StudioService:
             shared=settings.studio_shared_memory,
         )
 
+    def _search_budget(self) -> SearchBudget:
+        """Today's use of the search keys, shared by every search Studio runs."""
+        self._budget.daily_limit = self.settings.studio_search_daily_limit
+        return self._budget
+
     def _search(self) -> StudioSearch:
         settings = self.settings
         return StudioSearch(
             provider=settings.studio_search_provider,
             api_key=settings.studio_search_api_key or "",
             backup_key=settings.studio_search_backup_api_key or "",
+            order=settings.studio_search_order,
+            budget=self._search_budget(),
             base_url=settings.studio_search_base_url or "",
             fallback=self._web_tools,
             transport=self._search_transport,

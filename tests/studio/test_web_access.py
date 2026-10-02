@@ -466,3 +466,95 @@ def test_a_site_that_blocks_readers_is_explained_plainly():
         "read. Use another search result instead."
     )
     assert _blocked_page(ToolCall(id="s", name="web_search", arguments={}), error) == ""
+
+
+def _quota_gone(seen: list[httpx.Request]) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(429, json={"error": "quota"})
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.asyncio
+async def test_a_key_that_runs_out_is_skipped_for_the_rest_of_the_day():
+    from free_claude_code.studio.search import SearchBudget
+
+    seen: list[httpx.Request] = []
+    budget = SearchBudget()
+    fallback = RecordingWebTools()
+    search = searcher(
+        "auto",
+        key="tvly-empty",
+        fallback=fallback,
+        transport=_quota_gone(seen),
+        budget=budget,
+    )
+
+    first = await search.search("tides")
+    second = await search.search("moon phases")
+
+    assert [r.url.host for r in seen] == ["api.tavily.com"], (
+        "the empty key is tried once"
+    )
+    assert first.provider == "duckduckgo" and second.provider == "duckduckgo"
+    assert "Tavily is used up for today" in second.note
+    assert search.status()["used_up"] == ["Tavily"]
+
+
+@pytest.mark.asyncio
+async def test_the_daily_limit_and_the_cache_save_api_searches():
+    from free_claude_code.studio.search import SearchBudget
+
+    seen: list[httpx.Request] = []
+    budget = SearchBudget()
+    budget.daily_limit = 1
+    fallback = RecordingWebTools()
+    search = searcher(
+        "auto",
+        key="tvly-ok",
+        fallback=fallback,
+        transport=api_server(seen),
+        budget=budget,
+    )
+
+    paid = await search.search("tides")
+    again = await search.search("tides")  # within six hours: reused
+    free = await search.search("moon phases")  # over the daily limit
+
+    assert paid.provider == "tavily" and again is paid
+    assert free.provider == "duckduckgo"
+    assert "daily limit of 1 API searches is reached" in free.note
+    assert len(seen) == 1
+    assert search.status()["api_today"] == 1
+
+
+@pytest.mark.asyncio
+async def test_free_first_spends_the_key_only_when_free_search_finds_too_little():
+    seen: list[httpx.Request] = []
+    rich = RecordingWebTools()  # two free results
+    search = searcher(
+        "auto",
+        key="tvly-ok",
+        fallback=rich,
+        transport=api_server(seen),
+        order="free_first",
+    )
+
+    report = await search.search("tides", limit=2)
+
+    assert report.provider == "duckduckgo" and seen == []
+
+    class Thin(RecordingWebTools):
+        async def search(self, query: str):
+            return []
+
+    thin = searcher(
+        "auto",
+        key="tvly-ok",
+        fallback=Thin(),
+        transport=api_server(seen),
+        order="free_first",
+    )
+    report = await thin.search("tides")
+    assert report.provider == "tavily" and len(seen) == 1

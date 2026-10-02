@@ -3,6 +3,8 @@
 import asyncio
 import html
 import re
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
@@ -119,6 +121,77 @@ def _failure(provider: str, error: Exception) -> str:
     return f"{label} returned something unexpected ({error})"
 
 
+FREE_ENOUGH = 3
+"""With free search first, this many free results is enough to skip the key."""
+CACHE_SECONDS = 6 * 3600
+"""The same search within this long reuses its results instead of paying again."""
+_SPENDING_STATUSES = frozenset({401, 402, 403, 429, 432, 433})
+
+
+def _spends_key(error: Exception) -> bool:
+    """A key that is refused or out of quota: skip it for the rest of the day."""
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code in _SPENDING_STATUSES or _says_bad_key(
+            error.response
+        )
+    return False
+
+
+class SearchBudget:
+    """How much of the search keys today's searches used, shared by every search."""
+
+    def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
+        self.daily_limit = 0
+        self._clock = clock
+        self._day = ""
+        self._used = 0
+        self._spent: set[str] = set()
+        self._cache: dict[tuple[str, int], tuple[float, SearchReport]] = {}
+
+    def _roll(self) -> None:
+        day = time.strftime("%Y-%m-%d", time.localtime(self._clock()))
+        if day != self._day:
+            self._day, self._used, self._spent = day, 0, set()
+
+    @property
+    def used(self) -> int:
+        self._roll()
+        return self._used
+
+    def spent(self) -> tuple[str, ...]:
+        self._roll()
+        return tuple(sorted(self._spent))
+
+    def spent_today(self, provider: str) -> bool:
+        self._roll()
+        return provider in self._spent
+
+    def mark_spent(self, provider: str) -> None:
+        self._roll()
+        self._spent.add(provider)
+
+    def over_limit(self) -> bool:
+        self._roll()
+        return self.daily_limit > 0 and self._used >= self.daily_limit
+
+    def count(self) -> None:
+        self._roll()
+        self._used += 1
+
+    def cached(self, query: str, limit: int) -> SearchReport | None:
+        found = self._cache.get((query.casefold(), limit))
+        if found is None or self._clock() - found[0] > CACHE_SECONDS:
+            return None
+        return found[1]
+
+    def remember(self, query: str, limit: int, report: SearchReport) -> SearchReport:
+        if report.hits:
+            if len(self._cache) > 500:
+                self._cache.clear()
+            self._cache[(query.casefold(), limit)] = (self._clock(), report)
+        return report
+
+
 class StudioSearch:
     """Search with the configured provider, then a backup key's service, then
     DuckDuckGo."""
@@ -131,6 +204,8 @@ class StudioSearch:
         base_url: str,
         fallback: WebToolsPort,
         backup_key: str = "",
+        order: str = "api_first",
+        budget: SearchBudget | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout: float = 15.0,
         retry_delay: float = 1.0,
@@ -143,6 +218,8 @@ class StudioSearch:
         backup = detect_provider("auto", self._backup_key, "")
         self._backup = backup if backup in KEYED_PROVIDERS else ""
         self._fallback = fallback
+        self._order = order
+        self._budget = budget or SearchBudget()
         self._transport = transport
         self._timeout = timeout
         self._retry_delay = retry_delay
@@ -175,47 +252,83 @@ class StudioSearch:
                 if self._backup_key and not self._backup
                 else ""
             ),
+            "order": self._order,
+            "api_today": self._budget.used,
+            "api_limit": self._budget.daily_limit,
+            "used_up": [
+                PROVIDER_LABELS.get(name, name) for name in self._budget.spent()
+            ],
         }
 
     async def search(self, query: str, *, limit: int = 6) -> SearchReport:
-        """Return up to ``limit`` results, noting any fallback that happened."""
+        """Return up to ``limit`` results, noting any fallback that happened.
+
+        With the search order 'api_first' the keyed services go first and free
+        search follows; with 'free_first' free search goes first and a key is
+        spent only when free search finds too little. A key that runs out or
+        is refused is skipped for the rest of the day, and a daily limit caps
+        what the keys are used for.
+        """
         cleaned = query.strip()
         if not cleaned:
             raise ValueError("A search query is required.")
+        budget = self._budget
+        cached = budget.cached(cleaned, limit)
+        if cached is not None:
+            return cached
+        if self._order == "free_first":
+            free = await self._free_attempt(cleaned, limit)
+            if free is not None and len(free.hits) >= min(FREE_ENOUGH, limit):
+                return budget.remember(cleaned, limit, free)
         tried: list[str] = []
-        if self._provider != "duckduckgo":
-            problem = self.problem()
-            if problem:
-                tried.append(problem.rstrip("."))
-            else:
-                try:
-                    hits = await self._primary(
-                        self._provider, self._api_key, cleaned, limit
-                    )
-                    return SearchReport(provider=self._provider, hits=hits[:limit])
-                except (
-                    httpx.HTTPError,
-                    ValueError,
-                    TypeError,
-                    AttributeError,
-                ) as error:
-                    tried.append(_failure(self._provider, error))
+        keyed = (
+            [(self._provider, self._api_key)] if self._provider != "duckduckgo" else []
+        )
         if self._backup and self._backup_key != self._api_key:
+            keyed.append((self._backup, self._backup_key))
+        for index, (provider, key) in enumerate(keyed):
+            label = PROVIDER_LABELS.get(provider, provider)
+            if index == 0 and self.problem():
+                tried.append(self.problem().rstrip("."))
+                continue
+            metered = provider in KEYED_PROVIDERS
+            if metered and budget.spent_today(provider):
+                tried.append(f"{label} is used up for today")
+                continue
+            if metered and budget.over_limit():
+                tried.append(
+                    f"the daily limit of {budget.daily_limit} API searches is reached"
+                )
+                continue
             try:
-                hits = await self._primary(
-                    self._backup, self._backup_key, cleaned, limit
-                )
-                note = (
-                    f"{'; '.join(tried)}. Used the backup, "
-                    f"{PROVIDER_LABELS[self._backup]}."
-                    if tried
-                    else ""
-                )
-                return SearchReport(provider=self._backup, hits=hits[:limit], note=note)
+                hits = await self._primary(provider, key, cleaned, limit)
             except (httpx.HTTPError, ValueError, TypeError, AttributeError) as error:
-                tried.append(f"backup {_failure(self._backup, error)}")
+                if metered and _spends_key(error):
+                    budget.mark_spent(provider)
+                tried.append(_failure(provider, error))
+                continue
+            if metered:
+                budget.count()
+            used = f"the backup, {label}" if index else label
+            note = f"{'; '.join(tried)}. Used {used}." if tried else ""
+            return budget.remember(
+                cleaned,
+                limit,
+                SearchReport(provider=provider, hits=hits[:limit], note=note),
+            )
         note = f"{'; '.join(tried)}. Used DuckDuckGo instead." if tried else ""
-        return await self._keyless(cleaned, limit, note)
+        return budget.remember(
+            cleaned, limit, await self._keyless(cleaned, limit, note)
+        )
+
+    async def _free_attempt(self, query: str, limit: int) -> SearchReport | None:
+        """Free search, without the Wikipedia stand-in, for 'free_first'."""
+        try:
+            results = await self._fallback.search(query)
+        except httpx.HTTPError, OSError, ValueError:
+            return None
+        hits = tuple(SearchHit(title=item.title, url=item.url) for item in results)
+        return SearchReport(provider="duckduckgo", hits=hits[:limit]) if hits else None
 
     async def _keyless(self, query: str, limit: int, note: str) -> SearchReport:
         """DuckDuckGo, tried twice, then Wikipedia when it comes back empty."""

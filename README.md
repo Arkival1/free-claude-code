@@ -1033,6 +1033,12 @@ full-web search, add a key in **admin → Studio → Web Search API Key**:
 | [SearXNG](https://docs.searxng.org/) | no key | Self-hosted and free: set `STUDIO_SEARCH_BASE_URL` and enable its `json` format |
 
 `STUDIO_SEARCH_PROVIDER=auto` (the default) picks the service from the key.
+**Web Search Order** (`STUDIO_SEARCH_ORDER`) puts your API key first (free
+search takes over when it runs out) or free search first (the key is used only
+when free search finds too little). A key that runs out or is refused is skipped
+for the rest of the day, **Daily API Search Limit** (`STUDIO_SEARCH_DAILY_LIMIT`)
+caps paid searches per day, and the same search within six hours reuses its
+results. **More → Internet access** shows today's API use.
 **Backup Web Search API Key** (`STUDIO_SEARCH_BACKUP_API_KEY`) takes a second key,
 for example Tavily beside Brave. If the first service rejects its key or runs
 out of quota, the backup is used, then DuckDuckGo, and the agent is told why. **More → Internet access** shows the setup

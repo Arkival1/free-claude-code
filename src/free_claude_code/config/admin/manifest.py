@@ -1193,6 +1193,36 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_SEARCH_ORDER",
+        "Web Search Order",
+        "studio",
+        "select",
+        settings_attr="studio_search_order",
+        options=(
+            ConfigOptionSpec("api_first", "API key first, then free search"),
+            ConfigOptionSpec(
+                "free_first", "Free search first, API key only when needed"
+            ),
+        ),
+        description=(
+            "Which goes first. With the API first, free search takes over when a "
+            "key runs out (and that key is skipped for the rest of the day). With "
+            "free first, a key is only used when free search finds too little."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_DAILY_LIMIT",
+        "Daily API Search Limit",
+        "studio",
+        "number",
+        settings_attr="studio_search_daily_limit",
+        description=(
+            "The most searches a day that may use your search API keys; after "
+            "that, free search only. 0 means no limit. The same search within six "
+            "hours reuses its results and never costs twice."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_SEARCH_BACKUP_API_KEY",
         "Backup Web Search API Key",
         "studio",

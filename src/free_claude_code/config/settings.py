@@ -825,6 +825,12 @@ class Settings(BaseModel):
     studio_search_api_key: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_SEARCH_API_KEY"
     )
+    studio_search_order: NonEmptyString = Field(
+        default="api_first", validation_alias="STUDIO_SEARCH_ORDER"
+    )
+    studio_search_daily_limit: int = Field(
+        default=0, ge=0, le=100_000, validation_alias="STUDIO_SEARCH_DAILY_LIMIT"
+    )
     studio_search_backup_api_key: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_SEARCH_BACKUP_API_KEY"
     )
@@ -1012,6 +1018,13 @@ class Settings(BaseModel):
             raise ValueError(
                 f"STUDIO_WEB_ACCESS must be 'all', 'listed', or 'off', got {value!r}"
             )
+        return value
+
+    @field_validator("studio_search_order")
+    @classmethod
+    def validate_studio_search_order(cls, value: str) -> str:
+        if value not in ("api_first", "free_first"):
+            raise ValueError("STUDIO_SEARCH_ORDER must be api_first or free_first")
         return value
 
     @field_validator("studio_search_provider")

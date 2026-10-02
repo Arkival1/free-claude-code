@@ -466,9 +466,15 @@ class DeepResearch:
             lambda page: _good_thread(page, terms),
         )
         if len(good) < need:
+            hint = (
+                ""
+                if getattr(self._reader, "reddit_app_ready", True)
+                else " Reddit often blocks free readers; a free Reddit App ID and "
+                "Secret (Settings, search 'reddit') lets research read it."
+            )
             notes.append(
                 f"Found {len(good)} of {need} Reddit threads that were on topic "
-                "and had a real discussion."
+                f"and had a real discussion.{hint}"
             )
         return good
 

@@ -4905,6 +4905,10 @@
         el("p", {}, [el("strong", { text: "Connection: " }), connection]),
         el("p", {}, [el("strong", { text: "Search: " }), service]),
         el("p", {}, [
+          el("strong", { text: "API use today: " }),
+          `${web.api_today ?? 0}${web.api_limit ? ` of ${web.api_limit}` : ""} searches${(web.used_up || []).length ? `; used up until tomorrow: ${web.used_up.join(", ")} (free search takes over)` : ""}. ${web.order === "free_first" ? "Free search goes first; a key is used only when free search finds too little." : "Your API key goes first; free search takes over when it runs out."} Repeating a search within six hours reuses the results.`,
+        ]),
+        el("p", {}, [
           el("strong", { text: "Research: " }),
           `${web.sources} sources per question. Every run reads at least ${(web.mix || {}).web ?? 3} web pages, ${(web.mix || {}).reddit ?? 2} Reddit threads that are on topic and have real replies (${web.reddit}), and ${(web.mix || {}).youtube ?? 2} YouTube videos whose transcripts could be read (${web.youtube}), each with its link. Coding questions add Stack Overflow, GitHub, MDN, and dev.to. Ask for a different mix any time, like "research this with no YouTube".`,
         ]),
