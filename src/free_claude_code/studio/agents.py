@@ -76,6 +76,10 @@ START_NOTE = (
     "you found."
 )
 WEB_TOOLS = frozenset({"web_search", "web_fetch", "research"})
+SEARCHED_FOR_YOU_NOTE = (
+    "(Studio) You didn't search, so Studio ran {tool} for you. Write your "
+    "report from these results only, and cite the links:\n\n{results}"
+)
 NO_SEARCH_NOTE = (
     "(Studio: {name} never searched the web for this, so this answer is not "
     "researched. Its model may not support tools; pick another in Team brains.)"
@@ -110,6 +114,20 @@ KEEP_RECENT = 6
 REPLY_TOKENS = 2048
 BUILD_REPLY_TOKENS = 4096
 """Builders write whole files in one reply, so they get more room."""
+
+
+def _search_for(goal: str, names: Sequence[str]) -> ToolCall:
+    """The search Studio runs for a Researcher that didn't run one: the job
+    itself, without the briefing that follows it."""
+    job = goal.strip()
+    if job.startswith("The job: "):
+        job = job[len("The job: ") :].split("\n\nBriefing from ", 1)[0]
+    job = " ".join(job.split())[:300]
+    if "research" in names:
+        return ToolCall(
+            id="studio-research", name="research", arguments={"question": job}
+        )
+    return ToolCall(id="studio-search", name="web_search", arguments={"query": job})
 
 
 def _call_key(call: ToolCall) -> str:
@@ -878,6 +896,7 @@ class AgentRunner:
         idle = 0
         squeezed = False
         prodded = False
+        searched_for_it = False
         for step in range(1, max_steps + 1):
             history = compact_history(history)
             try:
@@ -965,6 +984,38 @@ class AgentRunner:
                 prodded = True
                 history.append(ChatMessage.assistant(reply.text[:1_500]))
                 history.append(ChatMessage.user(START_NOTE))
+                continue
+            if (
+                not reply.tool_calls
+                and alone
+                and agent.role == "researcher"
+                and not searched_for_it
+                and not WEB_TOOLS & set(used)
+                and WEB_TOOLS & set(names)
+                and step < max_steps
+            ):
+                # A Researcher's report must come from the web. When its model
+                # won't call tools (or answers from what it already knows),
+                # Studio does the searching and the model writes it up.
+                searched_for_it = True
+                call = _search_for(query, names)
+                outcome = (await self._run_calls([call], context, sealed=sealed))[0]
+                used.append(call.name)
+                await self._store.append_message(
+                    chat_id=chat.id,
+                    role="tool",
+                    text=outcome.text[:4_000],
+                    author=call.name,
+                    data={**outcome.data, "failed": outcome.failed, "by_studio": True},
+                )
+                history.append(ChatMessage.assistant(reply.text[:1_500]))
+                history.append(
+                    ChatMessage.user(
+                        SEARCHED_FOR_YOU_NOTE.format(
+                            tool=call.name, results=outcome.text[:12_000]
+                        )
+                    )
+                )
                 continue
             if not reply.tool_calls:
                 text = reply.text or "(no reply)"

@@ -150,10 +150,67 @@ def web_request(text: str, main: str = "") -> str:
 
 
 _YES_WORDS = frozenset(
-    ["yes", "yeah", "yep", "yup", "ya", "yea", "yess", "yesss", "sure", "ok", "okay", "k", "y", "go", "ahead", "do", "it", "start", "begin", "ready", "im", "i'm", "i", "am", "lets", "let's", "please", "sounds", "good", "for", "absolutely", "definitely", "of", "course", "right", "now"]
+    [
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "ya",
+        "yea",
+        "yess",
+        "yesss",
+        "sure",
+        "ok",
+        "okay",
+        "k",
+        "y",
+        "go",
+        "ahead",
+        "do",
+        "it",
+        "start",
+        "begin",
+        "ready",
+        "im",
+        "i'm",
+        "i",
+        "am",
+        "lets",
+        "let's",
+        "please",
+        "sounds",
+        "good",
+        "for",
+        "absolutely",
+        "definitely",
+        "of",
+        "course",
+        "right",
+        "now",
+    ]
 )
 _YES_CORE = frozenset(
-    ["yes", "yeah", "yep", "yup", "ya", "yea", "yess", "yesss", "sure", "ok", "okay", "k", "y", "go", "start", "begin", "ready", "absolutely", "definitely"]
+    [
+        "yes",
+        "yeah",
+        "yep",
+        "yup",
+        "ya",
+        "yea",
+        "yess",
+        "yesss",
+        "sure",
+        "ok",
+        "okay",
+        "k",
+        "y",
+        "go",
+        "start",
+        "begin",
+        "ready",
+        "absolutely",
+        "definitely",
+    ]
 )
 _OFFER_LEAD = re.compile(
     r"^(?:(?:shall|should|can|may)\s+i\s+|(?:do\s+you\s+want|would\s+you\s+like|"

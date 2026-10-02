@@ -393,8 +393,10 @@ async def test_code_testing_explains_when_commands_are_off(make_studio):
 async def test_the_builder_asks_the_researcher_when_it_is_stuck(make_studio):
     def respond(system: str, prompt: str):
         if "Research questions for the user and the team" in system:
-            if prompt.startswith("Builder asks:"):
+            if "Studio ran research for you" in prompt:
                 return LLMReply(text="Add `display: grid` to the parent [1].")
+            if prompt.startswith("Builder asks:"):
+                return LLMReply(text="Probably the grid.")
             return LLMReply(text="?")
         if "You support the other agents" in system:
             assert prompt.startswith("Builder needs help: Why do my cards not line up?")
@@ -780,11 +782,14 @@ async def test_a_researcher_that_asks_before_starting_is_told_to_start(make_stud
 
 
 @pytest.mark.asyncio
-async def test_a_researcher_that_never_searches_says_so(make_studio):
+async def test_studio_searches_for_a_researcher_that_wont(make_studio, web_tools):
     def respond(system: str, prompt: str):
         if "Research questions for the user and the team" not in system:
             return LLMReply(text="ok")
-        return LLMReply(text="Shall I begin?")
+        if "Studio ran research for you" in prompt:
+            assert "find rain jackets" in prompt or "[1]" in prompt
+            return LLMReply(text="From the web: the best jackets are ... [1].")
+        return LLMReply(text="Rain jackets are great. Shall I begin?")
 
     studio, _ = make_studio(respond)
     await studio.ensure_defaults()
@@ -794,5 +799,9 @@ async def test_a_researcher_that_never_searches_says_so(make_studio):
     await studio.wait_for_background()
 
     done = await studio.store.require(AgentRun, run.id)
-    assert "Researcher never searched the web" in done.result
-    assert "pick another in Team brains" in done.result
+    assert done.result == "From the web: the best jackets are ... [1]."
+    searched = [
+        m for m in await studio.transcript(done.chat_id) if m.data.get("by_studio")
+    ]
+    assert [m.author for m in searched] == ["research"]
+    assert web_tools.searches
