@@ -5953,6 +5953,18 @@
             ),
             quick("Choose brain", "A model on this PC", () => openBrainPicker(hud.name, rethink)),
             quick("Team brains", "A model for each agent", () => openTeamBrains(rethink)),
+            quick("Team check", "Test every agent's brain", async () => {
+              notify("Testing every agent's brain… results go to the team room.");
+              try {
+                const { results } = await post("/studio/api/team-check");
+                const broken = results.filter((row) => !row.ok).map((row) => row.agent);
+                notify(broken.length ? `Not working: ${broken.join(", ")}. Details in the team room.` : "Every agent's brain works. Details in the team room.");
+              } catch (error) {
+                notify(error.message);
+              }
+              hud.keys.room = "";
+              poll();
+            }),
             quick("Model control", "Load models, settings, speed", () => go("engine")),
           ])
         ),

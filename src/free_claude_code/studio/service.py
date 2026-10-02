@@ -2221,7 +2221,13 @@ class StudioService:
             run = await self._store.require(AgentRun, run_id)
             note = await self._room_note(run) if chat.parent_chat_id else ""
             async with self._working(agent.id):
-                finished = await self._runner().run_task(agent, chat, run, note=note)
+                finished = await self._runner().run_task(
+                    agent,
+                    chat,
+                    run,
+                    note=note,
+                    fallback_model=await self._fallback_model(agent),
+                )
             if chat.parent_chat_id:
                 await self._share_in_room(agent, finished)
             await self._refresh_site_count(finished.site_id)
@@ -2238,6 +2244,42 @@ class StudioService:
             return
         await self._note_report(parent_id, chat, agent, run)
         await self._main_follows_up(parent_id, agent, run)
+
+    async def _fallback_model(self, agent: Agent) -> str | None:
+        """The main AI's model, for an agent whose own model fails mid-job:
+        the main AI answering the user is the surest sign a model works."""
+        main = await self.main_agent()
+        model = main.model or self.default_model
+        own = agent.model or self.default_model
+        return None if agent.id == main.id or model == own else model
+
+    async def team_check(self) -> list[JsonObject]:
+        """Test every agent's model with one tiny message and post the results
+        in the team room, so a broken brain shows up before a job needs it."""
+        results: list[JsonObject] = []
+        lines: list[str] = []
+        for agent in await self.agents():
+            if agent.archived or agent.role in CLASS_ROLES:
+                continue
+            model = agent.model or self.default_model
+            using = await self.effective_model(model)
+            outcome = await self.test_model(using)
+            ok = bool(outcome["ok"])
+            message = str(outcome["message"])
+            results.append(
+                {"agent": agent.name, "model": using, "ok": ok, "message": message}
+            )
+            mark = "✓" if ok and message == "Works." else "⚠" if ok else "✗"
+            label = model_label(using)
+            lines.append(
+                f"{mark} {agent.name} ({label}): {message}"
+                if message != "Works."
+                else f"{mark} {agent.name} ({label}) works"
+            )
+        await self._post_in_room(
+            "Studio", "Team check\n" + "\n".join(lines), {"kind": "team_check"}
+        )
+        return results
 
     def _turn_lock(self, chat_id: str) -> asyncio.Lock:
         """One turn at a time in a chat: an answer and a follow-up never mix."""
@@ -3877,7 +3919,13 @@ class StudioService:
         await self._post_handoff(agent, goal, parent_chat_id, run.id)
         note = await self._room_note(run) if parent_chat_id else ""
         async with self._working(agent.id):
-            finished = await self._runner().run_task(agent, chat, run, note=note)
+            finished = await self._runner().run_task(
+                agent,
+                chat,
+                run,
+                note=note,
+                fallback_model=await self._fallback_model(agent),
+            )
         if parent_chat_id:
             await self._share_in_room(agent, finished)
         await self._refresh_site_count(site_id)

@@ -561,3 +561,95 @@ async def test_the_lab_falls_back_to_the_main_ai_model(
     answer = await studio._lab_think("You are a chemist.", "What is soap?")
 
     assert answer == "Hi from jarvis-4b."
+
+
+class BrokenServer:
+    """A provider whose every model call fails, like a bad key or outage."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def complete(self, messages, *, model=None, **_) -> LLMReply:
+        from free_claude_code.studio.llm import StudioLLMError
+
+        self.asked.append(str(model))
+        raise StudioLLMError("Model endpoint returned 500: upstream exploded")
+
+
+class WorkingPc:
+    """The PC's model: Jarvis talks, and it finishes jobs it is given."""
+
+    async def complete(self, messages, *, model=None, tools=(), **_) -> LLMReply:
+        if tools and any(tool.name == "finish" for tool in tools):
+            return tool_reply("finish", {"summary": "The Arc B580 is the pick."})
+        return LLMReply(text="On it.")
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_agent_model_fails_is_done_on_the_main_ai_model(
+    tmp_path, store, web_tools, studio_settings
+):
+    from free_claude_code.studio.llm import StudioModelRouter
+    from free_claude_code.studio.service import StudioService
+
+    server = BrokenServer()
+    settings = studio_settings(STUDIO_MAIN_AGENT_MODEL="local/jarvis-4b")
+    studio = StudioService(
+        store=store,
+        web_tools=web_tools,
+        settings_provider=lambda: settings,
+        models_dir=tmp_path / "models",
+        sites_dir=tmp_path / "sites",
+        router=StudioModelRouter(proxy=server, local=WorkingPc()),
+    )
+    await studio.ensure_defaults()
+
+    await studio.main_say(
+        "have Researcher research the best budget gpu", background=False
+    )
+    await studio.wait_for_background()
+
+    runs = await studio.runs()
+    assert [run.status for run in runs] == ["succeeded"]
+    assert runs[0].result == "The Arc B580 is the pick."
+    log = [
+        m
+        for m in await studio.transcript(runs[0].chat_id)
+        if m.data.get("kind") == "model_fallback"
+    ]
+    assert len(log) == 1 and "doing this job with jarvis-4b instead" in log[0].text
+    room = (await studio.rooms())[0]
+    texts = [m.text for m in await studio.transcript(room.id)]
+    assert any(t.startswith("Done: research the best budget gpu") for t in texts)
+
+
+@pytest.mark.asyncio
+async def test_team_check_posts_every_agents_brain_in_the_room(
+    tmp_path, store, web_tools, studio_settings
+):
+    from free_claude_code.studio.llm import StudioModelRouter
+    from free_claude_code.studio.service import StudioService
+
+    settings = studio_settings(STUDIO_MAIN_AGENT_MODEL="local/jarvis-4b")
+    studio = StudioService(
+        store=store,
+        web_tools=web_tools,
+        settings_provider=lambda: settings,
+        models_dir=tmp_path / "models",
+        sites_dir=tmp_path / "sites",
+        router=StudioModelRouter(proxy=BrokenServer(), local=WorkingPc()),
+    )
+    await studio.ensure_defaults()
+
+    results = await studio.team_check()
+
+    by_name = {row["agent"]: row["ok"] for row in results}
+    assert by_name["Jarvis"] is True
+    assert by_name["Researcher"] is False
+    room = (await studio.rooms())[0]
+    post = [m.text for m in await studio.transcript(room.id) if m.author == "Studio"][
+        -1
+    ]
+    assert post.startswith("Team check")
+    assert "✓ Jarvis (jarvis-4b) works" in post
+    assert "✗ Researcher" in post and "upstream exploded" in post

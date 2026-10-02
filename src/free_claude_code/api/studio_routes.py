@@ -1515,6 +1515,15 @@ async def test_team_model(
     return await studio.test_model(payload.model)
 
 
+@router.post("/studio/api/team-check")
+async def team_check(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Test every agent's model and post the results in the team room."""
+    return {"results": await studio.team_check()}
+
+
 @router.get("/studio/api/team-models/suggest")
 async def suggest_team_models(
     studio: StudioService = Depends(get_studio),

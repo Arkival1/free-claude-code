@@ -80,6 +80,10 @@ START_NOTE = (
     "you found."
 )
 WEB_TOOLS = frozenset({"web_search", "web_fetch", "research"})
+FALLBACK_NOTE = (
+    "{name}'s model ({model}) failed, so {name} is doing this job with {used} "
+    "instead. Fix {name}'s model in Team brains (Test checks it). Error: {error}"
+)
 FOLLOW_UP_STEPS = 4
 """Turns the main AI may take to digest a teammate's report."""
 EMPTY_NOTE = (
@@ -833,7 +837,13 @@ class AgentRunner:
         )
 
     async def run_task(
-        self, agent: Agent, chat: Chat, run: AgentRun, *, note: str = ""
+        self,
+        agent: Agent,
+        chat: Chat,
+        run: AgentRun,
+        *,
+        note: str = "",
+        fallback_model: str | None = None,
     ) -> AgentRun:
         """Run one autonomous goal to completion and persist its outcome.
 
@@ -868,6 +878,7 @@ class AgentRunner:
             sealed=sealed,
             alone=True,
             turn_note=note,
+            fallback_model=fallback_model,
         )
         finished = started.model_copy(
             update={
@@ -948,6 +959,7 @@ class AgentRunner:
         sealed: bool = False,
         alone: bool = False,
         talk_only: bool = False,
+        fallback_model: str | None = None,
     ) -> TurnResult:
         """``alone``: a background job, so nobody is there to answer questions.
         ``talk_only``: no tools this turn (a follow-up that only reports)."""
@@ -1021,6 +1033,28 @@ class AgentRunner:
                     history = compact_history(history, budget=HISTORY_BUDGET // 3)
                     continue
                 logger.warning("Studio agent call failed: {}", error)
+                if fallback_model and fallback_model != model:
+                    # The job still gets done: on the model that just worked
+                    # for the main AI, with a note saying so.
+                    await self._store.append_message(
+                        chat_id=chat.id,
+                        role="event",
+                        text=FALLBACK_NOTE.format(
+                            name=agent.name,
+                            model=model_label(model),
+                            used=model_label(fallback_model),
+                            error=str(error)[:300],
+                        ),
+                        author=agent.name,
+                        data={
+                            "kind": "model_fallback",
+                            "model": model,
+                            "used": fallback_model,
+                        },
+                    )
+                    model = fallback_model
+                    fallback_model = None
+                    continue
                 hint = model_missing_hint(str(error), model, agent.name)
                 await self._store.append_message(
                     chat_id=chat.id,
