@@ -243,6 +243,10 @@ MAIN_CONSOLE_SETTING = "console"
 LAB_CHAT_SETTING = "lab"
 ENGINE_RETRY_SECONDS = 300.0
 """After the engine fails to start, LM Studio answers this long before a retry."""
+ROOM_POST_CHARS = 1_500
+"""How much of a result an agent posts in the team room."""
+ROOM_NOTE_CHARS = 400
+"""How much of each room message an agent starting a job reads."""
 ROOM_NEEDED = 8192
 """Tokens of context an agent needs: instructions, tools, the talk so far,
 and room to answer."""
@@ -2203,8 +2207,11 @@ class StudioService:
             agent = await self._store.require(Agent, agent_id)
             chat = await self._store.require(Chat, chat_id)
             run = await self._store.require(AgentRun, run_id)
+            note = await self._room_note(run) if chat.parent_chat_id else ""
             async with self._working(agent.id):
-                finished = await self._runner().run_task(agent, chat, run)
+                finished = await self._runner().run_task(agent, chat, run, note=note)
+            if chat.parent_chat_id:
+                await self._share_in_room(agent, finished)
             await self._refresh_site_count(finished.site_id)
             await self._after_memory_change([agent.id], wait=False)
             if chat.parent_chat_id:
@@ -3661,6 +3668,86 @@ class StudioService:
             orders = [Order(researcher.name, request.text.strip())]
         return orders
 
+    # ------------------------------------------------------------ team room
+
+    async def _team_room(self) -> Chat:
+        """The room the team shares: the latest one, or a new Team room."""
+        rooms = await self._store.find(
+            Chat, where={"kind": "room"}, order_by="updated_at DESC", limit=1
+        )
+        return rooms[0] if rooms else await self.create_room(title="Team room")
+
+    async def _post_in_room(self, author: str, text: str, data: JsonObject) -> None:
+        """Write in the team room for everyone to read. Only a note: it starts
+        no one talking, so a job handed out is never done twice."""
+        try:
+            room = await self._team_room()
+        except StudioError as error:
+            logger.info("Studio: no team room to post in: {}", error)
+            return
+        await self._store.append_message(
+            chat_id=room.id,
+            role="assistant",
+            text=text.strip()[:ROOM_POST_CHARS],
+            author=author,
+            data=data,
+        )
+
+    async def _post_handoff(
+        self, worker: Agent, goal: str, parent_chat_id: str | None, run_id: str
+    ) -> None:
+        """Whoever handed the job out tells the room: '@Researcher: ...'."""
+        if not parent_chat_id:
+            return
+        parent = await self._store.get(Chat, parent_chat_id)
+        boss = (
+            await self._store.get(Agent, parent.agent_id)
+            if parent and parent.agent_id
+            else None
+        )
+        task = " ".join(
+            goal.split("\n\nBriefing from ")[0].removeprefix("The job: ").split()
+        )
+        await self._post_in_room(
+            boss.name if boss else "Studio",
+            f"@{worker.name}: {task}",
+            {"kind": "handoff", "agent": worker.name, "run_id": run_id},
+        )
+
+    async def _share_in_room(self, agent: Agent, run: AgentRun) -> None:
+        """When a handed-out job ends, its agent tells the team what came of it."""
+        goal = " ".join(run.goal.split("\n\nBriefing from ")[0].split())[:160]
+        if run.status == "succeeded":
+            result = (run.result or "").strip() or "Done, with nothing to report."
+            text = f"Done: {goal}\n{result}"
+        else:
+            text = f"Couldn't finish: {goal}\n{(run.error or run.status).strip()}"
+        await self._post_in_room(
+            agent.name, text, {"kind": "shared", "run_id": run.id, "status": run.status}
+        )
+
+    async def _room_note(self, run: AgentRun) -> str:
+        """What the team has shared in the room, for an agent starting a job."""
+        rooms = await self._store.find(
+            Chat, where={"kind": "room"}, order_by="updated_at DESC", limit=1
+        )
+        if not rooms:
+            return ""
+        lines = [
+            f"- {message.author}: {' '.join(message.text.split())[:ROOM_NOTE_CHARS]}"
+            for message in await self._store.transcript(rooms[0].id, limit=12)
+            if message.role in {"user", "assistant"}
+            and message.text.strip()
+            and message.data.get("run_id") != run.id
+        ][-8:]
+        if not lines:
+            return ""
+        return (
+            "What the team has shared in the team room (use what helps your job; "
+            "your result is posted there for the others when you finish):\n"
+            + "\n".join(lines)
+        )
+
     async def start_agent_task(
         self,
         agent: Agent,
@@ -3670,12 +3757,14 @@ class StudioService:
         parent_chat_id: str | None,
     ) -> AgentRun:
         """Start a hand-off in the background; the crew uses this."""
-        return await self.start_task(
+        run = await self.start_task(
             agent_id=agent.id,
             goal=await self._briefed(agent, goal, parent_chat_id),
             site_id=site_id,
             parent_chat_id=parent_chat_id,
         )
+        await self._post_handoff(agent, goal, parent_chat_id, run.id)
+        return run
 
     async def runs(
         self, *, agent_id: str | None = None, limit: int | None = None
@@ -3723,8 +3812,12 @@ class StudioService:
             }
         )
         await self._store.put(run)
+        await self._post_handoff(agent, goal, parent_chat_id, run.id)
+        note = await self._room_note(run) if parent_chat_id else ""
         async with self._working(agent.id):
-            finished = await self._runner().run_task(agent, chat, run)
+            finished = await self._runner().run_task(agent, chat, run, note=note)
+        if parent_chat_id:
+            await self._share_in_room(agent, finished)
         await self._refresh_site_count(site_id)
         await self._after_memory_change([agent.id], wait=False)
         return finished, chat

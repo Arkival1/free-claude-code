@@ -489,3 +489,57 @@ async def test_a_server_jarvis_is_not_routed(make_studio):
 
     assert await studio.runs() == ()
     assert not any("You decide who handles" in str(c["system"]) for c in model.calls)
+
+
+@pytest.mark.asyncio
+async def test_jobs_and_results_are_shared_in_the_team_room(make_studio):
+    async def respond(system: str, prompt: str):
+        if "the user's main AI" in system:
+            return LLMReply(text="On it.")
+        if prompt.startswith("research budget laptops"):
+            return tool_reply(
+                "finish", {"summary": "The Acer Swift Go is the best value [1]."}
+            )
+        return tool_reply("finish", {"summary": "Built the page."})
+
+    studio, model = make_studio(respond)
+    await studio.ensure_defaults()
+
+    await studio.main_say("have Researcher research budget laptops", background=False)
+    await studio.wait_for_background()
+
+    room = (await studio.rooms())[0]
+    posts = [
+        (m.author, m.text)
+        for m in await studio.transcript(room.id)
+        if m.role == "assistant"
+    ]
+    assert posts == [
+        ("Jarvis", "@Researcher: research budget laptops"),
+        (
+            "Researcher",
+            "Done: research budget laptops\nThe Acer Swift Go is the best value [1].",
+        ),
+    ]
+
+    model.calls.clear()
+    await studio.main_say(
+        "have Builder make a laptop comparison page", background=False
+    )
+    await studio.wait_for_background()
+
+    builder_call = next(
+        c
+        for c in model.calls
+        if str(c["prompt"]).startswith("make a laptop comparison page")
+    )
+    note = str(builder_call["studio_note"])
+    assert "What the team has shared in the team room" in note
+    assert "Researcher: Done: research budget laptops The Acer Swift Go" in note
+    assert "@Builder: make a laptop comparison page" not in note, "not its own job"
+    # Posts are notes: nobody in the room started talking because of them.
+    assert all(
+        "the user's main AI" in str(c["system"])
+        or c["prompt"].startswith("make a laptop")
+        for c in model.calls
+    )

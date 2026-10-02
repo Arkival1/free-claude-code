@@ -808,8 +808,14 @@ class AgentRunner:
             )
         return result
 
-    async def run_task(self, agent: Agent, chat: Chat, run: AgentRun) -> AgentRun:
-        """Run one autonomous goal to completion and persist its outcome."""
+    async def run_task(
+        self, agent: Agent, chat: Chat, run: AgentRun, *, note: str = ""
+    ) -> AgentRun:
+        """Run one autonomous goal to completion and persist its outcome.
+
+        ``note`` rides along with the goal (what the team shared in the room)
+        without becoming part of it.
+        """
         agent, sealed, directs = await self._private_view(agent)
         started = run.model_copy(update={"status": "running", "updated_at": now_ms()})
         await self._store.put(started)
@@ -837,6 +843,7 @@ class AgentRunner:
             max_steps=run.max_steps or self._max_steps,
             sealed=sealed,
             alone=True,
+            turn_note=note,
         )
         finished = started.model_copy(
             update={
