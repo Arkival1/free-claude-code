@@ -1233,7 +1233,7 @@
         class: "secondary",
         type: "button",
         text: "Test",
-        "aria-label": `Test the model for ${row.name}`,
+        "aria-label": `Test ${row.name}'s brain`,
         onclick: async () => {
           const model = pickers.get(row.id).value;
           button.disabled = true;
