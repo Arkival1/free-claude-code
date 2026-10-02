@@ -10,6 +10,7 @@ from loguru import logger
 from .convo_notes import NOTES_HEADER, NotesKeeper
 from .lab.bench import LAB_PROMPT
 from .llm import (
+    THINKING_ONLY,
     ChatMessage,
     LLMReply,
     StudioLLMError,
@@ -22,6 +23,7 @@ from .memory import MemoryService, server_area
 from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
 from .recall_messages import Found, recall_note, search
 from .store import StudioStore
+from .team_models import model_label
 from .tools import (
     CHECK_PROJECT_TOOL,
     COMMAND_TOOL,
@@ -77,6 +79,32 @@ START_NOTE = (
     "you found."
 )
 WEB_TOOLS = frozenset({"web_search", "web_fetch", "research"})
+EMPTY_NOTE = (
+    "(Studio) Your reply came back empty. Answer now in plain words, and keep "
+    "any thinking short."
+)
+
+
+def empty_reply_note(agent: str, model: str, stop_reason: str) -> str:
+    """Say why an agent's answer is blank instead of showing nothing."""
+    if stop_reason == THINKING_ONLY:
+        why = (
+            "it spent its whole reply thinking and never answered. Pick a model "
+            "that doesn't think first (an 'instruct' model) in Team brains"
+        )
+    elif stop_reason in {"length", "max_tokens"}:
+        why = (
+            "it ran out of room before answering. In LM Studio, load the model "
+            "with a bigger Context Length (8192 or more)"
+        )
+    else:
+        why = (
+            "the model sent back an empty answer twice. Check the model is "
+            "loaded in LM Studio, or pick another in Team brains"
+        )
+    return f"(Studio: {agent} got no answer from {model_label(model)}: {why}.)"
+
+
 SWAPPED_NOTE = (
     "{model} isn't available for your key, so {name} used {used}, which works. "
     "Pick {name}'s model in Team brains (Test checks one) to change it."
@@ -914,6 +942,7 @@ class AgentRunner:
         squeezed = False
         prodded = False
         searched_for_it = False
+        emptied = False
         for step in range(1, max_steps + 1):
             history = compact_history(history)
             try:
@@ -1048,8 +1077,21 @@ class AgentRunner:
                     )
                 )
                 continue
+            if (
+                not reply.tool_calls
+                and not reply.text.strip()
+                and not emptied
+                and step < max_steps
+            ):
+                # An empty answer (a model that only thought, or a runtime
+                # hiccup): ask once more before giving up on it.
+                emptied = True
+                history.append(ChatMessage.user(EMPTY_NOTE))
+                continue
             if not reply.tool_calls:
-                text = reply.text or "(no reply)"
+                text = reply.text.strip() or empty_reply_note(
+                    agent.name, model, reply.stop_reason
+                )
                 if prodded and not used and WEB_TOOLS & set(names):
                     # Told to start and still only talking: its model most
                     # likely can't call tools at all.

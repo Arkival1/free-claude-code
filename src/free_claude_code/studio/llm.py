@@ -604,6 +604,7 @@ class LocalOpenAILLM:
         on_text: Callable[[str], None],
     ) -> LLMReply:
         text: list[str] = []
+        thought: list[str] = []
         finish = ""
         served = ""
         shown = ""
@@ -659,6 +660,10 @@ class LocalOpenAILLM:
                         piece = (
                             delta.get("content") if isinstance(delta, dict) else None
                         )
+                        if isinstance(delta, dict):
+                            reasoning = _reasoning_of(delta)
+                            if reasoning:
+                                thought.append(reasoning)
                         if isinstance(piece, str) and piece:
                             text.append(piece)
                             visible = visible_reply("".join(text))
@@ -671,7 +676,10 @@ class LocalOpenAILLM:
             "model": served,
             "choices": [
                 {
-                    "message": {"content": "".join(text)},
+                    "message": {
+                        "content": "".join(text),
+                        "reasoning_content": "".join(thought),
+                    },
                     "finish_reason": finish,
                 }
             ],
@@ -1101,12 +1109,35 @@ def _openai_reply(body: JsonObject) -> LLMReply:
         )
     content = message.get("content")
     usage = body.get("usage")
+    text = strip_thinking(content) if isinstance(content, str) else ""
+    stop = str(first.get("finish_reason") or "") if isinstance(first, dict) else ""
+    reasoning = _reasoning_of(message)
+    if not text and not calls and reasoning:
+        if stop == "length":
+            # It spent the whole reply thinking and never answered.
+            stop = THINKING_ONLY
+        else:
+            # Some templates open a thinking section the model never closes,
+            # so LM Studio files the whole answer as reasoning.
+            text = strip_thinking(reasoning)
     return LLMReply(
-        text=strip_thinking(content) if isinstance(content, str) else "",
+        text=text,
         tool_calls=tuple(calls),
         model=str(body.get("model", "")),
-        stop_reason=str(first.get("finish_reason") or "")
-        if isinstance(first, dict)
-        else "",
+        stop_reason=stop,
         usage=dict(usage) if isinstance(usage, dict) else {},
     )
+
+
+THINKING_ONLY = "thinking_only"
+"""stop_reason for a reply that was all thinking and no answer."""
+
+
+def _reasoning_of(part: Mapping[str, object]) -> str:
+    """The thinking a runtime sent apart from the answer (LM Studio and
+    llama.cpp call it reasoning_content; some servers say reasoning)."""
+    for key in ("reasoning_content", "reasoning"):
+        value = part.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""

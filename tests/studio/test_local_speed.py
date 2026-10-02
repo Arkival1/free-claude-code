@@ -185,3 +185,79 @@ def test_several_tool_calls_come_back_from_one_reply():
     single, _ = parse_tool_directives('{"tool": "recall", "arguments": {}}')
     assert [call.name for call in single] == ["recall"]
     assert parse_tool_directives('{"final": "Done."}') == ((), "Done.")
+
+
+def reasoning_sse(
+    pieces: list[str], *, finish: str, key: str = "reasoning_content"
+) -> bytes:
+    """LM Studio's stream when everything lands in the reasoning field."""
+    lines = [
+        "data: " + json.dumps({"model": "m", "choices": [{"delta": {key: piece}}]})
+        for piece in pieces
+    ]
+    lines.append(
+        "data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": finish}]})
+    )
+    lines.append("data: [DONE]")
+    return ("\n\n".join(lines) + "\n\n").encode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["reasoning_content", "reasoning"])
+async def test_an_answer_filed_as_reasoning_is_still_the_answer(key):
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1",
+        transport=streaming_runtime(
+            [],
+            reasoning_sse(["Hello, ", "I'm the Researcher."], finish="stop", key=key),
+        ),
+    )
+
+    reply = await llm.complete_streaming(
+        [ChatMessage(role="user", content="hello")], on_text=lambda _: None
+    )
+
+    assert reply.text == "Hello, I'm the Researcher."
+
+
+@pytest.mark.asyncio
+async def test_a_reply_that_was_all_thinking_says_so():
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1",
+        transport=streaming_runtime(
+            [],
+            reasoning_sse(["Let me think about", " this for a long"], finish="length"),
+        ),
+    )
+
+    reply = await llm.complete_streaming(
+        [ChatMessage(role="user", content="hello")], on_text=lambda _: None
+    )
+
+    assert reply.text == ""
+    assert reply.stop_reason == "thinking_only"
+
+
+@pytest.mark.asyncio
+async def test_a_non_streamed_answer_in_reasoning_content_is_read():
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "m",
+                "choices": [
+                    {
+                        "message": {"content": "", "reasoning_content": "Hi there."},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1", transport=httpx.MockTransport(answer)
+    )
+
+    reply = await llm.complete([ChatMessage(role="user", content="hello")])
+
+    assert reply.text == "Hi there."

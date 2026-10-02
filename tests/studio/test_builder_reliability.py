@@ -323,3 +323,30 @@ async def test_a_model_the_provider_wont_run_is_explained_in_plain_words(make_st
     event = (await studio.transcript(chat.id))[-1]
     assert event.text.startswith("Researcher can't use")
     assert "Model call failed: Model endpoint returned 404" in event.text
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_is_asked_again_then_explained(make_studio):
+    studio, model = make_studio(
+        [LLMReply(text=""), LLMReply(text="Hi! Ready to research.")]
+    )
+    await studio.ensure_defaults()
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None
+    chat = await studio.create_chat(agent_id=researcher.id)
+
+    result = await studio.send(chat.id, "hello")
+
+    assert result.text == "Hi! Ready to research."
+    assert "came back empty" in model.calls[-1]["prompt"]
+
+    studio2, _ = make_studio([LLMReply(text="", stop_reason="thinking_only")] * 2)
+    await studio2.ensure_defaults()
+    researcher2 = await studio2.agent_by_name("Researcher")
+    assert researcher2 is not None
+    chat2 = await studio2.create_chat(agent_id=researcher2.id)
+
+    blank = await studio2.send(chat2.id, "hello")
+
+    assert "(no reply)" not in blank.text
+    assert "spent its whole reply thinking" in blank.text
