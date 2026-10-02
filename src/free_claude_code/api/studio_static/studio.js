@@ -1240,8 +1240,9 @@
           result.textContent = "Testing…";
           try {
             const body = await post("/studio/api/team-models/test", { model });
-            result.textContent = body.ok ? "✓ Works" : `✗ ${body.message}`;
-            result.className = `brain-test ${body.ok ? "good" : "bad"}`;
+            const warned = body.ok && body.message !== "Works.";
+            result.textContent = body.ok ? (warned ? `⚠ ${body.message}` : "✓ Works") : `✗ ${body.message}`;
+            result.className = `brain-test ${body.ok && !warned ? "good" : "bad"}`;
           } catch (error) {
             result.textContent = `✗ ${error.message}`;
             result.className = "brain-test bad";

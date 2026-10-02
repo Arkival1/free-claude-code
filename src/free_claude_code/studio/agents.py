@@ -120,8 +120,9 @@ def garbled_call_note(agent: str, text: str, names: Sequence[str]) -> str:
         )
     return (
         f"(Studio: {agent} tried to use {tool}, but its reply was cut off or "
-        "garbled, so nothing ran. Ask again, or give this agent a bigger model "
-        "in Team brains.)"
+        "garbled, so nothing ran. Ask again. If it keeps happening, in LM Studio "
+        "load the model with a bigger Context Length (8192 or more), or give "
+        "this agent another model in Team brains.)"
     )
 
 

@@ -102,30 +102,62 @@ def strip_thinking(text: str) -> str:
     return _THINKING.sub("", text).strip()
 
 
-def tool_protocol_instructions(tools: Sequence[ToolSpec]) -> str:
-    """Describe the text tool protocol used by models without tool support."""
+def tool_protocol_instructions(
+    tools: Sequence[ToolSpec], *, brief: bool = False
+) -> str:
+    """Describe the text tool protocol used by models without tool support.
+
+    ``brief`` keeps each tool to its first sentence and its argument names: a
+    model on this PC is often loaded with room for only about 4,000 tokens,
+    and the full list alone would fill most of it.
+    """
     if not tools:
         return ""
+    writes = any(tool.name == "write_file" for tool in tools)
     lines = [
         "You can use tools. To call one, reply with a single JSON object and "
         "nothing else:",
         '{"tool": "<name>", "arguments": {...}}',
         'When the work is finished, reply with: {"final": "<your answer>"}',
-        "To write a file, leave content out of the JSON and put the whole file "
-        "in a fenced code block right after it, with no escaping:",
-        '{"tool": "write_file", "arguments": {"path": "index.html"}}',
-        "```html",
-        "<!doctype html>...",
-        "```",
+    ]
+    if writes or not brief:
+        lines += [
+            "To write a file, leave content out of the JSON and put the whole "
+            "file in a fenced code block right after it, with no escaping:",
+            '{"tool": "write_file", "arguments": {"path": "index.html"}}',
+            "```html",
+            "<!doctype html>...",
+            "```",
+        ]
+    lines += [
         "To use several tools that do not depend on each other, reply with a "
         "JSON array of these objects; they run together, which is faster.",
         "Available tools:",
     ]
     lines.extend(
-        f"- {tool.name}: {tool.description}{_arguments_line(tool.parameters)}"
+        f"- {tool.name}: {_first_sentence(tool.description)}"
+        f"{_argument_names(tool.parameters)}"
+        if brief
+        else f"- {tool.name}: {tool.description}{_arguments_line(tool.parameters)}"
         for tool in tools
     )
     return "\n".join(lines)
+
+
+def _first_sentence(text: str) -> str:
+    found = re.match(r"(.+?[.!?])(?:\s|$)", text.strip(), re.S)
+    return found.group(1) if found else text.strip()
+
+
+def _argument_names(parameters: Mapping[str, object]) -> str:
+    """'Arguments: path (required), content.' with no explanations."""
+    properties = parameters.get("properties")
+    if not isinstance(properties, Mapping) or not properties:
+        return " Arguments: none."
+    required = parameters.get("required")
+    needed = set(required) if isinstance(required, list) else set()
+    names = [f"{name} (required)" if name in needed else name for name in properties]
+    return " Arguments: " + ", ".join(names) + "."
 
 
 def _arguments_line(parameters: Mapping[str, object]) -> str:
@@ -445,6 +477,27 @@ class LocalOpenAILLM:
             if isinstance(row, dict) and isinstance(row.get("id"), str)
         )
 
+    async def context_length(self, model: str) -> int | None:
+        """How many tokens LM Studio loaded this model with, when it says."""
+        root = self._base_url.removesuffix("/v1")
+        headers = {}
+        if self._api_key:
+            headers["authorization"] = f"Bearer {self._api_key}"
+        try:
+            async with httpx.AsyncClient(
+                timeout=5.0, transport=self._transport
+            ) as client:
+                response = await client.get(f"{root}/api/v0/models", headers=headers)
+                body = response.json() if response.status_code < 400 else None
+        except httpx.HTTPError, ValueError:
+            return None
+        rows = body.get("data") if isinstance(body, dict) else None
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and row.get("id") == model:
+                size = row.get("loaded_context_length")
+                return size if isinstance(size, int) and size > 0 else None
+        return None
+
     async def loaded_models(self) -> tuple[str, ...] | None:
         """Chat models loaded in memory right now, when the runtime says so.
 
@@ -504,7 +557,7 @@ class LocalOpenAILLM:
         prelude = "\n\n".join(
             part
             for part in (
-                tool_protocol_instructions(tools),
+                tool_protocol_instructions(tools, brief=True),
                 system,
                 NO_THINK_SWITCH if fast else "",
             )
@@ -807,6 +860,15 @@ class StudioModelRouter:
     def use_stand_in(self, pick: Callable[[str], Awaitable[str | None]]) -> None:
         """Let a local model answer for a server model that cannot be reached."""
         self._stand_in = pick
+
+    async def context_length(self, model: str) -> int | None:
+        """The room a local model was loaded with, in tokens, when known."""
+        if not model.startswith(LOCAL_MODEL_PREFIX):
+            return None
+        measure = getattr(self._local, "context_length", None)
+        if measure is None:
+            return None
+        return await measure(model[len(LOCAL_MODEL_PREFIX) :])
 
     async def loaded_local_models(self) -> tuple[str, ...] | None:
         """Return the local models loaded in memory, when the runtime knows."""

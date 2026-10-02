@@ -261,3 +261,54 @@ async def test_a_non_streamed_answer_in_reasoning_content_is_read():
     reply = await llm.complete([ChatMessage(role="user", content="hello")])
 
     assert reply.text == "Hi there."
+
+
+def test_local_models_get_a_brief_tool_list():
+    from free_claude_code.studio.llm import tool_protocol_instructions
+    from free_claude_code.studio.tools import MAIN_TOOL_NAMES, tool_specs
+
+    specs = tool_specs(MAIN_TOOL_NAMES)
+    full = tool_protocol_instructions(specs)
+    brief = tool_protocol_instructions(specs, brief=True)
+
+    assert len(brief) < len(full) * 0.6
+    assert "- web_search: Search the web and return result titles and URLs." in brief
+    assert "Arguments: query (required)." in brief
+    assert "```html" not in brief, "no file-writing example for agents that can't"
+
+
+@pytest.mark.asyncio
+async def test_a_local_request_sends_the_brief_list():
+    sent: list[dict] = []
+    llm = LocalOpenAILLM(base_url="http://localhost:1234/v1", transport=runtime(sent))
+
+    await llm.complete([ChatMessage(role="user", content="hi")], tools=(TOOL,))
+
+    system = sent[0]["messages"][0]["content"]
+    assert "- recall: Search memory. Arguments: query." in system
+
+
+@pytest.mark.asyncio
+async def test_the_room_a_model_was_loaded_with_is_read_from_lm_studio():
+    def answer(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v0/models"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "jarvis-4b",
+                        "state": "loaded",
+                        "loaded_context_length": 4096,
+                    },
+                    {"id": "other", "state": "not-loaded", "max_context_length": 32768},
+                ]
+            },
+        )
+
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1", transport=httpx.MockTransport(answer)
+    )
+
+    assert await llm.context_length("jarvis-4b") == 4096
+    assert await llm.context_length("other") is None

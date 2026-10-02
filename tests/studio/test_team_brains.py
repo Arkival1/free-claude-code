@@ -520,3 +520,44 @@ async def test_the_test_route_reports_without_switching(make_studio):
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()
+
+
+@pytest.mark.asyncio
+async def test_testing_a_local_model_with_too_little_room_warns(make_studio):
+    studio, _ = make_studio(["OK"])
+
+    async def room(model: str) -> int | None:
+        return 4096
+
+    studio._router.context_length = room
+
+    body = await studio.test_model("local/jarvis-4b")
+
+    assert body["ok"] is True
+    assert "room for only 4096 tokens" in str(body["message"])
+    assert "Context Length 8192" in str(body["message"])
+
+
+@pytest.mark.asyncio
+async def test_the_lab_falls_back_to_the_main_ai_model(
+    tmp_path, store, web_tools, studio_settings
+):
+    from free_claude_code.studio.llm import StudioModelRouter
+    from free_claude_code.studio.service import StudioService
+
+    works = "local/jarvis-4b"
+    provider = OnlySomeModels({"jarvis-4b"})  # local models arrive without local/
+    settings = studio_settings(STUDIO_MAIN_AGENT_MODEL=works)
+    studio = StudioService(
+        store=store,
+        web_tools=web_tools,
+        settings_provider=lambda: settings,
+        models_dir=tmp_path / "models",
+        sites_dir=tmp_path / "sites",
+        router=StudioModelRouter(proxy=provider, local=provider),
+    )
+    await studio.ensure_defaults()
+
+    answer = await studio._lab_think("You are a chemist.", "What is soap?")
+
+    assert answer == "Hi from jarvis-4b."

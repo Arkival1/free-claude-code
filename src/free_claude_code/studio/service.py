@@ -240,6 +240,9 @@ MAIN_CONSOLE_SETTING = "console"
 LAB_CHAT_SETTING = "lab"
 ENGINE_RETRY_SECONDS = 300.0
 """After the engine fails to start, LM Studio answers this long before a retry."""
+ROOM_NEEDED = 8192
+"""Tokens of context an agent needs: instructions, tools, the talk so far,
+and room to answer."""
 MAIN_PROMPT_NOTE = (
     "Run the team for the user: answer directly when you can, and hand work "
     "that needs building, research, or commands to the right agents."
@@ -1473,14 +1476,31 @@ class StudioService:
         return self._lab
 
     async def _lab_think(self, system: str, prompt: str) -> str:
-        """The Lab's own questions go to a server AI: it knows more chemistry."""
-        reply = await self._router.complete(
-            [ChatMessage.user(prompt)],
-            model=await self.effective_model(self.server_model),
-            system=system,
-            temperature=0.2,
-            max_tokens=900,
-        )
+        """The Lab's own questions go to a server AI: it knows more chemistry.
+
+        When no server model answers (no key, or one the key can't use), the
+        main AI's own model takes them, so the Lab still works offline.
+        """
+        server = await self.effective_model(self.server_model)
+        try:
+            reply = await self._router.complete(
+                [ChatMessage.user(prompt)],
+                model=server,
+                system=system,
+                temperature=0.2,
+                max_tokens=900,
+            )
+        except StudioLLMError:
+            own = (await self.main_agent()).model or self.default_model
+            if own == server:
+                raise
+            reply = await self._router.complete(
+                [ChatMessage.user(prompt)],
+                model=own,
+                system=system,
+                temperature=0.2,
+                max_tokens=900,
+            )
         return reply.text
 
     async def lab_chat(self) -> Chat:
@@ -2806,6 +2826,16 @@ class StudioService:
                 "but won't run it. Pick another."
                 if model_missing(text)
                 else text[:300],
+            }
+        room = await self._router.context_length(model)
+        if room is not None and room < ROOM_NEEDED:
+            return {
+                "model": model,
+                "ok": True,
+                "message": f"Works, but LM Studio loaded it with room for only "
+                f"{room} tokens; agents need {ROOM_NEEDED} or more, or replies come "
+                "back empty or cut off. In LM Studio, reload it with Context Length "
+                f"{ROOM_NEEDED}.",
             }
         return {"model": model, "ok": True, "message": "Works."}
 
