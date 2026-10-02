@@ -368,3 +368,84 @@ async def test_a_garbled_tool_call_is_never_shown_as_the_answer(make_studio):
     assert '"tool"' not in result.text
     assert "tried to use write_file" in result.text
     assert "nothing ran" in result.text
+
+
+GPU_PAGE = (
+    '<!doctype html><html lang="en"><head><title>Budget GPUs</title></head>'
+    "<body><h1>Best budget GPUs</h1><p>The Arc B580 ($249, 12 GB) beats the "
+    "RTX 4060 in most games.</p></body></html>"
+)
+
+
+def test_whole_files_pasted_in_a_reply_are_found():
+    from free_claude_code.studio.agents import fenced_files
+
+    text = (
+        "Here is the page:\n```html\n" + GPU_PAGE + "\n```\nand styles:\n"
+        "```css\nbody { font-family: system-ui; margin: 0 auto; max-width: 60rem; }\n```"
+    )
+    assert fenced_files(text) == [
+        ("index.html", GPU_PAGE + "\n"),
+        (
+            "styles.css",
+            "body { font-family: system-ui; margin: 0 auto; max-width: 60rem; }\n",
+        ),
+    ]
+    assert fenced_files("```html\n<p>just a snippet of a page</p>\n```") == []
+
+
+@pytest.mark.asyncio
+async def test_a_builder_that_pastes_its_page_gets_it_saved_and_shared(make_studio):
+    async def respond(system: str, prompt: str):
+        if "the user's main AI" in system:
+            return LLMReply(text="On it.")
+        if prompt.startswith("make a gpu comparison page"):
+            return tool_reply(
+                "start_project", {"template": "business", "name": "GPU page"}
+            )
+        if "Now read the files" in prompt:
+            # What the live run's small model did: paste the page, not save it.
+            return LLMReply(text="```html\n" + GPU_PAGE + "\n```")
+        return tool_reply("finish", {"summary": "```html\n" + GPU_PAGE + "\n```"})
+
+    studio, _ = make_studio(respond)
+    await studio.ensure_defaults()
+
+    await studio.main_say("have Builder make a gpu comparison page", background=False)
+    await studio.wait_for_background()
+
+    run = (await studio.runs())[0]
+    assert run.status == "succeeded"
+    assert "Arc B580" in await studio.workspace.read(str(run.site_id), "index.html")
+    room = (await studio.rooms())[0]
+    done = [
+        m.text for m in await studio.transcript(room.id) if m.text.startswith("Done:")
+    ]
+    assert len(done) == 1
+    assert "Built " in done[0] and "index.html" in done[0] and "```" not in done[0]
+
+
+@pytest.mark.asyncio
+async def test_a_builder_that_never_writes_is_told_to_once(make_studio):
+    async def respond(system: str, prompt: str):
+        if "the user's main AI" in system:
+            return LLMReply(text="On it.")
+        if prompt.startswith("make a gpu comparison page"):
+            return tool_reply(
+                "start_project", {"template": "business", "name": "GPU page"}
+            )
+        if "Nothing is built yet" in prompt:
+            return tool_reply("write_file", {"path": "index.html", "content": GPU_PAGE})
+        if "Now read the files" in prompt:
+            return LLMReply(text="I made the page.")
+        return tool_reply("finish", {"summary": "Built the GPU page."})
+
+    studio, model = make_studio(respond)
+    await studio.ensure_defaults()
+
+    await studio.main_say("have Builder make a gpu comparison page", background=False)
+    await studio.wait_for_background()
+
+    run = (await studio.runs())[0]
+    assert "Arc B580" in await studio.workspace.read(str(run.site_id), "index.html")
+    assert any("Nothing is built yet" in str(c["prompt"]) for c in model.calls)

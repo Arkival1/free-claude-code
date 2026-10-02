@@ -243,6 +243,16 @@ MAIN_CONSOLE_SETTING = "console"
 LAB_CHAT_SETTING = "lab"
 ENGINE_RETRY_SECONDS = 300.0
 """After the engine fails to start, LM Studio answers this long before a retry."""
+
+
+def _file_rank(path: str) -> tuple[int, str]:
+    """The page first, then other pages, styles, scripts, and the rest."""
+    if path == "index.html":
+        return (0, path)
+    order = {".html": 1, ".css": 2, ".js": 3}
+    return (order.get(Path(path).suffix, 4), path)
+
+
 FOLLOW_UP_PROMPT = (
     "(Studio) {agent} {status} the job you gave it: {job}\n"
     "Its report:\n{result}\n\n"
@@ -2294,7 +2304,7 @@ class StudioService:
         main = await self.main_agent()
         if parent is None or parent.agent_id != main.id:
             return  # An agent's own helper reported back; it reads it itself.
-        result = (run.result or run.error or "").strip()
+        result = (await self._plain_result(run) or run.error or "").strip()
         job = " ".join(
             run.goal.split("\n\nBriefing from ")[0].removeprefix("The job: ").split()
         )
@@ -2326,7 +2336,7 @@ class StudioService:
     async def _note_report(
         self, parent_id: str, chat: Chat, agent: Agent, run: AgentRun
     ) -> None:
-        summary = (run.result or run.error or "").strip()[:600]
+        summary = (await self._plain_result(run) or run.error or "").strip()[:600]
         await self._store.append_message(
             chat_id=parent_id,
             role="event",
@@ -3818,11 +3828,31 @@ class StudioService:
             {"kind": "handoff", "agent": worker.name, "run_id": run_id},
         )
 
+    async def _plain_result(self, run: AgentRun) -> str:
+        """A job's result in words: a pasted file becomes a list of what was built."""
+        result = (run.result or "").strip()
+        code = "```" in result or re.search(r"<(?:!doctype|html)\b", result, re.I)
+        if run.site_id and code:
+            site = await self._store.get(SiteProject, run.site_id)
+            if site is not None:
+                files = sorted(
+                    (f.path for f in await self.workspace.files(run.site_id)),
+                    key=_file_rank,
+                )
+                listed = ", ".join(files[:6]) or "no files"
+                if len(files) > 6:
+                    listed += f" and {len(files) - 6} more files"
+                return (
+                    f"Built {listed} in the '{site.name}' project "
+                    "(open it under Projects to see it)."
+                )
+        return result
+
     async def _share_in_room(self, agent: Agent, run: AgentRun) -> None:
         """When a handed-out job ends, its agent tells the team what came of it."""
         goal = " ".join(run.goal.split("\n\nBriefing from ")[0].split())[:160]
         if run.status == "succeeded":
-            result = (run.result or "").strip() or "Done, with nothing to report."
+            result = await self._plain_result(run) or "Done, with nothing to report."
             text = f"Done: {goal}\n{result}"
         else:
             text = f"Couldn't finish: {goal}\n{(run.error or run.status).strip()}"

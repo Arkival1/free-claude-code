@@ -65,6 +65,36 @@ WRITE_TOOLS = frozenset(
         "use_photo",
     }
 )
+CONTENT_WRITES = frozenset({"write_file", "edit_file"})
+"""Writes that put content in a file (starting a template does not)."""
+WRITE_NOTE = (
+    "(Studio) Nothing is built yet: the files still hold the starter template. "
+    "Write the real page now with write_file (path index.html), using what the "
+    "task and the team shared, then finish."
+)
+_FENCE = re.compile(r"```(html|css|javascript|js)[^\n]*\n(.*?)```", re.S | re.I)
+_FENCE_PATHS = {
+    "html": "index.html",
+    "css": "styles.css",
+    "javascript": "app.js",
+    "js": "app.js",
+}
+
+
+def fenced_files(text: str) -> list[tuple[str, str]]:
+    """Whole files a reply pasted in fenced blocks: a full page (index.html),
+    a stylesheet (styles.css), or a script (app.js)."""
+    found: dict[str, str] = {}
+    for match in _FENCE.finditer(text):
+        kind, body = match.group(1).lower(), match.group(2).strip()
+        if kind == "html" and not re.search(r"<(?:!doctype|html|body)\b", body, re.I):
+            continue  # A snippet, not a page.
+        if len(body) < 40:
+            continue
+        found[_FENCE_PATHS[kind]] = body + "\n"
+    return list(found.items())
+
+
 REPEAT_FAILURES = 2
 REPEAT_NOTE = (
     "This same call has now failed more than once. Do not repeat it: read the "
@@ -1010,6 +1040,7 @@ class AgentRunner:
         squeezed = False
         prodded = False
         searched_for_it = False
+        pushed_to_write = False
         emptied = False
         for step in range(1, max_steps + 1):
             history = compact_history(history)
@@ -1103,6 +1134,38 @@ class AgentRunner:
                 history.append(
                     ChatMessage.user(CUT_OFF_NOTE if cut_off else UNREADABLE_NOTE)
                 )
+                continue
+            if not reply.tool_calls and context.site_id and "write_file" in names:
+                fenced = fenced_files(reply.text)
+                if fenced:
+                    # A small model often pastes the finished page in its reply
+                    # instead of saving it; save it for it.
+                    reply = replace(
+                        reply,
+                        text="",
+                        tool_calls=tuple(
+                            ToolCall(
+                                id=f"fenced_{step}_{index}",
+                                name="write_file",
+                                arguments={"path": path, "content": body},
+                            )
+                            for index, (path, body) in enumerate(fenced)
+                        ),
+                    )
+            if (
+                not reply.tool_calls
+                and alone
+                and context.site_id
+                and "write_file" in names
+                and not CONTENT_WRITES & set(used)
+                and not pushed_to_write
+                and step < max_steps
+            ):
+                # Starting the template is not building the site: ask once for
+                # the real content before the job may end.
+                pushed_to_write = True
+                history.append(ChatMessage.assistant(reply.text[:1_500]))
+                history.append(ChatMessage.user(WRITE_NOTE))
                 continue
             if (
                 not reply.tool_calls
