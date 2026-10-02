@@ -114,7 +114,14 @@ from .models import (
     now_ms,
 )
 from .obsidian import ObsidianVault, VaultStatus
-from .orders import Order, parse_orders, pick_agent, web_request
+from .orders import (
+    Order,
+    is_yes,
+    offered_orders,
+    parse_orders,
+    pick_agent,
+    web_request,
+)
 from .phone_link import (
     MAX_MEMORY_CHARS,
     MAX_PULL,
@@ -3405,6 +3412,8 @@ class StudioService:
         task = "" if orders or researcher is None else web_request(text, main.name)
         if task and researcher is not None:
             orders = [Order(agent=researcher.name, task=task)]
+        if not orders and is_yes(text, main.name):
+            orders = await self._accepted_offer(main, chat, team)
         if not orders:
             return ""
         crew = Crew(
@@ -3474,6 +3483,60 @@ class StudioService:
             "in a sentence or two who is doing what; each agent reports back here "
             "when it finishes. Answer anything else they asked."
         )
+
+    async def _accepted_offer(
+        self, main: Agent, chat: Chat, team: Sequence[Agent]
+    ) -> list[Order]:
+        """The job the main AI asked about, now that the user said yes.
+
+        A small model on this PC often asks 'Shall I have the Researcher look
+        into it?' instead of handing the job out; without this, 'yes' names
+        no job and it asks again, round and round.
+        """
+        recent = list(await self._store.transcript(chat.id, limit=16))
+        if recent and recent[-1].role == "user":
+            recent.pop()  # The 'yes' itself.
+        asked = next(
+            (
+                index
+                for index in range(len(recent) - 1, -1, -1)
+                if recent[index].role == "assistant"
+            ),
+            None,
+        )
+        if asked is None or "?" not in recent[asked].text:
+            return []
+        question = recent[asked].text
+        request = next(
+            (
+                message
+                for message in reversed(recent[:asked])
+                if message.role == "user" and not is_yes(message.text, main.name)
+            ),
+            None,
+        )
+        since = recent[recent.index(request) :] if request is not None else recent
+        if any(message.data.get("order") for message in since):
+            return []  # That job was handed out already; don't start it twice.
+        names = [agent.name for agent in team]
+        orders = offered_orders(question, names)
+        if not orders and request is not None:
+            orders = parse_orders(request.text, names)
+            task = "" if orders else web_request(request.text, main.name)
+            if task:
+                orders = [Order("", task)]
+        researcher = next((agent for agent in team if agent.role == "researcher"), None)
+        if (
+            not orders
+            and request is not None
+            and researcher is not None
+            and len(request.text.split()) >= 3
+            and re.search(
+                rf"\b(?:research|{re.escape(researcher.name)})", question, re.I
+            )
+        ):
+            orders = [Order(researcher.name, request.text.strip())]
+        return orders
 
     async def start_agent_task(
         self,

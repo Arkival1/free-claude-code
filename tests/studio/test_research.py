@@ -754,3 +754,45 @@ async def test_web_status_reports_reddit_and_youtube_modes(make_studio):
     assert status["youtube"] == "YouTube search, no key"
     assert status["sources"] == 12
     assert "secret" not in json.dumps(status)
+
+
+@pytest.mark.asyncio
+async def test_a_researcher_that_asks_before_starting_is_told_to_start(make_studio):
+    def respond(system: str, prompt: str):
+        if "Research questions for the user and the team" not in system:
+            return LLMReply(text="ok")
+        if "Nobody can answer questions during this job" in prompt:
+            return tool_reply("web_search", {"query": "rain jackets"})
+        if prompt == "find rain jackets":
+            return LLMReply(text="Ready when you are. Shall I begin?")
+        return LLMReply(text="Here is what I found [1].")
+
+    studio, _ = make_studio(respond)
+    await studio.ensure_defaults()
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None
+    run = await studio.start_task(agent_id=researcher.id, goal="find rain jackets")
+    await studio.wait_for_background()
+
+    done = await studio.store.require(AgentRun, run.id)
+    assert done.result == "Here is what I found [1]."
+    assert "never searched the web" not in done.result
+
+
+@pytest.mark.asyncio
+async def test_a_researcher_that_never_searches_says_so(make_studio):
+    def respond(system: str, prompt: str):
+        if "Research questions for the user and the team" not in system:
+            return LLMReply(text="ok")
+        return LLMReply(text="Shall I begin?")
+
+    studio, _ = make_studio(respond)
+    await studio.ensure_defaults()
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None
+    run = await studio.start_task(agent_id=researcher.id, goal="find rain jackets")
+    await studio.wait_for_background()
+
+    done = await studio.store.require(AgentRun, run.id)
+    assert "Researcher never searched the web" in done.result
+    assert "pick another in Team brains" in done.result

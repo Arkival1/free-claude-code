@@ -149,6 +149,51 @@ def web_request(text: str, main: str = "") -> str:
     return task
 
 
+_YES_WORDS = frozenset(
+    ["yes", "yeah", "yep", "yup", "ya", "yea", "yess", "yesss", "sure", "ok", "okay", "k", "y", "go", "ahead", "do", "it", "start", "begin", "ready", "im", "i'm", "i", "am", "lets", "let's", "please", "sounds", "good", "for", "absolutely", "definitely", "of", "course", "right", "now"]
+)
+_YES_CORE = frozenset(
+    ["yes", "yeah", "yep", "yup", "ya", "yea", "yess", "yesss", "sure", "ok", "okay", "k", "y", "go", "start", "begin", "ready", "absolutely", "definitely"]
+)
+_OFFER_LEAD = re.compile(
+    r"^(?:(?:shall|should|can|may)\s+i\s+|(?:do\s+you\s+want|would\s+you\s+like|"
+    r"want)\s+me\s+to\s+|i\s+can\s+)",
+    re.I,
+)
+
+
+def is_yes(text: str, main: str = "") -> bool:
+    """'yes', 'yeah go ahead', 'ok I'm ready': a go-ahead and nothing more."""
+    words = re.findall(r"[a-z']+", text.casefold())
+    if main.strip():
+        words = [word for word in words if word != main.casefold()]
+    return (
+        0 < len(words) <= 6
+        and all(word in _YES_WORDS for word in words)
+        and any(word in _YES_CORE for word in words)
+    )
+
+
+def offered_orders(question: str, names: Sequence[str]) -> list[Order]:
+    """The jobs the main AI offered in 'Shall I have the Researcher look into
+    X?' or 'Do you want me to research X?', so a 'yes' can start them."""
+    found = [
+        Order(order.agent, task)
+        for order in parse_orders(question, names)
+        if (task := order.task.rstrip("?").strip()) and not _VAGUE.search(task)
+    ]
+    if found:
+        return found
+    for sentence in re.split(r"(?<=[.!?])\s+", question):
+        lead = _OFFER_LEAD.match(sentence.strip())
+        if lead is None:
+            continue
+        task = web_request(sentence.strip()[lead.end() :])
+        if task:
+            return [Order("", task)]
+    return []
+
+
 def pick_agent(task: str, team: Sequence[tuple[str, str]]) -> str:
     """Choose who should do a job the user left open: (name, role) pairs."""
     by_role: dict[str, str] = {}

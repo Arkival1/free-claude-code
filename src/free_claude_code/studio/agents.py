@@ -70,6 +70,16 @@ REPEAT_NOTE = (
 
 RETRY_UNREADABLE = 2
 """How many times a garbled tool call is sent back before the reply stands."""
+START_NOTE = (
+    "(Studio) Nobody can answer questions during this job, and the user has "
+    "already said go. Don't ask; start now with your tools, then report what "
+    "you found."
+)
+WEB_TOOLS = frozenset({"web_search", "web_fetch", "research"})
+NO_SEARCH_NOTE = (
+    "(Studio: {name} never searched the web for this, so this answer is not "
+    "researched. Its model may not support tools; pick another in Team brains.)"
+)
 UNREADABLE_NOTE = (
     "(Studio) That tool call could not be read, so nothing happened. Reply with "
     "one valid JSON tool call. For write_file, leave content out of the JSON "
@@ -232,7 +242,9 @@ MAIN_PROMPT = (
     "- When the user tells you to have an agent do something, it gets done: "
     "Studio hands those orders out the moment the user speaks and tells you "
     "in a note. Confirm who is doing what; never redo the work yourself or "
-    "ask the user to repeat it.\n"
+    "ask the user to repeat it. When the user asks for research or for "
+    "anything on the web, give it to the Researcher right away; never ask "
+    "whether they are ready or want you to go ahead.\n"
     "- For a bigger goal, think first: split it into parts and give each part "
     "to the agent whose job it is (Researcher to find out, Builder to make, "
     "Helper to plan, Tester to check). When the Builder finishes something "
@@ -740,6 +752,7 @@ class AgentRunner:
             query=run.goal,
             max_steps=run.max_steps or self._max_steps,
             sealed=sealed,
+            alone=True,
         )
         finished = started.model_copy(
             update={
@@ -818,7 +831,9 @@ class AgentRunner:
         extra_system: str = "",
         turn_note: str = "",
         sealed: bool = False,
+        alone: bool = False,
     ) -> TurnResult:
+        """``alone``: a background job, so nobody is there to answer questions."""
         await self._toolbox.check_online()
         names = self._toolbox.tool_names(agent.tools, role=agent.role)
         specs = tool_specs(
@@ -862,6 +877,7 @@ class AgentRunner:
         seen: set[str] = set()
         idle = 0
         squeezed = False
+        prodded = False
         for step in range(1, max_steps + 1):
             history = compact_history(history)
             try:
@@ -935,8 +951,27 @@ class AgentRunner:
                         )
                     )
                     continue
+            if (
+                not reply.tool_calls
+                and alone
+                and names
+                and not used
+                and not prodded
+                and step < max_steps
+                and "?" in reply.text
+            ):
+                # "Shall I begin?" on a background job would come back to the
+                # user as the report; tell it once to just start.
+                prodded = True
+                history.append(ChatMessage.assistant(reply.text[:1_500]))
+                history.append(ChatMessage.user(START_NOTE))
+                continue
             if not reply.tool_calls:
                 text = reply.text or "(no reply)"
+                if prodded and not used and WEB_TOOLS & set(names):
+                    # Told to start and still only talking: its model most
+                    # likely can't call tools at all.
+                    text = f"{text}\n\n{NO_SEARCH_NOTE.format(name=agent.name)}"
                 await self._record_assistant(chat, agent, text, reply)
                 return TurnResult(text=text, steps=step, tool_calls=tuple(used))
             finish = self._finish_call(reply.tool_calls)

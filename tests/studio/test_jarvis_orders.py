@@ -6,7 +6,14 @@ import pytest
 
 from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun, Chat
-from free_claude_code.studio.orders import Order, parse_orders, pick_agent, web_request
+from free_claude_code.studio.orders import (
+    Order,
+    is_yes,
+    offered_orders,
+    parse_orders,
+    pick_agent,
+    web_request,
+)
 
 from .conftest import tool_reply
 
@@ -238,3 +245,47 @@ async def test_asking_jarvis_to_research_hands_it_to_the_researcher(make_studio)
     assert researcher is not None and runs[0].agent_id == researcher.id
     jarvis = next(c for c in model.calls if "the user's main AI" in str(c["system"]))
     assert "Researcher is now working on" in jarvis["studio_note"]
+
+
+def test_a_go_ahead_is_told_apart_from_a_new_request():
+    assert is_yes("yes")
+    assert is_yes("Yeah go ahead!")
+    assert is_yes("ok I'm ready", "Jarvis")
+    assert is_yes("yes Jarvis do it", "Jarvis")
+    assert not is_yes("yes but research boots instead")
+    assert not is_yes("no")
+    assert not is_yes("please")
+
+
+def test_the_job_jarvis_offered_is_read_from_his_question():
+    assert offered_orders(
+        "Shall I have the Researcher look into rain jackets?", TEAM
+    ) == [Order("Researcher", "look into rain jackets")]
+    assert offered_orders("Got it. Do you want me to research rain jackets?", TEAM) == [
+        Order("", "research rain jackets")
+    ]
+    assert offered_orders("Should I ask the Researcher to look into it?", TEAM) == []
+    assert offered_orders("How are you today?", TEAM) == []
+
+
+@pytest.mark.asyncio
+async def test_saying_yes_to_jarvis_starts_the_job_he_offered_once(make_studio):
+    def jarvis(prompt: str) -> LLMReply:
+        if prompt.startswith("yes"):
+            return LLMReply(text="Starting now.")
+        return LLMReply(text="Are you ready for the Researcher to look into it?")
+
+    studio, _ = make_studio(team_script(jarvis=jarvis))
+    await studio.ensure_defaults()
+
+    await studio.main_say("best rain jackets under 100 dollars", background=False)
+    assert await studio.runs() == ()
+
+    await studio.main_say("yes", background=False)
+    await studio.main_say("yes go", background=False)
+    await studio.wait_for_background()
+
+    runs = await studio.runs()
+    assert [run.goal for run in runs] == ["best rain jackets under 100 dollars"]
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None and runs[0].agent_id == researcher.id
