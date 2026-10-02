@@ -540,6 +540,18 @@ button.startup-busy::before,
   color: var(--text-strong);
 }
 
+.field-saved {
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+}
+
 .field-source {
   color: var(--accent);
   font-size: 11px;

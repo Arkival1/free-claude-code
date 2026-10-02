@@ -166,7 +166,22 @@
     return { name, id: rest.join("/") };
   };
 
+  // A key typed into Settings is only kept after Apply; leaving first would
+  // quietly drop it, so ask.
+  const settingsUnsaved = () => {
+    try {
+      const doc = document.querySelector(".settings-frame")?.contentDocument;
+      return /unsaved/i.test(doc?.querySelector("#dirtyState")?.textContent || "");
+    } catch {
+      return false;
+    }
+  };
+  const mayLeave = () =>
+    !settingsUnsaved() ||
+    !confirm("You have settings that aren't saved yet (like a key you typed).\n\nOK: stay here, then press Apply at the bottom.\nCancel: leave without saving.");
+
   const go = (hash) => {
+    if (!mayLeave()) return;
     location.hash = hash;
   };
 
@@ -183,7 +198,9 @@
   for (const tab of document.querySelectorAll(".tab")) {
     tab.addEventListener("click", () => go(tab.dataset.route));
   }
-  backButton.addEventListener("click", () => history.back());
+  backButton.addEventListener("click", () => {
+    if (mayLeave()) history.back();
+  });
   guideButton.addEventListener("click", openGuide);
   // "?" opens the guide from anywhere, unless you are typing.
   document.addEventListener("keydown", (event) => {

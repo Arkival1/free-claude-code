@@ -62,3 +62,36 @@ def test_one_search_box_finds_settings_on_every_page(
     page.get_by_role("button", name="Studio", exact=True).click()
     expect(search).to_have_value("")
     expect(page.locator("#pageTitle")).to_have_text("Studio")
+
+
+def test_a_saved_key_looks_saved_and_leaving_unsaved_asks_first(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{admin_base_url}/studio#settings")
+    page.reload()
+    frame = page.frame_locator(".settings-frame")
+    frame.get_by_role("searchbox").first.fill("web search")
+    backup = frame.locator("#field-STUDIO_SEARCH_BACKUP_API_KEY")
+    expect(backup).to_be_visible()
+    backup.fill("tvly-testkey123")
+    asked: list[str] = []
+
+    def answer(dialog) -> None:
+        asked.append(dialog.message)
+        dialog.accept()  # OK: stay
+
+    page.once("dialog", answer)
+    page.locator(".tab", has_text="Home").click()
+    page.wait_for_timeout(500)
+    assert asked and "aren't saved yet" in asked[0]
+    assert page.url.endswith("#settings")
+    frame.get_by_role("button", name="Apply", exact=True).click()
+    expect(frame.locator("#dirtyState")).to_have_text("No changes")
+    page.reload()
+    frame = page.frame_locator(".settings-frame")
+    frame.get_by_role("searchbox").first.fill("web search")
+    field = frame.locator(
+        ".field", has=frame.locator("#field-STUDIO_SEARCH_BACKUP_API_KEY")
+    )
+    expect(field.locator(".field-saved")).to_have_text("✓ saved")

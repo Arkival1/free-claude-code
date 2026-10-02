@@ -859,6 +859,13 @@ function renderField(field) {
     sourceEl.textContent = source;
     label.appendChild(sourceEl);
   }
+  if (field.type === "secret" && field.configured) {
+    // A saved key stays hidden, so say plainly that it is there.
+    const savedEl = document.createElement("span");
+    savedEl.className = "field-saved";
+    savedEl.textContent = "\u2713 saved";
+    label.appendChild(savedEl);
+  }
 
   const input = window.FccFormControls.configure(inputForField(field));
   input.id = `field-${field.key}`;
@@ -964,7 +971,7 @@ function inputForField(field) {
     input.spellcheck = false;
     input.setAttribute("autocorrect", "off");
     input.placeholder = field.configured
-      ? "Configured - enter a new value to replace"
+      ? "Saved (hidden) - type a new key to replace it"
       : "Not configured";
     input.value = "";
     input.autocomplete = "off";
