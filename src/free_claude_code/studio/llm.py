@@ -107,9 +107,9 @@ def tool_protocol_instructions(
 ) -> str:
     """Describe the text tool protocol used by models without tool support.
 
-    ``brief`` keeps each tool to its first sentence and its argument names: a
-    model on this PC is often loaded with room for only about 4,000 tokens,
-    and the full list alone would fill most of it.
+    ``brief`` keeps each tool to two sentences and a short note per argument
+    (about two thirds of the full list): a model on this PC has far less room
+    than a server model, and the full list would take much of it.
     """
     if not tools:
         return ""
@@ -135,8 +135,8 @@ def tool_protocol_instructions(
         "Available tools:",
     ]
     lines.extend(
-        f"- {tool.name}: {_first_sentence(tool.description)}"
-        f"{_argument_names(tool.parameters)}"
+        f"- {tool.name}: {_sentences(tool.description, 2)}"
+        f"{_short_arguments(tool.parameters)}"
         if brief
         else f"- {tool.name}: {tool.description}{_arguments_line(tool.parameters)}"
         for tool in tools
@@ -144,20 +144,30 @@ def tool_protocol_instructions(
     return "\n".join(lines)
 
 
-def _first_sentence(text: str) -> str:
-    found = re.match(r"(.+?[.!?])(?:\s|$)", text.strip(), re.S)
-    return found.group(1) if found else text.strip()
+def _sentences(text: str, count: int) -> str:
+    return " ".join(re.split(r"(?<=[.!?])\s+", text.strip())[:count])
 
 
-def _argument_names(parameters: Mapping[str, object]) -> str:
-    """'Arguments: path (required), content.' with no explanations."""
+ARGUMENT_NOTE_CHARS = 80
+
+
+def _short_arguments(parameters: Mapping[str, object]) -> str:
+    """'Arguments: path (required): Where the file goes; content.' with each
+    note cut to its first sentence and a few words."""
     properties = parameters.get("properties")
     if not isinstance(properties, Mapping) or not properties:
         return " Arguments: none."
     required = parameters.get("required")
     needed = set(required) if isinstance(required, list) else set()
-    names = [f"{name} (required)" if name in needed else name for name in properties]
-    return " Arguments: " + ", ".join(names) + "."
+    parts = []
+    for name, spec in properties.items():
+        info = spec if isinstance(spec, Mapping) else {}
+        about = _sentences(str(info.get("description") or ""), 1).rstrip(".")
+        if len(about) > ARGUMENT_NOTE_CHARS:
+            about = about[:ARGUMENT_NOTE_CHARS].rsplit(" ", 1)[0] + "…"
+        label = f"{name} (required)" if name in needed else name
+        parts.append(f"{label}: {about}" if about else label)
+    return " Arguments: " + "; ".join(parts) + "."
 
 
 def _arguments_line(parameters: Mapping[str, object]) -> str:

@@ -271,9 +271,9 @@ def test_local_models_get_a_brief_tool_list():
     full = tool_protocol_instructions(specs)
     brief = tool_protocol_instructions(specs, brief=True)
 
-    assert len(brief) < len(full) * 0.6
+    assert len(brief) < len(full) * 0.75
     assert "- web_search: Search the web and return result titles and URLs." in brief
-    assert "Arguments: query (required)." in brief
+    assert "Arguments: query (required): What to search for." in brief
     assert "```html" not in brief, "no file-writing example for agents that can't"
 
 

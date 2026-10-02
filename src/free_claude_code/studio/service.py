@@ -124,7 +124,10 @@ from .orders import (
     offered_orders,
     parse_orders,
     pick_agent,
+    route_prompt,
+    routed_agent,
     web_request,
+    worth_routing,
 )
 from .phone_link import (
     MAX_MEMORY_CHARS,
@@ -3480,6 +3483,8 @@ class StudioService:
             orders = await self._accepted_offer(main, chat, team)
         if not orders and is_job(text, main.name):
             orders = await self._job_for_called_agent(main, chat, team, text)
+        if not orders and not chat.settings.get(LAB_CHAT_SETTING):
+            orders = await self._routed_by_model(main, team, text)
         if not orders:
             return ""
         crew = Crew(
@@ -3549,6 +3554,39 @@ class StudioService:
             "in a sentence or two who is doing what; each agent reports back here "
             "when it finishes. Answer anything else they asked."
         )
+
+    async def _routed_by_model(
+        self, main: Agent, team: Sequence[Agent], text: str
+    ) -> list[Order]:
+        """Any wording: ask the main AI's model one word, who should do this.
+
+        A small model on this PC rarely picks the hand-off tool out of two
+        dozen, but answers 'Researcher' or 'none' reliably; Studio then hands
+        the job out itself. Server models choose their own tools well.
+        """
+        model = main.model or self.default_model
+        if not self._is_local(await self.effective_model(model)):
+            return []
+        if not worth_routing(text, main.name):
+            return []
+        pairs = [(agent.name, agent.role) for agent in team]
+        if not any(
+            role in {"researcher", "builder", "helper", "tester"} for _, role in pairs
+        ):
+            return []
+        try:
+            reply = await self._router.complete(
+                [ChatMessage.user(text)],
+                model=model,
+                system=route_prompt(pairs, main.name),
+                temperature=0.0,
+                max_tokens=16,
+            )
+        except StudioLLMError as error:
+            logger.info("Studio: routing skipped: {}", error)
+            return []
+        name = routed_agent(reply.text, pairs)
+        return [Order(name, text.strip())] if name else []
 
     async def _job_for_called_agent(
         self, main: Agent, chat: Chat, team: Sequence[Agent], text: str

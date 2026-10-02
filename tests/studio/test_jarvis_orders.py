@@ -15,7 +15,9 @@ from free_claude_code.studio.orders import (
     offered_orders,
     parse_orders,
     pick_agent,
+    routed_agent,
     web_request,
+    worth_routing,
 )
 
 from .conftest import tool_reply
@@ -397,3 +399,93 @@ async def test_asking_jarvis_for_a_website_hands_it_to_the_builder(make_studio):
     assert [(run.agent_id, run.goal) for run in runs] == [
         (builder.id, "make me a spider-man website")
     ]
+
+
+ROUTE_TEAM = [
+    ("Builder", "builder"),
+    ("Researcher", "researcher"),
+    ("Helper", "helper"),
+]
+
+
+@pytest.mark.parametrize(
+    ("reply", "agent"),
+    [
+        ("Researcher", "Researcher"),
+        ("researcher.", "Researcher"),
+        ("**Builder**", "Builder"),
+        ("helper - it is a plan", "Helper"),
+        ("none", ""),
+        ("I think the answer is", ""),
+        ("", ""),
+    ],
+)
+def test_a_one_word_route_is_read(reply, agent):
+    assert routed_agent(reply, ROUTE_TEAM) == agent
+
+
+def test_only_real_messages_are_routed():
+    assert worth_routing("what is the best budget gpu right now")
+    assert not worth_routing("yes go ahead")
+    assert not worth_routing("hi jarvis")
+    assert not worth_routing("no thanks, not now")
+
+
+def routing_script(route: str, jarvis_text: str = "On it."):
+    async def respond(system: str, prompt: str):
+        if "You decide who handles the user's message" in system:
+            return LLMReply(text=route)
+        if "the user's main AI" in system:
+            return LLMReply(text=jarvis_text)
+        return tool_reply("finish", {"summary": "All done."})
+
+    return respond
+
+
+@pytest.mark.asyncio
+async def test_a_local_jarvis_hands_any_wording_to_the_right_agent(make_studio):
+    studio, model = make_studio(
+        routing_script("Researcher"), STUDIO_MAIN_AGENT_MODEL="local/jarvis-4b"
+    )
+    await studio.ensure_defaults()
+
+    await studio.main_say(
+        "whats the deal with the new gpus this year", background=False
+    )
+    await studio.wait_for_background()
+
+    runs = await studio.runs()
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None
+    assert [(run.agent_id, run.goal) for run in runs] == [
+        (researcher.id, "whats the deal with the new gpus this year")
+    ]
+    route = next(c for c in model.calls if "You decide who handles" in str(c["system"]))
+    assert route["model"] == "jarvis-4b"  # Jarvis's own model, on this PC
+    assert "- Researcher: finds things out on the web" in str(route["system"])
+
+
+@pytest.mark.asyncio
+async def test_a_local_jarvis_answers_chat_himself(make_studio):
+    studio, _ = make_studio(
+        routing_script("none", "I'm good!"), STUDIO_MAIN_AGENT_MODEL="local/jarvis-4b"
+    )
+    await studio.ensure_defaults()
+
+    chat = await studio.main_say("how are you doing today", background=False)
+
+    assert await studio.runs() == ()
+    assert (await studio.transcript(chat.id))[-1].text == "I'm good!"
+
+
+@pytest.mark.asyncio
+async def test_a_server_jarvis_is_not_routed(make_studio):
+    studio, model = make_studio(routing_script("Researcher"))
+    await studio.ensure_defaults()
+
+    await studio.main_say(
+        "whats the deal with the new gpus this year", background=False
+    )
+
+    assert await studio.runs() == ()
+    assert not any("You decide who handles" in str(c["system"]) for c in model.calls)

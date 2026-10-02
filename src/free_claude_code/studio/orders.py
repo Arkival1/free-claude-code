@@ -333,6 +333,53 @@ def build_request(text: str, main: str = "") -> str:
     return task if len(task.split()) >= 3 else ""
 
 
+ROUTED_ROLES = {
+    "researcher": "finds things out on the web: research, prices, reviews, news, comparisons",
+    "builder": "builds and fixes websites, apps, games, and code",
+    "helper": "plans, brainstorms, organizes, and turns ideas into next steps",
+    "tester": "tests and reviews what was built and reports bugs",
+}
+_ROUTE_WORD = re.compile(r"[A-Za-z][\w -]*")
+
+
+def worth_routing(text: str, main: str = "") -> bool:
+    """A message that could be a job: not a 'yes', a 'no', or a few words."""
+    return (
+        len(text.split()) >= 3 and not is_yes(text, main) and not _NOT_A_JOB.match(text)
+    )
+
+
+def route_prompt(team: Sequence[tuple[str, str]], main: str) -> str:
+    """Ask a small model one easy thing: who should do this?"""
+    lines = [
+        f"You decide who handles the user's message for {main}'s team.",
+        "Agents:",
+        *(
+            f"- {name}: {ROUTED_ROLES[role]}"
+            for name, role in team
+            if role in ROUTED_ROLES
+        ),
+        f"- none: {main} answers himself. Use none for greetings and chat, "
+        f"questions about {main}, the team or this app, opinions, simple facts "
+        "he already knows, maths, the time, the weather, reminders, to-do "
+        "lists, and memory.",
+        "Reply with exactly one word: an agent's name, or none.",
+    ]
+    return "\n".join(lines)
+
+
+def routed_agent(reply: str, team: Sequence[tuple[str, str]]) -> str:
+    """The agent a one-word routing reply names, or ''."""
+    found = _ROUTE_WORD.search(reply.strip().strip("*`\"'"))
+    if found is None:
+        return ""
+    word = found.group(0).split()[0].strip("-").casefold()
+    for name, role in team:
+        if role in ROUTED_ROLES and word in {name.casefold(), role}:
+            return name
+    return ""
+
+
 def pick_agent(task: str, team: Sequence[tuple[str, str]]) -> str:
     """Choose who should do a job the user left open: (name, role) pairs."""
     by_role: dict[str, str] = {}
