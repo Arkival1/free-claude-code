@@ -3,6 +3,7 @@
 import contextlib
 import json
 import re
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
@@ -739,6 +740,18 @@ class LocalModelsUnavailable(StudioLLMError):
     """Raised when the local runtime cannot be asked what it serves."""
 
 
+_MODEL_MISSING = re.compile(
+    r"Function '[^']*': Not found for account|model[^.\n]{0,80}(?:not found|does not exist)"
+    r"|(?:unknown|invalid) model|no such model",
+    re.I,
+)
+
+
+def model_missing(error: str) -> bool:
+    """True when the provider says it won't run that model for this key."""
+    return bool(_MODEL_MISSING.search(error))
+
+
 class StudioModelRouter:
     """Route each model reference to the transport that can serve it."""
 
@@ -746,6 +759,13 @@ class StudioModelRouter:
         self._proxy = proxy
         self._local = local
         self._stand_in: Callable[[str], Awaitable[str | None]] | None = None
+        self._fallback: Callable[[], str] | None = None
+        self.worked: dict[str, float] = {}
+        """Server models that answered, with when (newest is the safest pick)."""
+        self.missing: set[str] = set()
+        """Server models the provider said it won't run for this key."""
+        self.swaps: dict[str, str] = {}
+        """Models that were missing, and the model used instead."""
         self._turns_on: Callable[[], bool] = lambda: False
         self._prepare_local: Callable[[], Awaitable[None]] | None = None
         self.turns = ModelTurns(loaded=self.loaded_local_models)
@@ -762,6 +782,19 @@ class StudioModelRouter:
     def use_turns(self, enabled: Callable[[], bool]) -> None:
         """Make local models take turns when ``enabled()`` says so."""
         self._turns_on = enabled
+
+    def use_fallback(self, pick: Callable[[], str]) -> None:
+        """The model to try when a server model is missing and none has
+        answered yet (Studio's server model)."""
+        self._fallback = pick
+
+    def _replacement(self, model: str) -> str:
+        tried = self.missing | {model}
+        for name, _ in sorted(self.worked.items(), key=lambda item: -item[1]):
+            if name not in tried:
+                return name
+        fallback = self._fallback() if self._fallback is not None else ""
+        return fallback if fallback and fallback not in tried else ""
 
     def use_stand_in(self, pick: Callable[[str], Awaitable[str | None]]) -> None:
         """Let a local model answer for a server model that cannot be reached."""
@@ -797,14 +830,65 @@ class StudioModelRouter:
         temperature: float = 0.2,
         max_tokens: int = 1024,
         on_text: Callable[[str], None] | None = None,
+        swap: bool = True,
     ) -> LLMReply:
         """Complete one call with the transport owning the given model.
 
         With on_text, a runtime that can stream reports the reply as it is
         written, so people see words appear instead of waiting for all of it.
+        When the provider says it won't run a server model for this key, the
+        call goes to one that has answered (``swaps`` records it) unless
+        ``swap`` is off.
         """
         if self._stand_in is not None:
             model = await self._stand_in(model) or model
+        local = model.startswith(LOCAL_MODEL_PREFIX)
+        if swap and not local and model in self.swaps:
+            model = self.swaps[model]
+        try:
+            reply = await self._complete_with(
+                model,
+                messages,
+                system=system,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                on_text=on_text,
+            )
+        except StudioLLMError as error:
+            if local or not model_missing(str(error)):
+                raise
+            self.missing.add(model)
+            self.worked.pop(model, None)
+            replacement = self._replacement(model) if swap else ""
+            if not replacement:
+                raise
+            reply = await self._complete_with(
+                replacement,
+                messages,
+                system=system,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                on_text=on_text,
+            )
+            self.swaps[model] = replacement
+            model = replacement
+        if not local:
+            self.worked[model] = time.monotonic()
+        return reply
+
+    async def _complete_with(
+        self,
+        model: str,
+        messages: Sequence[ChatMessage],
+        *,
+        system: str,
+        tools: Sequence[ToolSpec],
+        temperature: float,
+        max_tokens: int,
+        on_text: Callable[[str], None] | None,
+    ) -> LLMReply:
         client, wire_model = self.client_for(model)
         if self._prepare_local is not None and model.startswith(LOCAL_MODEL_PREFIX):
             await self._prepare_local()

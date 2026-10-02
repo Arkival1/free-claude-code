@@ -62,6 +62,7 @@ from .llm import (
     StudioLLMError,
     StudioModelRouter,
     ToolCall,
+    model_missing,
 )
 from .local_voice import (
     LocalVoice,
@@ -438,6 +439,7 @@ class StudioService:
         self._voice_warmed = False
         self._studying: set[str] = set()
         self._router.use_stand_in(self._stand_in_model)
+        self._router.use_fallback(lambda: self.server_model)
         self._router.use_turns(lambda: self.settings.studio_local_model_turns)
         self._router.before_local(self._engine_before_local)
 
@@ -2779,6 +2781,30 @@ class StudioService:
             "working": [model_label(m) for m in turns.working],
             "waiting": [model_label(m) for m in turns.waiting],
         }
+
+    async def test_model(self, model: str) -> JsonObject:
+        """Send one tiny message to a model, as Team brains' Test button does."""
+        model = model.strip()
+        if not model:
+            raise StudioError("Pick a model to test.")
+        try:
+            await self._router.complete(
+                [ChatMessage.user("Reply with the word OK.")],
+                model=model,
+                max_tokens=8,
+                swap=False,
+            )
+        except StudioLLMError as error:
+            text = str(error)
+            return {
+                "model": model,
+                "ok": False,
+                "message": "Not available for your key: the provider lists it "
+                "but won't run it. Pick another."
+                if model_missing(text)
+                else text[:300],
+            }
+        return {"model": model, "ok": True, "message": "Works."}
 
     async def assign_models(self, assignments: Mapping[str, str]) -> tuple[Agent, ...]:
         """Give each named agent its own model. Returns the agents changed."""

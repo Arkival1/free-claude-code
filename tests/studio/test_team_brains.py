@@ -430,3 +430,93 @@ def test_a_broken_provider_list_never_breaks_studio(make_studio):
 
     studio._server_models = broken
     assert studio.server_model_list() == []
+
+
+NOT_FOUND = (
+    "Model endpoint returned 404: Upstream provider NIM returned HTTP 404. "
+    "\"detail\":\"Function 'ee47df99': Not found for account 'abc'\""
+)
+
+
+class OnlySomeModels:
+    """A provider that runs some models for this key and 404s the rest."""
+
+    def __init__(self, runs: set[str]) -> None:
+        self.runs = runs
+        self.asked: list[str] = []
+
+    async def complete(self, messages, *, model=None, **_) -> LLMReply:
+        self.asked.append(str(model))
+        if model not in self.runs:
+            from free_claude_code.studio.llm import StudioLLMError
+
+            raise StudioLLMError(NOT_FOUND)
+        return LLMReply(text=f"Hi from {model}.")
+
+
+@pytest.mark.asyncio
+async def test_a_model_the_key_cant_use_falls_back_to_one_that_works(
+    tmp_path, store, web_tools, studio_settings
+):
+    from free_claude_code.studio.llm import StudioModelRouter
+    from free_claude_code.studio.service import StudioService
+
+    works = "nvidia_nim/meta/llama-3.3-70b-instruct"
+    gone = "nvidia_nim/google/gemma-3-27b-it"
+    provider = OnlySomeModels({works})
+    settings = studio_settings(MODEL=works, STUDIO_DEFAULT_MODEL=works)
+    studio = StudioService(
+        store=store,
+        web_tools=web_tools,
+        settings_provider=lambda: settings,
+        models_dir=tmp_path / "models",
+        sites_dir=tmp_path / "sites",
+        router=StudioModelRouter(proxy=provider, local=provider),
+    )
+    await studio.ensure_defaults()
+    researcher = await studio.agent_by_name("Researcher")
+    assert researcher is not None
+    await studio.assign_models({researcher.id: gone})
+
+    test = await studio.test_model(gone)
+    assert test["ok"] is False and "Not available for your key" in str(test["message"])
+    assert (await studio.test_model(works))["ok"] is True
+
+    chat = await studio.create_chat(agent_id=researcher.id)
+    result = await studio.send(chat.id, "hello")
+
+    assert not result.failed
+    assert result.text == f"Hi from {works}."
+    notes = [
+        m
+        for m in await studio.transcript(chat.id)
+        if m.data.get("kind") == "model_swapped"
+    ]
+    assert len(notes) == 1
+    assert (
+        f"{gone} isn't available for your key, so Researcher used {works}"
+        in notes[0].text
+    )
+    # Next time it goes straight to the working one.
+    provider.asked.clear()
+    await studio.send(chat.id, "again")
+    assert provider.asked == [works]
+
+
+@pytest.mark.asyncio
+async def test_the_test_route_reports_without_switching(make_studio):
+    studio, _ = make_studio(["OK"])
+    app = create_test_app(studio=studio)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        try:
+            body = (
+                await client.post(
+                    "/studio/api/team-models/test", json={"model": "nvidia_nim/x"}
+                )
+            ).json()
+            assert body == {"model": "nvidia_nim/x", "ok": True, "message": "Works."}
+        finally:
+            await studio.shutdown()
+            await app.state.services.admin.close()

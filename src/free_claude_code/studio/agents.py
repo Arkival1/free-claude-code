@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import re
 from collections.abc import Awaitable, Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 
@@ -16,6 +15,7 @@ from .llm import (
     StudioLLMError,
     StudioModelRouter,
     ToolCall,
+    model_missing,
     unreadable_tool_call,
 )
 from .memory import MemoryService, server_area
@@ -77,6 +77,10 @@ START_NOTE = (
     "you found."
 )
 WEB_TOOLS = frozenset({"web_search", "web_fetch", "research"})
+SWAPPED_NOTE = (
+    "{model} isn't available for your key, so {name} used {used}, which works. "
+    "Pick {name}'s model in Team brains (Test checks one) to change it."
+)
 SEARCHED_FOR_YOU_NOTE = (
     "(Studio) You didn't search, so Studio ran {tool} for you. Write your "
     "report from these results only, and cite the links:\n\n{results}"
@@ -117,16 +121,9 @@ BUILD_REPLY_TOKENS = 4096
 """Builders write whole files in one reply, so they get more room."""
 
 
-_MODEL_MISSING = re.compile(
-    r"Function '[^']*': Not found for account|model[^.\n]{0,80}(?:not found|does not exist)"
-    r"|(?:unknown|invalid) model|no such model",
-    re.I,
-)
-
-
 def model_missing_hint(error: str, model: str, agent: str) -> str:
     """Plain words for 'this provider won't run that model for your key'."""
-    if not _MODEL_MISSING.search(error):
+    if not model_missing(error):
         return ""
     return (
         f"{agent} can't use {model}: the provider lists it, but it doesn't run "
@@ -956,6 +953,18 @@ class AgentRunner:
                     error=hint or str(error),
                 )
             self._clear_live(chat.id)
+            swapped = self._router.swaps.get(model)
+            if swapped and swapped != model:
+                await self._store.append_message(
+                    chat_id=chat.id,
+                    role="event",
+                    text=SWAPPED_NOTE.format(
+                        name=agent.name, model=model, used=swapped
+                    ),
+                    author=agent.name,
+                    data={"kind": "model_swapped", "model": model, "used": swapped},
+                )
+                model = swapped
             if (
                 not reply.tool_calls
                 and names

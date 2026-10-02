@@ -1225,6 +1225,33 @@
       pickers.set(row.id, select);
       return select;
     };
+    // Test: one tiny message to the chosen model, so a model the provider
+    // lists but won't run for this key shows up before an agent needs it.
+    const tester = (row) => {
+      const result = el("span", { class: "muted brain-test", role: "status" });
+      const button = el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Test",
+        "aria-label": `Test the model for ${row.name}`,
+        onclick: async () => {
+          const model = pickers.get(row.id).value;
+          button.disabled = true;
+          result.textContent = "Testing…";
+          try {
+            const body = await post("/studio/api/team-models/test", { model });
+            result.textContent = body.ok ? "✓ Works" : `✗ ${body.message}`;
+            result.className = `brain-test ${body.ok ? "good" : "bad"}`;
+          } catch (error) {
+            result.textContent = `✗ ${error.message}`;
+            result.className = "brain-test bad";
+          } finally {
+            button.disabled = false;
+          }
+        },
+      });
+      return el("div", { class: "row brain-test-row" }, [button, result]);
+    };
     const rows = data.agents.map((row) =>
       el("div", { class: "brain-row" }, [
         el("div", { class: "brain-who" }, [
@@ -1232,6 +1259,7 @@
           el("span", { class: "muted", text: row.role }),
         ]),
         picker(row),
+        tester(row),
         row.note ? el("p", { class: "muted brain-note", text: row.note }) : null,
         row.private
           ? el("p", { class: "muted brain-note brain-private", text: "Server AI: can't see your memory or Obsidian. Jarvis briefs it when you give it a job." })

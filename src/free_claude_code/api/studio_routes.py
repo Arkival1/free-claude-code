@@ -165,6 +165,10 @@ class TeamModelsPayload(BaseModel):
     assignments: dict[str, str] = Field(min_length=1, max_length=50)
 
 
+class ModelTestPayload(BaseModel):
+    model: str = Field(min_length=1, max_length=300)
+
+
 class PackPayload(BaseModel):
     agent_id: str
     name: str = ""
@@ -1499,6 +1503,16 @@ async def assign_team_models(
     """Give each agent its own model."""
     changed = await studio.assign_models(payload.assignments)
     return {"changed": [agent.id for agent in changed]}
+
+
+@router.post("/studio/api/team-models/test")
+async def test_team_model(
+    payload: ModelTestPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Check that one model answers with the user's key."""
+    return await studio.test_model(payload.model)
 
 
 @router.get("/studio/api/team-models/suggest")

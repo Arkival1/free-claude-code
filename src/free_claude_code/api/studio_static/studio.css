@@ -2546,9 +2546,21 @@ body[data-page="settings"] .view {
 .brain-advice {
   margin-top: 0.75rem;
 }
+.brain-test-row {
+  grid-column: 2;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.brain-test { font-size: 0.85em; }
+.brain-test.good { color: var(--good); }
+.brain-test.bad { color: var(--bad); }
 @media (max-width: 420px) {
   .brain-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .brain-test-row {
+    grid-column: 1;
   }
 }
 .brain-private {
