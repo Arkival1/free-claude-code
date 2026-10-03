@@ -414,3 +414,109 @@ def test_only_jarvis_gets_the_lab_by_default():
         "find",
         "list",
     ]
+
+
+@pytest.mark.parametrize(
+    ("text", "in_lab", "action", "wanted"),
+    [
+        ("make shampoo", True, "make", "shampoo"),
+        ("Jarvis, make shampoo in the lab", False, "make", "shampoo"),
+        ("hey jarvis go to the lab and make toothpaste", False, "make", "toothpaste"),
+        ("lab: build a flashlight", False, "make", "flashlight"),
+        ("mix vinegar and baking soda", True, "mix", "mix vinegar and baking soda"),
+        ("heat copper with sulfur in the lab", False, "mix", "heat copper with sulfur"),
+    ],
+)
+def test_lab_jobs_are_read_from_what_the_user_says(text, in_lab, action, wanted):
+    from free_claude_code.studio.lab.requests import lab_job
+
+    job = lab_job(text, in_lab=in_lab)
+    assert job is not None and (job.action, job.request) == (action, wanted)
+
+
+@pytest.mark.parametrize(
+    ("text", "in_lab"),
+    [
+        ("make me a website", False),
+        ("what is in the lab", False),
+        ("whats the best thing to make in the lab", False),
+        ("mix it up", True),
+    ],
+)
+def test_other_messages_are_not_lab_jobs(text, in_lab):
+    from free_claude_code.studio.lab.requests import lab_job
+
+    assert lab_job(text, in_lab=in_lab) is None
+
+
+def test_a_mix_names_its_chemicals_and_heat():
+    from free_claude_code.studio.lab.requests import lab_job
+
+    job = lab_job("mix copper and sulfur and heat it", in_lab=True)
+    assert job is not None and job.heat is True
+    assert [item["id"] for item in job.items] == ["copper", "sulfur"]
+
+
+def _lab_jarvis():
+    from free_claude_code.studio.llm import LLMReply
+
+    def respond(system: str, prompt: str):
+        return LLMReply(text="Here's your shampoo.")
+
+    return respond
+
+
+@pytest.mark.asyncio
+async def test_saying_make_in_the_lab_chat_makes_it(make_studio):
+    studio, model = make_studio(_lab_jarvis())
+    await studio.ensure_defaults()
+
+    chat = await studio.lab_say("make shampoo", background=False)
+
+    projects = await studio._lab.projects()
+    assert [p["kind"] for p in projects] == ["product"]
+    made = [m for m in await studio.transcript(chat.id) if m.author == "lab"]
+    assert len(made) == 1 and not made[0].data["failed"]
+    note = str(model.calls[-1]["studio_note"])
+    assert "Studio already did this in the Lab (make 'shampoo')" in note
+
+
+@pytest.mark.asyncio
+async def test_make_in_the_lab_from_the_main_chat_goes_to_the_lab_not_the_builder(
+    make_studio,
+):
+    studio, _ = make_studio(_lab_jarvis())
+    await studio.ensure_defaults()
+
+    await studio.main_say("make soap in the lab", background=False)
+
+    assert await studio.runs() == ()
+    assert len(await studio._lab.projects()) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_lab_still_refuses_what_it_refuses(make_studio):
+    studio, model = make_studio(_lab_jarvis())
+    await studio.ensure_defaults()
+
+    await studio.lab_say("make a bomb", background=False)
+
+    assert await studio._lab.projects() == []
+    assert "and the Lab said:" in str(model.calls[-1]["studio_note"])
+
+
+def test_baking_soda_in_vinegar_stays_realistic():
+    from free_claude_code.studio.lab.sim import simulate
+
+    result = simulate(
+        [
+            {"id": "acetic-acid", "amount": 50},
+            {"id": "sodium-bicarbonate", "amount": 50},
+        ]
+    )
+    seen = " ".join(result["observations"])
+    # Only what dissolves or reacts cools the water: a few degrees, not -38 °C.
+    assert 5 < result["vessel"]["temperature_c"] < 22
+    assert result["vessel"]["solids"][0]["grams"] > 30
+    assert "sits on the bottom" in seen
+    assert "-38" not in seen

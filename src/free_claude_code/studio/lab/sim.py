@@ -392,12 +392,18 @@ def _dissolve(mix: Mix) -> None:
             acid_eats_it = "carbonate" in chemical.tags and any(
                 other.chemical.acid for other in mix.portions
             )
-            if limit is not None and not acid_eats_it:
+            if limit is not None:
                 fits = limit * mix.water_ml / 100
+                if acid_eats_it and portion.moles:
+                    # Acid uses up only as much carbonate as it has acid for;
+                    # past that, the water holds what it can and the rest sits.
+                    acid = sum(o.moles for o in mix.portions if o.chemical.acid)
+                    fits += acid * portion.grams / portion.moles
                 if portion.grams > fits * 1.02:
                     left = portion.grams - fits
                     mix.see(
-                        f"Only {fits:.3g} g of {chemical.name.lower()} dissolves in "
+                        f"Only {fits:.3g} g of {chemical.name.lower()} "
+                        f"{'reacts or dissolves' if acid_eats_it else 'dissolves'} in "
                         f"{mix.water_ml:.0f} mL: the water is saturated and "
                         f"{left:.3g} g sits on the bottom."
                     )
@@ -1292,6 +1298,10 @@ def _result(mix: Mix) -> LabData:
     heat_capacity = water * 4.18 + max(0.0, mass - water) * 2.0
     rise = mix.heat_kj * 1000 / heat_capacity if heat_capacity else 0.0
     temperature = ROOM_C + rise
+    if temperature < 0 and mix.wet:
+        # Water near freezing soaks up the cold; say the drop it really has.
+        temperature = max(temperature, -15.0)
+        rise = temperature - ROOM_C
     if mix.heat:
         temperature = max(temperature, 100.0 if mix.wet else 180.0)
     boiling = mix.wet and temperature >= 100
@@ -1303,8 +1313,6 @@ def _result(mix: Mix) -> LabData:
     elif rise < -3:
         frost = "; frost forms on the outside" if temperature < 3 else ""
         mix.see(f"The beaker gets cold ({rise:.0f} °C){frost}.")
-    if temperature < 0 and mix.wet:
-        temperature = max(temperature, -15.0)
 
     # Colour of the liquid: coloured ions, dyes, and indicators.
     tints = list(mix.tints)

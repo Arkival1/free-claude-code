@@ -47,6 +47,7 @@ from .guide import (
 )
 from .lab import text as lab_text
 from .lab.bench import LabBench
+from .lab.requests import lab_job
 from .lab.sim import LabError
 from .learning import (
     LearnEngine,
@@ -273,6 +274,8 @@ FOLLOW_UP_PROMPT = (
 )
 FOLLOW_UP_REPORT_CHARS = 6_000
 """How much of a teammate's report the main AI reads when it follows up."""
+LAB_NOTE_CHARS = 3_000
+"""How much of a Lab result the main AI reads before describing it."""
 ROOM_POST_CHARS = 1_500
 """How much of a result an agent posts in the team room."""
 ROOM_NOTE_CHARS = 400
@@ -2445,12 +2448,13 @@ class StudioService:
         switched = await self._carry_out_model_change(main, chat, text)
         if switched:
             return "\n".join((now_line(datetime.now()), switched))
-        orders = await self._carry_out_orders(main, chat, text)
+        lab = await self._carry_out_lab(main, chat, text)
+        orders = "" if lab else await self._carry_out_orders(main, chat, text)
         learning = await self._carry_out_learning(chat, text, started_by=main.name)
         weather = await self._carry_out_weather(chat, text)
         return "\n".join(
             part
-            for part in (now_line(datetime.now()), orders, learning, weather)
+            for part in (now_line(datetime.now()), lab, orders, learning, weather)
             if part
         )
 
@@ -3594,6 +3598,47 @@ class StudioService:
                 logger.info("Studio: voice warm-up skipped: {}", error)
 
         self.spawn(warm())
+
+    async def _carry_out_lab(self, main: Agent, chat: Chat, text: str) -> str:
+        """Make or mix in the Lab before the main AI answers.
+
+        'make shampoo' in the Lab chat, or 'make shampoo in the lab' anywhere,
+        is done by Studio, so a small model never has to pick the lab tool.
+        """
+        job = lab_job(text, in_lab=bool(chat.settings.get(LAB_CHAT_SETTING)))
+        if job is None:
+            return ""
+        arguments: JsonObject = {"action": job.action, "request": job.request}
+        if job.action == "mix":
+            arguments |= {"items": job.items, "heat": job.heat, "flame": job.flame}
+        context = ToolContext(
+            agent_id=main.id,
+            chat_id=chat.id,
+            site_id=chat.site_id,
+            agent_name=main.name,
+            agent_role=main.role,
+        )
+        outcome = await self._lab_tool(
+            ToolCall(id="studio-lab", name="lab", arguments=arguments), context
+        )
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=outcome.text,
+            author="lab",
+            data={**outcome.data, "failed": outcome.failed, "order": True},
+        )
+        if outcome.failed:
+            return (
+                f"The user asked the Lab to {job.action} '{job.request}', and the Lab "
+                f"said: {outcome.text}\nTell the user that in a sentence or two."
+            )
+        return (
+            f"Studio already did this in the Lab ({job.action} '{job.request}'); it "
+            f"is on the Lab bench and in this chat:\n{outcome.text[:LAB_NOTE_CHARS]}\n"
+            "Tell the user the result in your own words in a few sentences. Don't "
+            "use the lab tool for it again."
+        )
 
     async def _carry_out_orders(self, main: Agent, chat: Chat, text: str) -> str:
         """Hand out the jobs the user told the main AI to give, before it answers.
