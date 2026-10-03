@@ -1202,6 +1202,37 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Jarvis's playbook",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Jarvis's playbook card: pick a note, edit "
+            "it, Save note, or Reset to starting note. In Obsidian: the vault's "
+            "FCC Studio/Playbook folder. On or off: Settings, Studio, Jarvis's "
+            "Playbook."
+        ),
+        terms=(
+            "playbook",
+            "teach jarvis",
+            "tool use",
+            "use tools",
+            "wrong tool",
+            "doesn't use",
+            "examples",
+        ),
+        body=(
+            "Jarvis's playbook teaches a small model when and how to use each "
+            "tool without changing models. It is one note per tool: the words "
+            "that call for it, an example call, and tips, plus a Rules note on "
+            "how to read the Studio note, earlier messages, memory, and the "
+            "group chat. Before each reply Studio adds the Rules and the one or "
+            "two notes that match your message. When a tool call works, your "
+            "words and the call go into that note's Learned list (the newest "
+            "five), so he gets better at the way you talk. Edit a note's "
+            "'When the user says:' line or its examples to change what he does; "
+            "delete a learned line you don't want."
+        ),
+    ),
+    GuideTopic(
         title="Teach an agent a skill",
         route="/studio#agents",
         where="Agents, tap the agent, the Teach a skill card.",

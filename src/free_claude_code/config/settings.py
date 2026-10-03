@@ -794,6 +794,9 @@ class Settings(BaseModel):
     studio_main_own_memory: bool = Field(
         default=True, validation_alias="STUDIO_MAIN_OWN_MEMORY"
     )
+    studio_jarvis_playbook: bool = Field(
+        default=True, validation_alias="STUDIO_JARVIS_PLAYBOOK"
+    )
     studio_engine: bool = Field(default=False, validation_alias="STUDIO_ENGINE")
     studio_engine_port: int = Field(
         default=39281, ge=1024, le=65535, validation_alias="STUDIO_ENGINE_PORT"

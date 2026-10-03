@@ -1,5 +1,6 @@
 """The Studio app on an iPhone-sized viewport: reachable, sized, installable."""
 
+import re
 import struct
 
 from playwright.sync_api import Page, ViewportSize, expect
@@ -769,6 +770,40 @@ def test_jarvis_can_be_given_a_subject_to_learn(
     expect(learning.get_by_label("Depth")).to_have_value("normal")
     expect(learning.get_by_role("button", name="Start learning")).to_be_visible()
     expect(learning).to_contain_text("Nothing learned yet")
+
+
+def test_jarvis_playbook_notes_can_be_read_and_edited(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url, "more")
+
+    book = page.locator(
+        ".card", has=page.get_by_role("heading", name="Jarvis's playbook")
+    )
+    expect(book).to_be_visible()
+    book.get_by_label("Playbook note").select_option("todo")
+    editor = book.get_by_label("Playbook note text")
+    expect(editor).to_have_value(re.compile("When the user says: remind me"))
+
+    editor.fill(editor.input_value().replace("remind me,", "nag me,"))
+    book.get_by_role("button", name="Save note").click()
+    expect(
+        page.get_by_text("Saved. Jarvis uses it from his next reply.")
+    ).to_be_visible()
+
+    page.reload()
+    book = page.locator(
+        ".card", has=page.get_by_role("heading", name="Jarvis's playbook")
+    )
+    book.get_by_label("Playbook note").select_option("todo")
+    expect(book.get_by_label("Playbook note text")).to_have_value(
+        re.compile("When the user says: nag me")
+    )
+    page.once("dialog", lambda dialog: dialog.accept())
+    book.get_by_role("button", name="Reset to starting note").click()
+    expect(book.get_by_label("Playbook note text")).to_have_value(
+        re.compile("When the user says: remind me")
+    )
 
 
 def test_to_dos_can_be_added_and_ticked_off(page: Page, admin_base_url: str) -> None:

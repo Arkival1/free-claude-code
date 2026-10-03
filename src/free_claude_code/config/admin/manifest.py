@@ -1097,6 +1097,21 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_JARVIS_PLAYBOOK",
+        "Jarvis's Playbook",
+        "studio",
+        "boolean",
+        settings_attr="studio_jarvis_playbook",
+        description=(
+            "Notes that teach the main AI (Jarvis) when and how to use each "
+            "tool, with examples. Before each reply Studio adds the notes that "
+            "match your message, and when a tool call works it adds your words "
+            "and the call to that tool's note. The notes live in the Obsidian "
+            "vault's Playbook folder (or Studio's own folder until a vault is "
+            "set); edit them there or on the More page."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_PRIVATE_MEMORY",
         "Keep Memory on This PC",
         "studio",

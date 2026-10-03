@@ -501,8 +501,11 @@ class AgentRunner:
         sealed: Callable[[Agent], Awaitable[bool]] | None = None,
         local_control: bool = False,
         main_own_memory: bool = False,
+        learned: Callable[[str, ToolCall], Awaitable[None]] | None = None,
     ) -> None:
         self._store = store
+        # The main AI's calls that worked, so its playbook keeps the example.
+        self._learned = learned
         # Agents on this PC direct the agents on server AIs.
         self._local_control = local_control
         # The main AI keeps its own memory and reads every agent's.
@@ -832,6 +835,7 @@ class AgentRunner:
             turn_note=note,
             sealed=sealed,
             extra_system=LAB_PROMPT if chat.settings.get("lab") else "",
+            learn=agent.role == MAIN_ROLE,
         )
         self._keep_notes(agent, chat, await self._history_start(chat))
         if (agent.memory_enabled or sealed) and not result.failed and result.text:
@@ -990,9 +994,11 @@ class AgentRunner:
         alone: bool = False,
         talk_only: bool = False,
         fallback_model: str | None = None,
+        learn: bool = False,
     ) -> TurnResult:
         """``alone``: a background job, so nobody is there to answer questions.
-        ``talk_only``: no tools this turn (a follow-up that only reports)."""
+        ``talk_only``: no tools this turn (a follow-up that only reports).
+        ``learn``: calls that work go into the main AI's playbook."""
         await self._toolbox.check_online()
         names = (
             () if talk_only else self._toolbox.tool_names(agent.tools, role=agent.role)
@@ -1321,6 +1327,8 @@ class AgentRunner:
                 idle += 1
             for call, outcome in zip(reply.tool_calls, outcomes, strict=True):
                 used.append(call.name)
+                if learn and self._learned is not None and not outcome.failed:
+                    await self._learned(query, call)
                 if call.name in LOOK_TOOLS and not outcome.failed:
                     key = _call_key(call)
                     if key in seen:

@@ -153,6 +153,7 @@ from .platforms import (
     platform_of,
     youtube_id,
 )
+from .playbook import PLAYBOOK_FOLDER, Playbook, PlaybookError, PlaybookNote
 from .presets import (
     BUILDER_PROMPT,
     HELPER_PROMPT,
@@ -430,6 +431,8 @@ class StudioService:
         self._settings_provider = settings_provider
         self._sites = SiteWorkspace(sites_dir)
         self._photos = PhotoLibrary(store, sites_dir.parent / "photos")
+        # Jarvis's playbook until an Obsidian vault is set.
+        self._playbook_home = sites_dir.parent / "playbook"
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._models_dir = models_dir
         self._voice_setup = SetupState()
@@ -890,6 +893,7 @@ class StudioService:
             sealed=self.is_private_from,
             local_control=self.settings.studio_local_control,
             main_own_memory=self.settings.studio_main_own_memory,
+            learned=self._learn_call if self.settings.studio_jarvis_playbook else None,
         )
 
     def _tuner(self) -> LightTuner:
@@ -2452,11 +2456,38 @@ class StudioService:
         orders = "" if lab else await self._carry_out_orders(main, chat, text)
         learning = await self._carry_out_learning(chat, text, started_by=main.name)
         weather = await self._carry_out_weather(chat, text)
+        # Studio did the job already: the playbook's tool examples would only
+        # push a small model to do it a second time.
+        done = any((lab, orders, learning, weather))
+        playbook = await self._playbook_guide(text, rules_only=done)
         return "\n".join(
             part
-            for part in (now_line(datetime.now()), lab, orders, learning, weather)
+            for part in (
+                now_line(datetime.now()),
+                lab,
+                orders,
+                learning,
+                weather,
+                playbook,
+            )
             if part
         )
+
+    async def _playbook_guide(self, text: str, *, rules_only: bool) -> str:
+        if not self.settings.studio_jarvis_playbook:
+            return ""
+        try:
+            return await self._playbook().guide(text, rules_only=rules_only)
+        except OSError as error:
+            logger.warning("Jarvis's playbook could not be read: {}", error)
+            return ""
+
+    async def _learn_call(self, said: str, call: ToolCall) -> None:
+        """A call the main AI made that worked becomes a playbook example."""
+        try:
+            await self._playbook().learn(call.name, said, call.arguments)
+        except (OSError, PlaybookError) as error:
+            logger.warning("Jarvis's playbook could not learn: {}", error)
 
     async def _weather(self, place: str, *, days: int = 3) -> str:
         if self.settings.studio_web_access == "off":
@@ -5012,6 +5043,43 @@ class StudioService:
     async def vault_status(self) -> VaultStatus:
         """Describe the configured Obsidian vault."""
         return await self._vault().status()
+
+    # -------------------------------------------------------------- playbook
+
+    def _playbook(self) -> Playbook:
+        """The vault's Playbook folder once a vault is set (seeded from
+        Studio's own folder, so nothing learned is lost), else Studio's."""
+        vault = self._vault()
+        if vault.configured:
+            return Playbook(vault.base / PLAYBOOK_FOLDER, seed_from=self._playbook_home)
+        return Playbook(self._playbook_home)
+
+    async def playbook(self) -> tuple[str, bool, list[PlaybookNote]]:
+        """Where Jarvis's playbook lives, whether it is in the vault, and its notes."""
+        playbook = self._playbook()
+        return (
+            str(playbook.folder),
+            self._vault().configured,
+            await playbook.notes(),
+        )
+
+    async def playbook_note(self, tool: str) -> PlaybookNote:
+        try:
+            return await self._playbook().read(tool)
+        except PlaybookError as error:
+            raise StudioNotFoundError(str(error)) from error
+
+    async def save_playbook_note(self, tool: str, text: str) -> PlaybookNote:
+        try:
+            return await self._playbook().save(tool, text)
+        except PlaybookError as error:
+            raise StudioError(str(error)) from error
+
+    async def reset_playbook_note(self, tool: str) -> PlaybookNote:
+        try:
+            return await self._playbook().reset(tool)
+        except PlaybookError as error:
+            raise StudioError(str(error)) from error
 
     async def sync_chat(self, chat_id: str) -> str:
         """Write one chat into the vault and return the note path."""

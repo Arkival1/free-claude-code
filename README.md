@@ -788,6 +788,22 @@ agent with `manage_agent add_memory`, and jobs and questions with `ask_agent`.
 The same holds in FCC Phone: Jarvis's own memories are marked *only Jarvis reads
 it* on the Memory page and stay on the phone.
 
+**Jarvis's playbook.** With **Jarvis's Playbook** (`STUDIO_JARVIS_PLAYBOOK`,
+on by default), a small model learns when and how to use each tool without a
+model change. The playbook is one Markdown note per tool: the words that call
+for it (`When the user says: remind me, reminder, …`), an example call, and
+tips, plus a Rules note on reading the Studio note, earlier messages, memory,
+and the group chat. Before each reply Studio puts the Rules and the one or two
+notes that match your message on it (about 700 tokens). When Studio has already
+done the job itself (a hand-off, the Lab, weather), only the Rules go on, so
+he isn't pushed to do it twice. When one of Jarvis's tool calls works, your words and the
+call are added to that note's Learned list (the newest five), and a message
+like it later brings that example back. The notes live in the Obsidian vault's
+`FCC Studio/Playbook` folder; until a vault is set they live in Studio's own
+`playbook` folder and are copied into the vault when you set one. Edit them in
+Obsidian or on the HUD's **Jarvis's playbook** card (Save note, Reset to
+starting note).
+
 **Local agents direct server agents.** With **Local Agents Direct Server
 Agents** (`STUDIO_LOCAL_CONTROL`, on by default), every agent thinking on this
 PC gets `ask_agent`, `team_status`, `stop_agent`, and `manage_agent` over the

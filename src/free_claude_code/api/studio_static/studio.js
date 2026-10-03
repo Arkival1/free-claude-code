@@ -3712,6 +3712,81 @@
 
   // The user's to-do list. Jarvis and the Helper add to it too, and Jarvis
   // announces reminders on the HUD when they are due.
+  function playbookCard(book) {
+    const notes = book.notes || [];
+    const learned = notes.reduce((sum, note) => sum + (note.learned || 0), 0);
+    const picker = el(
+      "select",
+      { "aria-label": "Playbook note" },
+      notes.map((note) =>
+        el("option", {
+          value: note.tool,
+          text: note.tool === "rules" ? "Rules (every reply)" : `${note.tool}${note.learned ? ` · ${note.learned} learned` : ""}`,
+        })
+      )
+    );
+    const editor = el("textarea", { rows: 14, spellcheck: "false", "aria-label": "Playbook note text" });
+    const show = () => {
+      const note = notes.find((item) => item.tool === picker.value);
+      editor.value = note ? note.text : "";
+    };
+    picker.addEventListener("change", show);
+    show();
+    const replace = (saved) => {
+      const index = notes.findIndex((item) => item.tool === saved.tool);
+      if (index >= 0) notes[index] = saved;
+      editor.value = saved.text;
+    };
+    return card("Jarvis's playbook", [
+      el("p", {
+        class: "muted",
+        text: "Notes that teach Jarvis when and how to use each tool, with examples. Before each reply Studio adds the Rules and the notes that match your message; when a tool call works, your words and the call are added to that note's Learned list. Edit a note to change how he does it.",
+      }),
+      el("div", { class: "kv" }, [
+        el("span", { text: "Folder" }),
+        el("span", { text: book.folder }),
+        el("span", { text: "Notes" }),
+        el("span", { text: `${notes.length} (${learned} learned example${learned === 1 ? "" : "s"})` }),
+        el("span", { text: "In Obsidian" }),
+        el("span", { text: book.in_vault ? "yes" : "not yet — moves into the vault's Playbook folder once a vault is set" }),
+      ]),
+      book.enabled ? null : el("p", { class: "muted", text: "The playbook is off. Turn on Jarvis's Playbook in settings." }),
+      notes.length ? picker : null,
+      notes.length ? editor : null,
+      notes.length
+        ? el("div", { class: "row" }, [
+            el("button", {
+              class: "primary",
+              type: "button",
+              text: "Save note",
+              onclick: async () => {
+                try {
+                  replace(await put(`/studio/api/playbook/${encodeURIComponent(picker.value)}`, { text: editor.value }));
+                  notify("Saved. Jarvis uses it from his next reply.");
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Reset to starting note",
+              onclick: async () => {
+                if (!confirm(`Put Studio's starting note back for ${picker.value}? Your edits and its learned examples go.`)) return;
+                try {
+                  replace(await post(`/studio/api/playbook/${encodeURIComponent(picker.value)}/reset`));
+                  notify("Starting note restored.");
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ])
+        : null,
+    ]);
+  }
+
   function todoCard(items) {
     const text = el("input", { type: "text", placeholder: "Add a to-do", "aria-label": "New to-do" });
     const due = el("input", { type: "text", placeholder: "Remind me… (in 20 minutes, tomorrow 9am)", "aria-label": "Reminder time" });
@@ -3905,7 +3980,7 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
@@ -3914,6 +3989,7 @@
       api("/studio/api/videos").catch(() => ({ videos: [] })),
       api("/studio/api/todos").catch(() => ({ todos: [] })),
       api("/studio/api/studies").catch(() => ({ studies: [] })),
+      api("/studio/api/playbook").catch(() => null),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -3951,6 +4027,7 @@
         el("button", { class: "primary", type: "button", text: "Open settings", onclick: () => go("settings") }),
       ]),
       learningCard(studies.studies || []),
+      ...(book ? [playbookCard(book)] : []),
       todoCard(todos.todos || []),
       videoCard(videos.videos || []),
       voiceCard(voiceInfo),

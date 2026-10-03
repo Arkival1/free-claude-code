@@ -37,6 +37,7 @@ from free_claude_code.studio.lora import (
 from free_claude_code.studio.models import Agent, LoraJob, PhoneLink, VideoNote
 from free_claude_code.studio.phone_link import PhoneAuthError, PhoneLinkError
 from free_claude_code.studio.photos import MAX_PHOTO_BYTES, PhotoError
+from free_claude_code.studio.playbook import PlaybookNote
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.tuning import TuningError
@@ -253,6 +254,10 @@ class SyncPayload(BaseModel):
     chat_id: str | None = None
     course_id: str | None = None
     agent_id: str | None = None
+
+
+class PlaybookPayload(BaseModel):
+    text: str = Field(max_length=20_000)
 
 
 def require_studio_access(
@@ -2124,6 +2129,51 @@ async def obsidian_import(
     if not payload.agent_id:
         raise HTTPException(status_code=400, detail="Choose an agent.")
     return {"imported": await studio.import_vault_notes(payload.agent_id)}
+
+
+def _playbook_note(note: PlaybookNote) -> JsonObject:
+    return {
+        "tool": note.tool,
+        "file": note.path.name,
+        "when": list(note.when),
+        "learned": len(note.learned),
+        "text": note.text,
+    }
+
+
+@router.get("/studio/api/playbook")
+async def playbook(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Jarvis's playbook: where its notes live and what each one says."""
+    folder, in_vault, notes = await studio.playbook()
+    return {
+        "folder": folder,
+        "in_vault": in_vault,
+        "enabled": studio.settings.studio_jarvis_playbook,
+        "notes": [_playbook_note(note) for note in notes],
+    }
+
+
+@router.put("/studio/api/playbook/{tool}")
+async def save_playbook_note(
+    tool: str,
+    payload: PlaybookPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Save the user's edit to one playbook note."""
+    return _playbook_note(await studio.save_playbook_note(tool, payload.text))
+
+
+@router.post("/studio/api/playbook/{tool}/reset")
+async def reset_playbook_note(
+    tool: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Put Studio's starting note back for one tool."""
+    return _playbook_note(await studio.reset_playbook_note(tool))
 
 
 @router.post("/studio/api/guide/ask")
