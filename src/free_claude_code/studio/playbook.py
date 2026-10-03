@@ -744,6 +744,31 @@ def _clip(text: str, limit: int) -> str:
     return "\n".join(kept)
 
 
+HANDOFF_TOOLS = frozenset(
+    {"ask_agent", "team_task", "ask_helper", "research", "web_search", "web_fetch"}
+)
+"""Tools whose job an agent can take; any other match is the main AI's own."""
+
+
+def own_tool(notes: list[PlaybookNote], text: str) -> str:
+    """The main AI's own tool a message best matches ('todo', 'calculate'),
+    or '' when the best match is a job for an agent or nothing fits."""
+    best, tool = 0, ""
+    for note in notes:
+        if note.tool == RULES:
+            continue
+        points = score(note, text)
+        if points > best:
+            best, tool = points, note.tool
+    return "" if tool in HANDOFF_TOOLS else tool
+
+
+def starter_notes() -> list[PlaybookNote]:
+    """Studio's starting notes, read without touching the disk."""
+    found = [parse_note(Path(f"{s.tool}.md"), starter_text(s)) for s in STARTERS]
+    return [note for note in found if note is not None]
+
+
 def _trimmed(value: object) -> object:
     if isinstance(value, str) and len(value) > LEARNED_VALUE_CHARS:
         return value[:LEARNED_VALUE_CHARS].rstrip() + "…"

@@ -153,7 +153,14 @@ from .platforms import (
     platform_of,
     youtube_id,
 )
-from .playbook import PLAYBOOK_FOLDER, Playbook, PlaybookError, PlaybookNote
+from .playbook import (
+    PLAYBOOK_FOLDER,
+    Playbook,
+    PlaybookError,
+    PlaybookNote,
+    own_tool,
+    starter_notes,
+)
 from .presets import (
     BUILDER_PROMPT,
     HELPER_PROMPT,
@@ -2482,6 +2489,15 @@ class StudioService:
             logger.warning("Jarvis's playbook could not be read: {}", error)
             return ""
 
+    async def _own_job(self, text: str) -> str:
+        """The main AI's own tool for this message ('remind me...' is a to-do,
+        not a job for the Helper), so the one-word router never hands it out."""
+        notes = starter_notes()
+        if self.settings.studio_jarvis_playbook:
+            with contextlib.suppress(OSError):
+                notes = await self._playbook().notes()
+        return own_tool(notes, text)
+
     async def _learn_call(self, said: str, call: ToolCall) -> None:
         """A call the main AI made that worked becomes a playbook example."""
         try:
@@ -3697,7 +3713,11 @@ class StudioService:
             orders = await self._accepted_offer(main, chat, team)
         if not orders and is_job(text, main.name):
             orders = await self._job_for_called_agent(main, chat, team, text)
-        if not orders and not chat.settings.get(LAB_CHAT_SETTING):
+        if (
+            not orders
+            and not chat.settings.get(LAB_CHAT_SETTING)
+            and not await self._own_job(text)
+        ):
             orders = await self._routed_by_model(main, team, text)
         if not orders:
             return ""

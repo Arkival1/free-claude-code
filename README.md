@@ -798,7 +798,11 @@ notes that match your message on it (about 700 tokens). When Studio has already
 done the job itself (a hand-off, the Lab, weather), only the Rules go on, so
 he isn't pushed to do it twice. When one of Jarvis's tool calls works, your words and the
 call are added to that note's Learned list (the newest five), and a message
-like it later brings that example back. The notes live in the Obsidian vault's
+like it later brings that example back. The notes also stop a misroute: a
+message that matches one of Jarvis's own tools (a reminder, a sum, your
+projects, the PC's status, memory) is never handed to an agent by the one-word
+router, so *"remind me to call the dentist"* goes on the to-do list instead of to
+the Helper. The notes live in the Obsidian vault's
 `FCC Studio/Playbook` folder; until a vault is set they live in Studio's own
 `playbook` folder and are copied into the vault when you set one. Edit them in
 Obsidian or on the HUD's **Jarvis's playbook** card (Save note, Reset to

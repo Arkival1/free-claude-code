@@ -230,3 +230,42 @@ async def test_the_playbook_through_the_routes(make_studio):
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "remind me to call the dentist tomorrow at 9am",
+        "show me my projects",
+        "how is my pc doing",
+    ],
+)
+@pytest.mark.asyncio
+async def test_jarvis_own_jobs_are_never_routed_to_an_agent(make_studio, said):
+    async def respond(system: str, prompt: str):
+        if "You decide who handles the user's message" in system:
+            return LLMReply(text="Helper")
+        return LLMReply(text="On it.")
+
+    studio, model = make_studio(respond, STUDIO_MAIN_AGENT_MODEL="local/jarvis-4b")
+    await studio.ensure_defaults()
+
+    await studio.main_say(said, background=False)
+
+    assert await studio.runs() == ()
+    assert not any("You decide who handles" in str(c["system"]) for c in model.calls)
+    assert "## Examples" in str(model.calls[-1]["studio_note"])
+
+
+@pytest.mark.asyncio
+async def test_own_jobs_are_known_with_the_playbook_off(make_studio):
+    studio, _ = make_studio(
+        lambda system, prompt: LLMReply(text="Helper"),
+        STUDIO_MAIN_AGENT_MODEL="local/jarvis-4b",
+        STUDIO_JARVIS_PLAYBOOK=False,
+    )
+    await studio.ensure_defaults()
+
+    await studio.main_say("add buy eggs to my to-do list", background=False)
+
+    assert await studio.runs() == ()
