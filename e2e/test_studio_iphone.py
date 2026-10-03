@@ -781,7 +781,7 @@ def test_jarvis_playbook_notes_can_be_read_and_edited(
         ".card", has=page.get_by_role("heading", name="Jarvis's playbook")
     )
     expect(book).to_be_visible()
-    book.get_by_label("Playbook note").select_option("todo")
+    book.get_by_label("Playbook note", exact=True).select_option("todo")
     editor = book.get_by_label("Playbook note text")
     expect(editor).to_have_value(re.compile("When the user says: remind me"))
 
@@ -795,7 +795,7 @@ def test_jarvis_playbook_notes_can_be_read_and_edited(
     book = page.locator(
         ".card", has=page.get_by_role("heading", name="Jarvis's playbook")
     )
-    book.get_by_label("Playbook note").select_option("todo")
+    book.get_by_label("Playbook note", exact=True).select_option("todo")
     expect(book.get_by_label("Playbook note text")).to_have_value(
         re.compile("When the user says: nag me")
     )
