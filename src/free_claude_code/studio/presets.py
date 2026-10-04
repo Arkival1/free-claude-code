@@ -552,7 +552,15 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Added from GitHub", ("skill", "mcp")),
     (
         "Everyday",
-        ("calculate", "todo", "list_projects", "system_status", "app_help", "lab"),
+        (
+            "calculate",
+            "todo",
+            "list_projects",
+            "system_status",
+            "app_help",
+            "lab",
+            "farm",
+        ),
     ),
 )
 """Every tool but finish (always on), in the groups the app shows them."""
@@ -607,6 +615,18 @@ LAB_AGENT_PROMPT = (
     "refuses dangerous requests; say so plainly when it does."
 )
 LAB_AGENT_TOOLS: tuple[str, ...] = ("lab", "knowledge", "skill", *_WEB, *_MEMORY)
+FARM_AGENT_PROMPT = (
+    "Run the Content Farm for the team: faceless short videos for Reels, "
+    "TikTok, and YouTube Shorts, made on this PC. When Jarvis hands you a "
+    "job, do it with the farm tool: make (videos about a topic, or the next "
+    "ideas on the board, for a channel), ideas (fill the idea board), channel "
+    "(add an account for a niche, with a style), list, and queue. Videos are "
+    "made in the background; say how many are on the way and that they show "
+    "up in the posting queue on the Content Farm page. Look up what is "
+    "trending on the web when asked for ideas. Keep it honest: no fake "
+    "reviews, no copying other people's videos, no made-up facts."
+)
+FARM_AGENT_TOOLS: tuple[str, ...] = ("farm", "knowledge", "skill", *_WEB, *_MEMORY)
 PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("Builder", "builder", BUILDER_PROMPT, DEFAULT_TOOL_NAMES),
     ("Researcher", "researcher", RESEARCHER_PROMPT, RESEARCHER_TOOLS),
@@ -629,6 +649,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("Tester", "tester", TESTER_PROMPT, TESTER_TOOLS),
     ("Coder", "coder", CODER_PROMPT, CODER_TOOLS),
     ("Lab", "lab", LAB_AGENT_PROMPT, LAB_AGENT_TOOLS),
+    ("Farm", "farm", FARM_AGENT_PROMPT, FARM_AGENT_TOOLS),
     ("Assistant", "assistant", ASSISTANT_PROMPT, (*_WEB, *_MEMORY)),
     ("Custom", "agent", "", DEFAULT_TOOL_NAMES),
 )
@@ -639,6 +660,7 @@ ROLE_NOTES = {
     "tester": "Tests what the team built, fixes small bugs, and hands the rest back.",
     "coder": "Codes apps, games, scripts, and tools for as long as it takes, with the Tester.",
     "lab": "Runs the Lab: makes products, mixes chemicals, builds circuits for Jarvis.",
+    "farm": "Runs the Content Farm: faceless short videos, from idea to finished MP4.",
     "agent": "A general worker with the tools you give it.",
     "assistant": "Answers questions and helps with everyday tasks.",
     "teacher": "Teaches classes to another agent.",

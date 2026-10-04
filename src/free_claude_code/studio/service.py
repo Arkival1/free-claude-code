@@ -37,6 +37,11 @@ from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
 from .engine import ENGINE_ARCHIVE, Engine, EngineError, not_a_model
 from .extensions import Extension, ExtensionError, ExtensionLibrary, McpServer
+from .farm.farm import ContentFarm, FarmError, channel_view, whole
+from .farm.formats import style_of
+from .farm.render import video_tools
+from .farm.requests import FarmJob, farm_job
+from .farm.visuals import Visuals
 from .guide import (
     GUIDE_TOPICS,
     STARTER_QUESTIONS,
@@ -69,6 +74,7 @@ from .llm import (
     short_arguments,
 )
 from .local_voice import (
+    VOICE_CHOICES,
     LocalVoice,
     LocalVoiceError,
     SetupState,
@@ -101,6 +107,8 @@ from .models import (
     CommandRequest,
     Course,
     ExamQuestion,
+    FarmChannel,
+    FarmPost,
     Lesson,
     LoraJob,
     MemoryEntry,
@@ -170,6 +178,8 @@ from .presets import (
     BUILDER_PROMPT,
     CODER_PROMPT,
     CODER_TOOLS,
+    FARM_AGENT_PROMPT,
+    FARM_AGENT_TOOLS,
     HELPER_PROMPT,
     HELPER_TOOLS,
     LAB_AGENT_PROMPT,
@@ -222,6 +232,7 @@ HELPER_AGENT_NAME = "Helper"
 TESTER_AGENT_NAME = "Tester"
 CODER_AGENT_NAME = "Coder"
 LAB_AGENT_NAME = "Lab"
+FARM_AGENT_NAME = "Farm"
 _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     BUILDER_AGENT_NAME: (
         "skill",
@@ -250,6 +261,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     TESTER_AGENT_NAME: TESTER_TOOLS,
     CODER_AGENT_NAME: CODER_TOOLS,
     LAB_AGENT_NAME: LAB_AGENT_TOOLS,
+    FARM_AGENT_NAME: FARM_AGENT_TOOLS,
 }
 _DEFAULT_ROLES = {
     BUILDER_AGENT_NAME: "builder",
@@ -258,15 +270,19 @@ _DEFAULT_ROLES = {
     TESTER_AGENT_NAME: "tester",
     CODER_AGENT_NAME: "coder",
     LAB_AGENT_NAME: "lab",
+    FARM_AGENT_NAME: "farm",
 }
 SHARED_MEMORY_NAME = "Team memory"
 TEAM_LAYOUT_FLAG = "team_layout_v1"
-LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper", "lab"})
+LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper", "lab", "farm"})
 """Roles that think on this PC; every other agent thinks on a server."""
 CLASS_ROLES = frozenset({"teacher", "student"})
 """Classes keep their own choice: a server teacher and a local student."""
 MAIN_CONSOLE_SETTING = "console"
 LAB_CHAT_SETTING = "lab"
+FARM_CHAT_SETTING = "farm"
+FARM_PILOT_SECONDS = 600.0
+"""How often autopilot checks whether a channel needs another video."""
 ENGINE_RETRY_SECONDS = 300.0
 """After the engine fails to start, LM Studio answers this long before a retry."""
 
@@ -387,6 +403,24 @@ BRIEFING_PROMPT = (
     "details, health, money, passwords, and keys. Write it as direct "
     "instructions to {agent}, under 220 words. Write only the briefing."
 )
+
+
+def farm_style_label(style: str) -> str:
+    return style_of(style).label.lower()
+
+
+def farm_task(job: FarmJob) -> str:
+    """A Farm job in words the Farm agent's safety net reads back."""
+    about = f" about {job.topic}" if job.topic else ""
+    for_channel = f" for @{job.channel}" if job.channel else ""
+    if job.action == "channel":
+        return f"Start a channel about {job.topic} in the Content Farm."
+    if job.action == "ideas":
+        return (
+            f"Give me {job.count} video ideas{about}{for_channel} in the Content Farm."
+        )
+    plural = "video" if job.count == 1 else "videos"
+    return f"Make {job.count} {plural}{about}{for_channel} in the Content Farm."
 
 
 def _dict_list(value: object) -> list[JsonObject]:
@@ -537,6 +571,21 @@ class StudioService:
         self._lab = LabBench(store, think=self._lab_think, transport=search_transport)
         self._lab_busy = 0
         self._lab_error: str | None = None
+        self._farm = ContentFarm(
+            store,
+            sites_dir.parent / "farm",
+            think=self._farm_think,
+            speak=self._farm_speak,
+            research=self._farm_research,
+            visuals=self._farm_visuals,
+            video_size=lambda: self.settings.studio_farm_video_size,
+            music=self._farm_music,
+        )
+        self._farm_busy = 0
+        self._farm_error: str | None = None
+        self._farm_pilot: asyncio.Task[None] | None = None
+        # Tests point the farm's image maker here instead of a real server.
+        self.farm_image_transport: httpx.AsyncBaseTransport | None = None
         self._engine_start_failed = False
         self._engine_retry_at = 0.0
         self._local_probe: tuple[float, JsonObject] | None = None
@@ -1030,6 +1079,10 @@ class StudioService:
         for task in tuple(self._tasks):
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+        if self._farm_pilot is not None:
+            self._farm_pilot.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._farm_pilot
         await self._engine.stop()
         await self._mcp.close()
 
@@ -1320,6 +1373,13 @@ class StudioService:
                 self._local_team_model(existing),
                 LAB_AGENT_PROMPT,
                 LAB_AGENT_TOOLS,
+            ),
+            (
+                FARM_AGENT_NAME,
+                "farm",
+                self._local_team_model(existing),
+                FARM_AGENT_PROMPT,
+                FARM_AGENT_TOOLS,
             ),
             (
                 TEACHER_AGENT_NAME,
@@ -1779,6 +1839,475 @@ class StudioService:
             text="Use action make, mix, build, material, find, or list.",
             data={"tool": "lab"},
             failed=True,
+        )
+
+    # ------------------------------------------------------- the Content Farm
+
+    @property
+    def farm(self) -> ContentFarm:
+        """The Content Farm: faceless short videos, idea to finished MP4."""
+        return self._farm
+
+    async def _farm_writer(self) -> str:
+        """The farm writes with the Farm agent's model: the team's local one."""
+        writer = await self._team_member("farm")
+        if writer is not None and writer.model:
+            return writer.model
+        return (await self.main_agent()).model or self.default_model
+
+    async def _farm_think(self, system: str, prompt: str) -> str:
+        model = await self.effective_model(await self._farm_writer())
+        try:
+            reply = await self._router.complete(
+                [ChatMessage.user(prompt)],
+                model=model,
+                system=system,
+                temperature=0.8,
+                max_tokens=1_400,
+            )
+        except StudioLLMError as error:
+            own = await self.effective_model(
+                (await self.main_agent()).model or self.default_model
+            )
+            if own == model:
+                raise FarmError(f"The writer's model didn't answer: {error}") from error
+            try:
+                reply = await self._router.complete(
+                    [ChatMessage.user(prompt)],
+                    model=own,
+                    system=system,
+                    temperature=0.8,
+                    max_tokens=1_400,
+                )
+            except StudioLLMError as again:
+                raise FarmError(f"The writer's model didn't answer: {again}") from again
+        return reply.text
+
+    async def _farm_speak(self, text: str, voice: str) -> bytes | None:
+        """A line read by the built-in voice, or None when there is none."""
+        if voice == "none" or not speech_package_ready():
+            return None
+        settings = self.settings
+        speaker = LocalVoice(
+            self._models_dir / "voice",
+            quality=settings.studio_voice_quality,
+            voice=voice if voice in VOICE_CHOICES else "am_michael",
+            speed=1.08,
+            effect="none",
+            transport=self._voice_transport,
+        )
+        if not speaker.speech_ready():
+            return None
+        try:
+            return await speaker.speak(text)
+        except (LocalVoiceError, OSError, RuntimeError, ValueError) as error:
+            logger.info("Content Farm: the voice failed: {}", error)
+            return None
+
+    async def _farm_research(self, query: str) -> str:
+        if self.settings.studio_web_access == "off":
+            return ""
+        try:
+            report = await self._search().search(query[:200], limit=5)
+        except (SearchError, ValueError, httpx.HTTPError) as error:
+            logger.info("Content Farm: search failed: {}", error)
+            return ""
+        return "\n".join(
+            f"- {hit.title}: {hit.snippet}"[:300] for hit in report.hits[:5]
+        )
+
+    def _farm_visuals(self) -> Visuals:
+        return Visuals(
+            image_url=self.settings.studio_farm_image_url or "",
+            transport=self._search_transport,
+            image_transport=self.farm_image_transport,
+        )
+
+    def _farm_music(self) -> Path | None:
+        chosen = (self.settings.studio_farm_music or "").strip().strip('"')
+        path = Path(chosen).expanduser() if chosen else None
+        return path if path is not None and path.is_file() else None
+
+    async def farm_overview(self) -> JsonObject:
+        overview = await self._farm.overview()
+        overview["voice"] = speech_package_ready() and self.local_voice().speech_ready()
+        overview["voices"] = [v for v in VOICE_CHOICES if v != "jarvis"]
+        self._start_farm_pilot(
+            any(
+                channel.get("autopilot") for channel in _dict_list(overview["channels"])
+            )
+        )
+        return overview
+
+    async def save_farm_channel(
+        self, fields: JsonObject, channel_id: str | None = None
+    ) -> JsonObject:
+        try:
+            channel = await self._farm.save_channel(fields, channel_id)
+        except FarmError as error:
+            raise StudioError(str(error)) from error
+        self._start_farm_pilot(channel.autopilot)
+        return channel_view(channel)
+
+    async def farm_ideas(
+        self, channel_id: str, *, count: int = 5, topic: str = ""
+    ) -> list[JsonObject]:
+        try:
+            channel = await self._farm.channel(channel_id)
+            posts = await self._farm.ideas(channel, count=count, topic=topic)
+        except FarmError as error:
+            raise StudioError(str(error)) from error
+        return [self._farm.view(post) for post in posts]
+
+    async def farm_make(
+        self, post_ids: Sequence[str], *, tell_chat: str | None = None
+    ) -> int:
+        """Start making videos, one after another, in the background."""
+        ready = [post_id for post_id in post_ids if post_id]
+        if not ready:
+            return 0
+        self.spawn(self._farm_line(ready, tell_chat))
+        return len(ready)
+
+    async def _farm_line(self, post_ids: Sequence[str], tell_chat: str | None) -> None:
+        for post_id in post_ids:
+            try:
+                post = await self._farm.make(post_id)
+            except FarmError as error:
+                logger.info("Content Farm: {}", error)
+                continue
+            await self._farm_news(post, tell_chat)
+
+    async def _farm_news(self, post: FarmPost, tell_chat: str | None) -> None:
+        """Say in the farm chat (and where it was asked) that a video is done."""
+        if post.status == "ready":
+            when = (
+                datetime.fromtimestamp(post.scheduled_at / 1000).strftime(
+                    "%a %d %b %H:%M"
+                )
+                if post.scheduled_at
+                else "when you like"
+            )
+            text = f"Video ready: {post.title} (post it {when})."
+        elif post.status == "failed":
+            text = f"Couldn't make '{post.title}': {post.error}"
+        else:
+            return
+        chats = {(await self.farm_chat()).id}
+        if tell_chat:
+            chats.add(tell_chat)
+        for chat_id in chats:
+            with contextlib.suppress(StudioNotFoundError, StudioError):
+                await self._store.append_message(
+                    chat_id=chat_id,
+                    role="event",
+                    text=text,
+                    author="farm",
+                    data={"kind": "farm", "post_id": post.id, "status": post.status},
+                )
+
+    async def farm_fill(self, channel_id: str) -> int:
+        """Make a day of videos for one channel: its ideas first, then new ones."""
+        try:
+            channel = await self._farm.channel(channel_id)
+            ideas = await self._farm.posts(channel.id, status="idea")
+            ideas.reverse()
+            wanted = channel.posts_per_day
+            if len(ideas) < wanted:
+                ideas += await self._farm.ideas(channel, count=wanted - len(ideas))
+        except FarmError as error:
+            raise StudioError(str(error)) from error
+        return await self.farm_make([post.id for post in ideas[:wanted]])
+
+    def _start_farm_pilot(self, wanted: bool) -> None:
+        if not wanted or (self._farm_pilot is not None and not self._farm_pilot.done()):
+            return
+        self._farm_pilot = asyncio.ensure_future(self._farm_autopilot())
+
+    async def _farm_autopilot(self) -> None:
+        """Keep each autopilot channel's queue a day deep, one video at a time."""
+        while True:
+            try:
+                await self._farm_pilot_round()
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("Content Farm autopilot: {}", error)
+            await asyncio.sleep(FARM_PILOT_SECONDS)
+
+    async def _farm_pilot_round(self) -> None:
+        if not video_tools()[0]:
+            return
+        for channel in await self._farm.channels():
+            if not channel.autopilot or not await self._farm.needs_more(channel):
+                continue
+            ideas = await self._farm.posts(channel.id, status="idea")
+            post = ideas[-1] if ideas else None
+            if post is None:
+                made = await self._farm.ideas(channel, count=3, made_by="Autopilot")
+                post = made[0]
+            await self._farm_news(await self._farm.make(post.id), None)
+
+    async def farm_chat(self) -> Chat:
+        """The Content Farm's chat with the main AI, opening one if needed."""
+        agent = await self.main_agent()
+        for chat in await self._store.find(
+            Chat, where={"agent_id": agent.id}, order_by="updated_at DESC"
+        ):
+            if chat.settings.get(FARM_CHAT_SETTING):
+                return chat
+        return await self.create_chat(
+            agent_id=agent.id,
+            title=f"{agent.name} in the Content Farm",
+            settings={FARM_CHAT_SETTING: True},
+        )
+
+    async def farm_say(self, text: str, *, background: bool = True) -> Chat:
+        """Ask the main AI for videos, ideas, or advice in the farm."""
+        if not text.strip():
+            raise StudioError("Say what to make.")
+        chat = await self.farm_chat()
+        self._farm_busy += 1
+        self._farm_error = None
+        if background:
+            self.spawn(self._farm_turn(chat.id, text))
+        else:
+            await self._farm_turn(chat.id, text)
+        return chat
+
+    async def _farm_turn(self, chat_id: str, text: str) -> None:
+        try:
+            async with self._turn_lock(chat_id):
+                result = await self.send(chat_id, text)
+            if result.failed:
+                self._farm_error = result.error or "The main AI did not finish."
+        except (StudioError, StudioNotFoundError) as error:
+            self._farm_error = str(error)
+            await self._store.append_message(
+                chat_id=chat_id,
+                role="event",
+                text=f"Could not answer: {error}",
+                author="studio",
+                data={"kind": "error"},
+            )
+        finally:
+            self._farm_busy = max(0, self._farm_busy - 1)
+
+    async def farm_console(self, *, after: int = 0) -> JsonObject:
+        """The farm chat so far, and whether the main AI is still working."""
+        chat = await self.farm_chat()
+        messages = await self._store.transcript(chat.id, after=after)
+        agent = await self.main_agent()
+        return {
+            "chat_id": chat.id,
+            "agent": agent.name,
+            "busy": self._farm_busy > 0,
+            "error": self._farm_error,
+            "messages": [message.model_dump() for message in messages],
+        }
+
+    async def _farm_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        arguments = call.arguments
+        action = str(arguments.get("action") or "").strip().lower()
+        topic = " ".join(str(arguments.get("topic") or "").split())[:200]
+        name = str(arguments.get("channel") or "").strip()
+        asked = whole(arguments.get("count"), 0)
+        count = max(1, min(10, asked or 1))
+        made_by = context.agent_name or "An agent"
+        data: JsonObject = {"tool": "farm", "action": action}
+        try:
+            if action == "channel":
+                if not topic:
+                    raise FarmError("Say what the channel is about.")
+                channel = await self._farm.save_channel(
+                    {"niche": topic, "style": str(arguments.get("style") or "facts")}
+                )
+                return ToolOutcome(
+                    text=(
+                        f"Added the channel @{channel.name} about {channel.niche} "
+                        f"({farm_style_label(channel.style)} videos, "
+                        f"{channel.seconds} seconds, posting at "
+                        f"{', '.join(channel.post_times)}). Change its voice, look, "
+                        "and posting times on the Content Farm page."
+                    ),
+                    data={**data, "channel_id": channel.id},
+                )
+            if action == "list":
+                return ToolOutcome(text=await self._farm_list(), data=data)
+            if action == "queue":
+                return ToolOutcome(text=await self._farm_queue_text(), data=data)
+            channel = await self._farm_channel_for(name, topic)
+            if action == "ideas":
+                count = asked or 5
+                posts = await self._farm.ideas(
+                    channel, count=count, topic=topic, made_by=made_by
+                )
+                lines = "\n".join(f"{n}. {p.title}" for n, p in enumerate(posts, 1))
+                return ToolOutcome(
+                    text=f"New ideas on @{channel.name}'s board:\n{lines}",
+                    data={**data, "channel_id": channel.id},
+                )
+            if action == "make":
+                ready, why = video_tools()
+                if not ready:
+                    raise FarmError(f"Videos can't be made on this PC yet: {why}")
+                if topic:
+                    posts = await self._farm.ideas(
+                        channel, count=count, topic=topic, made_by=made_by
+                    )
+                else:
+                    posts = list(
+                        reversed(await self._farm.posts(channel.id, status="idea"))
+                    )[:count]
+                    if len(posts) < count:
+                        posts += await self._farm.ideas(
+                            channel, count=count - len(posts), made_by=made_by
+                        )
+                started = await self.farm_make(
+                    [post.id for post in posts[:count]],
+                    tell_chat=None
+                    if context.chat_id == (await self.farm_chat()).id
+                    else context.chat_id,
+                )
+                lines = "\n".join(
+                    f"{n}. {p.title}" for n, p in enumerate(posts[:count], 1)
+                )
+                return ToolOutcome(
+                    text=(
+                        f"Making {started} video(s) for @{channel.name}, one after "
+                        f"another (about a minute or two each):\n{lines}\nThey show "
+                        "up in the posting queue on the Content Farm page, with the "
+                        "caption and hashtags ready to paste."
+                    ),
+                    data={
+                        **data,
+                        "channel_id": channel.id,
+                        "post_ids": [post.id for post in posts[:count]],
+                    },
+                )
+        except FarmError as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+        return ToolOutcome(
+            text="Use action make, ideas, channel, list, or queue.",
+            data=data,
+            failed=True,
+        )
+
+    async def _farm_channel_for(self, name: str, topic: str) -> FarmChannel:
+        """The channel asked for; with none yet, one made for the topic."""
+        if not await self._farm.channels() and topic:
+            return await self._farm.save_channel({"niche": topic})
+        return await self._farm.find_channel(name)
+
+    async def _farm_list(self) -> str:
+        channels = await self._farm.channels()
+        if not channels:
+            return "The Content Farm has no channels yet."
+        lines = []
+        for channel in channels:
+            posts = await self._farm.posts(channel.id)
+            count = dict.fromkeys(("idea", "making", "ready", "posted"), 0)
+            for post in posts:
+                if post.status in count:
+                    count[post.status] += 1
+            lines.append(
+                f"- @{channel.name}: {channel.niche or 'no niche'} "
+                f"({farm_style_label(channel.style)}); {count['idea']} ideas, "
+                f"{count['making']} being made, {count['ready']} ready, "
+                f"{count['posted']} posted"
+                + (", autopilot on" if channel.autopilot else "")
+            )
+        return "\n".join(lines)
+
+    async def _farm_queue_text(self) -> str:
+        ready = await self._farm.queue()
+        if not ready:
+            return "No finished videos are waiting to be posted."
+        names = {channel.id: channel.name for channel in await self._farm.channels()}
+        return "\n".join(
+            f"- {datetime.fromtimestamp(post.scheduled_at / 1000):%a %d %b %H:%M}: "
+            f"@{names.get(post.channel_id, '?')}: {post.title}"
+            for post in ready[:20]
+        )
+
+    async def _carry_out_farm(self, main: Agent, chat: Chat, text: str) -> str:
+        """Videos, ideas, or a channel asked for in words, done before the main
+        AI answers, so a small model never has to pick the farm tool."""
+        in_farm = bool(chat.settings.get(FARM_CHAT_SETTING))
+        job = farm_job(text, in_farm=in_farm)
+        if job is None:
+            return ""
+        producer = None if in_farm else await self._team_member("farm")
+        if producer is not None:
+            return await self._hand_to_farm_agent(main, chat, producer, job)
+        arguments: JsonObject = {
+            "action": job.action,
+            "topic": job.topic,
+            "count": job.count,
+        }
+        if job.channel:
+            arguments["channel"] = job.channel
+        context = ToolContext(
+            agent_id=main.id,
+            chat_id=chat.id,
+            site_id=chat.site_id,
+            agent_name=main.name,
+            agent_role=main.role,
+        )
+        outcome = await self._farm_tool(
+            ToolCall(id="studio-farm", name="farm", arguments=arguments), context
+        )
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=outcome.text,
+            author="farm",
+            data={**outcome.data, "failed": outcome.failed, "order": True},
+        )
+        if outcome.failed:
+            return (
+                f"The user asked the Content Farm for {job.action} '{job.topic}', and "
+                f"the farm said: {outcome.text}\nTell the user that in a sentence or two."
+            )
+        return (
+            "Studio already did this in the Content Farm; it is on the farm page "
+            f"and in this chat:\n{outcome.text[:LAB_NOTE_CHARS]}\nTell the user in "
+            "your own words in a few sentences. Don't use the farm tool for it again."
+        )
+
+    async def _hand_to_farm_agent(
+        self, main: Agent, chat: Chat, producer: Agent, job: FarmJob
+    ) -> str:
+        task = farm_task(job)
+        crew = Crew(
+            store=self._store,
+            host=self,
+            helper_pipeline=self.settings.studio_helper_pipeline,
+        )
+        context = ToolContext(
+            agent_id=main.id,
+            chat_id=chat.id,
+            site_id=chat.site_id,
+            agent_name=main.name,
+            agent_role=main.role,
+        )
+        try:
+            outcome = await crew.ask_agent(
+                context, agent=producer.name, task=task, project="", background=True
+            )
+        except (ValueError, StudioError) as error:
+            return f"The {producer.name} agent could not take the farm job: {error}"
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=outcome.text,
+            author="ask_agent",
+            data={**outcome.data, "order": True, "task": task},
+        )
+        return (
+            f"The Content Farm job went to the {producer.name} agent ({task}), which "
+            "is doing it now and reports here when done. Tell the user that in a "
+            "sentence; don't use the farm tool for it yourself."
         )
 
     async def agent(self, agent_id: str) -> Agent:
@@ -2425,8 +2954,11 @@ class StudioService:
             result=result[:FOLLOW_UP_REPORT_CHARS] or "(no report)",
         )
         lab = bool(parent.settings.get(LAB_CHAT_SETTING))
+        farm = bool(parent.settings.get(FARM_CHAT_SETTING))
         if lab:
             self._lab_busy += 1
+        elif farm:
+            self._farm_busy += 1
         else:
             self._main_busy += 1
         try:
@@ -2438,6 +2970,8 @@ class StudioService:
         finally:
             if lab:
                 self._lab_busy = max(0, self._lab_busy - 1)
+            elif farm:
+                self._farm_busy = max(0, self._farm_busy - 1)
             else:
                 self._main_busy = max(0, self._main_busy - 1)
 
@@ -2537,6 +3071,8 @@ class StudioService:
         if switched:
             return "\n".join((now_line(datetime.now()), switched))
         lab = await self._carry_out_lab(main, chat, text)
+        if not lab:
+            lab = await self._carry_out_farm(main, chat, text)
         orders = "" if lab else await self._carry_out_orders(main, chat, text)
         learning = await self._carry_out_learning(chat, text, started_by=main.name)
         weather = await self._carry_out_weather(chat, text)
@@ -2684,6 +3220,8 @@ class StudioService:
                 return await self._manage_agent_tool(call, context)
             case "lab":
                 return await self._lab_tool(call, context)
+            case "farm":
+                return await self._farm_tool(call, context)
             case "code_and_test":
                 return await self._code_tool(call, context)
             case "skill":
@@ -4224,6 +4762,7 @@ class StudioService:
         if (
             not orders
             and not chat.settings.get(LAB_CHAT_SETTING)
+            and not chat.settings.get(FARM_CHAT_SETTING)
             and not await self._own_job(text)
         ):
             orders = await self._routed_by_model(main, team, text)

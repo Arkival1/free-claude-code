@@ -3,12 +3,13 @@
 import asyncio
 import contextlib
 import json
+import re
 import secrets
 import socket
 import sys
 import time
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -28,6 +29,7 @@ from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
 from free_claude_code.studio.downloads import DownloadError
 from free_claude_code.studio.extensions import Extension
+from free_claude_code.studio.farm.farm import FarmError
 from free_claude_code.studio.file_text import MAX_UPLOAD, read_file_text
 from free_claude_code.studio.lab.sim import LabError
 from free_claude_code.studio.llm import ChatMessage
@@ -61,6 +63,8 @@ _ASSET_FILENAMES = frozenset(
         "studio.js",
         "lab.css",
         "lab.js",
+        "farm.css",
+        "farm.js",
         "icon.svg",
         "icon-180.png",
         "icon-192.png",
@@ -2785,4 +2789,235 @@ async def lab_say(
 ) -> JsonObject:
     """Ask the main AI to make or test something in the Lab."""
     chat = await studio.lab_say(payload.text)
+    return {"accepted": True, "chat_id": chat.id}
+
+
+# ---------------------------------------------------------- the Content Farm
+
+
+class FarmChannelPayload(BaseModel):
+    name: str | None = Field(default=None, max_length=60)
+    niche: str | None = Field(default=None, max_length=160)
+    platform: str | None = Field(default=None, max_length=20)
+    style: str | None = Field(default=None, max_length=20)
+    look: str | None = Field(default=None, max_length=20)
+    visuals: str | None = Field(default=None, max_length=20)
+    voice: str | None = Field(default=None, max_length=40)
+    seconds: int | None = Field(default=None, ge=10, le=90)
+    posts_per_day: int | None = Field(default=None, ge=1, le=10)
+    post_times: list[str] | None = Field(default=None, max_length=10)
+    hashtags: list[str] | None = Field(default=None, max_length=30)
+    call_to_action: str | None = Field(default=None, max_length=160)
+    notes: str | None = Field(default=None, max_length=1_000)
+    autopilot: bool | None = None
+
+
+class FarmIdeasPayload(BaseModel):
+    count: int = Field(default=5, ge=1, le=10)
+    topic: str = Field(default="", max_length=200)
+
+
+class FarmIdeaPayload(BaseModel):
+    title: str = Field(min_length=1, max_length=140)
+
+
+class FarmPostPayload(BaseModel):
+    title: str | None = Field(default=None, max_length=140)
+    caption: str | None = Field(default=None, max_length=2_200)
+    scheduled_at: int | None = Field(default=None, ge=0)
+
+
+class FarmPostedPayload(BaseModel):
+    posted: bool = True
+
+
+def _farm_failed(error: FarmError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(error))
+
+
+def _channel_fields(payload: FarmChannelPayload) -> JsonObject:
+    return cast(JsonObject, payload.model_dump(exclude_none=True))
+
+
+@router.get("/studio/api/farm")
+async def farm_overview(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Channels, every video and idea, styles, and what this PC can do."""
+    return await studio.farm_overview()
+
+
+@router.post("/studio/api/farm/channels")
+async def farm_add_channel(
+    payload: FarmChannelPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    return await studio.save_farm_channel(_channel_fields(payload))
+
+
+@router.put("/studio/api/farm/channels/{channel_id}")
+async def farm_edit_channel(
+    channel_id: str,
+    payload: FarmChannelPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    return await studio.save_farm_channel(_channel_fields(payload), channel_id)
+
+
+@router.delete("/studio/api/farm/channels/{channel_id}")
+async def farm_delete_channel(
+    channel_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return {"deleted": await studio.farm.delete_channel(channel_id)}
+    except FarmError as error:
+        raise _farm_failed(error) from error
+
+
+@router.post("/studio/api/farm/channels/{channel_id}/ideas")
+async def farm_ideas(
+    channel_id: str,
+    payload: FarmIdeasPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """New ideas on the board, written by the team's local model."""
+    posts = await studio.farm_ideas(
+        channel_id, count=payload.count, topic=payload.topic
+    )
+    return {"posts": posts}
+
+
+@router.post("/studio/api/farm/channels/{channel_id}/posts")
+async def farm_add_idea(
+    channel_id: str,
+    payload: FarmIdeaPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        channel = await studio.farm.channel(channel_id)
+        post = await studio.farm.add_idea(channel, payload.title)
+    except FarmError as error:
+        raise _farm_failed(error) from error
+    return studio.farm.view(post)
+
+
+@router.post("/studio/api/farm/channels/{channel_id}/fill", status_code=202)
+async def farm_fill(
+    channel_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Make a day of videos for the channel, in the background."""
+    return {"started": await studio.farm_fill(channel_id)}
+
+
+@router.post("/studio/api/farm/posts/{post_id}/make", status_code=202)
+async def farm_make(
+    post_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        post = await studio.farm.post(post_id)
+    except FarmError as error:
+        raise _farm_failed(error) from error
+    if post.status == "making":
+        raise HTTPException(status_code=409, detail="That video is already being made.")
+    return {"started": await studio.farm_make([post.id])}
+
+
+@router.patch("/studio/api/farm/posts/{post_id}")
+async def farm_edit_post(
+    post_id: str,
+    payload: FarmPostPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        post = await studio.farm.edit_post(
+            post_id, cast(JsonObject, payload.model_dump(exclude_none=True))
+        )
+    except FarmError as error:
+        raise _farm_failed(error) from error
+    return studio.farm.view(post)
+
+
+@router.post("/studio/api/farm/posts/{post_id}/posted")
+async def farm_posted(
+    post_id: str,
+    payload: FarmPostedPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        post = await studio.farm.mark_posted(post_id, payload.posted)
+    except FarmError as error:
+        raise _farm_failed(error) from error
+    return studio.farm.view(post)
+
+
+@router.delete("/studio/api/farm/posts/{post_id}")
+async def farm_delete_post(
+    post_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return {"deleted": await studio.farm.delete_post(post_id)}
+    except FarmError as error:
+        raise _farm_failed(error) from error
+
+
+_FARM_FILES = {
+    ".mp4": "video/mp4",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".wav": "audio/wav",
+}
+
+
+@router.get("/studio/api/farm/posts/{post_id}/files/{name}")
+async def farm_file(
+    post_id: str,
+    name: str,
+    download: bool = False,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> FileResponse:
+    """A finished video, its cover, or a scene picture."""
+    try:
+        post = await studio.farm.post(post_id)
+        path = studio.farm.file(post, name)
+    except FarmError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    kind = _FARM_FILES.get(path.suffix.lower())
+    if kind is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="No such file.")
+    slug = re.sub(r"[^a-z0-9]+", "-", post.title.lower()).strip("-")[:60] or "video"
+    return FileResponse(
+        path,
+        media_type=kind,
+        filename=f"{slug}{path.suffix}" if download else None,
+        content_disposition_type="attachment" if download else "inline",
+        headers={"cache-control": "private, max-age=60"},
+    )
+
+
+@router.get("/studio/api/farm/chat")
+async def farm_chat(
+    after: int = 0,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The Content Farm chat with the main AI; poll while it works."""
+    return await studio.farm_console(after=after)
+
+
+@router.post("/studio/api/farm/chat", status_code=202)
+async def farm_say(
+    payload: MessagePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Ask the main AI for videos, ideas, or advice in the Content Farm."""
+    chat = await studio.farm_say(payload.text)
     return {"accepted": True, "chat_id": chat.id}

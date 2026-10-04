@@ -17,6 +17,8 @@ from .models import (
     Course,
     EngineModelSettings,
     ExamQuestion,
+    FarmChannel,
+    FarmPost,
     LabChemical,
     LabProject,
     Lesson,
@@ -49,6 +51,8 @@ _JSON_FIELDS = frozenset(
         "style_rules",
         "metrics",
         "member_ids",
+        "post_times",
+        "hashtags",
         "sources",
         "topics",
         "points",
@@ -87,6 +91,8 @@ TABLES: Mapping[type[Record], str] = {
     Photo: "studio_photos",
     LabProject: "studio_lab_projects",
     LabChemical: "studio_lab_chemicals",
+    FarmChannel: "studio_farm_channels",
+    FarmPost: "studio_farm_posts",
     StudioFlag: "studio_flags",
 }
 
@@ -100,6 +106,7 @@ _INDEXES: tuple[tuple[str, str, str], ...] = (
     ("studio_chats_kind", "studio_chats", "kind, updated_at"),
     ("studio_videos_video", "studio_videos", "video_id"),
     ("studio_study_lessons_study", "studio_study_lessons", "study_id, ordinal"),
+    ("studio_farm_posts_channel", "studio_farm_posts", "channel_id, status"),
 )
 
 

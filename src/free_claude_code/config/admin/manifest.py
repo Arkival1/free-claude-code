@@ -692,6 +692,46 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_FARM_VIDEO_SIZE",
+        "Content Farm Video Size",
+        "studio",
+        "select",
+        settings_attr="studio_farm_video_size",
+        description=(
+            "How big the Content Farm's videos are. 720p renders about twice as "
+            "fast; 1080p is sharper. Both are vertical 9:16."
+        ),
+        options=(
+            ConfigOptionSpec("720p", "720 x 1280 (faster)"),
+            ConfigOptionSpec("1080p", "1080 x 1920 (sharper)"),
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_FARM_IMAGE_URL",
+        "Content Farm Image Maker",
+        "studio",
+        "text",
+        settings_attr="studio_farm_image_url",
+        description=(
+            "Address of a Stable Diffusion running on this PC for channels set "
+            "to AI pictures, e.g. http://127.0.0.1:7860 (Automatic1111, Forge, "
+            "SD.Next) or an OpenAI-style images server. Empty: free photos."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_FARM_MUSIC",
+        "Content Farm Background Music",
+        "studio",
+        "text",
+        settings_attr="studio_farm_music",
+        advanced=True,
+        description=(
+            "A music file (MP3, WAV, M4A) played quietly under every video. Use "
+            "music you have the rights to; empty for none, and add a trending "
+            "sound in the app when you post."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LIGHT_TUNING_ENABLED",
         "Light Tuning",
         "studio",

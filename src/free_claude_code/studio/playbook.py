@@ -608,6 +608,38 @@ STARTERS: tuple[Starter, ...] = (
         ),
         ("The Lab refuses anything dangerous; tell the user if it does.",),
     ),
+    Starter(
+        "farm",
+        "The Content Farm",
+        (
+            "reel",
+            "reels",
+            "tiktok",
+            "shorts",
+            "content farm",
+            "faceless",
+            "video ideas",
+            "channel about",
+        ),
+        (
+            _x(
+                "make 3 reels about black holes",
+                action="make",
+                topic="black holes",
+                count=3,
+            ),
+            _x("give me 5 video ideas", action="ideas", count=5),
+            _x(
+                "start a channel about gym motivation",
+                action="channel",
+                topic="gym motivation",
+            ),
+        ),
+        (
+            "Videos are made in the background; say how many are on the way.",
+            "queue shows what is ready to post, with times.",
+        ),
+    ),
 )
 STARTER_TOOLS = frozenset(starter.tool for starter in STARTERS)
 

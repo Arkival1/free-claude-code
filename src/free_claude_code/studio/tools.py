@@ -84,6 +84,7 @@ LIST_PHOTOS_TOOL = "list_photos"
 USE_PHOTO_TOOL = "use_photo"
 SAVE_IMAGE_TOOL = "save_image"
 LAB_TOOL = "lab"
+FARM_TOOL = "farm"
 CODE_TOOL = "code_and_test"
 SKILL_TOOL = "skill"
 MCP_TOOL = "mcp"
@@ -516,6 +517,52 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 },
             },
             "required": ["goal"],
+        },
+    ),
+    ToolSpec(
+        name=FARM_TOOL,
+        description=(
+            "The Content Farm: makes faceless short videos (Reels, TikTok, "
+            "YouTube Shorts) on this PC, from idea to a finished MP4 with a "
+            "voiceover, pictures, and word-by-word captions. The user watches "
+            "it on the Content Farm page. action make: make videos (count, "
+            "about a topic, or the next ideas on the board) for a channel; it "
+            "runs in the background and they appear in the posting queue. "
+            "ideas: put new video ideas on the board. channel: add a channel "
+            "(an account) for a niche. list: the channels and what is ready. "
+            "queue: finished videos waiting to be posted, with their times."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["make", "ideas", "channel", "list", "queue"],
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "make/ideas: what the videos are about. channel: the niche.",
+                },
+                "count": {"type": "integer", "description": "How many (1-10)."},
+                "channel": {
+                    "type": "string",
+                    "description": "Which channel, by name; the newest one when empty.",
+                },
+                "style": {
+                    "type": "string",
+                    "enum": [
+                        "facts",
+                        "story",
+                        "motivation",
+                        "tips",
+                        "ai_art",
+                        "explainer",
+                        "news",
+                    ],
+                    "description": "channel: the video style.",
+                },
+            },
+            "required": ["action"],
         },
     ),
     ToolSpec(
@@ -1046,6 +1093,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         MANAGE_AGENT_TOOL,
         WEATHER_TOOL,
         LAB_TOOL,
+        FARM_TOOL,
         CODE_TOOL,
     }
 )
@@ -1075,6 +1123,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     APP_HELP_TOOL,
     LIST_PHOTOS_TOOL,
     LAB_TOOL,
+    FARM_TOOL,
     CODE_TOOL,
     SKILL_TOOL,
     MCP_TOOL,
@@ -1476,6 +1525,7 @@ class AgentToolbox:
                     | "manage_agent"
                     | "weather"
                     | "lab"
+                    | "farm"
                     | "code_and_test"
                     | "skill"
                     | "mcp"

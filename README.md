@@ -861,6 +861,34 @@ one himself with the `code_and_test` tool. Lab jobs from the main chat
 the lab tool and reports back; if its model only talks, Studio runs the make
 or mix for it. In the Lab's own chat, Studio still does it at once.
 
+**Content Farm.** The **Farm** tab makes faceless short videos for Instagram
+Reels, TikTok, and YouTube Shorts on this PC, start to finish. A **channel** is
+one account: a niche, a style (fact list, story time, motivation, quick tips,
+AI art reel, explainer, what's new), a caption look (bold, clean, neon,
+cinema), a voice, a length (10 to 90 seconds), how many videos a day, and the
+times it posts. The farm fills the channel's idea board with the team's local
+model (looking up what's new on the web for facts and news), writes each
+script with a hook in the first line, reads it with the built-in voice, finds
+a picture for every scene, and renders a vertical 9:16 MP4 with a slow zoom on
+each picture and big captions that light up word by word. Pictures come from
+free photos (Openverse), your own Stable Diffusion
+(`STUDIO_FARM_IMAGE_URL`, e.g. `http://127.0.0.1:7860` for Automatic1111 or
+Forge, or an OpenAI-style images server), or art cards that always work
+offline. Finished videos wait in the **posting queue** at the channel's next
+free time with the caption and hashtags ready: download, post it in the app
+(add a trending sound there), and mark it posted. **Autopilot** keeps a day of
+videos ready while the app is open. The **Farm chat** on the same page takes
+*"make 3 reels about black holes"*, *"give me 5 video ideas"*, or *"start a
+channel about gym motivation"*; said in the main chat, it goes to the **Farm**
+agent (a local agent, like the Lab agent). Video size is
+`STUDIO_FARM_VIDEO_SIZE` (720p renders faster; 1080p is sharper), and
+`STUDIO_FARM_MUSIC` can play a music file you have the rights to under every
+video. Videos need the `studio_video` extra (Pillow and ffmpeg), which the
+Windows installer adds; on an i7-4790 a 30-second 720p video renders in about
+half a minute. Posting stays with you: the platforms only allow it from their
+own apps or business APIs, and copied clips or made-up facts get accounts
+banned.
+
 **Local agents direct server agents.** With **Local Agents Direct Server
 Agents** (`STUDIO_LOCAL_CONTROL`, on by default), every agent thinking on this
 PC gets `ask_agent`, `team_status`, `stop_agent`, and `manage_agent` over the

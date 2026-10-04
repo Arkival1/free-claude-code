@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.56.1"
+version = "6.57.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -67,6 +67,11 @@ voice_local = [
 studio_voice = [
     "kokoro-onnx>=0.4.9",
     "faster-whisper>=1.1.0",
+]
+# The Content Farm's video maker: Pillow draws the frames, ffmpeg encodes them.
+studio_video = [
+    "pillow>=12.0.0",
+    "imageio-ffmpeg>=0.6.0",
 ]
 # LoRA weight training on this computer (Studio). A GPU is strongly advised.
 lora = [
@@ -178,6 +183,8 @@ allowed-unresolved-imports = [
     "kokoro_onnx",
     "faster_whisper",
     "numpy",
+    # Optional Content Farm video maker (studio_video extra).
+    "imageio_ffmpeg",
     # Optional LoRA trainer, run with whatever Python has these installed.
     "peft",
     "huggingface_hub",

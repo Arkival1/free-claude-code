@@ -3,7 +3,7 @@
   "use strict";
 
   const TOKEN_KEY = "fcc.studio.token";
-  const TAB_ROUTES = ["home", "chats", "agents", "lab", "learn", "more"];
+  const TAB_ROUTES = ["home", "chats", "agents", "lab", "farm", "learn", "more"];
   const POLL_MS = 2500;
   const HIDDEN_POLL_MS = 10000;
 
@@ -5209,6 +5209,7 @@
     ["Agents", "agents", "◎"],
     ["Chats", "chats", "◌"],
     ["Lab", "lab", "⚗"],
+    ["Content Farm", "farm", "🌾"],
     ["Classroom", "learn", "✎"],
     ["Models", "models", "▣"],
     ["Model Control", "engine", "⚡"],
@@ -6388,6 +6389,7 @@
         case "job": return await renderJob(id);
         case "lora": return await renderLoraJob(id);
         case "lab": return await renderLab(generation);
+        case "farm": return await renderFarm(generation);
         case "more": return await renderMore();
         case "settings": return await renderSettings();
         default: return go("home");
@@ -6408,6 +6410,22 @@
       el,
       api,
       post,
+      remove,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  // The Content Farm lives in farm.js, with the same helpers.
+  async function renderFarm(generation) {
+    if (!window.FCCFarm) throw new Error("The Content Farm didn't load. Reload the page.");
+    await window.FCCFarm.render({
+      view,
+      el,
+      api,
+      post,
+      patch,
       remove,
       notify,
       go,
@@ -6634,6 +6652,7 @@
         job: "Tuning run",
         lora: "LoRA training",
         lab: "Lab",
+        farm: "Content Farm",
         more: "More",
         settings: "Settings",
       }[name] || "Studio"

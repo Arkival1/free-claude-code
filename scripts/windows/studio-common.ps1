@@ -84,6 +84,8 @@ function Get-StudioExtras {
     if (-not $NoVoice) {
         $extras += @("--extra", "studio_voice")
     }
+    # Pillow and ffmpeg: the Content Farm renders its videos with them.
+    $extras += @("--extra", "studio_video")
     if ($WithTraining) {
         $extras += @("--extra", "lora")
     }

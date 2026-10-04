@@ -12,6 +12,7 @@ from free_claude_code.core.json_types import JsonObject
 
 from .call_guard import guarded
 from .convo_notes import NOTES_HEADER, NotesKeeper
+from .farm.requests import farm_job
 from .lab.bench import LAB_PROMPT
 from .lab.requests import lab_job
 from .llm import (
@@ -254,6 +255,56 @@ def _lab_call_for(goal: str) -> ToolCall | None:
     if job.action == "mix":
         arguments |= {"items": list(job.items), "heat": job.heat, "flame": job.flame}
     return ToolCall(id="studio-lab", name="lab", arguments=arguments)
+
+
+FARM_PROMPT = (
+    "You are in the Content Farm with the user, on the page where they watch "
+    "their faceless short videos get made. For videos, ideas, and channels, "
+    "use the farm tool: make (count, topic, channel) starts videos in the "
+    "background, ideas fills the idea board, channel adds an account for a "
+    "niche, list and queue show what is there. Then tell the user briefly "
+    "what is on the way. Give honest advice on hooks, niches, and posting "
+    "times when asked. Never make fake reviews or copy other people's videos."
+)
+
+
+def _place_prompt(chat: Chat) -> str:
+    """The Lab's or the Content Farm's note, in their own chats."""
+    if chat.settings.get("lab"):
+        return LAB_PROMPT
+    if chat.settings.get("farm"):
+        return FARM_PROMPT
+    return ""
+
+
+FARM_DONE_NOTE = (
+    "(Studio) You answered without using the Content Farm, so Studio ran the "
+    "job on the farm for you. Here is what the farm did:\n{result}\n\nNow "
+    "report it to the team in plain words: what is being made or was planned."
+)
+
+
+def _farm_call_for(goal: str) -> ToolCall | None:
+    """The farm call a Farm job asks for ('Make 3 videos about cats in the
+    Content Farm.')."""
+    job_text = goal.split("\n\nBriefing from ")[0].removeprefix("The job: ").strip()
+    job = farm_job(job_text.split("\n", 1)[0], in_farm=True)
+    if job is None:
+        return None
+    arguments: JsonObject = {
+        "action": job.action,
+        "topic": job.topic,
+        "count": job.count,
+    }
+    if job.channel:
+        arguments["channel"] = job.channel
+    return ToolCall(id="studio-farm", name="farm", arguments=arguments)
+
+
+_OWN_PLACE: dict[str, Callable[[str], ToolCall | None]] = {
+    "lab": _lab_call_for,
+    "farm": _farm_call_for,
+}
 
 
 def _call_key(call: ToolCall) -> str:
@@ -862,7 +913,7 @@ class AgentRunner:
             max_steps=self._steps_for(agent),
             turn_note=note,
             sealed=sealed,
-            extra_system=LAB_PROMPT if chat.settings.get("lab") else "",
+            extra_system=_place_prompt(chat),
             learn=agent.role == MAIN_ROLE,
             said=user_text,
         )
@@ -894,7 +945,7 @@ class AgentRunner:
             query=report[:500],
             max_steps=FOLLOW_UP_STEPS,
             sealed=sealed,
-            extra_system=LAB_PROMPT if chat.settings.get("lab") else "",
+            extra_system=_place_prompt(chat),
             # Talking only: a small model must not hand the same job out again.
             talk_only=True,
         )
@@ -1275,16 +1326,16 @@ class AgentRunner:
             if (
                 not reply.tool_calls
                 and alone
-                and agent.role == "lab"
+                and agent.role in _OWN_PLACE
                 and not labbed
-                and "lab" in names
-                and "lab" not in used
+                and agent.role in names
+                and agent.role not in used
                 and step < max_steps
             ):
-                # The Lab agent's job is the Lab: when its model only talks,
-                # Studio runs the make or mix and it writes up the result.
+                # The Lab and Farm agents' job is their own place: when the
+                # model only talks, Studio runs the job and it writes it up.
                 labbed = True
-                call = _lab_call_for(query)
+                call = _OWN_PLACE[agent.role](query)
                 if call is not None:
                     outcome = (await self._run_calls([call], context, sealed=sealed))[0]
                     used.append(call.name)
@@ -1300,10 +1351,9 @@ class AgentRunner:
                         },
                     )
                     history.append(ChatMessage.assistant(reply.text[:1_500]))
+                    done_note = LAB_DONE_NOTE if agent.role == "lab" else FARM_DONE_NOTE
                     history.append(
-                        ChatMessage.user(
-                            LAB_DONE_NOTE.format(result=outcome.text[:6_000])
-                        )
+                        ChatMessage.user(done_note.format(result=outcome.text[:6_000]))
                     )
                     continue
             if (

@@ -1254,6 +1254,47 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Content Farm",
+        route="/studio#farm",
+        where=(
+            "Farm in the tab bar (or MENU, Content Farm). Tabs: Production "
+            "line, Posting queue, Videos, Channel settings; the Farm chat is on "
+            "the right. Video size, image maker, and music: Settings, Studio."
+        ),
+        terms=(
+            "content farm",
+            "farm",
+            "reels",
+            "reel",
+            "tiktok",
+            "shorts",
+            "faceless",
+            "video",
+            "videos",
+            "channel",
+            "posting",
+            "caption",
+            "hashtags",
+            "autopilot",
+        ),
+        body=(
+            "The Content Farm makes faceless short videos on this PC. A channel "
+            "is one account: a niche, a style (fact list, story time, "
+            "motivation, quick tips, AI art reel, explainer, what's new), a "
+            "caption look, a voice, a length, and posting times. The farm "
+            "fills the idea board with the local model, writes each script, "
+            "reads it with the built-in voice, finds a picture per scene (free "
+            "photos, your own Stable Diffusion, or offline art cards), and "
+            "renders a 9:16 MP4 with word-by-word captions. Finished videos "
+            "wait in the posting queue at the channel's next time, with the "
+            "caption and hashtags to copy; download, post, and mark posted. "
+            "Autopilot keeps a day of videos ready. Ask Jarvis 'make 3 reels "
+            "about black holes' anywhere; from the main chat it goes to the "
+            "Farm agent. Needs the studio_video extra (Pillow and ffmpeg), "
+            "which the Windows installer adds."
+        ),
+    ),
+    GuideTopic(
         title="Jarvis's playbook",
         route="/studio#more",
         where=(

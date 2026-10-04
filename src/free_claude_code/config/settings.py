@@ -664,6 +664,15 @@ class Settings(BaseModel):
     studio_code_test_rounds: int = Field(
         default=3, ge=1, le=10, validation_alias="STUDIO_CODE_TEST_ROUNDS"
     )
+    studio_farm_image_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_FARM_IMAGE_URL"
+    )
+    studio_farm_video_size: NonEmptyString = Field(
+        default="720p", validation_alias="STUDIO_FARM_VIDEO_SIZE"
+    )
+    studio_farm_music: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_FARM_MUSIC"
+    )
     studio_memory_working_limit: int = Field(
         default=20, ge=1, le=200, validation_alias="STUDIO_MEMORY_WORKING_LIMIT"
     )
@@ -985,6 +994,15 @@ class Settings(BaseModel):
             raise ValueError(
                 "STUDIO_VOICE_ENGINE must be auto, builtin, server, or browser, "
                 f"got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_farm_video_size")
+    @classmethod
+    def validate_studio_farm_video_size(cls, value: str) -> str:
+        if value not in ("720p", "1080p"):
+            raise ValueError(
+                f"STUDIO_FARM_VIDEO_SIZE must be 720p or 1080p, got {value!r}"
             )
         return value
 

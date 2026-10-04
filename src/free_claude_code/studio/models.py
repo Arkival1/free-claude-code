@@ -17,6 +17,7 @@ type AgentRole = Literal[
     "tester",
     "coder",
     "lab",
+    "farm",
     "teacher",
     "student",
     "guide",
@@ -31,6 +32,7 @@ AGENT_ROLES: tuple[str, ...] = (
     "tester",
     "coder",
     "lab",
+    "farm",
     "teacher",
     "student",
     "guide",
@@ -549,6 +551,59 @@ class LabChemical(Record):
     colour: str = "#e8f4ff"
     note: str = ""
     created_at: int = Field(default_factory=now_ms)
+
+
+class FarmChannel(Record):
+    """One account the Content Farm makes videos for: a niche and a style."""
+
+    id: str = Field(default_factory=lambda: new_id("fch"))
+    name: str
+    niche: str = ""
+    """What the account is about, e.g. 'space facts' or 'gym motivation'."""
+    platform: str = "instagram"
+    """instagram, tiktok, or youtube: where the videos go."""
+    style: str = "facts"
+    """The video format: facts, story, motivation, tips, ai_art, explainer, news."""
+    look: str = "bold"
+    """The caption style: bold, clean, neon, or cinema."""
+    visuals: str = "photos"
+    """Where pictures come from: photos (free photos), ai (a local image maker),
+    or text (made-up art cards, always offline)."""
+    voice: str = "am_michael"
+    """The built-in voice that reads the script, or 'none' for captions only."""
+    seconds: int = 30
+    posts_per_day: int = 1
+    post_times: tuple[str, ...] = ("18:00",)
+    hashtags: tuple[str, ...] = ()
+    call_to_action: str = ""
+    notes: str = ""
+    """Anything else the writer should know: the tone, words to avoid."""
+    autopilot: bool = False
+    """Keep a day of videos ready on its own."""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
+class FarmPost(Record):
+    """One video on the farm, from idea to posted."""
+
+    id: str = Field(default_factory=lambda: new_id("fpo"))
+    channel_id: str
+    title: str
+    """The idea, e.g. '5 facts about black holes'."""
+    status: str = "idea"
+    """idea, making, ready, posted, or failed."""
+    stage: str = ""
+    """What the farm is doing now, while making: writing, voicing, pictures, video."""
+    progress: int = 0
+    data: JsonObject = Field(default_factory=dict)
+    """The script (hook, scenes, caption, hashtags) and the files made."""
+    error: str = ""
+    made_by: str = "You"
+    scheduled_at: int = 0
+    posted_at: int = 0
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
 
 
 class StudioFlag(Record):

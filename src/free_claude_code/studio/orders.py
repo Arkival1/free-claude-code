@@ -368,6 +368,7 @@ ROUTED_ROLES = {
     "tester": "tests and reviews what was built and reports bugs",
     "coder": "codes apps, games, scripts, tools, and bots for a long time",
     "lab": "makes products, mixes chemicals, and builds circuits in the Lab",
+    "farm": "makes faceless short videos (reels, TikToks, Shorts) in the Content Farm",
 }
 _ROUTE_WORD = re.compile(r"[A-Za-z][\w -]*")
 
