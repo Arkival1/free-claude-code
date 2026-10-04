@@ -15,6 +15,7 @@ from free_claude_code.core.anthropic.streaming import (
     ToolSchema,
     parse_complete_tool_input,
 )
+from free_claude_code.core.anthropic.task_policy import normalize_task_arguments
 from free_claude_code.core.failures import ExecutionFailure
 from free_claude_code.core.history_replay import (
     ReplayOrigin,
@@ -748,5 +749,4 @@ def _responses_usage(usage: ChatStreamUsage) -> dict[str, object]:
 
 
 def _normalize_task_args(arguments: dict[str, object]) -> None:
-    if arguments.get("run_in_background") is not False:
-        arguments["run_in_background"] = False
+    normalize_task_arguments(arguments)

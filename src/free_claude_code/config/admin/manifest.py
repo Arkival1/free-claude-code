@@ -410,6 +410,19 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         advanced=True,
     ),
     ConfigFieldSpec(
+        "ALLOW_BACKGROUND_SUBAGENTS",
+        "Allow Background Subagents",
+        "runtime",
+        "boolean",
+        settings_attr="allow_background_subagents",
+        description=(
+            "Let Claude Code's subagents (the Task tool) run in the background, "
+            "so several can work at once while the main agent carries on. Off: "
+            "every subagent runs in the foreground, which works with every "
+            "provider."
+        ),
+    ),
+    ConfigFieldSpec(
         "ENABLE_TITLE_GENERATION_SKIP",
         "Title Generation Skip",
         "runtime",

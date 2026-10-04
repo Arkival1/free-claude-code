@@ -811,6 +811,25 @@ gets a reminder time only when your message names one. The notes live in the Obs
 Obsidian or on the HUD's **Jarvis's playbook** card (Save note, Reset to
 starting note).
 
+**Studio agents over an API.** Other apps can talk to Jarvis and every agent
+the OpenAI way, from this PC: point any OpenAI-compatible app or SDK at
+`http://localhost:8082/studio/v1` with your proxy token as the API key (any
+key when proxy auth is off), and use an agent's name as the model (`jarvis`,
+`builder`, `coder`, `researcher`, `lab`, ...). `GET /studio/v1/models` lists
+the team, and `POST /studio/v1/chat/completions` sends the newest user message
+to that agent in its own API chat (set `user` to keep separate conversations;
+`stream: true` works; `wait: true` also returns what teammates reported back).
+The server listens on your network for the phone app, so keep a proxy token
+set if others share it.
+
+**Claude Code subagents through FCC.** Claude Code's subagents, plugins, and
+MCP servers run inside Claude Code and work through FCC as they are, with
+`MODEL_OPUS`, `MODEL_SONNET`, and `MODEL_HAIKU` choosing the model a subagent
+asks for. FCC keeps every subagent (the Task tool) in the foreground by
+default, which works with every provider; turn on **Allow Background
+Subagents** (`ALLOW_BACKGROUND_SUBAGENTS`) to let several run in the
+background at once.
+
 **Add from GitHub: skills, plugins, and MCP servers.** On the More page, paste
 a GitHub link (`https://github.com/owner/repo`, a `/tree/branch/folder` link,
 or `owner/repo`) and Studio pulls in what the repo holds, the Claude Code way:

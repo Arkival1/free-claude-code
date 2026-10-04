@@ -2,9 +2,11 @@
 
 import asyncio
 import contextlib
+import json
 import secrets
 import socket
 import sys
+import time
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -16,6 +18,7 @@ from fastapi.responses import (
     JSONResponse,
     RedirectResponse,
     Response,
+    StreamingResponse,
 )
 from pydantic import BaseModel, Field
 
@@ -259,6 +262,16 @@ class SyncPayload(BaseModel):
 
 class PlaybookPayload(BaseModel):
     text: str = Field(max_length=20_000)
+
+
+class AgentChatPayload(BaseModel):
+    """An OpenAI-style chat request; model is the agent's name."""
+
+    model: str = Field(default="jarvis", max_length=80)
+    messages: list[dict[str, object]] = Field(min_length=1)
+    stream: bool = False
+    user: str | None = Field(default=None, max_length=80)
+    wait: bool = False
 
 
 class ExtensionPayload(BaseModel):
@@ -2145,6 +2158,92 @@ async def obsidian_import(
     if not payload.agent_id:
         raise HTTPException(status_code=400, detail="Choose an agent.")
     return {"imported": await studio.import_vault_notes(payload.agent_id)}
+
+
+def _latest_user_text(messages: list[dict[str, object]]) -> str:
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "\n".join(
+                str(part.get("text") or "")
+                for part in content
+                if isinstance(part, dict) and part.get("type") in {"text", "input_text"}
+            )
+    return ""
+
+
+@router.get("/studio/v1/models")
+async def agent_models(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Every agent as an OpenAI-style model, for apps that talk to the team."""
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": agent.name.casefold(),
+                "object": "model",
+                "owned_by": "fcc-studio",
+                "created": agent.created_at // 1000,
+                "description": agent.description[:200],
+            }
+            for agent in await studio.api_agents()
+        ],
+    }
+
+
+@router.post("/studio/v1/chat/completions")
+async def agent_chat_completion(
+    payload: AgentChatPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+):
+    """Talk to Jarvis or any agent the OpenAI way: model is the agent's name,
+    user keeps separate conversations, and wait also returns what teammates
+    reported back."""
+    text = _latest_user_text(payload.messages)
+    agent, reply = await studio.api_ask(
+        payload.model, text, conversation=payload.user or "", wait=payload.wait
+    )
+    reply_id = f"chatcmpl-{secrets.token_hex(8)}"
+    created = int(time.time())
+    model = agent.name.casefold()
+    if not payload.stream:
+        return {
+            "id": reply_id,
+            "object": "chat.completion",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": reply},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+
+    def chunk(delta: JsonObject, finish: str | None) -> str:
+        body = {
+            "id": reply_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+        }
+        return f"data: {json.dumps(body)}\n\n"
+
+    async def events():
+        yield chunk({"role": "assistant", "content": reply}, None)
+        yield chunk({}, "stop")
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 
 def _extension(extension: Extension) -> JsonObject:

@@ -3977,6 +3977,53 @@ class StudioService:
             failed=failed,
         )
 
+    # ------------------------------------------------------------ agents API
+
+    async def api_agents(self) -> list[Agent]:
+        """The agents other apps may talk to: everyone but the archived."""
+        await self.ensure_defaults()
+        return [agent for agent in await self.agents() if not agent.archived]
+
+    async def api_ask(
+        self, name: str, text: str, *, conversation: str = "", wait: bool = False
+    ) -> tuple[Agent, str]:
+        """Send one message to an agent by name (or 'jarvis'/'main' for the main
+        AI) in its API chat, and return the agent and its reply. With wait,
+        the reply also carries what teammates reported back."""
+        if not text.strip():
+            raise StudioError("Send a message with some text.")
+        wanted = name.strip().casefold()
+        agents = await self.api_agents()
+        agent = next((a for a in agents if a.name.casefold() == wanted), None)
+        if agent is None and wanted in {"main", "jarvis", "studio", ""}:
+            agent = await self.main_agent()
+        if agent is None:
+            raise StudioNotFoundError(
+                f"No agent is called '{name}'. Agents: "
+                + ", ".join(a.name for a in agents)
+            )
+        title = f"API · {conversation.strip()[:40] or 'default'}"
+        chat = next(
+            (
+                c
+                for c in await self._store.find(Chat, where={"agent_id": agent.id})
+                if c.title == title
+            ),
+            None,
+        ) or await self.create_chat(agent_id=agent.id, title=title, kind="chat")
+        before = await self._store.transcript(chat.id)
+        last = before[-1].sequence if before else 0
+        result = await self.send(chat.id, text)
+        if not wait:
+            return agent, result.text
+        await self.wait_for_background()
+        said = [
+            message.text
+            for message in await self._store.transcript(chat.id, after=last)
+            if message.role == "assistant" and message.text.strip()
+        ]
+        return agent, "\n\n".join(dict.fromkeys(said)) or result.text
+
     async def _team_member(self, role: str) -> Agent | None:
         """The first working agent with this role, if the team has one."""
         return next(

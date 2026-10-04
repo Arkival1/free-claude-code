@@ -601,6 +601,9 @@ class Settings(BaseModel):
         default=True,
         validation_alias="ENABLE_NETWORK_PROBE_MOCK",
     )
+    allow_background_subagents: bool = Field(
+        default=False, validation_alias="ALLOW_BACKGROUND_SUBAGENTS"
+    )
     enable_title_generation_skip: bool = Field(
         default=True,
         validation_alias="ENABLE_TITLE_GENERATION_SKIP",

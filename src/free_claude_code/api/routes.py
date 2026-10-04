@@ -14,6 +14,7 @@ from free_claude_code.core.anthropic import (
     TokenCountRequest,
     get_token_count,
 )
+from free_claude_code.core.anthropic.task_policy import allow_background_subagents
 from free_claude_code.core.openai_responses import OpenAIResponsesRequest
 from free_claude_code.core.trace import trace_event
 from free_claude_code.core.version import package_version
@@ -55,6 +56,7 @@ async def _create_messages_response(
     try:
         lease = await services.requests.acquire()
         await lease.wait_for_token_estimation()
+        allow_background_subagents(lease.settings.allow_background_subagents)
         handler = MessagesHandler(
             lease.settings,
             web_tools=services.web_tools,
