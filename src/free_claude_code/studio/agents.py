@@ -8,9 +8,12 @@ from dataclasses import dataclass, replace
 
 from loguru import logger
 
+from free_claude_code.core.json_types import JsonObject
+
 from .call_guard import guarded
 from .convo_notes import NOTES_HEADER, NotesKeeper
 from .lab.bench import LAB_PROMPT
+from .lab.requests import lab_job
 from .llm import (
     THINKING_ONLY,
     ChatMessage,
@@ -231,6 +234,26 @@ def _search_for(goal: str, names: Sequence[str]) -> ToolCall:
             id="studio-research", name="research", arguments={"question": job}
         )
     return ToolCall(id="studio-search", name="web_search", arguments={"query": job})
+
+
+LAB_DONE_NOTE = (
+    "(Studio) You answered without using the Lab, so Studio ran the job in the "
+    "Lab for you. Here is what the Lab did:\n{result}\n\nNow report it to "
+    "the team in plain words: what was made or seen, the ingredients or parts "
+    "and what each does, and anything that failed."
+)
+
+
+def _lab_call_for(goal: str) -> ToolCall | None:
+    """The lab call a Lab job asks for ('In the Lab, make shampoo.')."""
+    job_text = goal.split("\n\nBriefing from ")[0].removeprefix("The job: ").strip()
+    job = lab_job(job_text, in_lab=True)
+    if job is None:
+        return None
+    arguments: JsonObject = {"action": job.action, "request": job.request}
+    if job.action == "mix":
+        arguments |= {"items": list(job.items), "heat": job.heat, "flame": job.flame}
+    return ToolCall(id="studio-lab", name="lab", arguments=arguments)
 
 
 def _call_key(call: ToolCall) -> str:
@@ -496,6 +519,7 @@ class AgentRunner:
         default_model: str,
         max_steps: int = 12,
         builder_max_steps: int = 40,
+        coder_max_steps: int = 80,
         notes: NotesKeeper | None = None,
         live: MutableMapping[str, str] | None = None,
         temperature: float = 0.2,
@@ -519,6 +543,7 @@ class AgentRunner:
         self._default_model = default_model
         self._max_steps = max(1, max_steps)
         self._builder_max_steps = max(self._max_steps, builder_max_steps)
+        self._coder_max_steps = max(self._max_steps, coder_max_steps)
         self._notes = notes
         # Chat id -> the reply being written right now, for live display.
         self._live = live
@@ -585,6 +610,8 @@ class AgentRunner:
         return tuple(names)
 
     def _steps_for(self, agent: Agent) -> int:
+        if agent.role == "coder":
+            return self._coder_max_steps
         return self._builder_max_steps if agent.role == "builder" else self._max_steps
 
     async def system_prompt(
@@ -1050,6 +1077,7 @@ class AgentRunner:
         squeezed = False
         prodded = False
         searched_for_it = False
+        labbed = False
         pushed_to_write = False
         emptied = False
         for step in range(1, max_steps + 1):
@@ -1244,6 +1272,40 @@ class AgentRunner:
                     )
                 )
                 continue
+            if (
+                not reply.tool_calls
+                and alone
+                and agent.role == "lab"
+                and not labbed
+                and "lab" in names
+                and "lab" not in used
+                and step < max_steps
+            ):
+                # The Lab agent's job is the Lab: when its model only talks,
+                # Studio runs the make or mix and it writes up the result.
+                labbed = True
+                call = _lab_call_for(query)
+                if call is not None:
+                    outcome = (await self._run_calls([call], context, sealed=sealed))[0]
+                    used.append(call.name)
+                    await self._store.append_message(
+                        chat_id=chat.id,
+                        role="tool",
+                        text=outcome.text[:4_000],
+                        author=call.name,
+                        data={
+                            **outcome.data,
+                            "failed": outcome.failed,
+                            "by_studio": True,
+                        },
+                    )
+                    history.append(ChatMessage.assistant(reply.text[:1_500]))
+                    history.append(
+                        ChatMessage.user(
+                            LAB_DONE_NOTE.format(result=outcome.text[:6_000])
+                        )
+                    )
+                    continue
             if (
                 not reply.tool_calls
                 and not reply.text.strip()

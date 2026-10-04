@@ -811,6 +811,21 @@ gets a reminder time only when your message names one. The notes live in the Obs
 Obsidian or on the HUD's **Jarvis's playbook** card (Save note, Reset to
 starting note).
 
+**Coder, Tester, and Lab.** The starter team includes a **Coder** and a
+**Lab** agent. Say *"code me a snake game"*, *"build a todo app"*, *"write a
+script that renames my photos"*, or *"make a HUD"* (websites still go to the
+Builder) and Studio hands it to the Coder and the Tester together. The Coder
+codes for as long as the job needs (`STUDIO_CODER_MAX_STEPS`, 80 steps by
+default): it plans, writes every file, runs the code, and fixes what fails.
+Then the Tester tests it, fixes small bugs itself, and hands the rest back as a
+numbered list. They go round like that up to `STUDIO_CODE_TEST_ROUNDS` times (3
+by default), stopping as soon as the Tester says it works, posting each
+hand-off in the group chat, and Jarvis tells you how it went. Jarvis can start
+one himself with the `code_and_test` tool. Lab jobs from the main chat
+(*"make soap in the lab"*) go to the **Lab** agent, which works the Lab with
+the lab tool and reports back; if its model only talks, Studio runs the make
+or mix for it. In the Lab's own chat, Studio still does it at once.
+
 **Local agents direct server agents.** With **Local Agents Direct Server
 Agents** (`STUDIO_LOCAL_CONTROL`, on by default), every agent thinking on this
 PC gets `ask_agent`, `team_status`, `stop_agent`, and `manage_agent` over the

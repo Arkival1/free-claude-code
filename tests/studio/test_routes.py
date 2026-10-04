@@ -104,10 +104,12 @@ async def test_bootstrap_creates_the_starter_agents(studio_api):
         "Teacher",
         "Student",
         "Tester",
+        "Coder",
+        "Lab",
     }
 
     listed = await client.get("/studio/api/agents")
-    assert len(listed.json()["agents"]) == 8
+    assert len(listed.json()["agents"]) == 10
 
 
 @pytest.mark.asyncio

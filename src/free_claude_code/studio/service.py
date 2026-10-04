@@ -29,6 +29,7 @@ from free_claude_code.core.version import package_version
 from . import system_monitor
 from .agents import SEALED_TOOLS, AgentRunner, TurnResult
 from .assistant_tools import describe_time, now_line, parse_when
+from .code_loop import code_and_test
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .convo_notes import NotesKeeper
@@ -120,6 +121,7 @@ from .orders import (
     Order,
     build_request,
     called_agent,
+    code_request,
     is_job,
     is_yes,
     offered_orders,
@@ -163,8 +165,12 @@ from .playbook import (
 )
 from .presets import (
     BUILDER_PROMPT,
+    CODER_PROMPT,
+    CODER_TOOLS,
     HELPER_PROMPT,
     HELPER_TOOLS,
+    LAB_AGENT_PROMPT,
+    LAB_AGENT_TOOLS,
     PROMPT_UPGRADES,
     RESEARCHER_PROMPT,
     RESEARCHER_TOOLS,
@@ -211,6 +217,8 @@ STUDENT_AGENT_NAME = "Student"
 RESEARCHER_AGENT_NAME = "Researcher"
 HELPER_AGENT_NAME = "Helper"
 TESTER_AGENT_NAME = "Tester"
+CODER_AGENT_NAME = "Coder"
+LAB_AGENT_NAME = "Lab"
 _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     BUILDER_AGENT_NAME: (
         "research",
@@ -235,16 +243,20 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
     TESTER_AGENT_NAME: TESTER_TOOLS,
+    CODER_AGENT_NAME: CODER_TOOLS,
+    LAB_AGENT_NAME: LAB_AGENT_TOOLS,
 }
 _DEFAULT_ROLES = {
     BUILDER_AGENT_NAME: "builder",
     RESEARCHER_AGENT_NAME: "researcher",
     HELPER_AGENT_NAME: "helper",
     TESTER_AGENT_NAME: "tester",
+    CODER_AGENT_NAME: "coder",
+    LAB_AGENT_NAME: "lab",
 }
 SHARED_MEMORY_NAME = "Team memory"
 TEAM_LAYOUT_FLAG = "team_layout_v1"
-LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper"})
+LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper", "lab"})
 """Roles that think on this PC; every other agent thinks on a server."""
 CLASS_ROLES = frozenset({"teacher", "student"})
 """Classes keep their own choice: a server teacher and a local student."""
@@ -471,6 +483,8 @@ class StudioService:
         # requests at once; without this each one creates its own copy.
         self._defaults_lock = asyncio.Lock()
         self._room_lock = asyncio.Lock()
+        # Coding jobs the Coder and the Tester are on, so one isn't started twice.
+        self._code_loops: set[str] = set()
         self._budget = SearchBudget()
         self._chat_turns: dict[str, asyncio.Lock] = {}
         self._main_busy = 0
@@ -894,6 +908,7 @@ class StudioService:
             default_model=self.default_model,
             max_steps=self.settings.studio_agent_max_steps,
             builder_max_steps=self.settings.studio_builder_max_steps,
+            coder_max_steps=self.settings.studio_coder_max_steps,
             live=self._live_text,
             temperature=self.settings.studio_agent_temperature,
             notes=self._notes_keeper,
@@ -1245,6 +1260,20 @@ class StudioService:
                 self.server_model,
                 TESTER_PROMPT,
                 TESTER_TOOLS,
+            ),
+            (
+                CODER_AGENT_NAME,
+                "coder",
+                self.server_model,
+                CODER_PROMPT,
+                CODER_TOOLS,
+            ),
+            (
+                LAB_AGENT_NAME,
+                "lab",
+                self._local_team_model(existing),
+                LAB_AGENT_PROMPT,
+                LAB_AGENT_TOOLS,
             ),
             (
                 TEACHER_AGENT_NAME,
@@ -2386,6 +2415,8 @@ class StudioService:
     def _steps_for(self, agent: Agent) -> int:
         """Builders get room for whole apps; everyone else the usual budget."""
         settings = self.settings
+        if agent.role == "coder":
+            return max(settings.studio_coder_max_steps, settings.studio_agent_max_steps)
         if agent.role == "builder":
             return max(
                 settings.studio_builder_max_steps, settings.studio_agent_max_steps
@@ -2607,6 +2638,8 @@ class StudioService:
                 return await self._manage_agent_tool(call, context)
             case "lab":
                 return await self._lab_tool(call, context)
+            case "code_and_test":
+                return await self._code_tool(call, context)
             case "weather":
                 place = str(call.arguments.get("place") or "").strip()
                 if not place:
@@ -3649,12 +3682,19 @@ class StudioService:
     async def _carry_out_lab(self, main: Agent, chat: Chat, text: str) -> str:
         """Make or mix in the Lab before the main AI answers.
 
-        'make shampoo' in the Lab chat, or 'make shampoo in the lab' anywhere,
-        is done by Studio, so a small model never has to pick the lab tool.
+        'make shampoo in the lab' from the main chat goes to the Lab agent when
+        the team has one; in the Lab's own chat, or with no Lab agent, Studio
+        does it at once. Either way a small model never has to pick the tool.
         """
-        job = lab_job(text, in_lab=bool(chat.settings.get(LAB_CHAT_SETTING)))
+        in_lab = bool(chat.settings.get(LAB_CHAT_SETTING))
+        job = lab_job(text, in_lab=in_lab)
         if job is None:
             return ""
+        scientist = None if in_lab else await self._team_member("lab")
+        if scientist is not None:
+            return await self._hand_to_lab_agent(
+                main, chat, scientist, job.request, job.action
+            )
         arguments: JsonObject = {"action": job.action, "request": job.request}
         if job.action == "mix":
             arguments |= {"items": job.items, "heat": job.heat, "flame": job.flame}
@@ -3687,6 +3727,146 @@ class StudioService:
             "use the lab tool for it again."
         )
 
+    async def _team_member(self, role: str) -> Agent | None:
+        """The first working agent with this role, if the team has one."""
+        return next(
+            (
+                agent
+                for agent in await self.agents()
+                if agent.role == role and not agent.archived
+            ),
+            None,
+        )
+
+    async def _hand_to_lab_agent(
+        self, main: Agent, chat: Chat, scientist: Agent, request: str, action: str
+    ) -> str:
+        task = f"{action.capitalize()} {request} in the Lab."
+        crew = Crew(
+            store=self._store,
+            host=self,
+            helper_pipeline=self.settings.studio_helper_pipeline,
+        )
+        context = ToolContext(
+            agent_id=main.id,
+            chat_id=chat.id,
+            site_id=chat.site_id,
+            agent_name=main.name,
+            agent_role=main.role,
+        )
+        try:
+            outcome = await crew.ask_agent(
+                context, agent=scientist.name, task=task, project="", background=True
+            )
+        except (ValueError, StudioError) as error:
+            return f"The {scientist.name} agent could not take the Lab job: {error}"
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=outcome.text,
+            author="ask_agent",
+            data={**outcome.data, "order": True, "task": task},
+        )
+        return (
+            f"The Lab job went to the {scientist.name} agent ({action} '{request}'), "
+            "which is doing it in the Lab now and reports here when done. Tell the "
+            "user that in a sentence; don't use the lab tool for it yourself."
+        )
+
+    async def _code_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        goal = str(call.arguments.get("goal") or "").strip()
+        if not goal:
+            raise ValueError("Say what to code.")
+        line = await self.start_code_loop(
+            goal,
+            project=str(call.arguments.get("project") or ""),
+            parent_chat_id=context.chat_id,
+            caller=context,
+        )
+        return ToolOutcome(text=line, data={"tool": "code_and_test", "goal": goal})
+
+    async def start_code_loop(
+        self,
+        goal: str,
+        *,
+        project: str = "",
+        parent_chat_id: str | None,
+        caller: ToolContext | None = None,
+    ) -> str:
+        """Start the Coder and the Tester on a job in the background; the
+        sentence returned says who is doing what."""
+        coder = await self._team_member("coder")
+        tester = await self._team_member("tester")
+        if coder is None or tester is None:
+            raise StudioError(
+                "The team needs a Coder and a Tester for this; add them with the + button."
+            )
+        key = " ".join(goal.casefold().split())
+        if key in self._code_loops:
+            return (
+                f"{coder.name} and {tester.name} are already on this and will "
+                "report here when done."
+            )
+        main = await self.main_agent()
+        context = caller or ToolContext(
+            agent_id=main.id,
+            chat_id=parent_chat_id or "",
+            agent_name=main.name,
+            agent_role=main.role,
+        )
+        crew = Crew(
+            store=self._store,
+            host=self,
+            helper_pipeline=self.settings.studio_helper_pipeline,
+        )
+        site = await crew.project_for(context, project, task=goal, owner=coder)
+        self._code_loops.add(key)
+        self.spawn(self._code_loop_job(key, coder, tester, goal, site, parent_chat_id))
+        rounds = self.settings.studio_code_test_rounds
+        return (
+            f"{coder.name} is coding it in the '{site.name}' project; then "
+            f"{tester.name} tests it, fixes small bugs, and hands the rest back, up "
+            f"to {rounds} round(s). They report here when done."
+        )
+
+    async def _code_loop_job(
+        self,
+        key: str,
+        coder: Agent,
+        tester: Agent,
+        goal: str,
+        site: SiteProject,
+        parent_chat_id: str | None,
+    ) -> None:
+        async def run(agent: Agent, task: str) -> AgentRun:
+            finished, _ = await self.run_agent_task(
+                agent, task, site_id=site.id, parent_chat_id=parent_chat_id
+            )
+            return finished
+
+        try:
+            outcome = await code_and_test(
+                coder=coder,
+                tester=tester,
+                goal=goal,
+                project=site.name,
+                run=run,
+                rounds=self.settings.studio_code_test_rounds,
+            )
+            summary = outcome.summary(coder.name, tester.name)
+            if parent_chat_id:
+                await self._main_follows_up(
+                    parent_chat_id,
+                    coder,
+                    outcome.last_coder.model_copy(
+                        update={"result": summary, "goal": goal}
+                    ),
+                )
+        except (StudioError, StudioNotFoundError, ValueError) as error:
+            logger.warning("Studio: the Coder and Tester stopped: {}", error)
+        finally:
+            self._code_loops.discard(key)
+
     async def _carry_out_orders(self, main: Agent, chat: Chat, text: str) -> str:
         """Hand out the jobs the user told the main AI to give, before it answers.
 
@@ -3705,6 +3885,28 @@ class StudioService:
         task = "" if orders or researcher is None else web_request(text, main.name)
         if task and researcher is not None:
             orders = [Order(agent=researcher.name, task=task)]
+        code = (
+            ""
+            if orders or not {"coder", "tester"} <= {agent.role for agent in team}
+            else code_request(text, main.name)
+        )
+        if code:
+            try:
+                line = await self.start_code_loop(code, parent_chat_id=chat.id)
+            except StudioError as error:
+                return f"The coding job could not start: {error}"
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="tool",
+                text=line,
+                author="code_and_test",
+                data={"tool": "code_and_test", "order": True, "task": code},
+            )
+            return (
+                f"The coding job was handed out already: {line}\nDo not hand it "
+                "out again or write the code yourself. Tell the user in a sentence "
+                "or two who is doing what."
+            )
         builder = next((agent for agent in team if agent.role == "builder"), None)
         job = "" if orders or builder is None else build_request(text, main.name)
         if job and builder is not None:

@@ -655,6 +655,12 @@ class Settings(BaseModel):
     studio_builder_max_steps: int = Field(
         default=40, ge=1, le=120, validation_alias="STUDIO_BUILDER_MAX_STEPS"
     )
+    studio_coder_max_steps: int = Field(
+        default=80, ge=1, le=300, validation_alias="STUDIO_CODER_MAX_STEPS"
+    )
+    studio_code_test_rounds: int = Field(
+        default=3, ge=1, le=10, validation_alias="STUDIO_CODE_TEST_ROUNDS"
+    )
     studio_memory_working_limit: int = Field(
         default=20, ge=1, le=200, validation_alias="STUDIO_MEMORY_WORKING_LIMIT"
     )

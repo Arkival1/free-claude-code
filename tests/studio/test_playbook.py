@@ -178,8 +178,12 @@ async def test_no_tool_examples_when_studio_already_did_the_job(make_studio):
 
     await studio.main_say("make soap in the lab", background=False)
 
-    note = model.calls[0]["studio_note"]
-    assert "Studio already did this in the Lab" in note
+    note = next(
+        c["studio_note"]
+        for c in model.calls
+        if "the user's main AI" in str(c["system"])
+    )
+    assert "went to the Lab agent" in note
     assert "# Rules" in note and '"tool": "lab"' not in note
 
 

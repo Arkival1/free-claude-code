@@ -77,7 +77,7 @@ def lab_job(text: str, *, in_lab: bool) -> LabJob | None:
     """
     if not in_lab and not mentions_lab(text):
         return None
-    said = _IN_THE_LAB.sub(" ", text).strip()
+    said = _IN_THE_LAB.sub(" ", text).strip(" \t\n,;:.-")
     lead = _LEAD.match(said)
     if lead is not None:
         said = said[lead.end() :]

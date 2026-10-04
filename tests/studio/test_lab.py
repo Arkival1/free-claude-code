@@ -482,11 +482,36 @@ async def test_saying_make_in_the_lab_chat_makes_it(make_studio):
 
 
 @pytest.mark.asyncio
-async def test_make_in_the_lab_from_the_main_chat_goes_to_the_lab_not_the_builder(
+async def test_make_in_the_lab_from_the_main_chat_goes_to_the_lab_agent(
     make_studio,
 ):
+    studio, model = make_studio(_lab_jarvis())
+    await studio.ensure_defaults()
+    scientist = await studio.agent_by_name("Lab")
+    assert scientist is not None
+
+    await studio.main_say("make soap in the lab", background=False)
+    await studio.wait_for_background()
+
+    [run] = await studio.runs()
+    assert run.agent_id == scientist.id and "make soap" in run.goal.lower()
+    # Its model only talked, so Studio ran the make for it.
+    assert len(await studio._lab.projects()) == 1
+    note = next(
+        str(c["studio_note"])
+        for c in model.calls
+        if "the user's main AI" in str(c["system"])
+    )
+    assert "went to the Lab agent" in note
+
+
+@pytest.mark.asyncio
+async def test_with_no_lab_agent_studio_makes_it_itself(make_studio):
     studio, _ = make_studio(_lab_jarvis())
     await studio.ensure_defaults()
+    scientist = await studio.agent_by_name("Lab")
+    assert scientist is not None
+    await studio.delete_agent(scientist.id)
 
     await studio.main_say("make soap in the lab", background=False)
 

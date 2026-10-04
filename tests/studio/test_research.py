@@ -495,7 +495,7 @@ async def test_the_main_ai_can_leave_the_builder_working_in_the_background(
     studio, _ = make_studio(respond)
     await studio.ensure_defaults()
 
-    chat = await studio.main_say("make me a snake game", background=False)
+    chat = await studio.main_say("I'd love a snake game", background=False)
     first = await studio.transcript(chat.id)
     handoff = next(m for m in first if m.role == "tool")
     assert handoff.data["background"] is True

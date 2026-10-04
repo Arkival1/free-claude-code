@@ -501,6 +501,20 @@ class Crew:
             name=name, description=task[:200], agent_id=owner.id
         )
 
+    async def project_for(
+        self, context: ToolContext, project: str, *, task: str, owner: Agent
+    ) -> SiteProject:
+        """The project a build job works in: the one named, the one the task
+        names, or a new one titled from the task."""
+        site = await self._project(
+            context, project, task=task, builds=True, owner=owner
+        )
+        if site is not None:
+            return site
+        return await self._host.create_site(
+            name=_title_from(task), description=task[:200], agent_id=owner.id
+        )
+
     async def _named_project(self, task: str) -> SiteProject | None:
         """The project a task mentions by name, longest name first."""
         lowered = f" {' '.join(re.findall(r'[a-z0-9]+', task.lower()))} "

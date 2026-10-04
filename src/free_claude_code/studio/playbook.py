@@ -207,6 +207,36 @@ STARTERS: tuple[Starter, ...] = (
         ),
     ),
     Starter(
+        "code_and_test",
+        "Coding job for the Coder and Tester",
+        (
+            "code me",
+            "code a",
+            "write a script",
+            "write code",
+            "write a program",
+            "build an app",
+            "make an app",
+            "make a game",
+            "make a hud",
+            "build a tool",
+            "program",
+            "coder",
+            "bot",
+            "script",
+        ),
+        (
+            _x(
+                "code me a snake game in python",
+                goal="A snake game in Python with arrow keys, score, and restart.",
+            ),
+        ),
+        (
+            "Websites go to the Builder with ask_agent; code_and_test is for apps, "
+            "games, scripts, tools, bots, and HUDs.",
+        ),
+    ),
+    Starter(
         "team_task",
         "Several agents on one goal",
         ("together", "as a team", "the whole team", "everyone work on", "team up"),

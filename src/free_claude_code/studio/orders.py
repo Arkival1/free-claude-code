@@ -333,11 +333,41 @@ def build_request(text: str, main: str = "") -> str:
     return task if len(task.split()) >= 3 else ""
 
 
+_CODE_SOMETHING = re.compile(
+    r"(?:make|build|create|code|write|program|develop)\s+(?:me\s+|us\s+)?"
+    r"(?:a|an|the|my|our|some)?\s*(?:[\w'+#.-]+\s+){0,5}?"
+    r"(?:app|apps|application|program|script|tool|bot|game|api|cli|extension|"
+    r"plugin|backend|server|library|function|calculator|timer|tracker|dashboard|"
+    r"hud|code)\b",
+    re.I,
+)
+_SITE_WORDS = re.compile(
+    r"\b(?:website|web\s*site|site|web\s*page|webpage|landing\s+page|home\s*page|"
+    r"portfolio|blog|online\s+store|store\s+page)\b",
+    re.I,
+)
+
+
+def code_request(text: str, main: str = "") -> str:
+    """The job in 'code me a snake game' or 'build a todo app', said to the
+    main AI with no agent named; empty for websites (the Builder's) and for
+    anything else. The Coder and the Tester take these."""
+    name = rf"(?:{re.escape(main)}\s*[,:!]?\s+)?" if main.strip() else ""
+    lead = re.match(_ASKING.format(main=name), text, re.I)
+    rest = text[lead.end() if lead else 0 :]
+    if not _CODE_SOMETHING.match(rest) or _SITE_WORDS.search(rest):
+        return ""
+    task = _clean(rest).rstrip("?")
+    return task if len(task.split()) >= 3 else ""
+
+
 ROUTED_ROLES = {
     "researcher": "finds things out on the web: research, prices, reviews, news, comparisons",
     "builder": "builds and fixes websites, apps, games, and code",
     "helper": "plans, brainstorms, organizes, and turns ideas into next steps",
     "tester": "tests and reviews what was built and reports bugs",
+    "coder": "codes apps, games, scripts, tools, and bots for a long time",
+    "lab": "makes products, mixes chemicals, and builds circuits in the Lab",
 }
 _ROUTE_WORD = re.compile(r"[A-Za-z][\w -]*")
 

@@ -84,6 +84,7 @@ LIST_PHOTOS_TOOL = "list_photos"
 USE_PHOTO_TOOL = "use_photo"
 SAVE_IMAGE_TOOL = "save_image"
 LAB_TOOL = "lab"
+CODE_TOOL = "code_and_test"
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
 MAX_LISTED_PHOTOS = 30
@@ -449,6 +450,31 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "versions_back": {"type": "integer"},
             },
             "required": ["path"],
+        },
+    ),
+    ToolSpec(
+        name=CODE_TOOL,
+        description=(
+            "Hand a coding job to the Coder and the Tester: the Coder codes it "
+            "for as long as it needs (apps, games, scripts, tools, bots, HUDs), "
+            "the Tester tests it, fixes small bugs, and hands the rest back, "
+            "for a few rounds until it works. It runs in the background and "
+            "they report here when done. Websites go to the Builder with "
+            "ask_agent instead."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "goal": {
+                    "type": "string",
+                    "description": "What to code, with everything it needs.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Optional project name; a new one is made when none matches.",
+                },
+            },
+            "required": ["goal"],
         },
     ),
     ToolSpec(
@@ -979,6 +1005,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         MANAGE_AGENT_TOOL,
         WEATHER_TOOL,
         LAB_TOOL,
+        CODE_TOOL,
     }
 )
 MAIN_TOOL_NAMES: tuple[str, ...] = (
@@ -1007,6 +1034,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     APP_HELP_TOOL,
     LIST_PHOTOS_TOOL,
     LAB_TOOL,
+    CODE_TOOL,
     FINISH_TOOL,
 )
 SHARED_REMEMBER_SPEC = ToolSpec(
@@ -1405,6 +1433,7 @@ class AgentToolbox:
                     | "manage_agent"
                     | "weather"
                     | "lab"
+                    | "code_and_test"
                 ):
                     if self._assistant is None:
                         raise ValueError(f"{call.name} is not available here.")

@@ -1202,6 +1202,31 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Coder, Tester, and Lab agents",
+        route="/studio#agents",
+        where=(
+            "Agents page: Coder, Tester, and Lab. Rounds and steps: Settings, "
+            "Studio, Coder Max Steps and Coder and Tester Rounds."
+        ),
+        terms=(
+            "coder",
+            "tester",
+            "lab agent",
+            "code me",
+            "rounds",
+            "bugs",
+            "hand back",
+        ),
+        body=(
+            "Ask Jarvis to code an app, game, script, tool, bot, or HUD and the "
+            "Coder codes it for as long as it needs, then the Tester tests it, "
+            "fixes small bugs, and hands the rest back, round after round until "
+            "it works (3 rounds by default). Websites still go to the Builder. "
+            "Lab jobs from the main chat ('make soap in the lab') go to the Lab "
+            "agent, which works the Lab and reports back."
+        ),
+    ),
+    GuideTopic(
         title="Jarvis's playbook",
         route="/studio#more",
         where=(

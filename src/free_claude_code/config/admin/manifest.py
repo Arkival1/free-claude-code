@@ -656,6 +656,29 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_CODER_MAX_STEPS",
+        "Coder Max Steps",
+        "studio",
+        "number",
+        settings_attr="studio_coder_max_steps",
+        description=(
+            "How many steps (tool calls) the Coder may take on one round of a "
+            "job, 1 to 300. The Coder codes for a long time: it plans, writes "
+            "every file, runs the code, and fixes what fails."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CODE_TEST_ROUNDS",
+        "Coder and Tester Rounds",
+        "studio",
+        "number",
+        settings_attr="studio_code_test_rounds",
+        description=(
+            "How many times the Tester tests the Coder's work and hands bugs "
+            "back, 1 to 10. The rounds stop early when the Tester says it works."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LIGHT_TUNING_ENABLED",
         "Light Tuning",
         "studio",
