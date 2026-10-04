@@ -29,7 +29,7 @@ from free_claude_code.core.version import package_version
 from . import system_monitor
 from .agents import SEALED_TOOLS, AgentRunner, TurnResult
 from .assistant_tools import describe_time, now_line, parse_when
-from .code_loop import code_and_test
+from .code_loop import code_and_test, project_name
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .convo_notes import NotesKeeper
@@ -297,6 +297,13 @@ def _studio_tools(claude_tools: Sequence[str]) -> tuple[str, ...]:
         for tool in _CLAUDE_TOOLS.get(name.strip().lower().split("(")[0], ())
     ]
     return tuple(dict.fromkeys(("read_file", "list_files", *mapped, "skill", "mcp")))
+
+
+def _job_line(goal: str) -> str:
+    """A job's first line, as the room shows it: the long how-to after it
+    (the Coder's and Tester's instructions) stays in the job itself."""
+    job = goal.split("\n\nBriefing from ")[0].removeprefix("The job: ").strip()
+    return " ".join(job.split("\n", 1)[0].split())
 
 
 def _plain_error(run: AgentRun) -> str:
@@ -4116,7 +4123,9 @@ class StudioService:
             host=self,
             helper_pipeline=self.settings.studio_helper_pipeline,
         )
-        site = await crew.project_for(context, project, task=goal, owner=coder)
+        site = await crew.project_for(
+            context, project or project_name(goal), task=goal, owner=coder
+        )
         self._code_loops.add(key)
         self.spawn(self._code_loop_job(key, coder, tester, goal, site, parent_chat_id))
         rounds = self.settings.studio_code_test_rounds
@@ -4405,14 +4414,43 @@ class StudioService:
             )
             return rooms[0] if rooms else await self.create_room(title="Team room")
 
-    async def _post_in_room(self, author: str, text: str, data: JsonObject) -> None:
+    async def _join_room(self, room_id: str, members: Sequence[str]) -> None:
+        """Add agents to the room's member list (newer agents weren't in it)."""
+        async with self._room_lock:
+            room = await self._store.get(Chat, room_id)
+            if room is None:
+                return
+            main = await self._store.find(Agent, where={"role": MAIN_ROLE}, limit=1)
+            joining = [
+                member
+                for member in dict.fromkeys(members)
+                if member
+                and member not in room.member_ids
+                and not (main and member == main[0].id)
+            ]
+            if joining:
+                await self._store.put(
+                    room.model_copy(update={"member_ids": (*room.member_ids, *joining)})
+                )
+
+    async def _post_in_room(
+        self,
+        author: str,
+        text: str,
+        data: JsonObject,
+        *,
+        members: Sequence[str] = (),
+    ) -> None:
         """Write in the team room for everyone to read. Only a note: it starts
-        no one talking, so a job handed out is never done twice."""
+        no one talking, so a job handed out is never done twice. Agents who
+        post join the room's member list (newer agents weren't in it)."""
         try:
             room = await self._team_room()
         except StudioError as error:
             logger.info("Studio: no team room to post in: {}", error)
             return
+        if members:
+            await self._join_room(room.id, members)
         await self._store.append_message(
             chat_id=room.id,
             role="assistant",
@@ -4433,13 +4471,12 @@ class StudioService:
             if parent and parent.agent_id
             else None
         )
-        task = " ".join(
-            goal.split("\n\nBriefing from ")[0].removeprefix("The job: ").split()
-        )
+        task = _job_line(goal)
         await self._post_in_room(
             boss.name if boss else "Studio",
             f"@{worker.name}: {task}",
             {"kind": "handoff", "agent": worker.name, "run_id": run_id},
+            members=(worker.id, boss.id if boss else ""),
         )
 
     async def _plain_result(self, run: AgentRun) -> str:
@@ -4464,14 +4501,17 @@ class StudioService:
 
     async def _share_in_room(self, agent: Agent, run: AgentRun) -> None:
         """When a handed-out job ends, its agent tells the team what came of it."""
-        goal = " ".join(run.goal.split("\n\nBriefing from ")[0].split())[:160]
+        goal = _job_line(run.goal)[:160]
         if run.status == "succeeded":
             result = await self._plain_result(run) or "Done, with nothing to report."
             text = f"Done: {goal}\n{result}"
         else:
             text = f"Couldn't finish: {goal}\n{_plain_error(run)}"
         await self._post_in_room(
-            agent.name, text, {"kind": "shared", "run_id": run.id, "status": run.status}
+            agent.name,
+            text,
+            {"kind": "shared", "run_id": run.id, "status": run.status},
+            members=(agent.id,),
         )
 
     async def _room_note(self, run: AgentRun) -> str:

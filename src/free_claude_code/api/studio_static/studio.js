@@ -563,13 +563,13 @@
 
     if (generation !== renderGeneration) return;
     view.replaceChildren(
-      data.room.site_id
-        ? el("button", {
+      ...(data.room.site_id
+        ? [el("button", {
             class: "secondary",
             text: "Open the room's project",
             onclick: () => go(`site/${data.room.site_id}`),
-          })
-        : null,
+          })]
+        : []),
       card("Members", [
         el(
           "div",

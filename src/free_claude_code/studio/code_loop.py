@@ -80,7 +80,7 @@ def verdict(report: str) -> str:
 
 def coder_task(goal: str, project: str) -> str:
     return (
-        f"Code this, completely, in the '{project}' project: {goal}\n"
+        f"Code this in the '{project}' project: {goal}\n"
         "Take as long as it needs: plan with update_plan, write every file, run "
         "it and its tests with test_code or run_command, and fix what fails "
         "before you finish. The Tester checks your work next, so finish with a "
@@ -103,11 +103,25 @@ def tester_task(goal: str, project: str, number: int) -> str:
 
 def fix_task(goal: str, project: str, report: str, number: int) -> str:
     return (
-        f"Round {number}: the Tester tested the '{project}' project (the job: "
-        f"{goal}) and handed it back. Fix every bug in this report, run it "
+        f"Round {number}: fix the bugs the Tester found in the '{project}' project.\n"
+        f"The job: {goal}. Fix every bug in the Tester's report below, run it "
         "again to check, and finish with what you changed.\n\n"
         f"Tester's report:\n{report[:REPORT_CHARS]}"
     )
+
+
+_LEAD = re.compile(
+    r"^\s*(?:please\s+)?(?:code|build|make|create|write|program|develop)\s+"
+    r"(?:me\s+|us\s+)?(?:a|an|the|my|our|some)?\s*",
+    re.I,
+)
+
+
+def project_name(goal: str) -> str:
+    """'code me a snake game in python' becomes 'Snake game in python'."""
+    words = _LEAD.sub("", goal).split()[:5]
+    name = " ".join(words).strip(" .,!?")
+    return name[:1].upper() + name[1:] if name else "New project"
 
 
 async def code_and_test(
