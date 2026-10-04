@@ -522,9 +522,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name=FARM_TOOL,
         description=(
-            "The Content Farm: makes faceless short videos (Reels, TikTok, "
-            "YouTube Shorts) on this PC, from idea to a finished MP4 with a "
-            "voiceover, pictures, and word-by-word captions. The user watches "
+            "The Content Farm: makes faceless YouTube Shorts (and TikToks, "
+            "Reels) and two-hour lore or what-if videos to fall asleep to, on "
+            "this PC, from idea to a finished MP4 with a voiceover, real "
+            "stills and clips from the user's library or the show's fandom "
+            "wiki, and word-by-word captions. For a long video, set long. The user watches "
             "it on the Content Farm page. action make: make videos (count, "
             "about a topic, or the next ideas on the board) for a channel; it "
             "runs in the background and they appear in the posting queue. "
@@ -551,6 +553,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "style": {
                     "type": "string",
                     "enum": [
+                        "gameplay_story",
+                        "what_if",
+                        "lore",
                         "facts",
                         "story",
                         "motivation",
@@ -558,8 +563,23 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "ai_art",
                         "explainer",
                         "news",
+                        "lore_sleep",
+                        "what_if_sleep",
+                        "theory_sleep",
                     ],
                     "description": "channel: the video style.",
+                },
+                "long": {
+                    "type": "boolean",
+                    "description": "make: a two-hour video to fall asleep to (lore, a what-if) instead of shorts.",
+                },
+                "minutes": {
+                    "type": "integer",
+                    "description": "make, long: how long, e.g. 120 for two hours.",
+                },
+                "fandom": {
+                    "type": "string",
+                    "description": "channel: the show, movie, or game it is about.",
                 },
             },
             "required": ["action"],

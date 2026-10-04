@@ -1,9 +1,10 @@
 """Read a Content Farm job out of what the user says.
 
 'make 3 reels about black holes', 'give me 5 video ideas for spacefacts',
-'start a channel about gym motivation'. In the farm's own chat a plainer
-'make one about sharks' is enough; elsewhere the words must name videos,
-reels, shorts, TikToks, or the farm, so 'make me a website' never lands here.
+'start a channel about gym motivation', 'make a 2 hour sleep video about the
+entire lore of Breaking Bad'. In the farm's own chat a plainer 'make one
+about sharks' is enough; elsewhere the words must name videos, reels,
+shorts, TikToks, or the farm, so 'make me a website' never lands here.
 """
 
 import re
@@ -28,12 +29,23 @@ _NUMBERS = {
 }
 _COUNT = r"(?P<count>\d{1,2}|a couple of|a few|an?|one|two|three|four|five|six|seven|eight|nine|ten|some)?"
 _THINGS = r"(?:videos?|reels?|shorts?|tik ?toks?|clips?|posts?|content)"
+_LONG = re.compile(
+    r"\b(?:\d+(?:\.\d+)?\s*(?:-\s*)?(?:hours?|hrs?)(?:[- ]long)?|an?\s+hour[- ]long|"
+    r"hour[- ]long|long[- ]?form|long|to\s+(?:fall\s+a)?sleep\s+to|sleep|"
+    r"entire\s+lore|full\s+lore|whole\s+lore)\b",
+    re.I,
+)
+_LONG_SIZE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:-\s*)?(?:hours?|hrs?)(?:[- ]long)?\s*", re.I
+)
 _LEAD = r"^\s*(?:(?:hey|ok|okay)\s+)?(?:jarvis[,\s]+)?(?:please\s+)?(?:can you\s+|could you\s+)?"
 _MAKE = re.compile(
     _LEAD
     + r"(?:make|create|produce|render|generate|do|farm)\s+(?:me\s+|us\s+)?"
     + _COUNT
-    + r"\s*(?:new\s+|more\s+|faceless\s+|viral\s+|short\s+)*"
+    + r"\s*(?:new\s+|more\s+|faceless\s+|viral\s+|short\s+|long\s+|sleep\s+|lore\s+|"
+    + r"what[- ]if\s+|\d+(?:\.\d+)?\s*(?:-\s*)?(?:hours?|hrs?)(?:[- ]long)?\s+|"
+    + r"hour[- ]long\s+)*"
     + _THINGS
     + r"(?:\s+(?:about|on|for)\s+(?P<topic>.+))?$",
     re.I,
@@ -67,7 +79,7 @@ _IN_FARM = re.compile(
 _FOR_CHANNEL = re.compile(r"\s+for\s+(?P<channel>@?[\w.]+)\s*$", re.I)
 _FARM_WORDS = re.compile(
     r"\b(?:reels?|shorts|tik ?toks?|content farm|the farm|faceless|"
-    r"videos?\s+(?:about|on|for)|video ideas?)\b",
+    r"videos?\s+(?:about|on|for)|video ideas?|sleep videos?|lore videos?)\b",
     re.I,
 )
 
@@ -79,6 +91,10 @@ class FarmJob:
     topic: str = ""
     count: int = 1
     channel: str = ""
+    long: bool = False
+    """A two-hour video to fall asleep to, rather than a short."""
+    minutes: int = 0
+    """How long, when the user said ('a 3 hour video')."""
 
 
 def _count(raw: str | None, default: int) -> int:
@@ -100,10 +116,32 @@ def _topic(raw: str | None) -> tuple[str, str]:
     return text.strip(" ,;:.!?"), channel.lstrip("@")
 
 
+def _minutes(text: str) -> int:
+    found = re.search(r"(\d+(?:\.\d+)?)\s*(?:-\s*)?(?:hours?|hrs?)", text, re.I)
+    return round(float(found.group(1)) * 60) if found else 0
+
+
 def farm_job(text: str, *, in_farm: bool) -> FarmJob | None:
     said = " ".join(text.split())
     if not said or said.endswith("?"):
         return None
+    job = _job(said, in_farm=in_farm)
+    if job is None or job.action == "channel":
+        return job
+    if _LONG.search(said):
+        topic = _LONG_SIZE.sub("", job.topic).strip(" ,;:.!") or job.topic
+        return FarmJob(
+            job.action,
+            topic=topic,
+            count=job.count,
+            channel=job.channel,
+            long=True,
+            minutes=_minutes(said),
+        )
+    return job
+
+
+def _job(said: str, *, in_farm: bool) -> FarmJob | None:
     named = in_farm or bool(_FARM_WORDS.search(said))
     said = _IN_FARM.sub(" ", said).strip(" ,;:.!")
     found = _CHANNEL.match(said)

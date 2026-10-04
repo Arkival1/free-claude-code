@@ -1276,22 +1276,31 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "caption",
             "hashtags",
             "autopilot",
+            "youtube",
+            "sleep",
+            "lore",
+            "fandom",
+            "edit video",
+            "media library",
+            "gameplay",
         ),
         body=(
-            "The Content Farm makes faceless short videos on this PC. A channel "
-            "is one account: a niche, a style (fact list, story time, "
-            "motivation, quick tips, AI art reel, explainer, what's new), a "
-            "caption look, a voice, a length, and posting times. The farm "
-            "fills the idea board with the local model, writes each script, "
-            "reads it with the built-in voice, finds a picture per scene (free "
-            "photos, your own Stable Diffusion, or offline art cards), and "
-            "renders a 9:16 MP4 with word-by-word captions. Finished videos "
-            "wait in the posting queue at the channel's next time, with the "
-            "caption and hashtags to copy; download, post, and mark posted. "
-            "Autopilot keeps a day of videos ready. Ask Jarvis 'make 3 reels "
-            "about black holes' anywhere; from the main chat it goes to the "
-            "Farm agent. Needs the studio_video extra (Pillow and ffmpeg), "
-            "which the Windows installer adds."
+            "The Content Farm makes YouTube Shorts (and TikToks, Reels) and "
+            "two-hour lore, what-if, or theory videos to fall asleep to, on "
+            "this PC. A channel is one account: a show or niche, a style, a "
+            "caption look, a voice, a length, and posting times. Shorts can "
+            "run over a gameplay background from the Media library; long "
+            "videos are written chapter by chapter from the show's Fandom "
+            "wiki, in 16:9 with chapter titles, a description with chapter "
+            "timestamps, and a thumbnail. Each scene gets your own clips and "
+            "pictures first, then real wiki stills, stock, then AI pictures "
+            "only if 'Allow AI-made pictures' is on. Every video opens in the "
+            "editor: change lines, words on screen, order, or any scene's "
+            "picture or clip, or ask the AI to edit, then Save and render. "
+            "Finished videos wait in the posting queue with the title, "
+            "description, and tags to copy. Autopilot keeps a day ready. Ask "
+            "Jarvis 'make a 2 hour sleep video about the entire lore of "
+            "Breaking Bad'. Needs the studio_video extra (Pillow and ffmpeg)."
         ),
     ),
     GuideTopic(

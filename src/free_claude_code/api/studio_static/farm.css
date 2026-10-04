@@ -280,3 +280,108 @@ a.ghost-button { display: inline-flex; align-items: center; text-decoration: non
 
 .farm-chat .tool-line { display: block; align-self: stretch; overflow-wrap: break-word; }
 .farm-actions .ghost-button { border: 1px solid var(--line); padding: 0 14px; min-height: 42px; }
+
+/* ------------------------------------------------------------ farm 2 */
+
+.farm-thumb.wide { width: 96px; aspect-ratio: 16 / 9; }
+.farm-phone.wide video, .farm-phone.big.wide video { aspect-ratio: 16 / 9; width: 100%; max-width: 100%; border-radius: 10px; }
+.farm-detail.wide { flex-direction: column; align-items: stretch; }
+.farm-edited { color: var(--warn); }
+.farm-badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(2, 12, 20, 0.85);
+  color: var(--cyan);
+  font-size: 11px;
+}
+.farm-style-groups h4 { margin: 10px 0 6px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.farm-toggles { display: grid; gap: 6px; margin: 12px 0; }
+.farm-toggle { align-items: flex-start; }
+.farm-upload { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 16px; cursor: pointer; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.farm-upload:hover { filter: brightness(1.08); }
+
+/* the editor */
+.farm-editor-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+.farm-editor-head h2 { margin: 0; }
+.farm-ai-edit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 200, 97, 0.5);
+  border-radius: 8px;
+  background: rgba(255, 200, 97, 0.06);
+}
+.farm-ai-edit select { grid-column: 1 / -1; }
+.farm-ai-edit textarea { width: 100%; }
+.farm-scenes { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; counter-reset: scene; }
+.farm-scene {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.farm-scene-media {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  background: #000;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+.farm-scene-media img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; }
+.farm-scene-media small { padding: 2px 6px 6px; font-size: 11px; text-align: left; }
+.farm-scene-blank { display: grid; place-items: center; aspect-ratio: 16 / 10; font-size: 28px; }
+.farm-scene-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.farm-scene-text textarea, .farm-scene-text input { width: 100%; }
+.farm-scene-text .row { gap: 6px; }
+.farm-scene-buttons { display: flex; flex-direction: column; gap: 4px; }
+.farm-editor-actions { margin-top: 12px; justify-content: flex-end; }
+.farm-candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; max-height: 60vh; overflow-y: auto; margin-top: 10px; }
+.farm-candidate {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.farm-candidate:hover { border-color: var(--accent); }
+.farm-candidate img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #000; }
+.farm-candidate small { padding: 0 6px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.farm-candidate .farm-badge { position: absolute; top: 4px; left: 4px; }
+
+/* the library */
+.farm-library { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 14px; }
+.farm-asset { display: flex; flex-direction: column; gap: 5px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.farm-asset input { width: 100%; font-size: 13px; }
+.farm-asset-thumb { position: relative; border-radius: 6px; overflow: hidden; background: #000; }
+.farm-asset-thumb img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; }
+.farm-asset-thumb .farm-badge { position: absolute; bottom: 4px; right: 4px; }
+
+@media (max-width: 760px) {
+  .farm-scene { grid-template-columns: 90px minmax(0, 1fr); }
+  .farm-scene-buttons { grid-column: 1 / -1; flex-direction: row; }
+  .farm-ai-edit { grid-template-columns: 1fr; }
+}

@@ -673,6 +673,9 @@ class Settings(BaseModel):
     studio_farm_music: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_FARM_MUSIC"
     )
+    studio_farm_pexels_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_FARM_PEXELS_KEY"
+    )
     studio_memory_working_limit: int = Field(
         default=20, ge=1, le=200, validation_alias="STUDIO_MEMORY_WORKING_LIMIT"
     )

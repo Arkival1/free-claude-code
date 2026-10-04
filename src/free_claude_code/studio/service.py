@@ -409,6 +409,32 @@ def farm_style_label(style: str) -> str:
     return style_of(style).label.lower()
 
 
+_SHOW_LEAD = re.compile(
+    r"^(?:the\s+)?(?:entire\s+|full\s+|whole\s+|complete\s+)?(?:lore|story|history|"
+    r"timeline|theories|theory)\s+(?:of|about|behind)\s+|^everything\s+about\s+",
+    re.I,
+)
+
+
+def show_of(topic: str) -> str:
+    """'the entire lore of Breaking Bad' → 'Breaking Bad'; a what-if names none."""
+    text = topic.strip()
+    if text.lower().startswith("what if"):
+        return ""
+    return _SHOW_LEAD.sub("", text).strip(" ,.!") or text
+
+
+def long_title(topic: str, style: str) -> str:
+    """A sleep video's working title from what was asked."""
+    text = topic.strip().rstrip(".!")
+    if text.lower().startswith("what if"):
+        return f"{text[0].upper()}{text[1:]}? A calm what-if to fall asleep to"
+    if style == "theory_sleep":
+        return f"Every {show_of(text)} theory, explained to fall asleep to"
+    show = show_of(text)
+    return f"The entire lore of {show}, explained to fall asleep to"
+
+
 def farm_task(job: FarmJob) -> str:
     """A Farm job in words the Farm agent's safety net reads back."""
     about = f" about {job.topic}" if job.topic else ""
@@ -420,6 +446,9 @@ def farm_task(job: FarmJob) -> str:
             f"Give me {job.count} video ideas{about}{for_channel} in the Content Farm."
         )
     plural = "video" if job.count == 1 else "videos"
+    if job.long:
+        hours = f"{job.minutes / 60:g} hour" if job.minutes else "long"
+        return f"Make {job.count} {hours} sleep {plural}{about}{for_channel} in the Content Farm."
     return f"Make {job.count} {plural}{about}{for_channel} in the Content Farm."
 
 
@@ -580,6 +609,8 @@ class StudioService:
             visuals=self._farm_visuals,
             video_size=lambda: self.settings.studio_farm_video_size,
             music=self._farm_music,
+            pexels_key=lambda: self.settings.studio_farm_pexels_key or "",
+            transport=search_transport,
         )
         self._farm_busy = 0
         self._farm_error: str | None = None
@@ -1883,7 +1914,7 @@ class StudioService:
                 raise FarmError(f"The writer's model didn't answer: {again}") from again
         return reply.text
 
-    async def _farm_speak(self, text: str, voice: str) -> bytes | None:
+    async def _farm_speak(self, text: str, voice: str, speed: float) -> bytes | None:
         """A line read by the built-in voice, or None when there is none."""
         if voice == "none" or not speech_package_ready():
             return None
@@ -1892,7 +1923,7 @@ class StudioService:
             self._models_dir / "voice",
             quality=settings.studio_voice_quality,
             voice=voice if voice in VOICE_CHOICES else "am_michael",
-            speed=1.08,
+            speed=speed,
             effect="none",
             transport=self._voice_transport,
         )
@@ -1960,19 +1991,25 @@ class StudioService:
         return [self._farm.view(post) for post in posts]
 
     async def farm_make(
-        self, post_ids: Sequence[str], *, tell_chat: str | None = None
+        self,
+        post_ids: Sequence[str],
+        *,
+        tell_chat: str | None = None,
+        rewrite: bool = False,
     ) -> int:
         """Start making videos, one after another, in the background."""
         ready = [post_id for post_id in post_ids if post_id]
         if not ready:
             return 0
-        self.spawn(self._farm_line(ready, tell_chat))
+        self.spawn(self._farm_line(ready, tell_chat, rewrite))
         return len(ready)
 
-    async def _farm_line(self, post_ids: Sequence[str], tell_chat: str | None) -> None:
+    async def _farm_line(
+        self, post_ids: Sequence[str], tell_chat: str | None, rewrite: bool = False
+    ) -> None:
         for post_id in post_ids:
             try:
-                post = await self._farm.make(post_id)
+                post = await self._farm.make(post_id, rewrite=rewrite)
             except FarmError as error:
                 logger.info("Content Farm: {}", error)
                 continue
@@ -2005,6 +2042,50 @@ class StudioService:
                     author="farm",
                     data={"kind": "farm", "post_id": post.id, "status": post.status},
                 )
+
+    async def farm_editor(self, post_id: str) -> JsonObject:
+        try:
+            return self._farm.editor_view(await self._farm.post(post_id))
+        except FarmError as error:
+            raise StudioError(str(error)) from error
+
+    async def farm_edit_scenes(
+        self, post_id: str, scenes: list[JsonObject]
+    ) -> JsonObject:
+        try:
+            post = await self._farm.edit_scenes(post_id, scenes)
+        except FarmError as error:
+            raise StudioError(str(error)) from error
+        return self._farm.editor_view(post)
+
+    async def farm_scene_media(
+        self, post_id: str, index: int, choice: JsonObject
+    ) -> JsonObject:
+        try:
+            post = await self._farm.set_scene_media(post_id, index, choice)
+        except (FarmError, ValueError) as error:
+            raise StudioError(str(error)) from error
+        return self._farm.editor_view(post)
+
+    async def farm_ai_edit(
+        self, post_id: str, instruction: str, *, chapter: int | None = None
+    ) -> JsonObject:
+        try:
+            post = await self._farm.ai_edit(post_id, instruction, chapter=chapter)
+        except FarmError as error:
+            raise StudioError(str(error)) from error
+        return self._farm.editor_view(post)
+
+    async def farm_candidates(self, post_id: str, query: str) -> list[JsonObject]:
+        """Clips and pictures that could go in a scene, for the editor."""
+        try:
+            post = await self._farm.post(post_id)
+            channel = await self._farm.channel(post.channel_id)
+        except FarmError as error:
+            raise StudioError(str(error)) from error
+        picker = self._farm.picker(post, channel)
+        found = await picker.candidates(query or post.title)
+        return [item.to_json() for item in found]
 
     async def farm_fill(self, channel_id: str) -> int:
         """Make a day of videos for one channel: its ideas first, then new ones."""
@@ -2120,7 +2201,11 @@ class StudioService:
                 if not topic:
                     raise FarmError("Say what the channel is about.")
                 channel = await self._farm.save_channel(
-                    {"niche": topic, "style": str(arguments.get("style") or "facts")}
+                    {
+                        "niche": topic,
+                        "style": str(arguments.get("style") or "facts"),
+                        "fandom": str(arguments.get("fandom") or ""),
+                    }
                 )
                 return ToolOutcome(
                     text=(
@@ -2136,7 +2221,14 @@ class StudioService:
                 return ToolOutcome(text=await self._farm_list(), data=data)
             if action == "queue":
                 return ToolOutcome(text=await self._farm_queue_text(), data=data)
-            channel = await self._farm_channel_for(name, topic)
+            long = bool(arguments.get("long")) or bool(arguments.get("minutes"))
+            channel = await self._farm_channel_for(
+                name, topic, long=long, minutes=whole(arguments.get("minutes"), 0)
+            )
+            if action == "make" and long and topic:
+                return await self._farm_make_long(
+                    channel, topic, made_by, context, data
+                )
             if action == "ideas":
                 count = asked or 5
                 posts = await self._farm.ideas(
@@ -2193,11 +2285,69 @@ class StudioService:
             failed=True,
         )
 
-    async def _farm_channel_for(self, name: str, topic: str) -> FarmChannel:
-        """The channel asked for; with none yet, one made for the topic."""
-        if not await self._farm.channels() and topic:
+    async def _farm_channel_for(
+        self, name: str, topic: str, *, long: bool = False, minutes: int = 0
+    ) -> FarmChannel:
+        """The channel asked for; with none yet (or no long one for a long
+        video), one made for the topic."""
+        channels = await self._farm.channels()
+        if long:
+            mine = [c for c in channels if style_of(c.style).long]
+            wanted = name.lower().lstrip("@")
+            for channel in mine:
+                if wanted and wanted in channel.name.lower():
+                    return channel
+            show = show_of(topic)
+            for channel in mine:
+                if show and channel.fandom and channel.fandom.lower() in topic.lower():
+                    return channel
+            if mine and not show:
+                return mine[-1]
+            style = (
+                "what_if_sleep" if topic.lower().startswith("what if") else "lore_sleep"
+            )
+            fields: JsonObject = {
+                "niche": show or topic,
+                "style": style,
+                "fandom": show,
+            }
+            if minutes:
+                fields["minutes"] = minutes
+            return await self._farm.save_channel(fields)
+        if not channels and topic:
             return await self._farm.save_channel({"niche": topic})
         return await self._farm.find_channel(name)
+
+    async def _farm_make_long(
+        self,
+        channel: FarmChannel,
+        topic: str,
+        made_by: str,
+        context: ToolContext,
+        data: JsonObject,
+    ) -> ToolOutcome:
+        """One two-hour video, titled from what was asked."""
+        ready, why = video_tools()
+        if not ready:
+            raise FarmError(f"Videos can't be made on this PC yet: {why}")
+        title = long_title(topic, style_of(channel.style).key)
+        post = await self._farm.add_idea(channel, title, made_by=made_by)
+        await self.farm_make(
+            [post.id],
+            tell_chat=None
+            if context.chat_id == (await self.farm_chat()).id
+            else context.chat_id,
+        )
+        return ToolOutcome(
+            text=(
+                f"Making a {channel.minutes // 60 or 1} hour video for @{channel.name}: "
+                f"{title}. It writes {channel.minutes // 5} chapters with the fandom "
+                "wiki's lore, records the calm voiceover, finds real stills and your "
+                "clips, and renders it in 16:9: this takes a few hours on this PC. "
+                "Watch it on the Content Farm page; what's done is kept if it stops."
+            ),
+            data={**data, "channel_id": channel.id, "post_ids": [post.id]},
+        )
 
     async def _farm_list(self) -> str:
         channels = await self._farm.channels()
@@ -2244,7 +2394,10 @@ class StudioService:
             "action": job.action,
             "topic": job.topic,
             "count": job.count,
+            "long": job.long,
         }
+        if job.minutes:
+            arguments["minutes"] = job.minutes
         if job.channel:
             arguments["channel"] = job.channel
         context = ToolContext(

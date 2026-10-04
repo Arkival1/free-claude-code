@@ -1,10 +1,13 @@
 """What the farm makes: video styles, and the prompts that write them.
 
-Every style is a faceless short: a voice reads the script over pictures,
-with big captions that light up word by word. The writer is the team's local
-model, so the prompts ask for small JSON and the parsers cope with prose.
+Shorts are faceless: a voice reads the script over pictures, clips, or a
+gameplay background, with big captions that light up word by word. Long
+videos are calm two-hour narrations of a show's lore or a what-if, for
+people to fall asleep to. The writer is the team's local model, so the
+prompts ask for small JSON and the parsers cope with prose.
 """
 
+import json
 import re
 from dataclasses import dataclass
 
@@ -16,8 +19,9 @@ from ..memory import keywords
 WORDS_PER_SECOND = 2.6
 """How fast the voice reads: about 155 words a minute."""
 MIN_SECONDS = 10
-MAX_SECONDS = 90
-MAX_SCENES = 14
+MAX_SECONDS = 180
+"""YouTube Shorts run up to three minutes."""
+MAX_SCENES = 30
 MAX_SAY = 240
 MAX_HASHTAGS = 12
 
@@ -30,9 +34,36 @@ class Style:
     """What one video of this style is, for the writer."""
     example: str
     """An idea in this style, for the idea board."""
+    long: bool = False
+    """A two-hour sleep video rather than a short."""
+    fandom: bool = False
+    """About a show, movie, or game: lore and real pictures from its wiki."""
 
 
 STYLES: tuple[Style, ...] = (
+    Style(
+        "gameplay_story",
+        "Story over gameplay",
+        "a gripping first-person story (like the best Reddit stories) told "
+        "fast, with a cliffhanger every few lines and a twist at the end, "
+        "played over gameplay footage",
+        "My neighbor knocked on my wall at 3 AM every night, so I knocked back",
+    ),
+    Style(
+        "what_if",
+        "What if…",
+        "a what-if scenario followed step by step to its wild but logical end",
+        "What if the Moon disappeared tonight?",
+        fandom=True,
+    ),
+    Style(
+        "lore",
+        "Lore drop",
+        "one hidden or dark piece of a show's lore that most fans missed, "
+        "with the episode or scene it comes from",
+        "The dark truth about Gray Matter that Breaking Bad never said out loud",
+        fandom=True,
+    ),
     Style(
         "facts",
         "Fact list",
@@ -75,27 +106,71 @@ STYLES: tuple[Style, ...] = (
         "the latest news in the niche, quick and clear, with why it matters",
         "This week's biggest AI updates in 30 seconds",
     ),
+    Style(
+        "lore_sleep",
+        "Entire lore to sleep to",
+        "the whole lore of a show, movie, or game, told calmly from the very "
+        "beginning to the end, every era, character, and secret, explained",
+        "The entire lore of Breaking Bad, explained to fall asleep to",
+        long=True,
+        fandom=True,
+    ),
+    Style(
+        "what_if_sleep",
+        "What-if to sleep to",
+        "one big what-if about a show or the world, followed calmly through "
+        "every consequence, hour by hour and year by year",
+        "What if Walter White never got cancer? A calm what-if to sleep to",
+        long=True,
+        fandom=True,
+    ),
+    Style(
+        "theory_sleep",
+        "Theories to sleep to",
+        "the biggest fan theories about a show, each one explained calmly with "
+        "the clues for and against it",
+        "Every Stranger Things theory explained, to fall asleep to",
+        long=True,
+        fandom=True,
+    ),
 )
 STYLE_BY_KEY = {style.key: style for style in STYLES}
 PLATFORMS = {
-    "instagram": "Instagram Reels",
-    "tiktok": "TikTok",
     "youtube": "YouTube Shorts",
+    "tiktok": "TikTok",
+    "instagram": "Instagram Reels",
 }
 LOOKS = ("bold", "clean", "neon", "cinema")
-VISUALS = ("photos", "ai", "text")
+VISUALS = ("auto", "library", "photos", "ai", "text", "none")
+"""Where pictures come from: auto (your library, the fandom wiki, stock,
+then AI), library (only your clips and pictures), photos (stock), ai, text
+(art cards), none (the background video only)."""
 
 WRITER_SYSTEM = (
-    "You write scripts for faceless short videos (Reels, TikTok, Shorts). The "
+    "You write scripts for faceless short videos (YouTube Shorts, TikTok, "
+    "Reels). The "
     "first line is a hook that stops the scroll in under 2 seconds: a bold "
     "claim, a question, or a number. Short spoken sentences, no filler, no "
     "emojis in the spoken lines, nothing made up when it is about real facts. "
     "Reply with one JSON object only."
 )
 IDEAS_SYSTEM = (
-    "You come up with ideas for faceless short videos that people watch to "
-    "the end and share. Each idea is one specific title, under 12 words. "
-    "Reply with a JSON array of strings only."
+    "You come up with ideas for faceless videos that people watch to the end "
+    "and share. Each idea is one specific title, under 14 words. Reply with "
+    "a JSON array of strings only."
+)
+POLISH_SYSTEM = (
+    "You are a YouTube Shorts editor. Make this script better: a hook in the "
+    "first line that makes people stop scrolling, no filler, one idea per "
+    "scene, and an ending that makes people watch again or comment. Keep the "
+    "facts true and the same JSON shape. Reply with one JSON object only."
+)
+EDIT_SYSTEM = (
+    "You edit faceless video scripts. Change the scenes the way the owner "
+    "asks and keep the rest as it is. Each scene has say (spoken), show "
+    "(what the picture shows), and text (big words on screen). Reply with "
+    'one JSON object only: {"scenes": [{"say": "...", "show": "...", '
+    '"text": "..."}]}.'
 )
 
 
@@ -117,21 +192,70 @@ def word_budget(seconds: int) -> int:
 
 
 def ideas_prompt(
-    *, niche: str, style: str, platform: str, count: int, notes: str, trends: str
+    *,
+    niche: str,
+    style: str,
+    platform: str,
+    count: int,
+    notes: str,
+    trends: str,
+    fandom: str = "",
 ) -> str:
     chosen = style_of(style)
     lines = [
         f"Niche: {niche or 'anything people love to watch'}",
         f"Style: {chosen.label}: {chosen.pitch}.",
-        f"Platform: {PLATFORMS.get(platform, PLATFORMS['instagram'])}",
+        "Format: a two-hour narrated video for people to fall asleep to (YouTube)"
+        if chosen.long
+        else f"Platform: {PLATFORMS.get(platform, PLATFORMS['youtube'])}",
         f'Example idea: "{chosen.example}"',
     ]
+    if fandom:
+        lines.append(
+            f"Every idea is about {fandom}: go deep into the fandom, the "
+            "characters, the hidden details true fans love."
+        )
     if notes:
         lines.append(f"Notes from the owner: {notes}")
     if trends:
         lines.append(f"What people search and post about now:\n{trends}")
     lines.append(f"Write {count} new, different ideas as a JSON array of strings.")
     return "\n".join(lines)
+
+
+def edit_prompt(scenes: list[JsonObject], instruction: str) -> str:
+    """Ask for an edit: the owner's words and the scenes as they are."""
+    rows = [
+        {
+            "say": scene.get("say", ""),
+            "show": scene.get("show", ""),
+            "text": scene.get("text", ""),
+        }
+        for scene in scenes
+    ]
+    return (
+        f"The owner wants: {instruction}\n\nThe scenes now:\n"
+        f"{json.dumps({'scenes': rows}, ensure_ascii=False)}"
+    )
+
+
+def parse_edit(reply: str) -> list[JsonObject]:
+    """Scenes back from an AI edit; [] when it sent nothing usable."""
+    data = extract_object(reply)
+    raw = data.get("scenes")
+    out: list[JsonObject] = []
+    for item in raw if isinstance(raw, list) else []:
+        if isinstance(item, dict):
+            say = _clean(item.get("say"), MAX_SAY * 4)
+            if say:
+                out.append(
+                    {
+                        "say": say,
+                        "show": _clean(item.get("show"), 120),
+                        "text": _clean(item.get("text"), 40),
+                    }
+                )
+    return out
 
 
 def script_prompt(
@@ -144,6 +268,7 @@ def script_prompt(
     call_to_action: str,
     notes: str,
     facts: str = "",
+    fandom: str = "",
 ) -> str:
     chosen = style_of(style)
     scenes = scene_count(seconds)
@@ -151,7 +276,7 @@ def script_prompt(
         f"Video: {idea}",
         f"Niche: {niche or 'general'}",
         f"Style: {chosen.label}: {chosen.pitch}.",
-        f"Platform: {PLATFORMS.get(platform, PLATFORMS['instagram'])}",
+        f"Platform: {PLATFORMS.get(platform, PLATFORMS['youtube'])}",
         f"Length: {clamp_seconds(seconds)} seconds, about {word_budget(seconds)} "
         f"spoken words in {scenes} scenes.",
     ]
@@ -159,13 +284,19 @@ def script_prompt(
         lines.append(f"End with this call to action: {call_to_action}")
     if notes:
         lines.append(f"Notes from the owner: {notes}")
+    if fandom:
+        lines.append(
+            f"It is about {fandom}. Use real names, places, and episodes; in "
+            '"show", name the character, place, or scene the picture shows.'
+        )
     if facts:
-        lines.append(f"Facts to use (true, from the web):\n{facts}")
+        lines.append(f"Facts to use (true, from the web or the fandom wiki):\n{facts}")
     lines.append(
-        'JSON shape: {"title": "...", "scenes": [{"say": "the spoken line", '
-        '"show": "2-5 words describing the picture", "text": "up to 4 big words '
-        'on screen, or empty"}], "caption": "the post caption, 1-2 lines", '
-        '"hashtags": ["#tag", "..."]}. The first scene\'s "say" is the hook.'
+        'JSON shape: {"title": "a YouTube title under 60 characters", '
+        '"scenes": [{"say": "the spoken line", "show": "2-5 words describing '
+        'the picture", "text": "up to 4 big words on screen, or empty"}], '
+        '"caption": "the description, 1-2 lines", "hashtags": ["#tag", "..."]}. '
+        'The first scene\'s "say" is the hook.'
     )
     return "\n".join(lines)
 
@@ -365,11 +496,26 @@ def parse_ideas(reply: str, *, count: int) -> list[str]:
     return list(seen.values())[: max(1, count)]
 
 
-def full_caption(script: Script, call_to_action: str = "") -> str:
-    """What to paste under the video: caption, call to action, then #tags."""
-    parts = [script.caption]
+def full_caption(
+    script: Script, call_to_action: str = "", platform: str = "youtube"
+) -> str:
+    """What to paste under the video: caption, call to action, then #tags.
+    YouTube gets the title first, and #Shorts."""
+    parts = [script.title] if platform == "youtube" and script.title else []
+    parts.append(script.caption)
     if call_to_action and call_to_action.lower() not in script.caption.lower():
         parts.append(call_to_action)
-    if script.hashtags:
-        parts.append(" ".join(script.hashtags))
+    tags = list(script.hashtags)
+    if platform == "youtube" and "#shorts" not in {tag.lower() for tag in tags}:
+        tags.append("#Shorts")
+    if tags:
+        parts.append(" ".join(tags))
     return "\n\n".join(part for part in parts if part)
+
+
+def short_styles() -> list[Style]:
+    return [style for style in STYLES if not style.long]
+
+
+def long_styles() -> list[Style]:
+    return [style for style in STYLES if style.long]

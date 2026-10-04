@@ -620,6 +620,8 @@ STARTERS: tuple[Starter, ...] = (
             "faceless",
             "video ideas",
             "channel about",
+            "sleep video",
+            "lore video",
         ),
         (
             _x(
@@ -633,6 +635,13 @@ STARTERS: tuple[Starter, ...] = (
                 "start a channel about gym motivation",
                 action="channel",
                 topic="gym motivation",
+            ),
+            _x(
+                "make a 2 hour sleep video about the entire lore of Breaking Bad",
+                action="make",
+                topic="the entire lore of Breaking Bad",
+                long=True,
+                minutes=120,
             ),
         ),
         (

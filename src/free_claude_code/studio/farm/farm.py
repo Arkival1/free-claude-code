@@ -1,17 +1,22 @@
-"""The Content Farm: channels, an idea board, and a line that makes videos.
+"""The Content Farm: channels, an idea board, a line that makes videos, and
+an editor for when the AI gets it wrong.
 
-A channel is one account: a niche, a style, a voice, and when it posts. The
-farm fills the idea board, writes each script with the team's local model,
-reads it with the built-in voice, finds a picture for every scene, and
-renders a vertical MP4 with captions. Finished videos wait in the posting
-queue with their caption and hashtags, at the channel's next posting time.
-Posting itself stays with the user: the platforms only allow it from their
-own apps or business APIs.
+A channel is one account: a niche (often a show, movie, or game), a style, a
+voice, and when it posts. Shorts are 9:16 and quick; long videos are calm
+two-hour narrations of a show's lore or a what-if, to fall asleep to. The
+farm writes each script with the team's local model (using the show's fandom
+wiki), reads it with the built-in voice, picks a picture or clip for every
+scene (your library first), and renders the MP4. Every scene keeps its line,
+its picture, and its voice clip, so you or the AI can change one scene and
+render again in a fraction of the time. Posting stays with the user: the
+platforms only allow it from their own apps or business APIs.
 """
 
 import asyncio
 import concurrent.futures
 import contextlib
+import hashlib
+import json
 import re
 import shutil
 from collections.abc import Awaitable, Callable, Sequence
@@ -19,40 +24,49 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import anyio
+import httpx
 from loguru import logger
 
 from free_claude_code.core.json_types import JsonObject
 
 from ..models import FarmChannel, FarmPost, now_ms
 from ..store import StudioStore
-from . import formats
-from .formats import Script
-from .render import Plan, RenderError, Shot, render, video_tools
+from . import formats, longform
+from .fandom import Fandom
+from .formats import Script, style_of
+from .library import LibraryError, MediaLibrary
+from .media import MediaPicker
+from .render import Plan, RenderError, Shot, render, thumbnail, video_tools
 from .timing import (
     GAP,
     chunks,
-    join_wavs,
     reading_time,
-    silent_wav,
     spread_words,
     wav_length,
+    write_joined,
 )
-from .visuals import Picture, Visuals
+from .visuals import Visuals
 
 Think = Callable[[str, str], Awaitable[str]]
 """Ask the farm's writer (the team's local model): (system, prompt) → text."""
-Speak = Callable[[str, str], Awaitable[bytes | None]]
-"""Read a line aloud: (text, voice) → WAV bytes, or None with no voice."""
+Speak = Callable[[str, str, float], Awaitable[bytes | None]]
+"""Read a line aloud: (text, voice, speed) → WAV bytes, or None with no voice."""
 Research = Callable[[str], Awaitable[str]]
 """Search the web: query → a few lines of results, or '' when offline."""
 
 MAX_CHANNELS = 30
 MAX_POSTS = 600
 MAX_IDEAS = 10
+MAX_EDIT_SCENES = 40
+"""Scenes the AI edits at once: a long video is edited a chapter at a time."""
 _TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 _RESEARCHED = {"facts", "explainer", "news", "tips"}
 ACTIVE = ("making",)
 DONE = ("ready", "posted")
+SHORT_SPEED = 1.08
+LONG_SPEED = 0.92
+"""A sleep video's voice is slower."""
+LONG_GAP = 0.45
 
 
 class FarmError(ValueError):
@@ -90,16 +104,45 @@ def _choice(value: object, allowed: Sequence[str], default: str) -> str:
     return text if text in allowed else default
 
 
+def is_long(channel: FarmChannel) -> bool:
+    return style_of(channel.style).long
+
+
 def channel_view(
     channel: FarmChannel, counts: dict[str, int] | None = None
 ) -> JsonObject:
     view: JsonObject = channel.model_dump()
     view["post_times"] = list(channel.post_times)
     view["hashtags"] = list(channel.hashtags)
-    view["style_label"] = formats.style_of(channel.style).label
-    view["platform_label"] = formats.PLATFORMS.get(channel.platform, channel.platform)
+    view["style_label"] = style_of(channel.style).label
+    view["kind"] = "long" if is_long(channel) else "short"
+    view["platform_label"] = (
+        "YouTube (long)"
+        if is_long(channel)
+        else formats.PLATFORMS.get(channel.platform, channel.platform)
+    )
     view["counts"] = dict(counts or {})
     return view
+
+
+def _scenes(data: JsonObject) -> list[JsonObject]:
+    raw = data.get("scenes")
+    return (
+        [dict(item) for item in raw if isinstance(item, dict)]
+        if isinstance(raw, list)
+        else []
+    )
+
+
+def _seconds(value: object) -> float:
+    try:
+        return max(0.0, float(str(value or 0)))
+    except ValueError:
+        return 0.0
+
+
+def _voice_key(voice: str, speed: float, say: str) -> str:
+    return hashlib.sha1(f"{voice}|{speed}|{say}".encode()).hexdigest()[:20]
 
 
 class ContentFarm:
@@ -112,8 +155,12 @@ class ContentFarm:
         speak: Speak,
         research: Research,
         visuals: Callable[[], Visuals],
+        library: MediaLibrary | None = None,
+        fandom: Fandom | None = None,
         video_size: Callable[[], str] = lambda: "720p",
         music: Callable[[], Path | None] = lambda: None,
+        pexels_key: Callable[[], str] = lambda: "",
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._store = store
         self._root = root
@@ -121,8 +168,12 @@ class ContentFarm:
         self._speak = speak
         self._research = research
         self._visuals = visuals
+        self.library = library or MediaLibrary(store, root / "library")
+        self.fandom = fandom or Fandom(transport)
+        self._transport = transport
         self._video_size = video_size
         self._music = music
+        self._pexels_key = pexels_key
         self._line = asyncio.Lock()
         """One video at a time: rendering uses every core."""
         self._stopped: set[str] = set()
@@ -153,7 +204,11 @@ class ContentFarm:
                 if wanted in {channel.id.lower(), channel.name.lower()}:
                     return channel
             for channel in channels:
-                if wanted in channel.name.lower() or wanted in channel.niche.lower():
+                if (
+                    wanted in channel.name.lower()
+                    or wanted in channel.niche.lower()
+                    or (channel.fandom and wanted in channel.fandom.lower())
+                ):
                     return channel
         return channels[-1]
 
@@ -167,19 +222,37 @@ class ContentFarm:
         merged = {**base, **{k: v for k, v in fields.items() if v is not None}}
         name = _text(merged.get("name"), 60).lstrip("@")
         niche = _text(merged.get("niche"), 160)
+        fandom = _text(merged.get("fandom"), 120)
         if not name:
-            name = re.sub(r"[^a-z0-9]+", "", niche.lower())[:24] or "mychannel"
+            name = (
+                re.sub(r"[^a-z0-9]+", "", (niche or fandom).lower())[:24] or "mychannel"
+            )
+        style = _choice(merged.get("style"), tuple(formats.STYLE_BY_KEY), "facts")
+        long = style_of(style).long
         tags = merged.get("hashtags")
+        background = _text(merged.get("background"), 40)
+        if background:
+            try:
+                asset = await self.library.asset(background)
+            except LibraryError as error:
+                raise FarmError(str(error)) from error
+            if asset.kind != "video":
+                raise FarmError("The background has to be a clip from the library.")
         values: JsonObject = {
             "name": name,
-            "niche": niche,
+            "niche": niche or fandom,
             "platform": _choice(
-                merged.get("platform"), tuple(formats.PLATFORMS), "instagram"
+                merged.get("platform"), tuple(formats.PLATFORMS), "youtube"
             ),
-            "style": _choice(merged.get("style"), tuple(formats.STYLE_BY_KEY), "facts"),
-            "look": _choice(merged.get("look"), formats.LOOKS, "bold"),
-            "visuals": _choice(merged.get("visuals"), formats.VISUALS, "photos"),
-            "voice": _text(merged.get("voice"), 40) or "am_michael",
+            "style": style,
+            "look": _choice(
+                merged.get("look") if "look" in fields or old else None,
+                formats.LOOKS,
+                "cinema" if long else "bold",
+            ),
+            "visuals": _choice(merged.get("visuals"), formats.VISUALS, "auto"),
+            "voice": _text(merged.get("voice"), 40)
+            or ("bm_george" if long else "am_michael"),
             "seconds": formats.clamp_seconds(whole(merged.get("seconds"), 30)),
             "posts_per_day": max(1, min(10, whole(merged.get("posts_per_day"), 1))),
             "post_times": list(clean_times(merged.get("post_times"))),
@@ -189,6 +262,15 @@ class ContentFarm:
             "call_to_action": _text(merged.get("call_to_action"), 160),
             "notes": _text(merged.get("notes"), 1_000),
             "autopilot": bool(merged.get("autopilot")),
+            "fandom": fandom,
+            "wiki": _text(merged.get("wiki"), 200),
+            "ai_media": bool(merged.get("ai_media", True)),
+            "ai_polish": bool(merged.get("ai_polish", True)),
+            "background": background,
+            "minutes": longform.clamp_minutes(whole(merged.get("minutes"), 120)),
+            "captions": bool(merged["captions"])
+            if "captions" in fields or old
+            else not long,
         }
         if old is not None:
             channel = old.model_copy(update={**values, "updated_at": now_ms()})
@@ -227,8 +309,9 @@ class ContentFarm:
         return self._root / "posts" / post.id
 
     def file(self, post: FarmPost, name: str) -> Path:
-        path = (self.folder(post) / name).resolve()
-        if path.parent != self.folder(post).resolve():
+        folder = self.folder(post).resolve()
+        path = (folder / name).resolve()
+        if folder not in path.parents:
             raise FarmError("No such file.")
         return path
 
@@ -241,6 +324,10 @@ class ContentFarm:
             lambda: shutil.rmtree(folder, ignore_errors=True)
         )
         return await self._store.delete(FarmPost, post.id)
+
+    def stop(self, post_id: str) -> None:
+        """Stop a video being made; what was written and voiced is kept."""
+        self._stopped.add(post_id)
 
     async def mark_posted(self, post_id: str, posted: bool = True) -> FarmPost:
         post = await self.post(post_id)
@@ -262,7 +349,7 @@ class ContentFarm:
                 update["title"] = title
         data = dict(post.data)
         if "caption" in fields:
-            data["caption_full"] = str(fields.get("caption") or "")[:2_200]
+            data["caption_full"] = str(fields.get("caption") or "")[:5_000]
             update["data"] = data
         if "scheduled_at" in fields:
             update["scheduled_at"] = max(0, whole(fields.get("scheduled_at"), 0))
@@ -282,7 +369,8 @@ class ContentFarm:
                 await self.delete_post(extra.id)
 
     async def recover(self) -> None:
-        """Videos left half made when the app closed are marked failed."""
+        """Videos left half made when the app closed are marked failed (what
+        was written and voiced is kept: Make carries on from there)."""
         if self._recovered:
             return
         self._recovered = True
@@ -292,7 +380,7 @@ class ContentFarm:
             await self._update(
                 post,
                 status="failed",
-                error="The app closed while this was being made. Press Make again.",
+                error="The app closed while this was being made. Press Make to carry on.",
                 stage="",
             )
 
@@ -309,7 +397,11 @@ class ContentFarm:
         """New ideas on the board, written by the farm's writer."""
         count = max(1, min(MAX_IDEAS, count))
         trends = ""
-        if channel.style in _RESEARCHED or channel.style == "news":
+        if channel.fandom:
+            trends = await self.fandom.lore(
+                channel.fandom, topic or channel.fandom, link=channel.wiki, chars=2_000
+            )
+        elif channel.style in _RESEARCHED:
             trends = await self._research(
                 f"{topic or channel.niche} {datetime.now():%B %Y}"
             )
@@ -322,6 +414,7 @@ class ContentFarm:
             count=count,
             notes=channel.notes,
             trends=trends,
+            fandom=channel.fandom,
         )
         reply = await self._think(formats.IDEAS_SYSTEM, prompt)
         titles = formats.parse_ideas(reply, count=count)
@@ -351,27 +444,34 @@ class ContentFarm:
         self,
         post_id: str,
         *,
+        rewrite: bool = False,
         on_change: Callable[[FarmPost], Awaitable[None]] | None = None,
     ) -> FarmPost:
-        """Write, voice, picture, and render one video. Slow: run it in the
-        background; the post's stage and progress show how far it is."""
+        """Write (unless the scenes are kept), voice, picture, and render one
+        video. Slow: run it in the background; the post's stage and progress
+        show how far it is. rewrite starts the script over."""
         post = await self.post(post_id)
         if post.status == "making":
             raise FarmError("That video is already being made.")
         channel = await self.channel(post.channel_id)
+        data = dict(post.data)
+        if rewrite:
+            for key in ("scenes", "script", "long", "edited"):
+                data.pop(key, None)
         post = await self._update(
             post,
             status="making",
             stage="Waiting for the video before it",
             progress=0,
             error="",
+            data=data,
         )
         self._stopped.discard(post.id)
         async with self._line:
             try:
                 post = await self._make(post, channel)
             except FarmError as error:
-                if post.id in self._stopped:
+                if not await self._store.get(FarmPost, post.id):
                     return post
                 post = await self._update(
                     post, status="failed", stage="", error=str(error)
@@ -390,7 +490,7 @@ class ContentFarm:
 
     def _check(self, post: FarmPost) -> None:
         if post.id in self._stopped:
-            raise FarmError("Stopped.")
+            raise FarmError("Stopped. What was written and voiced is kept.")
 
     async def _stage(self, post: FarmPost, stage: str, progress: int) -> FarmPost:
         self._check(post)
@@ -400,61 +500,407 @@ class ContentFarm:
         ready, why = video_tools()
         if not ready:
             raise FarmError(f"Videos can't be made on this PC yet: {why}")
-        post = await self._stage(post, "Writing the script", 5)
-        script = await self.write(channel, post.title)
-        data: JsonObject = {**post.data, "script": script.to_json()}
-        post = await self._update(post, data=data)
-        post = await self._stage(post, "Recording the voiceover", 25)
-        clips = await self._voice(channel, script, post)
-        post = await self._stage(post, "Finding pictures", 45)
-        pictures = await self._pictures(channel, script, post)
-        post = await self._stage(post, "Rendering the video", 60)
+        long = is_long(channel)
+        data = dict(post.data)
+        if not _scenes(data):
+            data = (
+                await self._write_long(post, channel, data)
+                if long
+                else await self._write_short(post, channel, data)
+            )
+            post = await self._update(post, data=data)
+        scenes = _scenes(data)
+        if not scenes:
+            raise FarmError("The script has no scenes.")
         folder = self.folder(post)
         await anyio.to_thread.run_sync(
             lambda: folder.mkdir(parents=True, exist_ok=True)
         )
+        post = await self._stage(post, "Recording the voiceover", 30 if long else 25)
+        voices, lengths = await self._voice(post, channel, scenes, long)
+        post = await self._stage(post, "Finding pictures and clips", 52 if long else 45)
+        scenes = await self._media(post, channel, scenes, lengths)
+        data["scenes"] = scenes
+        data.pop("edited", None)
+        post = await self._update(post, data=data)
+        post = await self._stage(post, "Rendering the video", 62)
+        plan, audio = await self._plan(post, channel, scenes, voices, lengths, long)
+        await self._render(post, plan, audio)
+        return await self._finish(post, channel, plan, data, any(voices), long)
+
+    # ---------------------------------------------------------- writing
+
+    async def write(self, channel: FarmChannel, idea: str) -> Script:
+        """A short's script, polished once by the AI when the channel says so."""
+        style = style_of(channel.style)
+        facts = ""
+        if channel.fandom and style.fandom:
+            facts = await self.fandom.lore(
+                channel.fandom, idea, link=channel.wiki, chars=3_000
+            )
+        elif channel.style in _RESEARCHED or style.fandom:
+            facts = await self._research(idea)
+        prompt = formats.script_prompt(
+            idea=idea,
+            niche=channel.niche,
+            style=channel.style,
+            platform=channel.platform,
+            seconds=channel.seconds,
+            call_to_action=channel.call_to_action,
+            notes=channel.notes,
+            facts=facts,
+            fandom=channel.fandom,
+        )
+        reply = await self._think(formats.WRITER_SYSTEM, prompt)
+        script = formats.parse_script(
+            reply, idea=idea, seconds=channel.seconds, channel_tags=channel.hashtags
+        )
+        if not script.scenes:
+            raise FarmError("The writer's script was empty; try again.")
+        if channel.ai_polish:
+            draft = script.to_json()
+            # The hook is the first scene; sent twice, an old one would come back.
+            draft.pop("hook", None)
+            polished = formats.parse_script(
+                await self._think(
+                    formats.POLISH_SYSTEM, json.dumps(draft, ensure_ascii=False)
+                ),
+                idea=idea,
+                seconds=channel.seconds,
+                channel_tags=channel.hashtags,
+            )
+            # A polish that lost half the script is worse than none.
+            if len(polished.scenes) >= max(2, len(script.scenes) // 2) and (
+                polished.words >= script.words * 0.6
+            ):
+                script = polished
+        return script
+
+    async def _write_short(
+        self, post: FarmPost, channel: FarmChannel, data: JsonObject
+    ) -> JsonObject:
+        await self._stage(post, "Writing the script", 5)
+        script = await self.write(channel, post.title)
+        return {
+            **data,
+            "kind": "short",
+            "script": script.to_json(),
+            "scenes": [scene.to_json() for scene in script.scenes],
+        }
+
+    async def _write_long(
+        self, post: FarmPost, channel: FarmChannel, data: JsonObject
+    ) -> JsonObject:
+        """Outline, then chapter by chapter, kept as it goes."""
+        show = channel.fandom or channel.niche
+        state = data.get("long") if isinstance(data.get("long"), dict) else {}
+        assert isinstance(state, dict)
+        chapters = (
+            state.get("chapters") if isinstance(state.get("chapters"), list) else []
+        )
+        texts = state.get("texts") if isinstance(state.get("texts"), list) else []
+        assert isinstance(chapters, list) and isinstance(texts, list)
+        count = longform.chapter_count(channel.minutes)
+        if not chapters:
+            await self._stage(post, "Planning the chapters", 2)
+            lore = await self._lore(channel, post.title, chars=3_000)
+            reply = await self._think(
+                longform.OUTLINE_SYSTEM,
+                longform.outline_prompt(
+                    title=post.title,
+                    show=show,
+                    style=channel.style,
+                    minutes=channel.minutes,
+                    notes=channel.notes,
+                    lore=lore,
+                ),
+            )
+            title, found = longform.parse_outline(reply, count=count, title=post.title)
+            if len(found) < 3:
+                raise FarmError("The writer's chapter plan was too short; try again.")
+            chapters = list(found)
+            state = {"title": title, "chapters": chapters, "texts": []}
+            texts = []
+            data = {**data, "kind": "long", "long": state}
+            post = await self._update(post, data=data)
+        words = longform.chapter_words(channel.minutes) * count // max(1, len(chapters))
+        for number in range(len(texts), len(chapters)):
+            chapter = chapters[number]
+            assert isinstance(chapter, dict)
+            post = await self._stage(
+                post,
+                f"Writing chapter {number + 1} of {len(chapters)}",
+                2 + int(26 * number / len(chapters)),
+            )
+            lore = await self._lore(channel, f"{chapter.get('topic')}", chars=4_000)
+            prompt = longform.chapter_prompt(
+                title=str(state.get("title") or post.title),
+                show=show,
+                style=channel.style,
+                chapter=chapter,
+                number=number + 1,
+                total=len(chapters),
+                words=words,
+                lore=lore,
+                before=longform.summary(str(texts[-1])) if texts else "",
+                notes=channel.notes,
+            )
+            text = longform.clean_narration(
+                await self._think(longform.CHAPTER_SYSTEM, prompt)
+            )
+            if len(text.split()) < words // 2 and text:
+                more = longform.clean_narration(
+                    await self._think(
+                        longform.CHAPTER_SYSTEM,
+                        f"{prompt}\n\nIt so far:\n{text[-1_500:]}\n\nCarry on from "
+                        "there, about the same length again, without repeating it.",
+                    )
+                )
+                text = f"{text} {more}".strip()
+            if not text:
+                raise FarmError(f"The writer sent nothing for chapter {number + 1}.")
+            texts.append(text)
+            state = {**state, "texts": texts}
+            data = {**data, "long": state}
+            post = await self._update(post, data=data)
+        scenes: list[JsonObject] = []
+        for number, text in enumerate(texts):
+            scenes += longform.scenes_from(str(text), chapter=number)
+        tags = list(formats.clean_hashtags([], channel.hashtags))
+        return {
+            **data,
+            "kind": "long",
+            "script": {
+                "title": str(state.get("title") or post.title),
+                "hook": "",
+                "caption": "",
+                "hashtags": tags,
+            },
+            "scenes": scenes,
+        }
+
+    async def _lore(self, channel: FarmChannel, topic: str, *, chars: int) -> str:
+        if channel.fandom:
+            return await self.fandom.lore(
+                channel.fandom, topic, link=channel.wiki, chars=chars
+            )
+        return await self._research(f"{channel.niche} {topic}")
+
+    # ---------------------------------------------------------- voice
+
+    async def _voice(
+        self, post: FarmPost, channel: FarmChannel, scenes: list[JsonObject], long: bool
+    ) -> tuple[list[Path | None], list[float]]:
+        """Each scene's voice clip (kept by its words, so edits re-record only
+        what changed) and how long each scene lasts."""
+        speed = LONG_SPEED if long else SHORT_SPEED
+        folder = self.folder(post) / "voice"
+        voices: list[Path | None] = []
+        lengths: list[float] = []
+        silent = channel.voice == "none"
+        for number, scene in enumerate(scenes):
+            if number % 10 == 0:
+                post = await self._stage(
+                    post,
+                    f"Recording the voiceover ({number + 1} of {len(scenes)})",
+                    (30 if long else 25) + int(22 * number / len(scenes)),
+                )
+            say = str(scene.get("say") or "")
+            clip = folder / f"{_voice_key(channel.voice, speed, say)}.wav"
+            if not silent and not clip.is_file():
+                spoken = await self._speak(say, channel.voice, speed)
+                if spoken is None:
+                    silent = True
+                else:
+                    folder.mkdir(parents=True, exist_ok=True)
+                    await anyio.Path(clip).write_bytes(spoken)
+            if not silent and clip.is_file():
+                voices.append(clip)
+                lengths.append(wav_length(clip.read_bytes()))
+            else:
+                voices.append(None)
+                lengths.append(reading_time(say) * (1.25 if long else 1.0))
+        if silent:
+            # No voice on this PC: the whole video goes captions-only.
+            lengths = [
+                reading_time(str(s.get("say") or "")) * (1.25 if long else 1.0)
+                for s in scenes
+            ]
+            voices = [None] * len(scenes)
+        return voices, lengths
+
+    # ---------------------------------------------------------- media
+
+    def picker(self, post: FarmPost, channel: FarmChannel) -> MediaPicker:
+        long = is_long(channel)
+        return MediaPicker(
+            library=self.library,
+            fandom=self.fandom,
+            visuals=self._visuals(),
+            folder=self.folder(post),
+            show=channel.fandom,
+            niche=channel.niche,
+            wiki=channel.wiki,
+            mode=channel.visuals,
+            allow_ai=channel.ai_media,
+            prefer_clips=long,
+            pexels_key=self._pexels_key(),
+            transport=self._transport,
+        )
+
+    async def _media(
+        self,
+        post: FarmPost,
+        channel: FarmChannel,
+        scenes: list[JsonObject],
+        lengths: list[float],
+    ) -> list[JsonObject]:
+        picker = self.picker(post, channel)
+        long = is_long(channel)
+        chapters = [
+            str(chapter.get("topic") or chapter.get("title") or "")
+            for chapter in _chapter_list(post.data)
+        ]
+        for scene in scenes:
+            media = scene.get("media")
+            if isinstance(media, dict):
+                for key in ("asset", "url"):
+                    if media.get(key):
+                        picker.used.add(str(media[key]))
+        for number, scene in enumerate(scenes):
+            if isinstance(scene.get("media"), dict) and scene["media"]:
+                continue
+            if number % 5 == 0:
+                post = await self._stage(
+                    post,
+                    f"Finding pictures and clips ({number + 1} of {len(scenes)})",
+                    (52 if long else 45) + int(10 * number / len(scenes)),
+                )
+            chapter = whole(scene.get("chapter"), -1)
+            topic = chapters[chapter] if 0 <= chapter < len(chapters) else post.title
+            scene["media"] = await picker.pick(
+                scene, topic=topic, length=lengths[number]
+            )
+        return scenes
+
+    def media_path(self, post: FarmPost, media: JsonObject) -> Path | None:
+        """Where a scene's picture or clip is on this PC."""
+        if media.get("file"):
+            try:
+                return self.file(post, str(media["file"]))
+            except FarmError:
+                return None
+        return None
+
+    async def _asset_path(self, asset_id: str) -> Path | None:
+        try:
+            return self.library.path(await self.library.asset(asset_id))
+        except ValueError:
+            return None
+
+    # ---------------------------------------------------------- render
+
+    async def _plan(
+        self,
+        post: FarmPost,
+        channel: FarmChannel,
+        scenes: list[JsonObject],
+        voices: list[Path | None],
+        lengths: list[float],
+        long: bool,
+    ) -> tuple[Plan, Path]:
+        gap = LONG_GAP if long else GAP
         shots: list[Shot] = []
         words: tuple = ()
+        chapter_starts: list[tuple[float, str]] = []
+        titles = _chapter_titles(post.data)
+        seen_chapters: set[int] = set()
         at = 0.0
-        audio: list[bytes] = []
-        for number, scene in enumerate(script.scenes):
-            clip = clips[number]
-            length = wav_length(clip) if clip else reading_time(scene.say)
-            picture = pictures[number]
-            image = None
-            if picture is not None:
-                image = folder / f"scene{number + 1}{picture.ext}"
-                await anyio.Path(image).write_bytes(picture.data)
-            shots.append(
-                Shot(image, at, length + GAP, label=scene.text, show=scene.show)
+        for number, scene in enumerate(scenes):
+            length = lengths[number]
+            media = scene.get("media") if isinstance(scene.get("media"), dict) else {}
+            assert isinstance(media, dict)
+            path = self.media_path(post, media)
+            if path is None and media.get("asset"):
+                path = await self._asset_path(str(media["asset"]))
+            kind = str(media.get("type") or "card")
+            clip = (
+                path if kind == "clip" and path is not None and path.is_file() else None
             )
-            words += spread_words(scene.say, at, length)
-            audio.append(clip or silent_wav(length))
-            at += length + GAP
-        voice = folder / "voice.wav"
-        try:
-            joined = join_wavs(audio, [GAP] * len(audio))
-        except ValueError:
-            joined = silent_wav(at)
-        await anyio.Path(voice).write_bytes(joined)
+            image = path if kind == "image" and path is not None else None
+            shots.append(
+                Shot(
+                    image,
+                    at,
+                    length + gap,
+                    label=str(scene.get("text") or ""),
+                    show=str(scene.get("show") or ""),
+                    clip=clip,
+                    clip_start=_seconds(media.get("start")),
+                )
+            )
+            chapter = whole(scene.get("chapter"), -1)
+            if long and chapter >= 0 and chapter not in seen_chapters:
+                seen_chapters.add(chapter)
+                title = (
+                    titles[chapter]
+                    if chapter < len(titles)
+                    else f"Chapter {chapter + 1}"
+                )
+                chapter_starts.append((at, title))
+            words += spread_words(str(scene.get("say") or ""), at, length)
+            at += length + gap
+        folder = self.folder(post)
+        audio = folder / "voice.wav"
+        await anyio.to_thread.run_sync(
+            lambda: write_joined(voices, lengths, gap, audio)
+        )
+        background = None
+        if channel.background and not long:
+            background = await self._asset_path(channel.background)
+        size = self._video_size()
+        script = (
+            post.data.get("script") if isinstance(post.data.get("script"), dict) else {}
+        )
+        assert isinstance(script, dict)
+        first = scenes[0]
+        hook = (
+            ""
+            if long
+            else str(first.get("text") or _hook_banner(str(first.get("say") or "")))
+        )
         plan = Plan(
             shots=tuple(shots),
             chunks=chunks(words),
-            hook=script.scenes[0].text or _hook_banner(script),
+            hook=hook,
             duration=at,
             look=channel.look,
-            size=self._video_size(),
+            size=f"{size}-wide" if long else size,
             handle=channel.name,
             seed=sum(map(ord, post.id)) % 97,
             music=self._music(),
+            fps=24 if long else 30,
+            captions=channel.captions,
+            fade=1.2 if long else 0.22,
+            progress_bar=not long,
+            background=background,
+            dim=0.18 if long else 0.0,
+            chapters=tuple(
+                (start, f"Chapter {n + 1}: {title}")
+                for n, (start, title) in enumerate(chapter_starts)
+            ),
         )
+        return plan, audio
+
+    async def _render(self, post: FarmPost, plan: Plan, audio: Path) -> None:
         loop = asyncio.get_running_loop()
-        last = [60]
+        last = [62]
         reports: list[concurrent.futures.Future[FarmPost]] = []
+        folder = self.folder(post)
 
         def report(share: float) -> None:
-            value = 60 + int(share * 38)
-            if value >= last[0] + 4:
+            value = 62 + int(share * 36)
+            if value >= last[0] + 2:
                 last[0] = value
                 reports.append(
                     asyncio.run_coroutine_threadsafe(
@@ -467,10 +913,11 @@ class ContentFarm:
             await anyio.to_thread.run_sync(
                 lambda: render(
                     plan,
-                    audio=voice,
+                    audio=audio,
                     out=folder / "video.mp4",
                     cover=folder / "cover.jpg",
                     progress=report,
+                    stopped=lambda: post.id in self._stopped,
                 )
             )
         except RenderError as error:
@@ -481,21 +928,69 @@ class ContentFarm:
                 with contextlib.suppress(Exception):
                     await asyncio.wrap_future(sent)
         self._check(post)
+
+    async def _finish(
+        self,
+        post: FarmPost,
+        channel: FarmChannel,
+        plan: Plan,
+        data: JsonObject,
+        voiced: bool,
+        long: bool,
+    ) -> FarmPost:
+        folder = self.folder(post)
         taken = [
             other.scheduled_at
             for other in await self.posts(channel.id)
             if other.scheduled_at and other.id != post.id
         ]
-        credits = sorted({p.credit for p in pictures if p is not None and p.credit})
+        scenes = _scenes(data)
+        credits = sorted(
+            {
+                str(media.get("credit"))
+                for media in (scene.get("media") for scene in scenes)
+                if isinstance(media, dict) and media.get("credit")
+            }
+        )
+        raw_script = data.get("script") if isinstance(data.get("script"), dict) else {}
+        assert isinstance(raw_script, dict)
+        script = formats.script_from_json({**raw_script, "scenes": scenes})
+        if long:
+            title = script.title or post.title
+            chapters = [
+                (start, heading.split(": ", 1)[-1]) for start, heading in plan.chapters
+            ]
+            tags = list(script.hashtags) or ["#sleep", "#lore"]
+            caption = longform.youtube_description(
+                title=title,
+                show=channel.fandom or channel.niche,
+                chapters=chapters,
+                tags=tags,
+            )
+            made = await anyio.to_thread.run_sync(
+                lambda: thumbnail(folder / "cover.jpg", title, folder / "thumb.jpg")
+            )
+            extra: JsonObject = {
+                "chapters": [{"start": round(s, 1), "title": t} for s, t in chapters],
+                "thumb": "thumb.jpg" if made else "",
+                "yt_title": title,
+            }
+        else:
+            caption = formats.full_caption(
+                script, channel.call_to_action, channel.platform
+            )
+            extra = {"yt_title": script.title or post.title}
+        if credits:
+            caption += "\n\nCredits: " + "; ".join(credits[:40])
         data = {
             **data,
+            **extra,
             "video": "video.mp4",
             "cover": "cover.jpg",
-            "duration": round(at, 1),
-            "voiced": any(clips),
+            "duration": round(plan.duration, 1),
+            "voiced": voiced,
             "credits": credits,
-            "caption_full": formats.full_caption(script, channel.call_to_action)
-            + (f"\n\n{'; '.join(credits)}" if credits else ""),
+            "caption_full": caption,
         }
         return await self._update(
             post,
@@ -503,64 +998,128 @@ class ContentFarm:
             stage="",
             progress=100,
             data=data,
-            scheduled_at=next_slot(channel, taken),
+            scheduled_at=post.scheduled_at or next_slot(channel, taken),
         )
 
-    async def write(self, channel: FarmChannel, idea: str) -> Script:
-        facts = ""
-        if channel.style in _RESEARCHED:
-            facts = await self._research(idea)
-        prompt = formats.script_prompt(
-            idea=idea,
-            niche=channel.niche,
-            style=channel.style,
-            platform=channel.platform,
-            seconds=channel.seconds,
-            call_to_action=channel.call_to_action,
-            notes=channel.notes,
-            facts=facts,
-        )
-        reply = await self._think(formats.WRITER_SYSTEM, prompt)
-        script = formats.parse_script(
-            reply, idea=idea, seconds=channel.seconds, channel_tags=channel.hashtags
-        )
-        if not script.scenes:
-            raise FarmError("The writer's script was empty; try again.")
-        return script
+    # ------------------------------------------------------------ editing
 
-    async def _voice(
-        self, channel: FarmChannel, script: Script, post: FarmPost
-    ) -> list[bytes | None]:
-        if channel.voice == "none":
-            return [None] * len(script.scenes)
-        clips: list[bytes | None] = []
-        for scene in script.scenes:
-            self._check(post)
-            clips.append(await self._speak(scene.say, channel.voice))
-            if clips[-1] is None:
-                # No voice on this PC: the whole video goes captions-only.
-                return [None] * len(script.scenes)
-        return clips
+    async def edit_scenes(self, post_id: str, scenes: list[JsonObject]) -> FarmPost:
+        """The user's own edit: new lines, words on screen, order, pictures."""
+        post = await self.post(post_id)
+        if post.status == "making":
+            raise FarmError("Wait until it is made, or stop it, before editing.")
+        old = {
+            json.dumps(s.get("media"), sort_keys=True): s.get("media")
+            for s in _scenes(post.data)
+        }
+        cleaned: list[JsonObject] = []
+        for scene in scenes[:2_000]:
+            say = " ".join(str(scene.get("say") or "").split())[:1_500]
+            if not say:
+                continue
+            media = scene.get("media")
+            if isinstance(media, dict):
+                media = {k: v for k, v in media.items() if k != "preview"}
+            key = json.dumps(media, sort_keys=True)
+            item: JsonObject = {
+                "say": say,
+                "show": _text(scene.get("show"), 120),
+                "text": _text(scene.get("text"), 40),
+                # Only media the farm itself chose or saved may be kept.
+                "media": old.get(key) if isinstance(media, dict) else None,
+            }
+            if "chapter" in scene:
+                item["chapter"] = whole(scene.get("chapter"), 0)
+            cleaned.append(item)
+        if not cleaned:
+            raise FarmError("A video needs at least one scene with words.")
+        data = {**post.data, "scenes": cleaned, "edited": True}
+        return await self._update(post, data=data)
 
-    async def _pictures(
-        self, channel: FarmChannel, script: Script, post: FarmPost
-    ) -> list[Picture | None]:
-        if channel.visuals == "text":
-            return [None] * len(script.scenes)
-        visuals = self._visuals()
-        used: set[str] = set()
-        found: list[Picture | None] = []
-        for number, scene in enumerate(script.scenes):
-            self._check(post)
-            found.append(
-                await visuals.picture(
-                    scene.show, mode=channel.visuals, used=used, style=channel.niche
-                )
+    async def set_scene_media(
+        self, post_id: str, index: int, choice: JsonObject
+    ) -> FarmPost:
+        """Put a library clip or picture, or a picture from the web, in a scene."""
+        post = await self.post(post_id)
+        scenes = _scenes(post.data)
+        if not 0 <= index < len(scenes):
+            raise FarmError("There's no such scene.")
+        channel = await self.channel(post.channel_id)
+        picker = self.picker(post, channel)
+        if choice.get("asset_id"):
+            asset = await self.library.asset(str(choice["asset_id"]))
+            media = picker.from_asset(asset, length=8.0)
+        elif choice.get("url"):
+            saved = await picker.save_url(str(choice["url"]))
+            if saved is None:
+                raise FarmError("That picture couldn't be downloaded.")
+            media: JsonObject | None = {
+                "type": "image",
+                "file": saved,
+                "url": str(choice["url"]),
+                "source": str(choice.get("source") or "web")[:20],
+                "title": _text(choice.get("title"), 120),
+                "credit": _text(choice.get("credit"), 200),
+            }
+        elif choice.get("auto"):
+            media = None
+        else:
+            raise FarmError("Choose a clip or picture.")
+        if isinstance(media, dict):
+            media["locked"] = True
+        scenes[index]["media"] = media
+        data = {**post.data, "scenes": scenes, "edited": True}
+        return await self._update(post, data=data)
+
+    async def ai_edit(
+        self, post_id: str, instruction: str, *, chapter: int | None = None
+    ) -> FarmPost:
+        """Ask the AI to change the script ('make the hook scarier', 'cut the
+        third scene'); scenes it keeps keep their pictures."""
+        post = await self.post(post_id)
+        if post.status == "making":
+            raise FarmError("Wait until it is made, or stop it, before editing.")
+        instruction = _text(instruction, 600)
+        if not instruction:
+            raise FarmError("Say what to change.")
+        scenes = _scenes(post.data)
+        if not scenes:
+            raise FarmError("Make the video first; then the AI can edit it.")
+        if chapter is None and len(scenes) > MAX_EDIT_SCENES:
+            raise FarmError("This video is long: pick a chapter for the AI to edit.")
+        picked = [
+            n
+            for n, scene in enumerate(scenes)
+            if chapter is None or whole(scene.get("chapter"), -1) == chapter
+        ]
+        if not picked:
+            raise FarmError("There's no such chapter.")
+        before = [scenes[n] for n in picked]
+        changed = formats.parse_edit(
+            await self._think(
+                formats.EDIT_SYSTEM, formats.edit_prompt(before, instruction)
             )
-            await self._update(
-                post, progress=45 + int(15 * (number + 1) / len(script.scenes))
+        )
+        if not changed:
+            raise FarmError(
+                "The AI didn't send back an edit; try saying it another way."
             )
-        return found
+        kept = {
+            (str(scene.get("show")), str(scene.get("say"))[:40]): scene.get("media")
+            for scene in before
+        }
+        by_show = {str(scene.get("show")): scene.get("media") for scene in before}
+        for scene in changed:
+            media = kept.get(
+                (str(scene["show"]), str(scene["say"])[:40])
+            ) or by_show.get(str(scene["show"]))
+            scene["media"] = media
+            if chapter is not None:
+                scene["chapter"] = chapter
+        start, end = picked[0], picked[-1] + 1
+        scenes = scenes[:start] + changed + scenes[end:]
+        data = {**post.data, "scenes": scenes, "edited": True}
+        return await self._update(post, data=data)
 
     # ------------------------------------------------------------ the queue
 
@@ -587,36 +1146,95 @@ class ContentFarm:
             row = counts.setdefault(post.channel_id, {})
             row[post.status] = row.get(post.status, 0) + 1
         ready, why = video_tools()
+        assets = await self.library.assets()
         return {
             "channels": [channel_view(c, counts.get(c.id)) for c in channels],
             "posts": [self.view(post) for post in posts[:200]],
             "styles": [
-                {"key": s.key, "label": s.label, "pitch": s.pitch, "example": s.example}
+                {
+                    "key": s.key,
+                    "label": s.label,
+                    "pitch": s.pitch,
+                    "example": s.example,
+                    "long": s.long,
+                    "fandom": s.fandom,
+                }
                 for s in formats.STYLES
             ],
             "platforms": formats.PLATFORMS,
             "looks": list(formats.LOOKS),
+            "visuals": list(formats.VISUALS),
+            "library": {
+                "count": len(assets),
+                "backgrounds": [
+                    {"id": a.id, "name": a.name}
+                    for a in assets
+                    if a.kind == "video" and a.background
+                ],
+            },
             "tools": {
                 "video": ready,
                 "why": why,
                 "image_maker": self._visuals().can_make,
+                "pexels": bool(self._pexels_key()),
             },
             "busy": self._line.locked(),
         }
 
     def view(self, post: FarmPost) -> JsonObject:
+        """A post for the page; long scene lists stay out of the overview."""
         view: JsonObject = post.model_dump()
+        data = dict(post.data)
+        scenes = _scenes(data)
+        data.pop("scenes", None)
+        data.pop("long", None)
+        view["data"] = data
+        view["scene_count"] = len(scenes)
+        view["kind"] = str(data.get("kind") or "short")
         base = f"/studio/api/farm/posts/{post.id}/files/"
-        data = post.data
         if post.status in DONE and data.get("video"):
             view["video_url"] = base + str(data["video"])
             view["cover_url"] = base + str(data.get("cover") or "cover.jpg")
+            if data.get("thumb"):
+                view["thumb_url"] = base + str(data["thumb"])
+        return view
+
+    def editor_view(self, post: FarmPost) -> JsonObject:
+        """A post with every scene and a preview address for its media."""
+        view = self.view(post)
+        base = f"/studio/api/farm/posts/{post.id}/files/"
+        scenes = _scenes(post.data)
+        for scene in scenes:
+            media = scene.get("media")
+            if isinstance(media, dict):
+                if media.get("file") and media.get("type") == "image":
+                    media["preview"] = base + str(media["file"])
+                elif media.get("asset"):
+                    media["preview"] = f"/studio/api/farm/media/{media['asset']}/thumb"
+        view["scenes"] = scenes
+        view["chapters"] = [
+            str(chapter.get("title")) for chapter in _chapter_list(post.data)
+        ]
         return view
 
 
-def _hook_banner(script: Script) -> str:
+def _chapter_list(data: JsonObject) -> list[JsonObject]:
+    state = data.get("long")
+    chapters = state.get("chapters") if isinstance(state, dict) else None
+    return (
+        [c for c in chapters if isinstance(c, dict)]
+        if isinstance(chapters, list)
+        else []
+    )
+
+
+def _chapter_titles(data: JsonObject) -> list[str]:
+    return [str(chapter.get("title") or "") for chapter in _chapter_list(data)]
+
+
+def _hook_banner(hook: str) -> str:
     """Up to six words of the hook for the big banner at the start."""
-    words = script.hook.split()
+    words = hook.split()
     short = " ".join(words[:6])
     return short if len(words) <= 6 else short.rstrip(",.;:") + "…"
 

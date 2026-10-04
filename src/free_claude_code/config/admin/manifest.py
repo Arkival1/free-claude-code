@@ -719,6 +719,17 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_FARM_PEXELS_KEY",
+        "Content Farm Pexels Key",
+        "studio",
+        "secret",
+        settings_attr="studio_farm_pexels_key",
+        description=(
+            "A free Pexels API key (pexels.com/api) lets long videos use real "
+            "stock clips when your library and the fandom wiki run out."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_FARM_MUSIC",
         "Content Farm Background Music",
         "studio",

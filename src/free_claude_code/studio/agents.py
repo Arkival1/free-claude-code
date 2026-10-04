@@ -298,6 +298,10 @@ def _farm_call_for(goal: str) -> ToolCall | None:
     }
     if job.channel:
         arguments["channel"] = job.channel
+    if job.long:
+        arguments["long"] = True
+        if job.minutes:
+            arguments["minutes"] = job.minutes
     return ToolCall(id="studio-farm", name="farm", arguments=arguments)
 
 

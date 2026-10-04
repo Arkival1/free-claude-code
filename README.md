@@ -861,33 +861,58 @@ one himself with the `code_and_test` tool. Lab jobs from the main chat
 the lab tool and reports back; if its model only talks, Studio runs the make
 or mix for it. In the Lab's own chat, Studio still does it at once.
 
-**Content Farm.** The **Farm** tab makes faceless short videos for Instagram
-Reels, TikTok, and YouTube Shorts on this PC, start to finish. A **channel** is
-one account: a niche, a style (fact list, story time, motivation, quick tips,
-AI art reel, explainer, what's new), a caption look (bold, clean, neon,
-cinema), a voice, a length (10 to 90 seconds), how many videos a day, and the
-times it posts. The farm fills the channel's idea board with the team's local
-model (looking up what's new on the web for facts and news), writes each
-script with a hook in the first line, reads it with the built-in voice, finds
-a picture for every scene, and renders a vertical 9:16 MP4 with a slow zoom on
-each picture and big captions that light up word by word. Pictures come from
-free photos (Openverse), your own Stable Diffusion
-(`STUDIO_FARM_IMAGE_URL`, e.g. `http://127.0.0.1:7860` for Automatic1111 or
-Forge, or an OpenAI-style images server), or art cards that always work
-offline. Finished videos wait in the **posting queue** at the channel's next
-free time with the caption and hashtags ready: download, post it in the app
-(add a trending sound there), and mark it posted. **Autopilot** keeps a day of
-videos ready while the app is open. The **Farm chat** on the same page takes
-*"make 3 reels about black holes"*, *"give me 5 video ideas"*, or *"start a
-channel about gym motivation"*; said in the main chat, it goes to the **Farm**
-agent (a local agent, like the Lab agent). Video size is
-`STUDIO_FARM_VIDEO_SIZE` (720p renders faster; 1080p is sharper), and
+**Content Farm.** The **Farm** tab makes faceless videos on this PC, start
+to finish: **YouTube Shorts** (and TikToks or Reels) and **two-hour videos to
+fall asleep to** that walk through a show's entire lore, a what-if, or its fan
+theories. A **channel** is one account: a show, movie, or game (or any
+niche), a style, a caption look (bold, clean, neon, cinema), a voice, a
+length, and the times it posts.
+
+- **Short styles:** story over gameplay (a gripping story told over muted
+  gameplay with big word-by-word captions), what-if, lore drop, fact list,
+  story time, motivation, quick tips, AI art reel, explainer, what's new.
+  Shorts are 9:16 and up to three minutes; the AI polishes each script once
+  more for a stronger hook (`AI polishes each short`).
+- **Long styles:** entire lore to sleep to, what-if to sleep to, theories to
+  sleep to. The writer plans chapters, then writes each one with what the
+  show's **Fandom wiki** says (found by the show's name, or paste its
+  address), in a calm voice. Every chapter is kept as it is written, so a
+  video stopped halfway carries on from there. Long videos are 16:9, slower
+  and darker, with a chapter title at each chapter, a YouTube description
+  with chapter timestamps, and a thumbnail. Two hours takes a few hours to
+  make on an older PC: leave it overnight.
+- **Pictures and clips:** each scene gets, in order, your own clips and
+  pictures from the **Media library** (matched by their names, tags, notes,
+  and show), real stills from the show's Fandom wiki, stock (Openverse photos;
+  Pexels clips with a free key in `STUDIO_FARM_PEXELS_KEY`), then pictures
+  made by your own Stable Diffusion (`STUDIO_FARM_IMAGE_URL`) or art cards.
+  Turn off **Allow AI-made pictures** and only real clips, stills, and stock
+  are used. Clips play muted under the voice.
+- **Media library:** upload clips and pictures, or link a folder on this PC
+  (nothing is copied; folder and file names become tags, so name clips for
+  what they show). Tick **Background** on gameplay to play it under a whole
+  short, then pick it as the channel's background video.
+- **Editing:** every video opens in the editor. Change any scene's line or big
+  on-screen words, reorder, add, or delete scenes, swap a scene's picture or
+  clip (your library, the wiki, or an upload), or tell the AI what to change
+  (*"make the hook scarier"*; a long video is edited a chapter at a time).
+  **Save and render** renders it again; voice clips are kept for lines you
+  didn't change, so it is quick.
+- **Posting queue:** finished videos wait at the channel's next free time
+  with the title, description, and hashtags to copy (YouTube gets #Shorts):
+  download, post it, and mark it posted. **Autopilot** keeps a day of videos
+  ready while the app is open.
+- **Farm chat** on the same page takes *"make 3 shorts about Breaking Bad
+  lore"* or *"make a 2 hour sleep video about the entire lore of Breaking
+  Bad"*; said in the main chat, it goes to the **Farm** agent, a local agent.
+
+Videos need the `studio_video` extra (Pillow and ffmpeg), which the Windows
+installer adds. Video size is `STUDIO_FARM_VIDEO_SIZE` (720p renders faster);
 `STUDIO_FARM_MUSIC` can play a music file you have the rights to under every
-video. Videos need the `studio_video` extra (Pillow and ffmpeg), which the
-Windows installer adds; on an i7-4790 a 30-second 720p video renders in about
-half a minute. Posting stays with you: the platforms only allow it from their
-own apps or business APIs, and copied clips or made-up facts get accounts
-banned.
+video. Show clips and stills are other people's work: use short pieces with
+your own narration, and the farm credits the wiki in the description.
+Posting stays with you: the platforms only allow it from their own apps or
+business APIs.
 
 **Local agents direct server agents.** With **Local Agents Direct Server
 Agents** (`STUDIO_LOCAL_CONTROL`, on by default), every agent thinking on this

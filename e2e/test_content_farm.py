@@ -54,4 +54,37 @@ def test_the_farm_is_in_the_tab_bar(page: Page, admin_base_url: str) -> None:
     page.goto(f"{admin_base_url}/studio#agents")
     page.locator(".tab[data-route='farm']").click()
     expect(page.locator(".farm-hero h1")).to_have_text("Content Farm")
-    expect(page.locator(".farm-modes .lab-mode")).to_have_count(4)
+    expect(page.locator(".farm-modes .lab-mode")).to_have_count(5)
+
+
+def test_pictures_go_in_the_media_library_and_long_styles_are_offered(
+    page: Page, admin_base_url: str, tmp_path
+) -> None:
+    open_farm(page, admin_base_url)
+    page.locator(".farm-modes .lab-mode[data-mode='library']").click()
+    expect(page.get_by_role("heading", name="Media library")).to_be_visible()
+    picture = tmp_path / "walt teaching chemistry.png"
+    picture.write_bytes(
+        bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+            "890000000d49444154789c6360f8cfc0f01f0005000201e2bd1d5c0000000049"
+            "454e44ae426082"
+        )
+    )
+    page.get_by_label("Show for new files").fill("Breaking Bad")
+    page.get_by_label("Add clips and pictures").set_input_files(str(picture))
+    asset = page.locator(".farm-asset", has_text="walt teaching chemistry")
+    expect(asset).to_be_visible()
+    expect(asset).to_contain_text("Breaking Bad")
+    page.once("dialog", lambda dialog: dialog.accept())
+    asset.get_by_role("button", name="Remove walt teaching chemistry").click()
+    expect(asset).to_have_count(0)
+
+    page.locator(".farm-channel.add").click()
+    expect(
+        page.get_by_role("heading", name="Long videos to fall asleep to (16:9, hours)")
+    ).to_be_visible()
+    page.locator(".farm-style", has_text="Entire lore to sleep to").click()
+    expect(page.get_by_label("Length in minutes")).to_be_visible()
+    expect(page.get_by_label("Length in seconds")).to_be_hidden()
+    expect(page.get_by_label("Allow AI-made pictures")).to_be_checked()

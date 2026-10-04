@@ -17,6 +17,7 @@ from .models import (
     Course,
     EngineModelSettings,
     ExamQuestion,
+    FarmAsset,
     FarmChannel,
     FarmPost,
     LabChemical,
@@ -93,6 +94,7 @@ TABLES: Mapping[type[Record], str] = {
     LabChemical: "studio_lab_chemicals",
     FarmChannel: "studio_farm_channels",
     FarmPost: "studio_farm_posts",
+    FarmAsset: "studio_farm_assets",
     StudioFlag: "studio_flags",
 }
 

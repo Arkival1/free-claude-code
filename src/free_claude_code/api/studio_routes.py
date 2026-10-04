@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Literal, cast
 from urllib.parse import urlsplit
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import (
     FileResponse,
@@ -30,6 +31,14 @@ from free_claude_code.studio import StudioError, StudioNotFoundError, StudioServ
 from free_claude_code.studio.downloads import DownloadError
 from free_claude_code.studio.extensions import Extension
 from free_claude_code.studio.farm.farm import FarmError
+from free_claude_code.studio.farm.library import (
+    MAX_UPLOAD as MAX_LIBRARY_UPLOAD,
+)
+from free_claude_code.studio.farm.library import (
+    LibraryError,
+    asset_view,
+    kind_of,
+)
 from free_claude_code.studio.file_text import MAX_UPLOAD, read_file_text
 from free_claude_code.studio.lab.sim import LabError
 from free_claude_code.studio.llm import ChatMessage
@@ -2915,15 +2924,256 @@ async def farm_fill(
 
 @router.post("/studio/api/farm/posts/{post_id}/make", status_code=202)
 async def farm_make(
-    post_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+    post_id: str,
+    rewrite: bool = False,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
 ) -> JsonObject:
+    """Make a video; with rewrite, from a new script. Without it, a video
+    with scenes is rendered again with its edits."""
     try:
         post = await studio.farm.post(post_id)
     except FarmError as error:
         raise _farm_failed(error) from error
     if post.status == "making":
         raise HTTPException(status_code=409, detail="That video is already being made.")
-    return {"started": await studio.farm_make([post.id])}
+    return {"started": await studio.farm_make([post.id], rewrite=rewrite)}
+
+
+@router.post("/studio/api/farm/posts/{post_id}/stop")
+async def farm_stop(
+    post_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Stop a video being made; what was written and voiced is kept."""
+    studio.farm.stop(post_id)
+    return {"stopping": True}
+
+
+class FarmScenesPayload(BaseModel):
+    scenes: list[dict[str, object]] = Field(max_length=2_000)
+
+
+class FarmSceneMediaPayload(BaseModel):
+    asset_id: str = Field(default="", max_length=40)
+    url: str = Field(default="", max_length=2_000)
+    source: str = Field(default="", max_length=20)
+    title: str = Field(default="", max_length=200)
+    credit: str = Field(default="", max_length=300)
+    auto: bool = False
+
+
+class FarmAiEditPayload(BaseModel):
+    instruction: str = Field(min_length=1, max_length=600)
+    chapter: int | None = Field(default=None, ge=0, le=100)
+
+
+@router.get("/studio/api/farm/posts/{post_id}/editor")
+async def farm_editor(
+    post_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """A video's every scene, for the editor."""
+    return await studio.farm_editor(post_id)
+
+
+@router.put("/studio/api/farm/posts/{post_id}/scenes")
+async def farm_edit_scenes(
+    post_id: str,
+    payload: FarmScenesPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Your own edit: new lines, words on screen, order. Render to apply it."""
+    scenes = [cast(JsonObject, scene) for scene in payload.scenes]
+    return await studio.farm_edit_scenes(post_id, scenes)
+
+
+@router.put("/studio/api/farm/posts/{post_id}/scenes/{index}/media")
+async def farm_scene_media(
+    post_id: str,
+    index: int,
+    payload: FarmSceneMediaPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Put a library clip or picture, or a picture from the web, in a scene."""
+    choice = cast(JsonObject, payload.model_dump())
+    return await studio.farm_scene_media(post_id, index, choice)
+
+
+@router.post("/studio/api/farm/posts/{post_id}/ai-edit")
+async def farm_ai_edit(
+    post_id: str,
+    payload: FarmAiEditPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Ask the AI to change the script; render to apply it."""
+    return await studio.farm_ai_edit(
+        post_id, payload.instruction, chapter=payload.chapter
+    )
+
+
+@router.get("/studio/api/farm/posts/{post_id}/candidates")
+async def farm_candidates(
+    post_id: str,
+    q: str = "",
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Clips and pictures that could go in a scene: yours, then the wiki's."""
+    return {"candidates": await studio.farm_candidates(post_id, q[:200])}
+
+
+# ------------------------------------------------- the farm's media library
+
+
+class FarmLinkPayload(BaseModel):
+    folder: str = Field(min_length=1, max_length=1_000)
+    show: str = Field(default="", max_length=120)
+    background: bool = False
+
+
+class FarmAssetPayload(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    tags: list[str] | None = Field(default=None, max_length=30)
+    note: str | None = Field(default=None, max_length=1_000)
+    show: str | None = Field(default=None, max_length=120)
+    background: bool | None = None
+
+
+def _library_failed(error: ValueError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(error))
+
+
+@router.get("/studio/api/farm/media")
+async def farm_media(
+    show: str = "",
+    kind: str = "",
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    assets = await studio.farm.library.assets(show=show, kind=kind)
+    return {"assets": [asset_view(asset) for asset in assets[:1_000]]}
+
+
+@router.post("/studio/api/farm/media")
+async def farm_upload_media(
+    request: Request,
+    name: str,
+    show: str = "",
+    tags: str = "",
+    background: bool = False,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Upload one clip or picture; the file is the request body, streamed."""
+    library = studio.farm.library
+    if not kind_of(Path(name)):
+        raise HTTPException(
+            status_code=400,
+            detail="Send a picture (JPG, PNG, WebP) or a clip (MP4, MOV, MKV, WebM).",
+        )
+    target = library.incoming(name)
+    size = 0
+    try:
+        async with await anyio.open_file(target, "wb") as out:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > MAX_LIBRARY_UPLOAD:
+                    raise HTTPException(
+                        status_code=413, detail="That file is over 4 GB."
+                    )
+                await out.write(chunk)
+        if size == 0:
+            raise HTTPException(status_code=400, detail="The file was empty.")
+        asset = await library.add_file(
+            target,
+            name=name,
+            tags=[tag for tag in tags.split(",") if tag.strip()],
+            show=show,
+            background=background,
+            move=True,
+        )
+    except LibraryError as error:
+        raise _library_failed(error) from error
+    finally:
+        target.unlink(missing_ok=True)
+    return asset_view(asset)
+
+
+@router.post("/studio/api/farm/media/link")
+async def farm_link_folder(
+    payload: FarmLinkPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Add every clip and picture in a folder on this PC, without copying."""
+    try:
+        added = await studio.farm.library.link_folder(
+            payload.folder, show=payload.show, background=payload.background
+        )
+    except LibraryError as error:
+        raise _library_failed(error) from error
+    return {"added": len(added), "assets": [asset_view(a) for a in added[:200]]}
+
+
+@router.patch("/studio/api/farm/media/{asset_id}")
+async def farm_edit_media(
+    asset_id: str,
+    payload: FarmAssetPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        asset = await studio.farm.library.edit(
+            asset_id, cast(JsonObject, payload.model_dump(exclude_none=True))
+        )
+    except LibraryError as error:
+        raise _library_failed(error) from error
+    return asset_view(asset)
+
+
+@router.delete("/studio/api/farm/media/{asset_id}")
+async def farm_delete_media(
+    asset_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Remove from the library (a linked file stays on the PC)."""
+    try:
+        return {"deleted": await studio.farm.library.delete(asset_id)}
+    except LibraryError as error:
+        raise _library_failed(error) from error
+
+
+@router.get("/studio/api/farm/media/{asset_id}/thumb")
+async def farm_media_thumb(
+    asset_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> FileResponse:
+    try:
+        asset = await studio.farm.library.asset(asset_id)
+    except LibraryError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    thumb = await studio.farm.library.thumb(asset)
+    if thumb is None:
+        raise HTTPException(status_code=404, detail="No preview for that file.")
+    return FileResponse(
+        thumb,
+        media_type="image/jpeg",
+        headers={"cache-control": "private, max-age=3600"},
+    )
+
+
+@router.get("/studio/api/farm/media/{asset_id}/file")
+async def farm_media_file(
+    asset_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> FileResponse:
+    try:
+        asset = await studio.farm.library.asset(asset_id)
+    except LibraryError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    path = studio.farm.library.path(asset)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="That file has moved or gone.")
+    return FileResponse(path, headers={"cache-control": "private, max-age=3600"})
 
 
 @router.patch("/studio/api/farm/posts/{post_id}")
@@ -2975,7 +3225,7 @@ _FARM_FILES = {
 }
 
 
-@router.get("/studio/api/farm/posts/{post_id}/files/{name}")
+@router.get("/studio/api/farm/posts/{post_id}/files/{name:path}")
 async def farm_file(
     post_id: str,
     name: str,

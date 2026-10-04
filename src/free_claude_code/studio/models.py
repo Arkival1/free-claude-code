@@ -560,15 +560,15 @@ class FarmChannel(Record):
     name: str
     niche: str = ""
     """What the account is about, e.g. 'space facts' or 'gym motivation'."""
-    platform: str = "instagram"
-    """instagram, tiktok, or youtube: where the videos go."""
+    platform: str = "youtube"
+    """youtube, tiktok, or instagram: where the videos go."""
     style: str = "facts"
     """The video format: facts, story, motivation, tips, ai_art, explainer, news."""
     look: str = "bold"
     """The caption style: bold, clean, neon, or cinema."""
-    visuals: str = "photos"
-    """Where pictures come from: photos (free photos), ai (a local image maker),
-    or text (made-up art cards, always offline)."""
+    visuals: str = "auto"
+    """Where pictures come from: auto, library, photos, ai, text, or none (see
+    farm.formats.VISUALS)."""
     voice: str = "am_michael"
     """The built-in voice that reads the script, or 'none' for captions only."""
     seconds: int = 30
@@ -580,6 +580,19 @@ class FarmChannel(Record):
     """Anything else the writer should know: the tone, words to avoid."""
     autopilot: bool = False
     """Keep a day of videos ready on its own."""
+    fandom: str = ""
+    """The show, movie, or game the channel is about, for lore and pictures."""
+    wiki: str = ""
+    """Its Fandom wiki's address, when the farm can't find it by name."""
+    ai_media: bool = True
+    """Allow pictures made by AI; off means only real clips, stills, and stock."""
+    ai_polish: bool = True
+    """Let the AI edit each short's script once more before it is made."""
+    background: str = ""
+    """A library clip (gameplay) to play under every short."""
+    minutes: int = 120
+    """How long a long (sleep) video runs."""
+    captions: bool = True
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 
@@ -602,6 +615,39 @@ class FarmPost(Record):
     made_by: str = "You"
     scheduled_at: int = 0
     posted_at: int = 0
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
+class FarmAsset(Record):
+    """A clip or picture in the Content Farm's media library.
+
+    Uploads are copied into the library; a linked folder's files stay where
+    they are (a clip library can be hundreds of gigabytes).
+    """
+
+    id: str = Field(default_factory=lambda: new_id("fma"))
+    name: str
+    kind: str = "image"
+    """image or video."""
+    file: str = ""
+    """The file's name in the library folder, for uploads."""
+    path: str = ""
+    """The file's full path on this PC, for linked folders."""
+    tags: tuple[str, ...] = ()
+    note: str = ""
+    """What it shows: who, where, which episode."""
+    show: str = ""
+    """The show, movie, or game it is from."""
+    background: bool = False
+    """Gameplay or footage meant to play under a whole short."""
+    source: str = "upload"
+    """upload, folder, fandom, wikipedia, openverse, or ai."""
+    credit: str = ""
+    duration: float = 0.0
+    width: int = 0
+    height: int = 0
+    size: int = 0
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 

@@ -10,6 +10,7 @@ import io
 import re
 import wave
 from dataclasses import dataclass
+from pathlib import Path
 
 from .formats import WORDS_PER_SECOND
 
@@ -116,3 +117,38 @@ def silent_wav(seconds: float, rate: int = 24_000) -> bytes:
         writer.setframerate(rate)
         writer.writeframes(b"\0\0" * round(rate * max(0.0, seconds)))
     return out.getvalue()
+
+
+def write_joined(
+    parts: list[Path | None], lengths: list[float], gap: float, out: Path
+) -> None:
+    """One WAV file from many, streamed, so two hours never sit in memory.
+
+    A missing part (no voice) becomes silence of its scene's length.
+    """
+    rate, width, channels = 24_000, 2, 1
+    for part in parts:
+        if part is not None:
+            with wave.open(str(part)) as reader:
+                rate = reader.getframerate()
+                width = reader.getsampwidth()
+                channels = reader.getnchannels()
+            break
+    frame = width * channels
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(out), "wb") as writer:
+        writer.setnchannels(channels)
+        writer.setsampwidth(width)
+        writer.setframerate(rate)
+        for part, length in zip(parts, lengths, strict=True):
+            written = 0
+            if part is not None:
+                with wave.open(str(part)) as reader:
+                    if (reader.getframerate(), reader.getsampwidth()) == (rate, width):
+                        while chunk := reader.readframes(65_536):
+                            writer.writeframes(chunk)
+                            written += len(chunk) // frame
+            missing = round(rate * length) - written
+            if missing > 0:
+                writer.writeframes(b"\0" * frame * missing)
+            writer.writeframes(b"\0" * frame * round(rate * gap))

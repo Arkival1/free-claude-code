@@ -70,9 +70,13 @@ def test_a_script_is_read_from_json_and_cleaned():
     assert script.scenes[0].text == "THEY SING"
     # The channel's tags first, no repeats, every one a #tag.
     assert script.hashtags == ("#facts", "#space", "#astronomy")
-    caption = formats.full_caption(script, "Follow for more")
+    caption = formats.full_caption(script, "Follow for more", "instagram")
     assert caption.startswith("The universe has a soundtrack.\n\nFollow for more")
     assert caption.endswith("#facts #space #astronomy")
+    # YouTube gets the title first, and #Shorts.
+    youtube = formats.full_caption(script, "Follow for more")
+    assert youtube.startswith("Black holes can sing\n\nThe universe")
+    assert youtube.endswith("#astronomy #Shorts")
 
 
 def test_a_script_in_plain_words_still_becomes_scenes():
@@ -415,4 +419,6 @@ async def test_a_local_image_maker_draws_the_pictures(make_studio):
 
     assert post.status == "ready", post.error
     assert len(asked) == 4 and asked[0].startswith("black hole, space, vertical 9:16")
-    assert studio.farm.file(post, "scene1.png").is_file()
+    first = post.data["scenes"][0]["media"]
+    assert first["source"] == "ai" and first["file"].endswith(".png")
+    assert studio.farm.file(post, first["file"]).is_file()
