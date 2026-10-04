@@ -1202,6 +1202,33 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Add from GitHub (skills, plugins, MCP)",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Add from GitHub card: paste a link, then "
+            "Turn on / Check each MCP server, Add to team for plugin agents. "
+            "'Add an MCP server by hand' takes an npx/uvx command or address."
+        ),
+        terms=(
+            "github",
+            "plugin",
+            "plugins",
+            "skill",
+            "skills",
+            "mcp",
+            "server",
+            "extension",
+        ),
+        body=(
+            "Paste a GitHub link and Studio pulls in SKILL.md skills, Claude Code "
+            "plugin agents and commands, and MCP servers; a plain repo becomes a "
+            "skill from its README. Agents read skills with the skill tool and use "
+            "switched-on MCP servers with the mcp tool. MCP servers start off "
+            "because they run the repo's code: read the command, then Turn on, and "
+            "Check shows its tools. npx servers need Node.js."
+        ),
+    ),
+    GuideTopic(
         title="Coder, Tester, and Lab agents",
         route="/studio#agents",
         where=(

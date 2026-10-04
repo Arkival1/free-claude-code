@@ -237,6 +237,39 @@ STARTERS: tuple[Starter, ...] = (
         ),
     ),
     Starter(
+        "skill",
+        "Skills added from GitHub",
+        ("skill", "skills", "use the skill", "how do i", "guide for", "playbook for"),
+        (
+            _x("what skills do you have", action="list"),
+            _x("use the pdf skill", action="read", name="pdf"),
+        ),
+        ("List first, then read the one that fits and follow it.",),
+    ),
+    Starter(
+        "mcp",
+        "MCP tool servers",
+        (
+            "mcp",
+            "mcp server",
+            "tool server",
+            "my files",
+            "database",
+            "browser",
+        ),
+        (
+            _x("what mcp servers are on", action="servers"),
+            _x(
+                "list the files in my documents with the files server",
+                action="call",
+                server="files",
+                tool="list_directory",
+                arguments={"path": "C:/Users/me/Documents"},
+            ),
+        ),
+        ("Look at a server's tools (action tools) before calling one.",),
+    ),
+    Starter(
         "team_task",
         "Several agents on one goal",
         ("together", "as a team", "the whole team", "everyone work on", "team up"),

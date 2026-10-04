@@ -85,6 +85,8 @@ USE_PHOTO_TOOL = "use_photo"
 SAVE_IMAGE_TOOL = "save_image"
 LAB_TOOL = "lab"
 CODE_TOOL = "code_and_test"
+SKILL_TOOL = "skill"
+MCP_TOOL = "mcp"
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
 MAX_LISTED_PHOTOS = 30
@@ -450,6 +452,45 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "versions_back": {"type": "integer"},
             },
             "required": ["path"],
+        },
+    ),
+    ToolSpec(
+        name=SKILL_TOOL,
+        description=(
+            "Skills the user added from GitHub (Claude-style SKILL.md files, "
+            "commands, and repo guides). action list shows each skill's name and "
+            "what it is for; action read with a name gives its full "
+            "instructions. Read one when it fits the job, then follow it."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "read"]},
+                "name": {"type": "string", "description": "read: the skill's name."},
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
+        name=MCP_TOOL,
+        description=(
+            "MCP tool servers the user switched on (files, browsers, databases, "
+            "GitHub, and more). action servers lists them; tools with a server "
+            "lists its tools and their arguments; call runs one tool with "
+            "arguments. Look at a server's tools before calling one."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["servers", "tools", "call"]},
+                "server": {"type": "string", "description": "The server's name."},
+                "tool": {"type": "string", "description": "call: the tool's name."},
+                "arguments": {
+                    "type": "object",
+                    "description": "call: the tool's arguments.",
+                },
+            },
+            "required": ["action"],
         },
     ),
     ToolSpec(
@@ -1035,6 +1076,8 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     LIST_PHOTOS_TOOL,
     LAB_TOOL,
     CODE_TOOL,
+    SKILL_TOOL,
+    MCP_TOOL,
     FINISH_TOOL,
 )
 SHARED_REMEMBER_SPEC = ToolSpec(
@@ -1434,6 +1477,8 @@ class AgentToolbox:
                     | "weather"
                     | "lab"
                     | "code_and_test"
+                    | "skill"
+                    | "mcp"
                 ):
                     if self._assistant is None:
                         raise ValueError(f"{call.name} is not available here.")

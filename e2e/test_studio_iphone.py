@@ -806,6 +806,24 @@ def test_jarvis_playbook_notes_can_be_read_and_edited(
     )
 
 
+def test_the_add_from_github_card_takes_links_and_servers(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url, "more")
+
+    added = page.locator(
+        ".card", has=page.get_by_role("heading", name="Add from GitHub")
+    )
+    expect(added).to_be_visible()
+    expect(added.get_by_label("GitHub link")).to_be_visible()
+    expect(added.get_by_role("button", name="Add from GitHub")).to_be_visible()
+    added.get_by_text("Add an MCP server by hand").click()
+    expect(added.get_by_label("Server command")).to_be_visible()
+    added.get_by_label("GitHub link").fill("not a link")
+    added.get_by_role("button", name="Add from GitHub").click()
+    expect(added).to_contain_text("Paste a GitHub link")
+
+
 def test_to_dos_can_be_added_and_ticked_off(page: Page, admin_base_url: str) -> None:
     open_studio(page, admin_base_url, "more")
 

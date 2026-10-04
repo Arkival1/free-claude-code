@@ -24,6 +24,7 @@ from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
 from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.extensions import Extension
 from free_claude_code.studio.file_text import MAX_UPLOAD, read_file_text
 from free_claude_code.studio.lab.sim import LabError
 from free_claude_code.studio.llm import ChatMessage
@@ -258,6 +259,21 @@ class SyncPayload(BaseModel):
 
 class PlaybookPayload(BaseModel):
     text: str = Field(max_length=20_000)
+
+
+class ExtensionPayload(BaseModel):
+    url: str = Field(min_length=3, max_length=500)
+
+
+class ServerSwitchPayload(BaseModel):
+    on: bool
+
+
+class ServerPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    command: str = Field(default="", max_length=400)
+    args: list[str] | str = Field(default_factory=list)
+    url: str = Field(default="", max_length=500)
 
 
 def require_studio_access(
@@ -2129,6 +2145,118 @@ async def obsidian_import(
     if not payload.agent_id:
         raise HTTPException(status_code=400, detail="Choose an agent.")
     return {"imported": await studio.import_vault_notes(payload.agent_id)}
+
+
+def _extension(extension: Extension) -> JsonObject:
+    return {
+        "id": extension.id,
+        "name": extension.name,
+        "source": extension.source,
+        "description": extension.description,
+        "plugins": list(extension.plugins),
+        "skills": [
+            {"name": skill.name, "description": skill.description, "kind": skill.kind}
+            for skill in extension.skills
+        ],
+        "agents": [
+            {"name": agent.name, "description": agent.description, "tools": agent.tools}
+            for agent in extension.agents
+        ],
+        "servers": [
+            {
+                "name": server.name,
+                "shown": server.shown(),
+                "transport": server.transport,
+                "enabled": server.enabled,
+            }
+            for server in extension.servers
+        ],
+    }
+
+
+@router.get("/studio/api/extensions")
+async def list_extensions(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Skills, agents, commands, and MCP servers added from GitHub."""
+    return {"extensions": [_extension(item) for item in await studio.extensions()]}
+
+
+@router.post("/studio/api/extensions")
+async def add_extension(
+    payload: ExtensionPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Pull in everything a GitHub repo offers."""
+    return _extension(await studio.add_extension(payload.url))
+
+
+@router.post("/studio/api/extensions/servers")
+async def add_mcp_server(
+    payload: ServerPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Add an MCP server by its command (npx/uvx ...) or web address."""
+    args = payload.args.split() if isinstance(payload.args, str) else payload.args
+    command = payload.command.strip()
+    if command and not args and " " in command:
+        command, *args = command.split()
+    return _extension(
+        await studio.add_server(
+            name=payload.name, command=command, args=args, url=payload.url
+        )
+    )
+
+
+@router.delete("/studio/api/extensions/{ext_id}")
+async def remove_extension(
+    ext_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Remove an extension and stop its servers."""
+    await studio.remove_extension(ext_id)
+    return {"removed": True}
+
+
+@router.post("/studio/api/extensions/{ext_id}/servers/{name}")
+async def switch_mcp_server(
+    ext_id: str,
+    name: str,
+    payload: ServerSwitchPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Turn one MCP server on or off."""
+    return _extension(await studio.switch_server(ext_id, name, on=payload.on))
+
+
+@router.post("/studio/api/extensions/{ext_id}/servers/{name}/check")
+async def check_mcp_server(
+    ext_id: str,
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Start one server and list its tools."""
+    tools = await studio.check_server(ext_id, name)
+    return {
+        "tools": [
+            {"name": tool.name, "description": tool.description[:200]} for tool in tools
+        ]
+    }
+
+
+@router.post("/studio/api/extensions/{ext_id}/agents/{name}")
+async def add_extension_agent(
+    ext_id: str,
+    name: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Make one of a plugin's agents part of the team."""
+    agent = await studio.add_extension_agent(ext_id, name)
+    return {"id": agent.id, "name": agent.name}
 
 
 def _playbook_note(note: PlaybookNote) -> JsonObject:

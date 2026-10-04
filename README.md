@@ -811,6 +811,22 @@ gets a reminder time only when your message names one. The notes live in the Obs
 Obsidian or on the HUD's **Jarvis's playbook** card (Save note, Reset to
 starting note).
 
+**Add from GitHub: skills, plugins, and MCP servers.** On the More page, paste
+a GitHub link (`https://github.com/owner/repo`, a `/tree/branch/folder` link,
+or `owner/repo`) and Studio pulls in what the repo holds, the Claude Code way:
+every `SKILL.md` becomes a skill, a Claude Code plugin's `agents/*.md` become
+agents you can add to the team (their Read, Write, Bash, Grep tools mapped to
+Studio's), its `commands/*.md` become skills named `/command`, and MCP servers
+from `.mcp.json` or the plugin's `plugin.json` are listed. A plain repo becomes
+one skill from its README. Agents read skills with the `skill` tool and use MCP
+servers with the `mcp` tool (`servers`, `tools`, `call`). MCP servers from a
+repo start **off**: running one runs that repo's code, so turn each on after
+reading its command, and use **Check** to start it and see its tools. You can
+also add a server by hand (`npx -y @modelcontextprotocol/server-filesystem
+C:\Users\you\Documents`, a `uvx` command, or an HTTP address). npx servers
+need Node.js; uvx ones run with the uv that Studio already uses. Everything is
+kept in Studio's `extensions` folder.
+
 **Coder, Tester, and Lab.** The starter team includes a **Coder** and a
 **Lab** agent. Say *"code me a snake game"*, *"build a todo app"*, *"write a
 script that renames my photos"*, or *"make a HUD"* (websites still go to the

@@ -36,6 +36,7 @@ from .convo_notes import NotesKeeper
 from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
 from .engine import ENGINE_ARCHIVE, Engine, EngineError, not_a_model
+from .extensions import Extension, ExtensionError, ExtensionLibrary, McpServer
 from .guide import (
     GUIDE_TOPICS,
     STARTER_QUESTIONS,
@@ -65,6 +66,7 @@ from .llm import (
     StudioModelRouter,
     ToolCall,
     model_missing,
+    short_arguments,
 )
 from .local_voice import (
     LocalVoice,
@@ -73,6 +75,7 @@ from .local_voice import (
     speech_package_ready,
 )
 from .lora import LoraTrainer
+from .mcp import McpError, McpManager, McpTool, ServerSpec
 from .memory import (
     SERVER_AREA_PREFIX,
     SHARED_MEMORY_ID,
@@ -221,6 +224,8 @@ CODER_AGENT_NAME = "Coder"
 LAB_AGENT_NAME = "Lab"
 _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     BUILDER_AGENT_NAME: (
+        "skill",
+        "mcp",
         "research",
         "test_code",
         "ask_researcher",
@@ -264,6 +269,34 @@ MAIN_CONSOLE_SETTING = "console"
 LAB_CHAT_SETTING = "lab"
 ENGINE_RETRY_SECONDS = 300.0
 """After the engine fails to start, LM Studio answers this long before a retry."""
+
+
+_CLAUDE_TOOLS = {
+    "read": ("read_file",),
+    "write": ("write_file",),
+    "edit": ("edit_file",),
+    "multiedit": ("edit_file",),
+    "bash": ("run_command",),
+    "grep": ("search_files",),
+    "glob": ("list_files",),
+    "ls": ("list_files",),
+    "webfetch": ("web_fetch",),
+    "websearch": ("web_search",),
+    "todowrite": ("update_plan",),
+}
+
+
+def _studio_tools(claude_tools: Sequence[str]) -> tuple[str, ...]:
+    """Claude Code's tool names (Read, Bash, ...) as Studio's, plus skills
+    and MCP; an agent naming none gets the usual set."""
+    if not claude_tools:
+        return tuple(dict.fromkeys((*_default_tools(), "skill", "mcp")))
+    mapped = [
+        tool
+        for name in claude_tools
+        for tool in _CLAUDE_TOOLS.get(name.strip().lower().split("(")[0], ())
+    ]
+    return tuple(dict.fromkeys(("read_file", "list_files", *mapped, "skill", "mcp")))
 
 
 def _plain_error(run: AgentRun) -> str:
@@ -452,6 +485,11 @@ class StudioService:
         self._photos = PhotoLibrary(store, sites_dir.parent / "photos")
         # Jarvis's playbook until an Obsidian vault is set.
         self._playbook_home = sites_dir.parent / "playbook"
+        # Skills, agents, and MCP servers added from GitHub.
+        self._extensions = ExtensionLibrary(
+            sites_dir.parent / "extensions", transport=search_transport
+        )
+        self._mcp = McpManager()
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._models_dir = models_dir
         self._voice_setup = SetupState()
@@ -986,6 +1024,7 @@ class StudioService:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         await self._engine.stop()
+        await self._mcp.close()
 
     # ----------------------------------------------------------- the engine
 
@@ -2640,6 +2679,10 @@ class StudioService:
                 return await self._lab_tool(call, context)
             case "code_and_test":
                 return await self._code_tool(call, context)
+            case "skill":
+                return await self._skill_tool(call)
+            case "mcp":
+                return await self._mcp_tool(call)
             case "weather":
                 place = str(call.arguments.get("place") or "").strip()
                 if not place:
@@ -3725,6 +3768,213 @@ class StudioService:
             f"is on the Lab bench and in this chat:\n{outcome.text[:LAB_NOTE_CHARS]}\n"
             "Tell the user the result in your own words in a few sentences. Don't "
             "use the lab tool for it again."
+        )
+
+    # ----------------------------------------------------------- extensions
+
+    async def extensions(self) -> list[Extension]:
+        """Every repo added from GitHub, plus servers added by hand."""
+        return await self._extensions.all()
+
+    async def add_extension(self, link: str) -> Extension:
+        try:
+            return await self._extensions.add_github(link)
+        except ExtensionError as error:
+            raise StudioError(str(error)) from error
+
+    async def remove_extension(self, ext_id: str) -> None:
+        extension = await self._extension(ext_id)
+        for server in extension.servers:
+            await self._mcp.stop(f"{ext_id}/{server.name}")
+        await self._extensions.remove(ext_id)
+
+    async def _extension(self, ext_id: str) -> Extension:
+        try:
+            return await self._extensions.get(ext_id)
+        except ExtensionError as error:
+            raise StudioNotFoundError(str(error)) from error
+
+    async def switch_server(self, ext_id: str, name: str, *, on: bool) -> Extension:
+        """Turn one MCP server on or off; on means agents may start it."""
+        extension = await self._extension(ext_id)
+        server = next((s for s in extension.servers if s.name == name), None)
+        if server is None:
+            raise StudioNotFoundError(f"{extension.name} has no server {name}.")
+        server.enabled = on
+        if not on:
+            await self._mcp.stop(f"{ext_id}/{name}")
+        return await self._extensions.save(extension)
+
+    async def add_server(
+        self,
+        *,
+        name: str,
+        command: str = "",
+        args: Sequence[str] = (),
+        url: str = "",
+        env: Mapping[str, str] | None = None,
+    ) -> Extension:
+        """An MCP server the user typed in, switched on."""
+        if not name.strip() or not (command.strip() or url.strip()):
+            raise StudioError("A server needs a name and a command or a web address.")
+        return await self._extensions.add_server(
+            McpServer(
+                name=name.strip(),
+                command=command.strip(),
+                args=[str(arg) for arg in args],
+                url=url.strip(),
+                env=dict(env or {}),
+            )
+        )
+
+    async def check_server(self, ext_id: str, name: str) -> list[McpTool]:
+        """Start one server and list its tools, so the user sees it works."""
+        extension = await self._extension(ext_id)
+        server = next((s for s in extension.servers if s.name == name), None)
+        if server is None:
+            raise StudioNotFoundError(f"{extension.name} has no server {name}.")
+        try:
+            return await self._mcp.tools(self._server_spec(extension, server))
+        except McpError as error:
+            raise StudioError(str(error)) from error
+
+    def _server_spec(self, extension: Extension, server: McpServer) -> ServerSpec:
+        files = self._extensions.folder / extension.id / "files"
+        return ServerSpec(
+            key=f"{extension.id}/{server.name}",
+            name=server.name,
+            command=server.command,
+            args=tuple(server.args),
+            env=tuple(server.env.items()),
+            url=server.url,
+            headers=tuple(server.headers.items()),
+            cwd=str(files) if files.is_dir() else None,
+        )
+
+    async def add_extension_agent(self, ext_id: str, name: str) -> Agent:
+        """Make one of a plugin's agents a member of the team."""
+        extension = await self._extension(ext_id)
+        found = next((a for a in extension.agents if a.name == name), None)
+        if found is None:
+            raise StudioNotFoundError(f"{extension.name} has no agent {name}.")
+        tools = _studio_tools(found.tools)
+        return await self.create_agent(
+            name=found.name,
+            role="agent",
+            model=self.server_model,
+            system_prompt=found.prompt,
+            description=found.description or f"From {extension.name}.",
+            tools=tools,
+        )
+
+    async def _enabled_servers(self) -> list[tuple[Extension, McpServer]]:
+        return [
+            (extension, server)
+            for extension in await self._extensions.all()
+            for server in extension.servers
+            if server.enabled
+        ]
+
+    async def _skill_tool(self, call: ToolCall) -> ToolOutcome:
+        action = str(call.arguments.get("action") or "list").lower()
+        everything = [
+            (extension, skill)
+            for extension in await self._extensions.all()
+            for skill in extension.skills
+        ]
+        if action == "read":
+            wanted = (
+                str(call.arguments.get("name") or "").strip().lstrip("/").casefold()
+            )
+            match = next(
+                (
+                    pair
+                    for pair in everything
+                    if pair[1].name.lstrip("/").casefold() == wanted
+                ),
+                None,
+            ) or next(
+                (
+                    pair
+                    for pair in everything
+                    if wanted and wanted in pair[1].name.casefold()
+                ),
+                None,
+            )
+            if match is None:
+                raise ValueError(
+                    f"No skill is called '{wanted}'. Use action list to see them."
+                )
+            extension, skill = match
+            text = await self._extensions.skill_text(extension, skill)
+            return ToolOutcome(
+                text=f"Skill {skill.name} (from {extension.name}):\n{text}",
+                data={"tool": "skill", "name": skill.name},
+            )
+        if not everything:
+            return ToolOutcome(
+                text="No skills are added yet. The user adds them on the More page "
+                "(Add from GitHub).",
+                data={"tool": "skill"},
+            )
+        lines = [
+            f"- {skill.name}: {skill.description or '(no description)'} [{extension.name}]"
+            for extension, skill in everything[:80]
+        ]
+        return ToolOutcome(text="Skills:\n" + "\n".join(lines), data={"tool": "skill"})
+
+    async def _mcp_tool(self, call: ToolCall) -> ToolOutcome:
+        action = str(call.arguments.get("action") or "servers").lower()
+        servers = await self._enabled_servers()
+        if action == "servers" or not servers:
+            if not servers:
+                return ToolOutcome(
+                    text="No MCP servers are switched on. The user adds and turns "
+                    "them on on the More page (Add from GitHub).",
+                    data={"tool": "mcp"},
+                )
+            lines = [
+                f"- {server.name} [{extension.name}]" for extension, server in servers
+            ]
+            return ToolOutcome(
+                text="MCP servers:\n" + "\n".join(lines), data={"tool": "mcp"}
+            )
+        wanted = str(call.arguments.get("server") or "").strip().casefold()
+        pair = next((p for p in servers if p[1].name.casefold() == wanted), None) or (
+            servers[0] if len(servers) == 1 and not wanted else None
+        )
+        if pair is None:
+            raise ValueError(
+                f"No switched-on server is called '{wanted}'. Servers: "
+                + ", ".join(server.name for _, server in servers)
+            )
+        extension, server = pair
+        spec = self._server_spec(extension, server)
+        try:
+            if action == "tools":
+                tools = await self._mcp.tools(spec)
+                lines = [
+                    f"- {tool.name}: {tool.description[:200]}"
+                    f"{short_arguments(tool.schema)}"
+                    for tool in tools
+                ]
+                return ToolOutcome(
+                    text=f"{server.name} tools:\n" + "\n".join(lines),
+                    data={"tool": "mcp", "server": server.name},
+                )
+            tool = str(call.arguments.get("tool") or "").strip()
+            if not tool:
+                raise ValueError("Say which tool to call; list them with action tools.")
+            arguments = call.arguments.get("arguments")
+            text, failed = await self._mcp.call(
+                spec, tool, arguments if isinstance(arguments, dict) else {}
+            )
+        except McpError as error:
+            raise ValueError(str(error)) from error
+        return ToolOutcome(
+            text=text,
+            data={"tool": "mcp", "server": server.name, "called": tool},
+            failed=failed,
         )
 
     async def _team_member(self, role: str) -> Agent | None:

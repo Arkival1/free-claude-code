@@ -13,6 +13,8 @@ from .tools import (
 
 RESEARCHER_TOOLS: tuple[str, ...] = (
     "knowledge",
+    "skill",
+    "mcp",
     "conversation",
     "research",
     "study_video",
@@ -441,6 +443,8 @@ TESTER_PROMPT = (
 )
 TESTER_TOOLS: tuple[str, ...] = (
     "knowledge",
+    "skill",
+    "mcp",
     "conversation",
     "edit_file",
     "read_file",
@@ -462,6 +466,8 @@ TESTER_TOOLS: tuple[str, ...] = (
 )
 HELPER_TOOLS: tuple[str, ...] = (
     "knowledge",
+    "skill",
+    "mcp",
     "conversation",
     "recall",
     "remember",
@@ -543,6 +549,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Memory",
         ("remember", "recall", "video_notes", "conversation", "knowledge", "learn"),
     ),
+    ("Added from GitHub", ("skill", "mcp")),
     (
         "Everyday",
         ("calculate", "todo", "list_projects", "system_status", "app_help", "lab"),
@@ -583,6 +590,8 @@ CODER_TOOLS: tuple[str, ...] = (
     "ask_helper",
     "knowledge",
     "conversation",
+    "skill",
+    "mcp",
     *_WEB,
     *_MEMORY,
 )
@@ -597,7 +606,7 @@ LAB_AGENT_PROMPT = (
     "the colours, gas, heat, and pH, and anything that failed. The Lab "
     "refuses dangerous requests; say so plainly when it does."
 )
-LAB_AGENT_TOOLS: tuple[str, ...] = ("lab", "knowledge", *_WEB, *_MEMORY)
+LAB_AGENT_TOOLS: tuple[str, ...] = ("lab", "knowledge", "skill", *_WEB, *_MEMORY)
 PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("Builder", "builder", BUILDER_PROMPT, DEFAULT_TOOL_NAMES),
     ("Researcher", "researcher", RESEARCHER_PROMPT, RESEARCHER_TOOLS),

@@ -3712,6 +3712,162 @@
 
   // The user's to-do list. Jarvis and the Helper add to it too, and Jarvis
   // announces reminders on the HUD when they are due.
+  function extensionsCard(list) {
+    const status = el("p", { class: "muted", hidden: true });
+    const say = (text) => {
+      status.hidden = false;
+      status.textContent = text;
+    };
+    const link = el("input", { type: "url", placeholder: "https://github.com/owner/repo", "aria-label": "GitHub link" });
+    const addForm = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!link.value.trim()) return;
+        say("Fetching the repo…");
+        try {
+          const added = await post("/studio/api/extensions", { url: link.value.trim() });
+          notify(`Added ${added.name}: ${added.skills.length} skill(s), ${added.agents.length} agent(s), ${added.servers.length} MCP server(s).`);
+          render();
+        } catch (error) {
+          say(error.message);
+        }
+      },
+    }, [link, el("div", { class: "row" }, [el("button", { class: "primary", type: "submit", text: "Add from GitHub" })])]);
+    const serverName = el("input", { type: "text", placeholder: "Name, e.g. files", "aria-label": "Server name" });
+    const serverCommand = el("input", { type: "text", placeholder: "Command, e.g. npx -y @modelcontextprotocol/server-filesystem C:\\Users\\me\\Documents", "aria-label": "Server command" });
+    const serverUrl = el("input", { type: "url", placeholder: "…or a web address for an HTTP server", "aria-label": "Server address" });
+    const serverForm = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        try {
+          await post("/studio/api/extensions/servers", {
+            name: serverName.value.trim(),
+            command: serverCommand.value.trim(),
+            url: serverUrl.value.trim(),
+          });
+          notify("Server added and switched on.");
+          render();
+        } catch (error) {
+          say(error.message);
+        }
+      },
+    }, [serverName, serverCommand, serverUrl, el("div", { class: "row" }, [el("button", { class: "secondary", type: "submit", text: "Add MCP server" })])]);
+    const base = (item) => `/studio/api/extensions/${encodeURIComponent(item.id)}`;
+    const rows = list.map((item) =>
+      el("div", { class: "list-item extension-row" }, [
+        el("div", { class: "grow" }, [
+          el("strong", { text: item.name }),
+          el("p", {
+            class: "muted",
+            text: [
+              item.plugins.length ? `Plugin: ${item.plugins.join(", ")}` : "",
+              `${item.skills.length} skill(s)`,
+              `${item.agents.length} agent(s)`,
+              `${item.servers.length} MCP server(s)`,
+            ].filter(Boolean).join(" · "),
+          }),
+          item.description ? el("p", { class: "muted", text: item.description }) : null,
+          item.skills.length
+            ? el("details", {}, [
+                el("summary", { text: "Skills and commands" }),
+                el("ul", {}, item.skills.map((skill) => el("li", { text: `${skill.name}: ${skill.description || "(no description)"}` }))),
+              ])
+            : null,
+          ...item.agents.map((agent) =>
+            el("div", { class: "row" }, [
+              el("span", { class: "grow", text: `Agent ${agent.name}: ${agent.description || ""}` }),
+              el("button", {
+                class: "secondary",
+                type: "button",
+                text: "Add to team",
+                "aria-label": `Add ${agent.name} to the team`,
+                onclick: async () => {
+                  try {
+                    await post(`${base(item)}/agents/${encodeURIComponent(agent.name)}`);
+                    notify(`${agent.name} joined the team.`);
+                  } catch (error) {
+                    notify(error.message);
+                  }
+                },
+              }),
+            ])
+          ),
+          ...item.servers.map((server) =>
+            el("div", { class: "row" }, [
+              el("span", { class: "grow" }, [
+                el("strong", { text: `MCP ${server.name}` }),
+                el("code", { text: ` ${server.shown}` }),
+                el("span", { class: server.enabled ? "pill good" : "pill", text: server.enabled ? "on" : "off" }),
+              ]),
+              el("button", {
+                class: server.enabled ? "secondary" : "primary",
+                type: "button",
+                text: server.enabled ? "Turn off" : "Turn on",
+                "aria-label": `${server.enabled ? "Turn off" : "Turn on"} ${server.name}`,
+                onclick: async () => {
+                  if (!server.enabled && !confirm(`Turning this on lets your agents run:\n\n${server.shown}\n\nOnly turn on servers you trust.`)) return;
+                  try {
+                    await post(`${base(item)}/servers/${encodeURIComponent(server.name)}`, { on: !server.enabled });
+                    render();
+                  } catch (error) {
+                    notify(error.message);
+                  }
+                },
+              }),
+              server.enabled
+                ? el("button", {
+                    class: "secondary",
+                    type: "button",
+                    text: "Check",
+                    "aria-label": `Check ${server.name}`,
+                    onclick: async () => {
+                      say(`Starting ${server.name}… (the first start can take a minute)`);
+                      try {
+                        const result = await post(`${base(item)}/servers/${encodeURIComponent(server.name)}/check`);
+                        say(`${server.name} works: ${result.tools.map((tool) => tool.name).join(", ") || "no tools"}.`);
+                      } catch (error) {
+                        say(error.message);
+                      }
+                    },
+                  })
+                : null,
+            ])
+          ),
+          el("div", { class: "row" }, [
+            item.source && item.source !== "you" ? el("a", { class: "pill", href: item.source, target: "_blank", rel: "noopener", text: "GitHub" }) : null,
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Remove",
+              "aria-label": `Remove ${item.name}`,
+              onclick: async () => {
+                if (!confirm(`Remove ${item.name}? Its skills and servers go; agents you added stay.`)) return;
+                try {
+                  await remove(base(item));
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ]),
+        ]),
+      ])
+    );
+    return card("Add from GitHub", [
+      el("p", {
+        class: "muted",
+        text: "Paste a GitHub link and the team gets what the repo holds: skills (SKILL.md), Claude Code plugins (agents, commands, MCP servers), and plain repos as a skill from their README. Agents read skills with the skill tool and use switched-on MCP servers with the mcp tool.",
+      }),
+      addForm,
+      el("details", {}, [el("summary", { text: "Add an MCP server by hand" }), serverForm]),
+      status,
+      ...(rows.length ? rows : [el("p", { class: "muted", text: "Nothing added yet." })]),
+    ]);
+  }
+
   function playbookCard(book) {
     const notes = book.notes || [];
     const learned = notes.reduce((sum, note) => sum + (note.learned || 0), 0);
@@ -3980,7 +4136,7 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
@@ -3990,6 +4146,7 @@
       api("/studio/api/todos").catch(() => ({ todos: [] })),
       api("/studio/api/studies").catch(() => ({ studies: [] })),
       api("/studio/api/playbook").catch(() => null),
+      api("/studio/api/extensions").catch(() => ({ extensions: [] })),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -4028,6 +4185,7 @@
       ]),
       learningCard(studies.studies || []),
       ...(book ? [playbookCard(book)] : []),
+      extensionsCard(added.extensions || []),
       todoCard(todos.todos || []),
       videoCard(videos.videos || []),
       voiceCard(voiceInfo),

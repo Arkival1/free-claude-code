@@ -151,6 +151,11 @@ def _sentences(text: str, count: int) -> str:
 ARGUMENT_NOTE_CHARS = 80
 
 
+def short_arguments(parameters: Mapping[str, object]) -> str:
+    """A tool's arguments in a few words each, for listing tools to a model."""
+    return _short_arguments(parameters)
+
+
 def _short_arguments(parameters: Mapping[str, object]) -> str:
     """'Arguments: path (required): Where the file goes; content.' with each
     note cut to its first sentence and a few words."""
