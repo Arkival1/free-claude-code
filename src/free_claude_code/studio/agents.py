@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 
 from loguru import logger
 
+from .call_guard import guarded
 from .convo_notes import NOTES_HEADER, NotesKeeper
 from .lab.bench import LAB_PROMPT
 from .llm import (
@@ -836,6 +837,7 @@ class AgentRunner:
             sealed=sealed,
             extra_system=LAB_PROMPT if chat.settings.get("lab") else "",
             learn=agent.role == MAIN_ROLE,
+            said=user_text,
         )
         self._keep_notes(agent, chat, await self._history_start(chat))
         if (agent.memory_enabled or sealed) and not result.failed and result.text:
@@ -995,10 +997,12 @@ class AgentRunner:
         talk_only: bool = False,
         fallback_model: str | None = None,
         learn: bool = False,
+        said: str = "",
     ) -> TurnResult:
         """``alone``: a background job, so nobody is there to answer questions.
         ``talk_only``: no tools this turn (a follow-up that only reports).
-        ``learn``: calls that work go into the main AI's playbook."""
+        ``learn``: calls that work go into the main AI's playbook.
+        ``said``: the user's own message, which tool calls are held to."""
         await self._toolbox.check_online()
         names = (
             () if talk_only else self._toolbox.tool_names(agent.tools, role=agent.role)
@@ -1264,6 +1268,10 @@ class AgentRunner:
                     text = f"{text}\n\n{NO_SEARCH_NOTE.format(name=agent.name)}"
                 await self._record_assistant(chat, agent, text, reply)
                 return TurnResult(text=text, steps=step, tool_calls=tuple(used))
+            if said:
+                reply = replace(
+                    reply, tool_calls=tuple(guarded(c, said) for c in reply.tool_calls)
+                )
             finish = self._finish_call(reply.tool_calls)
             if (
                 finish is not None

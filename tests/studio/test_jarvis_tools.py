@@ -90,7 +90,9 @@ async def test_jarvis_keeps_the_to_do_list(make_studio):
     )
     await studio.ensure_defaults()
 
-    chat = await studio.main_say("remind me to call Sam and add milk", background=False)
+    chat = await studio.main_say(
+        "remind me to call Sam in 20 minutes and add milk", background=False
+    )
 
     tools = [m for m in await studio.transcript(chat.id) if m.role == "tool"]
     assert tools[0].text.startswith("Added to the to-do list: Call Sam. Reminder today")

@@ -310,7 +310,11 @@ async def test_jarvis_uses_the_agent_model_tool(make_studio):
     await studio.ensure_defaults()
     with_models_on_pc(studio)
 
-    await studio.main_say("what models is the team on?", background=False)
+    await studio.main_say(
+        "what models is the team on? then switch the researcher to llama and "
+        "the helper to gpt9",
+        background=False,
+    )
 
     chat = await studio.main_chat()
     listed, switched, missing = [

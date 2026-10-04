@@ -439,7 +439,10 @@ STARTERS: tuple[Starter, ...] = (
             ),
             _x("what's on my list", action="list"),
         ),
-        ("due only for reminders, like 'in 20 minutes' or 'tomorrow 9am'.",),
+        (
+            "due only when the user says a time, like 'in 20 minutes' or "
+            "'tomorrow 9am'; never copy a time from an example.",
+        ),
     ),
     Starter(
         "calculate",

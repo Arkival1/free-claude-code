@@ -802,7 +802,10 @@ like it later brings that example back. The notes also stop a misroute: a
 message that matches one of Jarvis's own tools (a reminder, a sum, your
 projects, the PC's status, memory) is never handed to an agent by the one-word
 router, so *"remind me to call the dentist"* goes on the to-do list instead of to
-the Helper. The notes live in the Obsidian vault's
+the Helper. Tool calls are also held to your words: a question
+(*"which model is the Builder using?"*) only looks, and never switches a model
+or changes an agent, unless the message also asks for the change; and a to-do
+gets a reminder time only when your message names one. The notes live in the Obsidian vault's
 `FCC Studio/Playbook` folder; until a vault is set they live in Studio's own
 `playbook` folder and are copied into the vault when you set one. Edit them in
 Obsidian or on the HUD's **Jarvis's playbook** card (Save note, Reset to
