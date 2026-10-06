@@ -38,9 +38,30 @@ class Style:
     """A two-hour sleep video rather than a short."""
     fandom: bool = False
     """About a show, movie, or game: lore and real pictures from its wiki."""
+    kind: str = "narrated"
+    """narrated (a voice over pictures and clips), cartoon (an animated
+    story with characters), or edit (clips cut to a song's beat)."""
 
 
 STYLES: tuple[Style, ...] = (
+    Style(
+        "cartoon_story",
+        "Animated cartoon story",
+        "a true or made-up story acted out by simple cartoon characters with "
+        "big heads, told by a narrator, one short line per shot, with a hook "
+        "first and a payoff at the end, like the big history cartoon accounts",
+        "The king who couldn't walk until he was 7, then conquered an empire",
+        kind="cartoon",
+    ),
+    Style(
+        "beat_edit",
+        "Music edit (beat for beat)",
+        "clips from a show cut on every beat of a song, with the lyrics on "
+        "screen and the big words spelled out huge",
+        "Steven — Money Longer edit",
+        fandom=True,
+        kind="edit",
+    ),
     Style(
         "gameplay_story",
         "Story over gameplay",
@@ -175,7 +196,13 @@ EDIT_SYSTEM = (
 
 
 def style_of(key: str) -> Style:
-    return STYLE_BY_KEY.get(key, STYLES[0])
+    return STYLE_BY_KEY.get(key, NARRATED[0])
+
+
+NARRATED = tuple(style for style in STYLES if style.kind == "narrated")
+TEXTURES = ("wood", "paper", "dark", "brick", "none")
+SHAPES = ("tall", "wide")
+PACES = ("auto", "fast", "medium", "slow")
 
 
 def clamp_seconds(seconds: int) -> int:

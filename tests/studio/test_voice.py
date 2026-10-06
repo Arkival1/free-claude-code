@@ -202,6 +202,7 @@ async def test_the_built_in_voice_speaks_and_hears(make_studio, monkeypatch):
     studio, _ = make_studio([])
     monkeypatch.setattr(service_module, "speech_package_ready", lambda: True)
     monkeypatch.setattr(local_voice, "listen_package_ready", lambda: True)
+    monkeypatch.setattr(local_voice, "speech_package_ready", lambda: True)
     spoken: list[tuple[str, str]] = []
 
     class FakeKokoro:
@@ -211,7 +212,7 @@ async def test_the_built_in_voice_speaks_and_hears(make_studio, monkeypatch):
         def create(self, text, *, voice, speed, lang):
             spoken.append((text, lang))
             assert np.allclose(voice, 0.6 * 1.0 + 0.4 * 3.0), "the Jarvis blend"
-            assert speed == pytest.approx(1.05)
+            assert speed == pytest.approx(studio.settings.studio_voice_speed)
             t = np.arange(2400) / 24000
             return (0.3 * np.sin(2 * np.pi * 180 * t)).astype(np.float32), 24000
 

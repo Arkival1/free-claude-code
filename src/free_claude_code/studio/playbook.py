@@ -622,6 +622,8 @@ STARTERS: tuple[Starter, ...] = (
             "channel about",
             "sleep video",
             "lore video",
+            "cartoon",
+            "music edit",
         ),
         (
             _x(
@@ -643,9 +645,18 @@ STARTERS: tuple[Starter, ...] = (
                 long=True,
                 minutes=120,
             ),
+            _x(
+                "make a cartoon about the king who couldn't walk",
+                action="make",
+                topic="the king who couldn't walk",
+                kind="cartoon",
+            ),
+            _x("make a music edit", action="make", kind="edit"),
         ),
         (
             "Videos are made in the background; say how many are on the way.",
+            "Cartoons use the characters on the Characters tab; music edits need "
+            "a song and clips in the Media library.",
             "queue shows what is ready to post, with times.",
         ),
     ),

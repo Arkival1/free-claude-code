@@ -902,11 +902,37 @@ length, and the times it posts.
   with the title, description, and hashtags to copy (YouTube gets #Shorts):
   download, post it, and mark it posted. **Autopilot** keeps a day of videos
   ready while the app is open.
+- **Animated cartoon stories** (style *Animated cartoon story*): the look of
+  the big history cartoon accounts. Characters with big heads on stick bodies
+  act out a story in painted places (a hut, a village, the savanna, a palace,
+  a battlefield, and more), filmed with a moving camera (wide, medium,
+  close-up, push in, pan). A narrator tells it with one big word at a time
+  on screen. A tall short shows the 16:9 cartoon on a wooden board under a
+  white series-title box. Add your own characters on the **Characters**
+  tab: their skin, hair, head wear, age, beard, earrings, glasses, or a face
+  picture from your library, plus their own voice for their lines. Tick them
+  in the channel and say *"make a cartoon about the king who couldn't
+  walk"*. The writer plans every shot (who is in it, what they do, where
+  they stand, the camera). In the editor, change any line, place, camera,
+  or who is in a shot (*"Sundiata crawl left, Sogolon cry right"*).
+- **Music edits** (style *Music edit (beat for beat)*): upload the song to
+  the Media library (MP3, WAV, M4A, or a video with the song in it) along
+  with clips from the show. The farm finds the song's tempo and every beat,
+  picks its loudest part (or the part you choose), and cuts between your
+  clips on the beat. Loud parts get more cuts, and the big hits punch in,
+  flash, or shake. The words being sung build up across the middle, and the
+  big words are spelled out huge, letter by letter, in the channel's colour.
+  Lyrics come from timed lyrics you paste (`[00:12.34] words`) or from the
+  built-in Whisper (the `studio_voice` extra), lined up with any plain
+  lyrics you paste. Without either, the pasted lines are spread over the
+  beat. Pick any cut's clip yourself in the editor; it stays when you
+  render again.
 - **Farm chat** on the same page takes *"make 3 shorts about Breaking Bad
   lore"* or *"make a 2 hour sleep video about the entire lore of Breaking
   Bad"*; said in the main chat, it goes to the **Farm** agent, a local agent.
 
-Videos need the `studio_video` extra (Pillow and ffmpeg), which the Windows
+Videos need the `studio_video` extra (Pillow, ffmpeg, and numpy for the
+beat), which the Windows
 installer adds. Video size is `STUDIO_FARM_VIDEO_SIZE` (720p renders faster);
 `STUDIO_FARM_MUSIC` can play a music file you have the rights to under every
 video. Show clips and stills are other people's work: use short pieces with

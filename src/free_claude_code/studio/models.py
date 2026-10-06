@@ -593,6 +593,47 @@ class FarmChannel(Record):
     minutes: int = 120
     """How long a long (sleep) video runs."""
     captions: bool = True
+    cast: tuple[str, ...] = ()
+    """Characters (FarmCharacter ids) in a cartoon channel's stories."""
+    series: str = ""
+    """The title box over a cartoon, e.g. 'Most Epic Comebacks in History'."""
+    texture: str = "wood"
+    """What a tall cartoon sits on: wood, paper, dark, brick, or none."""
+    song: str = ""
+    """A library song: the beat edit's music, or a cartoon's quiet bed."""
+    theme: str = "#ff5fc8"
+    """The colour of a beat edit's big words."""
+    shape: str = "tall"
+    """tall (9:16, for Shorts) or wide (16:9) for cartoons and beat edits."""
+    pace: str = "auto"
+    """How often a beat edit cuts: auto, fast, medium, or slow."""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
+class FarmCharacter(Record):
+    """A cartoon character: how they look and sound. Anything left blank is
+    chosen from the name, so they always look the same."""
+
+    id: str = Field(default_factory=lambda: new_id("fcr"))
+    name: str
+    description: str = ""
+    """Who they are, for the writer: 'a brave young king who couldn't walk'."""
+    skin: str = ""
+    hair: str = ""
+    hair_colour: str = ""
+    wear: str = ""
+    """Something on the head: wrap, crown, turban, cap, hood, helmet, ..."""
+    wear_colour: str = ""
+    age: str = "adult"
+    """kid, adult, or old."""
+    beard: bool = False
+    earrings: bool = False
+    glasses: bool = False
+    head_asset: str = ""
+    """A library picture used as the head instead of a drawn one."""
+    voice: str = ""
+    """Their own voice for lines they say; blank uses the narrator's."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 
@@ -629,7 +670,7 @@ class FarmAsset(Record):
     id: str = Field(default_factory=lambda: new_id("fma"))
     name: str
     kind: str = "image"
-    """image or video."""
+    """image, video, or audio (a song for beat edits)."""
     file: str = ""
     """The file's name in the library folder, for uploads."""
     path: str = ""

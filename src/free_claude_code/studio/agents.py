@@ -298,6 +298,8 @@ def _farm_call_for(goal: str) -> ToolCall | None:
     }
     if job.channel:
         arguments["channel"] = job.channel
+    if job.kind:
+        arguments["kind"] = job.kind
     if job.long:
         arguments["long"] = True
         if job.minutes:

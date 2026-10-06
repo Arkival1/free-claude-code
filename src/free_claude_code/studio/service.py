@@ -78,6 +78,7 @@ from .local_voice import (
     LocalVoice,
     LocalVoiceError,
     SetupState,
+    listen_package_ready,
     speech_package_ready,
 )
 from .lora import LoraTrainer
@@ -446,6 +447,10 @@ def farm_task(job: FarmJob) -> str:
             f"Give me {job.count} video ideas{about}{for_channel} in the Content Farm."
         )
     plural = "video" if job.count == 1 else "videos"
+    if job.kind:
+        thing = {"cartoon": "cartoon", "edit": "music edit"}[job.kind]
+        things = thing if job.count == 1 else f"{thing}s"
+        return f"Make {job.count} {things}{about}{for_channel} in the Content Farm."
     if job.long:
         hours = f"{job.minutes / 60:g} hour" if job.minutes else "long"
         return f"Make {job.count} {hours} sleep {plural}{about}{for_channel} in the Content Farm."
@@ -610,6 +615,7 @@ class StudioService:
             video_size=lambda: self.settings.studio_farm_video_size,
             music=self._farm_music,
             pexels_key=lambda: self.settings.studio_farm_pexels_key or "",
+            hear=self._farm_hear,
             transport=search_transport,
         )
         self._farm_busy = 0
@@ -1935,6 +1941,20 @@ class StudioService:
             logger.info("Content Farm: the voice failed: {}", error)
             return None
 
+    async def _farm_hear(self, wav: bytes) -> list[tuple[str, float, float]]:
+        """The words sung in a song and when, by the built-in Whisper; none
+        when the ears aren't set up (the lyrics are then spread on the beat)."""
+        if not listen_package_ready():
+            return []
+        ears = self.local_voice()
+        if not ears.listen_ready():
+            return []
+        try:
+            return await anyio.to_thread.run_sync(lambda: ears.timed_words(wav))
+        except (LocalVoiceError, OSError, RuntimeError, ValueError) as error:
+            logger.info("Content Farm: Whisper couldn't hear the song: {}", error)
+            return []
+
     async def _farm_research(self, query: str) -> str:
         if self.settings.studio_web_access == "off":
             return ""
@@ -2222,8 +2242,13 @@ class StudioService:
             if action == "queue":
                 return ToolOutcome(text=await self._farm_queue_text(), data=data)
             long = bool(arguments.get("long")) or bool(arguments.get("minutes"))
+            kind = str(arguments.get("kind") or "").strip().lower()
             channel = await self._farm_channel_for(
-                name, topic, long=long, minutes=whole(arguments.get("minutes"), 0)
+                name,
+                topic,
+                long=long,
+                minutes=whole(arguments.get("minutes"), 0),
+                kind=kind if kind in {"cartoon", "edit"} else "",
             )
             if action == "make" and long and topic:
                 return await self._farm_make_long(
@@ -2286,7 +2311,13 @@ class StudioService:
         )
 
     async def _farm_channel_for(
-        self, name: str, topic: str, *, long: bool = False, minutes: int = 0
+        self,
+        name: str,
+        topic: str,
+        *,
+        long: bool = False,
+        minutes: int = 0,
+        kind: str = "",
     ) -> FarmChannel:
         """The channel asked for; with none yet (or no long one for a long
         video), one made for the topic."""
@@ -2314,6 +2345,18 @@ class StudioService:
             if minutes:
                 fields["minutes"] = minutes
             return await self._farm.save_channel(fields)
+        if kind and not name:
+            # 'make a cartoon about ...' goes to a cartoon channel (made if
+            # there is none); 'make an edit ...' to a music edit channel.
+            mine = [c for c in channels if style_of(c.style).kind == kind]
+            if mine:
+                return mine[-1]
+            return await self._farm.save_channel(
+                {
+                    "niche": topic,
+                    "style": "cartoon_story" if kind == "cartoon" else "beat_edit",
+                }
+            )
         if not channels and topic:
             return await self._farm.save_channel({"niche": topic})
         return await self._farm.find_channel(name)
@@ -2400,6 +2443,8 @@ class StudioService:
             arguments["minutes"] = job.minutes
         if job.channel:
             arguments["channel"] = job.channel
+        if job.kind:
+            arguments["kind"] = job.kind
         context = ToolContext(
             agent_id=main.id,
             chat_id=chat.id,

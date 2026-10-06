@@ -692,7 +692,7 @@ wheels = [
 
 [[package]]
 name = "free-claude-code"
-version = "6.58.0"
+version = "6.59.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -732,6 +732,7 @@ lora = [
 ]
 studio-video = [
     { name = "imageio-ffmpeg" },
+    { name = "numpy" },
     { name = "pillow" },
 ]
 studio-voice = [
@@ -783,6 +784,7 @@ requires-dist = [
     { name = "librosa", marker = "extra == 'voice-local'", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7.0" },
     { name = "markdown-it-py", specifier = ">=4.2.0" },
+    { name = "numpy", marker = "extra == 'studio-video'", specifier = ">=2.0.0" },
     { name = "nvidia-riva-client", marker = "extra == 'voice'", specifier = ">=2.26.0" },
     { name = "openai", specifier = ">=3.14.0" },
     { name = "peft", marker = "extra == 'lora'", specifier = ">=0.21.0" },

@@ -385,3 +385,54 @@ a.ghost-button { display: inline-flex; align-items: center; text-decoration: non
   .farm-scene-buttons { grid-column: 1 / -1; flex-direction: row; }
   .farm-ai-edit { grid-template-columns: 1fr; }
 }
+
+/* cartoons and music edits */
+.farm-animated { margin-top: 12px; }
+.farm-animated > [hidden] { display: none; }
+.farm-asset-song { display: grid; place-items: center; aspect-ratio: 16 / 10; font-size: 40px; background: linear-gradient(135deg, #3a1450, #10213a); }
+.farm-cast { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; margin-top: 12px; }
+.farm-cast-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.farm-cast-card:hover { border-color: var(--accent); }
+.farm-cast-card img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 6px; background: #eee8dc; }
+.farm-cast-card small { font-size: 12px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.farm-cast-preview { width: 160px; aspect-ratio: 1; border-radius: 8px; background: #eee8dc; align-self: center; }
+.farm-cast-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.farm-cast-pick { flex-direction: column; align-items: center; gap: 2px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; }
+.farm-cast-pick img { width: 64px; height: 64px; border-radius: 6px; background: #eee8dc; }
+.farm-cast-pick:has(input:checked) { border-color: var(--accent); }
+.farm-colour { display: flex; align-items: center; gap: 8px; }
+.farm-colour input[type="color"] { width: 48px; height: 32px; padding: 0; border: 1px solid var(--line); background: none; }
+.farm-music {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255, 95, 200, 0.55);
+  border-radius: 8px;
+  background: rgba(255, 95, 200, 0.06);
+}
+.farm-music textarea { width: 100%; font-family: inherit; }
+.farm-cut { grid-template-columns: 120px minmax(0, 1fr); }
+.farm-cut p { margin: 0; }
+.farm-shot-number { display: grid; place-items: center; aspect-ratio: 16 / 10; cursor: default; color: var(--text); font-weight: 700; }
+.farm-shot-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.farm-shot-fields .farm-shot-cast { grid-column: 1 / -1; }
+.farm-shot-fields .farm-field { font-size: 12px; color: var(--muted); }
+
+@media (max-width: 760px) {
+  .farm-shot-fields { grid-template-columns: 1fr 1fr; }
+  .farm-cut { grid-template-columns: 90px minmax(0, 1fr); }
+}

@@ -1258,7 +1258,8 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         route="/studio#farm",
         where=(
             "Farm in the tab bar (or MENU, Content Farm). Tabs: Production "
-            "line, Posting queue, Videos, Channel settings; the Farm chat is on "
+            "line, Posting queue, Videos, Media library, Characters, Channel "
+            "settings; the Farm chat is on "
             "the right. Video size, image maker, and music: Settings, Studio."
         ),
         terms=(
@@ -1283,6 +1284,15 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "edit video",
             "media library",
             "gameplay",
+            "cartoon",
+            "animated",
+            "animation",
+            "character",
+            "characters",
+            "music edit",
+            "beat",
+            "lyrics",
+            "song",
         ),
         body=(
             "The Content Farm makes YouTube Shorts (and TikToks, Reels) and "
@@ -1300,7 +1310,17 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "Finished videos wait in the posting queue with the title, "
             "description, and tags to copy. Autopilot keeps a day ready. Ask "
             "Jarvis 'make a 2 hour sleep video about the entire lore of "
-            "Breaking Bad'. Needs the studio_video extra (Pillow and ffmpeg)."
+            "Breaking Bad'. Animated cartoon stories: add characters on the "
+            "Characters tab (look, face picture, own voice), tick them in a "
+            "channel with the 'Animated cartoon story' style, and say 'make a "
+            "cartoon about ...'; the writer plans each shot and you can change "
+            "the place, camera, and who is in it in the editor. Music edits: "
+            "upload the song (MP3, WAV, M4A, or a video with it) and clips to "
+            "the Media library, pick the song in a 'Music edit' channel, and "
+            "the farm cuts the clips on the beat with the lyrics on screen and "
+            "big words spelled out. Paste timed lyrics ([00:12.34] words) in the "
+            "editor's Song and lyrics box, or let the built-in Whisper hear "
+            "them. Needs the studio_video extra (Pillow, ffmpeg, numpy)."
         ),
     ),
     GuideTopic(

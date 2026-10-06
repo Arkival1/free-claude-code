@@ -28,7 +28,7 @@ _NUMBERS = {
     "a couple of": 2,
 }
 _COUNT = r"(?P<count>\d{1,2}|a couple of|a few|an?|one|two|three|four|five|six|seven|eight|nine|ten|some)?"
-_THINGS = r"(?:videos?|reels?|shorts?|tik ?toks?|clips?|posts?|content)"
+_THINGS = r"(?:videos?|reels?|shorts?|tik ?toks?|clips?|posts?|content|cartoons?|animations?|(?:music |beat |fan )?edits?)"
 _LONG = re.compile(
     r"\b(?:\d+(?:\.\d+)?\s*(?:-\s*)?(?:hours?|hrs?)(?:[- ]long)?|an?\s+hour[- ]long|"
     r"hour[- ]long|long[- ]?form|long|to\s+(?:fall\s+a)?sleep\s+to|sleep|"
@@ -44,6 +44,7 @@ _MAKE = re.compile(
     + r"(?:make|create|produce|render|generate|do|farm)\s+(?:me\s+|us\s+)?"
     + _COUNT
     + r"\s*(?:new\s+|more\s+|faceless\s+|viral\s+|short\s+|long\s+|sleep\s+|lore\s+|"
+    + r"animated\s+|cartoon\s+|"
     + r"what[- ]if\s+|\d+(?:\.\d+)?\s*(?:-\s*)?(?:hours?|hrs?)(?:[- ]long)?\s+|"
     + r"hour[- ]long\s+)*"
     + _THINGS
@@ -77,9 +78,13 @@ _IN_FARM = re.compile(
     r"\s*\b(?:in|on|at|for|with)\s+the\s+(?:content\s+)?farm\b\s*", re.I
 )
 _FOR_CHANNEL = re.compile(r"\s+for\s+(?P<channel>@?[\w.]+)\s*$", re.I)
+_CARTOON = re.compile(r"\b(?:cartoons?|animated|animations?)\b", re.I)
+_EDIT = re.compile(r"\b(?:(?:music|beat|fan)\s+)?edits?\b", re.I)
 _FARM_WORDS = re.compile(
     r"\b(?:reels?|shorts|tik ?toks?|content farm|the farm|faceless|"
-    r"videos?\s+(?:about|on|for)|video ideas?|sleep videos?|lore videos?)\b",
+    r"videos?\s+(?:about|on|for)|video ideas?|sleep videos?|lore videos?|"
+    r"cartoons?\s+(?:about|on|for)|animated\s+(?:videos?|stor(?:y|ies)|shorts?)|"
+    r"(?:music|beat|fan)\s+edits?)\b",
     re.I,
 )
 
@@ -95,6 +100,8 @@ class FarmJob:
     """A two-hour video to fall asleep to, rather than a short."""
     minutes: int = 0
     """How long, when the user said ('a 3 hour video')."""
+    kind: str = ""
+    """cartoon (an animated story) or edit (a music edit), when asked for."""
 
 
 def _count(raw: str | None, default: int) -> int:
@@ -109,6 +116,8 @@ def _topic(raw: str | None) -> tuple[str, str]:
     """The topic, and a channel named with 'for @name' at the end."""
     text = (raw or "").strip(" \t\n,;:.!?")
     channel = ""
+    if re.fullmatch(r"@[\w.]+", text):
+        return "", text.lstrip("@")
     found = _FOR_CHANNEL.search(text)
     if found and re.search(r"^@|[_.]", found.group("channel")):
         channel = found.group("channel")
@@ -128,6 +137,11 @@ def farm_job(text: str, *, in_farm: bool) -> FarmJob | None:
     job = _job(said, in_farm=in_farm)
     if job is None or job.action == "channel":
         return job
+    kind = "cartoon" if _CARTOON.search(said) else "edit" if _EDIT.search(said) else ""
+    if kind:
+        return FarmJob(
+            job.action, topic=job.topic, count=job.count, channel=job.channel, kind=kind
+        )
     if _LONG.search(said):
         topic = _LONG_SIZE.sub("", job.topic).strip(" ,;:.!") or job.topic
         return FarmJob(

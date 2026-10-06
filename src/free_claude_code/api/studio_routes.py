@@ -2812,13 +2812,51 @@ class FarmChannelPayload(BaseModel):
     look: str | None = Field(default=None, max_length=20)
     visuals: str | None = Field(default=None, max_length=20)
     voice: str | None = Field(default=None, max_length=40)
-    seconds: int | None = Field(default=None, ge=10, le=90)
+    seconds: int | None = Field(default=None, ge=10, le=180)
     posts_per_day: int | None = Field(default=None, ge=1, le=10)
     post_times: list[str] | None = Field(default=None, max_length=10)
     hashtags: list[str] | None = Field(default=None, max_length=30)
     call_to_action: str | None = Field(default=None, max_length=160)
     notes: str | None = Field(default=None, max_length=1_000)
     autopilot: bool | None = None
+    fandom: str | None = Field(default=None, max_length=120)
+    wiki: str | None = Field(default=None, max_length=200)
+    ai_media: bool | None = None
+    ai_polish: bool | None = None
+    background: str | None = Field(default=None, max_length=40)
+    minutes: int | None = Field(default=None, ge=5, le=600)
+    captions: bool | None = None
+    cast: list[str] | None = Field(default=None, max_length=12)
+    series: str | None = Field(default=None, max_length=80)
+    texture: str | None = Field(default=None, max_length=20)
+    song: str | None = Field(default=None, max_length=40)
+    theme: str | None = Field(default=None, max_length=9)
+    shape: str | None = Field(default=None, max_length=10)
+    pace: str | None = Field(default=None, max_length=10)
+
+
+class FarmCharacterPayload(BaseModel):
+    name: str | None = Field(default=None, max_length=40)
+    description: str | None = Field(default=None, max_length=400)
+    skin: str | None = Field(default=None, max_length=9)
+    hair: str | None = Field(default=None, max_length=20)
+    hair_colour: str | None = Field(default=None, max_length=9)
+    wear: str | None = Field(default=None, max_length=20)
+    wear_colour: str | None = Field(default=None, max_length=9)
+    age: str | None = Field(default=None, max_length=10)
+    beard: bool | None = None
+    earrings: bool | None = None
+    glasses: bool | None = None
+    head_asset: str | None = Field(default=None, max_length=40)
+    voice: str | None = Field(default=None, max_length=40)
+
+
+class FarmMusicPayload(BaseModel):
+    song: str | None = Field(default=None, max_length=40)
+    lyrics: str | None = Field(default=None, max_length=20_000)
+    song_start: float | str | None = None
+    song_length: float | None = Field(default=None, ge=0, le=90)
+    big_words: list[str] | str | None = None
 
 
 class FarmIdeasPayload(BaseModel):
@@ -2965,6 +3003,86 @@ class FarmSceneMediaPayload(BaseModel):
 class FarmAiEditPayload(BaseModel):
     instruction: str = Field(min_length=1, max_length=600)
     chapter: int | None = Field(default=None, ge=0, le=100)
+
+
+@router.get("/studio/api/farm/characters")
+async def farm_characters(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The cartoon characters: how each looks and sounds."""
+    return {"characters": [c.model_dump() for c in await studio.farm.characters()]}
+
+
+@router.post("/studio/api/farm/characters")
+async def farm_add_character(
+    payload: FarmCharacterPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        made = await studio.farm.save_character(
+            cast(JsonObject, payload.model_dump(exclude_none=True))
+        )
+    except FarmError as error:
+        raise _farm_failed(error) from error
+    return made.model_dump()
+
+
+@router.put("/studio/api/farm/characters/{character_id}")
+async def farm_edit_character(
+    character_id: str,
+    payload: FarmCharacterPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        saved = await studio.farm.save_character(
+            cast(JsonObject, payload.model_dump(exclude_none=True)), character_id
+        )
+    except FarmError as error:
+        raise _farm_failed(error) from error
+    return saved.model_dump()
+
+
+@router.get("/studio/api/farm/characters/{character_id}/picture")
+async def farm_character_picture(
+    character_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> FileResponse:
+    """The character, drawn standing and waving."""
+    try:
+        path = await studio.farm.character_picture(character_id)
+    except FarmError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return FileResponse(
+        path, media_type="image/png", headers={"cache-control": "no-store"}
+    )
+
+
+@router.delete("/studio/api/farm/characters/{character_id}")
+async def farm_delete_character(
+    character_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return {"deleted": await studio.farm.delete_character(character_id)}
+    except FarmError as error:
+        raise _farm_failed(error) from error
+
+
+@router.put("/studio/api/farm/posts/{post_id}/music")
+async def farm_post_music(
+    post_id: str,
+    payload: FarmMusicPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """A music edit's song, lyrics, the part of the song, and its big words."""
+    try:
+        post = await studio.farm.set_music(
+            post_id, cast(JsonObject, payload.model_dump(exclude_unset=True))
+        )
+    except FarmError as error:
+        raise _farm_failed(error) from error
+    return studio.farm.editor_view(post)
 
 
 @router.get("/studio/api/farm/posts/{post_id}/editor")

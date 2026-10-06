@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.58.0"
+version = "6.59.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -72,6 +72,7 @@ studio_voice = [
 studio_video = [
     "pillow>=12.0.0",
     "imageio-ffmpeg>=0.6.0",
+    "numpy>=2.0.0",
 ]
 # LoRA weight training on this computer (Studio). A GPU is strongly advised.
 lora = [

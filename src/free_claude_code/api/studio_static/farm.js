@@ -1,9 +1,11 @@
-/* FCC Studio Content Farm — YouTube Shorts and two-hour sleep videos,
-   idea to finished MP4. Channels (one per account and show), a production
-   line from idea to posted, a posting queue with captions ready to paste,
-   every video, a media library of your own clips and pictures, a scene
-   editor (yours and the AI's), each channel's settings, and the Farm chat
-   with the main AI, all on one page. Studio calls FCCFarm.render(ctx). */
+/* FCC Studio Content Farm — YouTube Shorts, animated cartoon stories,
+   beat-for-beat music edits, and two-hour sleep videos, idea to finished
+   MP4. Channels (one per account and show), a production line from idea to
+   posted, a posting queue with captions ready to paste, every video, a
+   media library of your own clips, pictures, and songs, your cartoon
+   characters, a scene editor (yours and the AI's), each channel's settings,
+   and the Farm chat with the main AI, all on one page. Studio calls
+   FCCFarm.render(ctx). */
 (() => {
   "use strict";
 
@@ -12,6 +14,7 @@
     ["queue", "Posting queue", "📅"],
     ["videos", "Videos", "🎬"],
     ["library", "Media library", "🎞"],
+    ["cast", "Characters", "🎭"],
     ["setup", "Channel settings", "⚙"],
   ];
   const MODE_KEY = "fcc.farm.mode";
@@ -19,6 +22,8 @@
   const SUGGESTIONS = [
     "Make 3 shorts about Breaking Bad lore",
     "Make a 2 hour sleep video about the entire lore of Breaking Bad",
+    "Make a cartoon about the king who couldn't walk",
+    "Make a music edit",
     "Give me 5 what-if video ideas",
     "Start a channel about scary stories over gameplay",
     "What's ready to post?",
@@ -114,6 +119,11 @@
   const channels = () => (state.data && state.data.channels) || [];
   const posts = () => (state.data && state.data.posts) || [];
   const channel = () => channels().find((item) => item.id === state.channelId) || null;
+  const channelKind = (id) => {
+    const found = channels().find((item) => item.id === id);
+    const style = found && (state.data.styles || []).find((item) => item.key === found.style);
+    return (style && style.kind) || "narrated";
+  };
   const channelName = (id) => {
     const found = channels().find((item) => item.id === id);
     return found ? `@${found.name}` : "";
@@ -233,7 +243,7 @@
       drawEditor();
       return;
     }
-    const pages = { line: drawLine, queue: drawQueue, videos: drawVideos, library: drawLibrary, setup: drawSetup };
+    const pages = { line: drawLine, queue: drawQueue, videos: drawVideos, library: drawLibrary, cast: drawCast, setup: drawSetup };
     stage.replaceChildren();
     (pages[state.mode] || drawLine)();
   }
@@ -333,7 +343,7 @@
         h("span", { class: "farm-logo", "aria-hidden": "true", text: "🌾" }),
         h("div", {}, [
           h("h1", { text: "Content Farm" }),
-          h("p", { class: "muted", text: "YouTube Shorts and two-hour lore videos to fall asleep to, made on this PC: idea, script, voice, your clips and real stills, captions, finished MP4. Edit any of it yourself." }),
+          h("p", { class: "muted", text: "YouTube Shorts, animated cartoon stories with your own characters, music edits cut on the beat, and two-hour lore videos to fall asleep to, made on this PC. Edit any of it yourself." }),
         ]),
       ]),
       h("div", { class: "farm-stats" }, stats.map(([label, value, icon]) =>
@@ -482,6 +492,7 @@
       h("div", { class: "row farm-card-buttons" }, clean([
         h("button", { class: "primary small", type: "button", text: failed ? (post.scene_count ? "Carry on" : "Try again") : "Make", onclick: () => act(() => ctx.post(`/studio/api/farm/posts/${post.id}/make`), "Making it now.") }),
         post.scene_count ? h("button", { class: "ghost-button small", type: "button", "aria-label": `Edit ${post.title}`, text: "✎ Edit", onclick: () => openEditor(post.id) }) : null,
+        !post.scene_count && channelKind(post.channel_id) === "edit" ? h("button", { class: "ghost-button small", type: "button", "aria-label": `Song and lyrics for ${post.title}`, text: "🎵 Song", onclick: () => openEditor(post.id) }) : null,
         h("button", { class: "ghost-button small", type: "button", "aria-label": `Rename ${post.title}`, text: "✎", onclick: () => renameIdea(post) }),
         h("button", { class: "ghost-button small", type: "button", "aria-label": `Delete ${post.title}`, text: "🗑", onclick: () => act(() => ctx.remove(`/studio/api/farm/posts/${post.id}`)) }),
       ])),
@@ -639,8 +650,13 @@
     ));
     let style = value("style", "lore");
     const isLong = () => Boolean((state.data.styles || []).find((item) => item.key === style && item.long));
+    const kindOf = () => ((state.data.styles || []).find((item) => item.key === style) || {}).kind || "narrated";
     const longOnly = [];
     const shortOnly = [];
+    const narratedOnly = [];
+    const cartoonOnly = [];
+    const editOnly = [];
+    const animatedOnly = [];
     const styleButton = (item) => h("button", {
       class: `farm-style ${item.key === style ? "on" : ""}`,
       type: "button",
@@ -652,13 +668,20 @@
     const drawStyles = () => {
       const all = state.data.styles || [];
       styles.replaceChildren(
+        h("h4", { text: "Animated cartoons and music edits" }),
+        h("div", { class: "farm-styles" }, all.filter((item) => item.kind && item.kind !== "narrated").map(styleButton)),
         h("h4", { text: "Shorts (9:16, under 3 minutes)" }),
-        h("div", { class: "farm-styles" }, all.filter((item) => !item.long).map(styleButton)),
+        h("div", { class: "farm-styles" }, all.filter((item) => !item.long && (!item.kind || item.kind === "narrated")).map(styleButton)),
         h("h4", { text: "Long videos to fall asleep to (16:9, hours)" }),
         h("div", { class: "farm-styles" }, all.filter((item) => item.long).map(styleButton))
       );
+      const kind = kindOf();
       for (const node of longOnly) node.hidden = !isLong();
       for (const node of shortOnly) node.hidden = isLong();
+      for (const node of narratedOnly) node.hidden = kind !== "narrated";
+      for (const node of cartoonOnly) node.hidden = kind !== "cartoon";
+      for (const node of editOnly) node.hidden = kind !== "edit";
+      for (const node of animatedOnly) node.hidden = kind === "narrated";
     };
     let look = value("look", "bold");
     const looks = h("div", { class: "farm-looks", role: "radiogroup", "aria-label": "Caption look" });
@@ -713,8 +736,53 @@
     const longLength = h("label", { class: "farm-field" }, ["Length ", minutesLabel, minutes, h("small", { class: "muted", text: "Two hours takes a few hours to make on this PC; leave it overnight." })]);
     const backgroundField = field("Background video", background, backgrounds.length ? "Plays under every short, muted (gameplay, satisfying clips). Pick “Background only” pictures for the pure gameplay look." : "Upload gameplay in the Media library and tick “Background” to use it here.");
     const platformField = field("Platform", platform);
-    shortOnly.push(shortLength, backgroundField, platformField);
+    // Cartoons and music edits.
+    const library = state.data.library || {};
+    const songs = library.songs || [];
+    const songPick = (selected, none) => h("select", { "aria-label": "Song" }, [
+      h("option", { value: "", text: none }),
+      ...songs.map((item) => h("option", { value: item.id, text: `${item.name}${item.duration ? ` (${Math.round(item.duration)}s)` : ""}`, selected: selected === item.id })),
+    ]);
+    const song = songPick(value("song", ""), "None");
+    const series = h("input", { type: "text", value: value("series", ""), placeholder: "e.g. Most Epic Comebacks in History", "aria-label": "Series title" });
+    const texture = h("select", { "aria-label": "Board" }, (state.data.textures || ["wood"]).map((key) =>
+      h("option", { value: key, text: { wood: "Wooden planks", paper: "Paper", dark: "Dark", brick: "Brick wall", none: "Black" }[key] || key, selected: value("texture", "wood") === key })
+    ));
+    const shape = h("select", { "aria-label": "Shape" }, [
+      h("option", { value: "tall", text: "Tall 9:16 (Shorts, TikTok, Reels)", selected: value("shape", "tall") === "tall" }),
+      h("option", { value: "wide", text: "Wide 16:9 (YouTube)", selected: value("shape", "tall") === "wide" }),
+    ]);
+    const theme = h("input", { type: "color", value: value("theme", "#ff5fc8"), "aria-label": "Big words colour" });
+    const pace = h("select", { "aria-label": "Cuts" }, (state.data.paces || ["auto"]).map((key) =>
+      h("option", { value: key, text: { auto: "Follow the music (more cuts when it's loud)", fast: "Fast: every beat or two", medium: "Medium", slow: "Slow: every bar" }[key] || key, selected: value("pace", "auto") === key })
+    ));
+    const characters = state.data.characters || [];
+    const castSet = new Set(value("cast", []));
+    const castBoxes = characters.map((item) => h("label", { class: "check farm-cast-pick" }, [
+      h("input", { type: "checkbox", value: item.id, checked: castSet.has(item.id), "aria-label": item.name }),
+      h("img", { src: `/studio/api/farm/characters/${item.id}/picture?v=${item.updated_at}`, alt: "", loading: "lazy" }),
+      h("span", { text: item.name }),
+    ]));
+    const castField = h("div", { class: "farm-field" }, [
+      h("strong", { text: "Characters in the stories" }),
+      castBoxes.length
+        ? h("div", { class: "farm-cast-picks" }, castBoxes)
+        : h("p", { class: "muted small", text: "No characters yet: the writer makes some up. Add your own on the Characters tab." }),
+    ]);
+    const seriesField = field("Series title", series, "In the white box above every cartoon.");
+    const textureField = field("Board under the cartoon", texture, "What the tall video shows around the cartoon.");
+    const bedField = field("Quiet music under the story", songPick(value("song", ""), "None (or the music file in Settings)"), "A song from your library, very quiet.");
+    const songField = field("Song", song, songs.length ? "Each edit cuts on this song's beat. A video's own song can be picked in its editor." : "Upload the song (MP3, WAV, M4A, or a video with it) in the Media library first.");
+    const themeField = field("Big words colour", theme, "The huge letters spelled across the screen.");
+    const paceField = field("Cuts", pace);
+    const shapeField = field("Shape", shape);
+    shortOnly.push(shortLength, platformField);
+    const picturesHeading = h("h3", { text: "Pictures and clips" });
+    narratedOnly.push(backgroundField, picturesHeading, pictures);
     longOnly.push(longLength);
+    cartoonOnly.push(castField, seriesField, textureField, bedField);
+    editOnly.push(songField, themeField, paceField);
+    animatedOnly.push(shapeField);
     drawStyles();
     const save = async () => {
       const body = {
@@ -739,7 +807,16 @@
         ai_polish: aiPolish.checked,
         captions: captions.checked,
         background: background.value,
+        series: series.value,
+        texture: texture.value,
+        shape: shape.value,
+        theme: theme.value,
+        pace: pace.value,
+        cast: castBoxes.map((label) => label.querySelector("input")).filter((box) => box.checked).map((box) => box.value),
       };
+      const kind = kindOf();
+      if (kind === "edit") body.song = song.value;
+      else if (kind === "cartoon") body.song = bedField.querySelector("select").value;
       const saved = await act(
         () => (chosen ? ctx.api(`/studio/api/farm/channels/${chosen.id}`, { method: "PUT", body: JSON.stringify(body) }) : ctx.post("/studio/api/farm/channels", body)),
         chosen ? "Channel saved." : "Channel made. Fill its idea board next."
@@ -763,7 +840,8 @@
       ]),
       h("h3", { text: "Video style" }),
       styles,
-      h("h3", { text: "Pictures and clips" }),
+      h("div", { class: "farm-grid farm-animated" }, [castField, seriesField, textureField, bedField, songField, themeField, paceField, shapeField]),
+      picturesHeading,
       pictures,
       h("div", { class: "farm-toggles" }, [
         toggle("Allow AI-made pictures", aiMedia, "Off: only your clips, real stills from the show, and stock photos. Nothing made up."),
@@ -823,6 +901,8 @@
     state.editChapter = 0;
     try {
       state.editor = await ctx.api(`/studio/api/farm/posts/${postId}/editor`);
+      const kind = channelKind(state.editor.channel_id);
+      if (kind !== "narrated") state.editor.kind = kind;
     } catch (error) {
       ctx.notify(error.message);
       state.editing = "";
@@ -854,17 +934,25 @@
       ? h("select", { "aria-label": "Chapter", onchange: (event) => { state.editChapter = Number(event.target.value); drawEditor(); } },
           chapters.map((title, number) => h("option", { value: number, text: `Chapter ${number + 1}: ${title}`, selected: number === state.editChapter })))
       : null;
-    const rows = visible.map(({ scene, index }) => sceneRow(scene, index, visible.length));
+    const kind = post.kind;
+    const rows = visible.map(({ scene, index }) => (kind === "edit" ? cutRow(scene, index) : sceneRow(scene, index, visible.length)));
+    const music = kind === "edit" ? musicPanel(post) : null;
+    const summary = kind === "edit"
+      ? `${scenes.length} cuts on the beat${post.data.tempo ? ` (${post.data.tempo} BPM)` : ""} · lyrics ${post.data.lyrics_from || "not read yet"} · pick any cut's clip, change the song, the part of it, or the lyrics, then render.`
+      : kind === "cartoon"
+        ? `${scenes.length} shots · change any line, where it happens, who is in it and what they do, or the camera, then render. Voice clips are kept for lines you didn't change.`
+        : `${scenes.length} scenes${long ? ` in ${chapters.length} chapters` : ""} · change any line, the words on screen, or a scene's picture or clip, then render. Voice clips are kept for lines you didn't change.`;
     stage.append(h("section", { class: "card farm-editor" }, clean([
       h("div", { class: "farm-editor-head" }, [
         h("button", { class: "ghost-button small", type: "button", text: "‹ Back", onclick: () => { state.editing = ""; state.editor = null; drawStage(); } }),
         h("div", { class: "grow" }, [
           h("h2", { text: `Edit: ${post.data.yt_title || post.title}` }),
-          h("p", { class: "muted small", text: `${scenes.length} scenes${long ? ` in ${chapters.length} chapters` : ""} · change any line, the words on screen, or a scene's picture or clip, then render. Voice clips are kept for lines you didn't change.` }),
+          h("p", { class: "muted small", text: summary }),
         ]),
         post.data.edited ? h("span", { class: "pill warn", text: "Edited" }) : null,
       ]),
-      h("div", { class: "farm-ai-edit" }, clean([
+      music,
+      kind === "edit" ? null : h("div", { class: "farm-ai-edit" }, clean([
         h("strong", { text: "🤖 Ask the AI to edit" }),
         chapterPick,
         instruction,
@@ -897,6 +985,103 @@
     ])));
   }
 
+  function musicPanel(post) {
+    const data = post.data || {};
+    const songs = ((state.data.library || {}).songs) || [];
+    const fallback = (channels().find((item) => item.id === post.channel_id) || {}).song || "";
+    const song = h("select", { "aria-label": "Song", "data-music": "song" }, [
+      h("option", { value: "", text: fallback ? "The channel's song" : "No song yet" }),
+      ...songs.map((item) => h("option", { value: item.id, text: item.name, selected: (data.song || "") === item.id })),
+    ]);
+    const span = data.song_window || [];
+    const start = h("input", { type: "number", min: 0, step: 0.5, value: data.song_start >= 0 ? data.song_start : "", placeholder: span.length ? `auto (${span[0]}s)` : "auto", "aria-label": "Start in the song (seconds)", "data-music": "song_start" });
+    const length = h("input", { type: "number", min: 8, max: 90, step: 1, value: data.song_length || "", placeholder: "channel length", "aria-label": "Length (seconds)", "data-music": "song_length" });
+    const big = h("input", { type: "text", value: (data.big_words || []).join(", "), placeholder: [...new Set(data.big_words_used || [])].join(", ") || "e.g. STEVEN, MONEY, HERO", "aria-label": "Big words", "data-music": "big_words" });
+    const lyrics = h("textarea", { rows: 6, placeholder: "Paste the lyrics, one line per sung line. Timed lyrics ([00:12.34] words) line up best; plain lyrics are timed by Whisper when the built-in ears are on.", "aria-label": "Lyrics", "data-music": "lyrics" });
+    lyrics.value = data.lyrics || "";
+    return h("div", { class: "farm-music" }, [
+      h("strong", { text: "🎵 Song and lyrics" }),
+      h("div", { class: "farm-grid" }, [
+        h("label", { class: "farm-field" }, ["Song", song]),
+        h("label", { class: "farm-field" }, ["Big words (spelled out huge)", big]),
+        h("label", { class: "farm-field" }, ["Start in the song (seconds)", start]),
+        h("label", { class: "farm-field" }, ["Length (seconds)", length]),
+      ]),
+      h("label", { class: "farm-field" }, ["Lyrics", lyrics]),
+    ]);
+  }
+
+  function musicFields() {
+    const body = {};
+    for (const input of stage.querySelectorAll("[data-music]")) {
+      const key = input.dataset.music;
+      if (key === "song_start") body[key] = input.value === "" ? "auto" : Number(input.value);
+      else if (key === "song_length") body[key] = input.value === "" ? 0 : Number(input.value);
+      else if (key === "big_words") body[key] = input.value.split(",").map((word) => word.trim()).filter(Boolean);
+      else body[key] = input.value;
+    }
+    return body;
+  }
+
+  function cutRow(scene, index) {
+    const media = scene.media;
+    const cut = scene.cut || {};
+    const effects = [cut.punch ? "punch" : "", cut.flash ? "flash" : "", cut.shake ? "shake" : ""].filter(Boolean).join(" + ");
+    const preview = media && media.preview
+      ? h("img", { src: media.preview, alt: "", loading: "lazy" })
+      : h("span", { class: "farm-scene-blank", text: "🎞" });
+    return h("li", { class: "farm-scene farm-cut", "data-index": index }, [
+      h("button", { class: "farm-scene-media", type: "button", "aria-label": `Change the clip for cut ${index + 1}`, onclick: () => chooseMedia(index, { show: scene.say === "♪" ? "" : scene.say }) }, [
+        preview,
+        h("small", { text: sceneMediaLabel(media) }),
+      ]),
+      h("div", { class: "farm-scene-text" }, [
+        h("strong", { text: `${Number(cut.start || 0).toFixed(2)}s – ${Number(cut.end || 0).toFixed(2)}s` }),
+        h("p", { class: "muted small", text: `${scene.say || "♪"}${effects ? ` · ${effects}` : ""}` }),
+      ]),
+    ]);
+  }
+
+  const SPOT_WORDS = ["far left", "center left", "centre left", "center right", "centre right", "far right", "left", "right", "middle", "center", "centre"];
+
+  function castText(cast) {
+    return (cast || []).map((actor) => [actor.name, actor.action && actor.action !== "stand" ? actor.action : "", actor.at || ""].filter(Boolean).join(" ")).join(", ");
+  }
+
+  // "Sundiata crawl left, Sogolon cry right" back into the shot's cast.
+  function parseCast(text) {
+    const actions = (state.data.character_options || {}).actions || [];
+    return text.split(",").map((part) => part.trim()).filter(Boolean).slice(0, 4).map((part) => {
+      let rest = part.toLowerCase();
+      let at = "";
+      for (const word of SPOT_WORDS) {
+        if (rest.endsWith(` ${word}`)) {
+          at = word;
+          rest = rest.slice(0, -word.length - 1);
+          break;
+        }
+      }
+      const words = part.split(/\s+/).slice(0, rest.split(/\s+/).length);
+      let action = "stand";
+      if (words.length > 1 && actions.includes(words[words.length - 1].toLowerCase())) action = words.pop().toLowerCase();
+      return { name: words.join(" "), action, at, feel: "" };
+    });
+  }
+
+  function shotFields(scene, index) {
+    const options = state.data.character_options || {};
+    const place = h("select", { "aria-label": `Shot ${index + 1} place`, "data-field": "place" }, (options.places || ["hut"]).map((key) => h("option", { value: key, text: key, selected: (scene.place || "hut") === key })));
+    const camera = h("select", { "aria-label": `Shot ${index + 1} camera`, "data-field": "camera" }, (options.cameras || ["wide"]).map((key) => h("option", { value: key, text: { wide: "Wide", medium: "Medium", close: "Close-up", push: "Push in", pan: "Pan" }[key] || key, selected: (scene.camera || "wide") === key })));
+    const speaker = h("input", { type: "text", value: scene.speaker || "", placeholder: "Narrator", "aria-label": `Shot ${index + 1} speaker`, "data-field": "speaker" });
+    const who = h("input", { type: "text", value: castText(scene.cast), placeholder: "Sundiata crawl left, Sogolon cry right", "aria-label": `Shot ${index + 1} characters`, "data-cast": "1" });
+    return h("div", { class: "farm-shot-fields" }, [
+      h("label", { class: "farm-field" }, ["Where", place]),
+      h("label", { class: "farm-field" }, ["Camera", camera]),
+      h("label", { class: "farm-field" }, ["Who says it", speaker]),
+      h("label", { class: "farm-field farm-shot-cast" }, ["Who's in it (name, action, where)", who]),
+    ]);
+  }
+
   function sceneRow(scene, index, count) {
     const say = h("textarea", { rows: 2, "aria-label": `Scene ${index + 1} words`, "data-field": "say" });
     say.value = scene.say || "";
@@ -906,12 +1091,15 @@
     const preview = media && media.preview
       ? h("img", { src: media.preview, alt: "", loading: "lazy" })
       : h("span", { class: "farm-scene-blank", text: media && media.type === "clip" ? "🎞" : media && media.type === "none" ? "🎮" : "🖼" });
-    return h("li", { class: "farm-scene", "data-index": index }, [
-      h("button", { class: "farm-scene-media", type: "button", "aria-label": `Change the picture for scene ${index + 1}`, onclick: () => chooseMedia(index, scene) }, [
-        preview,
-        h("small", { text: sceneMediaLabel(media) }),
-      ]),
-      h("div", { class: "farm-scene-text" }, [say, h("div", { class: "row" }, [onScreen, show])]),
+    const cartoon = state.editor.kind === "cartoon";
+    return h("li", { class: `farm-scene ${cartoon ? "farm-shot" : ""}`, "data-index": index }, [
+      cartoon
+        ? h("span", { class: "farm-scene-media farm-shot-number", text: `🎬 ${index + 1}` })
+        : h("button", { class: "farm-scene-media", type: "button", "aria-label": `Change the picture for scene ${index + 1}`, onclick: () => chooseMedia(index, scene) }, [
+            preview,
+            h("small", { text: sceneMediaLabel(media) }),
+          ]),
+      h("div", { class: "farm-scene-text" }, cartoon ? [say, shotFields(scene, index)] : [say, h("div", { class: "row" }, [onScreen, show])]),
       h("div", { class: "farm-scene-buttons" }, [
         h("button", { class: "ghost-button small", type: "button", "aria-label": `Move scene ${index + 1} up`, text: "↑", disabled: index === 0, onclick: () => moveScene(index, -1) }),
         h("button", { class: "ghost-button small", type: "button", "aria-label": `Move scene ${index + 1} down`, text: "↓", disabled: index === count - 1 && !(state.editor.kind === "long"), onclick: () => moveScene(index, 1) }),
@@ -927,6 +1115,8 @@
     for (const row of stage.querySelectorAll(".farm-scene")) {
       const index = Number(row.dataset.index);
       for (const input of row.querySelectorAll("[data-field]")) scenes[index][input.dataset.field] = input.value;
+      const who = row.querySelector("[data-cast]");
+      if (who) scenes[index].cast = parseCast(who.value);
     }
     return scenes;
   }
@@ -959,7 +1149,11 @@
   async function saveScenes(renderToo) {
     const scenes = collectScenes().filter((scene) => String(scene.say || "").trim());
     try {
-      state.editor = await ctx.api(`/studio/api/farm/posts/${state.editing}/scenes`, { method: "PUT", body: JSON.stringify({ scenes }) });
+      if (state.editor.kind === "edit") {
+        state.editor = await ctx.api(`/studio/api/farm/posts/${state.editing}/music`, { method: "PUT", body: JSON.stringify(musicFields()) });
+      } else {
+        state.editor = await ctx.api(`/studio/api/farm/posts/${state.editing}/scenes`, { method: "PUT", body: JSON.stringify({ scenes }) });
+      }
     } catch (error) {
       ctx.notify(error.message);
       return;
@@ -980,11 +1174,13 @@
     const results = h("div", { class: "farm-candidates" }, [h("p", { class: "muted", text: "Looking…" })]);
     const search = h("input", { type: "search", value: scene.show || "", placeholder: "Who or what should it show?", "aria-label": "Search for a picture or clip" });
     const upload = h("input", { type: "file", accept: "image/*,video/*", class: "visually-hidden", "aria-label": "Upload a picture or clip for this scene" });
+    const editing = state.editor && state.editor.kind === "edit";
     let box = null;
     const use = async (choice) => {
       const scenes = collectScenes();
       try {
-        await ctx.api(`/studio/api/farm/posts/${state.editing}/scenes`, { method: "PUT", body: JSON.stringify({ scenes }) });
+        if (editing) await ctx.api(`/studio/api/farm/posts/${state.editing}/music`, { method: "PUT", body: JSON.stringify(musicFields()) });
+        else await ctx.api(`/studio/api/farm/posts/${state.editing}/scenes`, { method: "PUT", body: JSON.stringify({ scenes }) });
         state.editor = await ctx.api(`/studio/api/farm/posts/${state.editing}/scenes/${index}/media`, { method: "PUT", body: JSON.stringify(choice) });
       } catch (error) {
         ctx.notify(error.message);
@@ -1045,7 +1241,7 @@
 
   async function drawLibrary() {
     const list = h("div", { class: "farm-library" }, [h("p", { class: "muted", text: "Loading…" })]);
-    const files = h("input", { type: "file", accept: "image/*,video/*", multiple: true, class: "visually-hidden", "aria-label": "Add clips and pictures" });
+    const files = h("input", { type: "file", accept: "image/*,video/*,audio/*", multiple: true, class: "visually-hidden", "aria-label": "Add clips, pictures, and songs" });
     const show = h("input", { type: "text", value: state.libraryShow || (channel() || {}).fandom || "", placeholder: "Which show they're from (optional)", "aria-label": "Show for new files" });
     const asBackground = h("input", { type: "checkbox", "aria-label": "Background video" });
     const status = h("p", { class: "muted small", role: "status" });
@@ -1067,13 +1263,13 @@
     });
     stage.append(h("section", { class: "card farm-library-card" }, [
       h("h2", { text: "Media library" }),
-      h("p", { class: "muted", text: "Your clips and pictures: the farm uses them first, matched by their names, tags, and notes, so name them for what they show (“walt teaching chemistry.mp4”). Clips play muted under the voice. Tick Background for gameplay to play under whole shorts." }),
+      h("p", { class: "muted", text: "Your clips and pictures: the farm uses them first, matched by their names, tags, and notes, so name them for what they show (“walt teaching chemistry.mp4”). Clips play muted under the voice. Tick Background for gameplay to play under whole shorts. Songs (MP3, WAV, M4A) are for music edits and cartoons." }),
       h("div", { class: "farm-grid" }, [
         h("div", { class: "farm-field" }, [
           h("strong", { text: "Upload" }),
           show,
           h("label", { class: "check" }, [asBackground, " Background video (gameplay)"]),
-          h("label", { class: "primary farm-upload" }, ["⬆ Add clips and pictures", files]),
+          h("label", { class: "primary farm-upload" }, ["⬆ Add clips, pictures, and songs", files]),
           status,
         ]),
         h("form", {
@@ -1126,8 +1322,11 @@
       background.addEventListener("change", async () => { await save(); await refresh(); });
       return h("article", { class: "farm-asset" }, [
         h("div", { class: "farm-asset-thumb" }, [
-          h("img", { src: asset.thumb_url, alt: "", loading: "lazy" }),
+          asset.kind === "audio"
+            ? h("span", { class: "farm-asset-song", text: "🎵" })
+            : h("img", { src: asset.thumb_url, alt: "", loading: "lazy" }),
           asset.kind === "video" ? h("span", { class: "farm-badge", text: `🎞 ${Math.round(asset.duration)}s` }) : null,
+          asset.kind === "audio" ? h("span", { class: "farm-badge", text: `🎵 ${Math.round(asset.duration)}s` }) : null,
         ].filter(Boolean)),
         h("strong", { text: asset.name }),
         h("small", { class: "muted", text: [asset.show, asset.source === "folder" ? "linked" : ""].filter(Boolean).join(" · ") }),
@@ -1139,6 +1338,118 @@
         ]),
       ]);
     }));
+  }
+
+  /* ------------------------------------------------------------ characters */
+
+  const HAIR_NAMES = { short: "Short", afro: "Afro", long: "Long", bald: "Bald", bun: "Bun", braids: "Braids", spiky: "Spiky", curly: "Curly" };
+  const WEAR_NAMES = { none: "Nothing", wrap: "Head wrap", crown: "Crown", turban: "Turban", cap: "Cap", hood: "Hood", helmet: "Helmet", headband: "Headband", hat: "Hat" };
+
+  function drawCast() {
+    const characters = state.data.characters || [];
+    const list = h("div", { class: "farm-cast" }, characters.length
+      ? characters.map((item) => h("button", { class: "farm-cast-card", type: "button", "aria-label": `Edit ${item.name}`, onclick: () => editCharacter(item) }, [
+          h("img", { src: `/studio/api/farm/characters/${item.id}/picture?v=${item.updated_at}`, alt: "", loading: "lazy" }),
+          h("strong", { text: item.name }),
+          h("small", { class: "muted", text: item.description || "No notes yet" }),
+        ]))
+      : [h("p", { class: "muted", text: "No characters yet. Add the people in your stories: the writer uses them by name, and each can have their own voice." })]);
+    stage.append(h("section", { class: "card farm-cast-card-list" }, [
+      h("div", { class: "row" }, [
+        h("div", { class: "grow" }, [
+          h("h2", { text: "Characters" }),
+          h("p", { class: "muted", text: "Big heads on stick bodies, like the history cartoon accounts. Give each a look (or a picture of a face from your library) and a voice, then tick them in a cartoon channel's settings." }),
+        ]),
+        h("button", { class: "primary", type: "button", text: "+ Add character", onclick: () => editCharacter(null) }),
+      ]),
+      list,
+    ]));
+  }
+
+  function editCharacter(item) {
+    const options = state.data.character_options || {};
+    const value = (key, fallback) => (item && item[key] != null && item[key] !== "" ? item[key] : fallback);
+    const field = (label, input) => h("label", { class: "farm-field" }, [label, input]);
+    const choose = (key, names, list, fallback) => h("select", { "aria-label": key, "data-key": key }, [
+      h("option", { value: "", text: "Pick for me" }),
+      ...(list || Object.keys(names)).map((option) => h("option", { value: option, text: names[option] || option, selected: value(key, fallback) === option })),
+    ]);
+    const colourPick = (key, label, fallback) => {
+      const input = h("input", { type: "color", value: value(key, fallback), "aria-label": label, "data-key": key });
+      const auto = h("input", { type: "checkbox", checked: !item || !item[key], "aria-label": `${label}: pick for me` });
+      return { input, auto, node: h("div", { class: "farm-colour" }, [input, h("label", { class: "check small" }, [auto, " pick for me"])]) };
+    };
+    const name = h("input", { type: "text", value: value("name", ""), placeholder: "e.g. Sundiata", "aria-label": "Name" });
+    const about = h("textarea", { rows: 2, placeholder: "Who they are, for the writer: a young prince who couldn't walk", "aria-label": "Who they are" });
+    about.value = value("description", "");
+    const age = h("select", { "aria-label": "Age" }, (options.ages || ["kid", "adult", "old"]).map((key) => h("option", { value: key, text: { kid: "Child", adult: "Grown-up", old: "Old" }[key] || key, selected: value("age", "adult") === key })));
+    const skin = colourPick("skin", "Skin", "#c68a5a");
+    const hair = choose("hair", HAIR_NAMES, options.hair, "");
+    const hairColour = colourPick("hair_colour", "Hair colour", "#1d1a18");
+    const wear = choose("wear", WEAR_NAMES, options.wear, "");
+    const wearColour = colourPick("wear_colour", "Head wear colour", "#3fa9f5");
+    const flags = ["beard", "earrings", "glasses"].map((key) => h("label", { class: "check" }, [h("input", { type: "checkbox", checked: Boolean(value(key, false)), "data-flag": key }), ` ${key[0].toUpperCase()}${key.slice(1)}`]));
+    const pictures = (state.data.library || {}).pictures || [];
+    const head = h("select", { "aria-label": "Face picture" }, [
+      h("option", { value: "", text: "Drawn head" }),
+      ...pictures.map((picture) => h("option", { value: picture.id, text: picture.name, selected: value("head_asset", "") === picture.id })),
+    ]);
+    const voice = h("select", { "aria-label": "Voice" }, [
+      h("option", { value: "", text: "The narrator's voice" }),
+      ...(state.data.voices || []).map((key) => h("option", { value: key, text: voiceName(key), selected: value("voice", "") === key })),
+    ]);
+    const preview = item ? h("img", { class: "farm-cast-preview", src: `/studio/api/farm/characters/${item.id}/picture?v=${item.updated_at}`, alt: `${item.name}` }) : null;
+    let box = null;
+    const save = async () => {
+      const body = {
+        name: name.value,
+        description: about.value,
+        age: age.value,
+        hair: hair.value,
+        wear: wear.value,
+        head_asset: head.value,
+        voice: voice.value,
+        skin: skin.auto.checked ? "" : skin.input.value,
+        hair_colour: hairColour.auto.checked ? "" : hairColour.input.value,
+        wear_colour: wearColour.auto.checked ? "" : wearColour.input.value,
+      };
+      for (const flag of box.querySelectorAll("[data-flag]")) body[flag.dataset.flag] = flag.checked;
+      const saved = await act(
+        () => (item ? ctx.api(`/studio/api/farm/characters/${item.id}`, { method: "PUT", body: JSON.stringify(body) }) : ctx.post("/studio/api/farm/characters", body)),
+        item ? "Character saved." : "Character added. Tick them in a cartoon channel's settings."
+      );
+      if (saved) box.remove();
+    };
+    box = modal(item ? `Edit ${item.name}` : "New character", clean([
+      preview,
+      h("div", { class: "farm-grid" }, [
+        field("Name", name),
+        field("Age", age),
+        field("Who they are", about),
+        field("Voice", voice),
+        field("Skin", skin.node),
+        field("Hair", hair),
+        field("Hair colour", hairColour.node),
+        field("On their head", wear),
+        field("Head wear colour", wearColour.node),
+        field("Face picture (optional)", head),
+      ]),
+      h("div", { class: "row" }, flags),
+      h("p", { class: "muted small", text: "A face picture from the library replaces the drawn head: a plain background is cut away. Anything left on “pick for me” is chosen from the name, so they always look the same." }),
+      h("div", { class: "row" }, clean([
+        h("button", { class: "primary", type: "button", text: item ? "Save" : "Add character", onclick: save }),
+        item ? h("button", {
+          class: "ghost-button danger",
+          type: "button",
+          text: "Delete",
+          onclick: async () => {
+            if (!window.confirm(`Delete ${item.name}?`)) return;
+            await act(() => ctx.remove(`/studio/api/farm/characters/${item.id}`), "Character deleted.");
+            box.remove();
+          },
+        }) : null,
+      ])),
+    ]));
   }
 
   function voiceName(id) {

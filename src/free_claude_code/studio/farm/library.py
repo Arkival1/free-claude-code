@@ -4,7 +4,7 @@ Upload clips and photos, or link a folder on this PC (a clip library can be
 huge, so linked files stay where they are). Every file gets tags from its
 name and folders, so 'Breaking Bad/S1/walt teaching.mp4' is found for a
 scene about Walt teaching. Mark gameplay or footage as a background to play
-under a whole short.
+under a whole short. Songs go here too, for beat edits.
 """
 
 import re
@@ -30,7 +30,16 @@ VIDEO_TYPES = {
     ".m4v": "video",
     ".avi": "video",
 }
-MEDIA_TYPES = {**IMAGE_TYPES, **VIDEO_TYPES}
+AUDIO_TYPES = {
+    ".mp3": "audio",
+    ".wav": "audio",
+    ".m4a": "audio",
+    ".ogg": "audio",
+    ".flac": "audio",
+    ".aac": "audio",
+    ".opus": "audio",
+}
+MEDIA_TYPES = {**IMAGE_TYPES, **VIDEO_TYPES, **AUDIO_TYPES}
 MAX_LINKED = 5_000
 """Files read from one linked folder."""
 MAX_UPLOAD = 4 * 1024 * 1024 * 1024
@@ -126,6 +135,9 @@ class MediaLibrary:
         if not source.is_file():
             return None
 
+        if asset.kind == "audio":
+            return None
+
         def make() -> bool:
             if asset.kind == "video":
                 return snapshot(source, out, at=min(2.0, asset.duration / 3 or 1.0))
@@ -164,7 +176,8 @@ class MediaLibrary:
         kind = kind_of(Path(clean_name)) or kind_of(source)
         if not kind:
             raise LibraryError(
-                "Send a picture (JPG, PNG, WebP) or a clip (MP4, MOV, MKV, WebM)."
+                "Send a picture (JPG, PNG, WebP), a clip (MP4, MOV, MKV, WebM), "
+                "or a song (MP3, WAV, M4A, OGG, FLAC)."
             )
         asset = FarmAsset(
             name=Path(clean_name).stem[:120],
@@ -236,7 +249,7 @@ class MediaLibrary:
 
     async def _measured(self, asset: FarmAsset) -> FarmAsset:
         path = self.path(asset)
-        if asset.kind == "video":
+        if asset.kind in {"video", "audio"}:
             seconds, width, height = await anyio.to_thread.run_sync(lambda: probe(path))
             return asset.model_copy(
                 update={"duration": round(seconds, 2), "width": width, "height": height}

@@ -61,7 +61,7 @@ OPTIONAL_IMPORT_OWNERS: dict[str, frozenset[str]] = {
     "riva": frozenset({"free_claude_code.providers.nvidia_nim.voice"}),
     "kokoro_onnx": frozenset({_STUDIO_VOICE}),
     "faster_whisper": frozenset({_STUDIO_VOICE}),
-    "numpy": frozenset({_STUDIO_VOICE}),
+    "numpy": frozenset({_STUDIO_VOICE, "free_claude_code.studio.farm.beats"}),
 }
 
 

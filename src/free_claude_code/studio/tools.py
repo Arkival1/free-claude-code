@@ -526,7 +526,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "Reels) and two-hour lore or what-if videos to fall asleep to, on "
             "this PC, from idea to a finished MP4 with a voiceover, real "
             "stills and clips from the user's library or the show's fandom "
-            "wiki, and word-by-word captions. For a long video, set long. The user watches "
+            "wiki, and word-by-word captions; animated cartoon stories with "
+            "the user's own characters (kind cartoon); and music edits cut "
+            "beat for beat to a song the user gave (kind edit). For a long "
+            "video, set long. The user watches "
             "it on the Content Farm page. action make: make videos (count, "
             "about a topic, or the next ideas on the board) for a channel; it "
             "runs in the background and they appear in the posting queue. "
@@ -566,8 +569,15 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "lore_sleep",
                         "what_if_sleep",
                         "theory_sleep",
+                        "cartoon_story",
+                        "beat_edit",
                     ],
                     "description": "channel: the video style.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["cartoon", "edit"],
+                    "description": "make: an animated cartoon story, or a music edit cut to a song, on a channel of that kind.",
                 },
                 "long": {
                     "type": "boolean",

@@ -450,3 +450,24 @@ class LocalVoice:
 
     async def transcribe(self, wav: bytes) -> str:
         return await anyio.to_thread.run_sync(lambda: self.recognize(wav))
+
+    def timed_words(self, wav: bytes) -> list[tuple[str, float, float]]:
+        """Each word heard and when (seconds), for lyrics over music (runs
+        on a thread)."""
+        samples, rate = read_wav(wav)
+        audio = resample(samples, rate, LISTEN_RATE)
+        if audio.size < LISTEN_RATE // 4:
+            return []
+        segments, _ = self._listener().transcribe(
+            audio,
+            language=self._language or None,
+            beam_size=1,
+            word_timestamps=True,
+            condition_on_previous_text=False,
+        )
+        return [
+            (word.word.strip(), float(word.start), float(word.end))
+            for segment in segments
+            for word in (segment.words or [])
+            if word.word.strip()
+        ]

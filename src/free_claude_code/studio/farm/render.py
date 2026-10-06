@@ -894,11 +894,46 @@ def render(
         raise RenderError(why)
     if not plan.shots:
         raise RenderError("The script has no scenes.")
-    ffmpeg = find_ffmpeg()
-    assert ffmpeg is not None
-    width, height = plan.frame_size
     cover.parent.mkdir(parents=True, exist_ok=True)
     draw_frame(plan, min(0.8, plan.duration / 3)).save(cover, "JPEG", quality=88)
+    frames = Frames(plan, find_ffmpeg())
+    encode(
+        frames.draw,
+        size=plan.frame_size,
+        fps=plan.fps,
+        duration=plan.duration,
+        audio=audio,
+        out=out,
+        music=plan.music,
+        progress=progress,
+        stopped=stopped,
+        close=frames.close,
+    )
+
+
+def encode(
+    draw: Callable[[float], Any],
+    *,
+    size: tuple[int, int],
+    fps: int,
+    duration: float,
+    audio: Path,
+    out: Path,
+    music: Path | None = None,
+    music_volume: float = 0.16,
+    progress: Callable[[float], None] = lambda _: None,
+    stopped: Callable[[], bool] = lambda: False,
+    close: Callable[[], None] = lambda: None,
+) -> None:
+    """Draw every frame in order and have ffmpeg write them, with the sound
+    (and quiet music under it), into an MP4."""
+    ready, why = video_tools()
+    if not ready:
+        close()
+        raise RenderError(why)
+    ffmpeg = find_ffmpeg()
+    assert ffmpeg is not None
+    width, height = size
     video = (
         ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]
         if _has_x264(ffmpeg)
@@ -906,11 +941,11 @@ def render(
     )
     inputs = ["-i", str(audio)]
     mixing: list[str] = ["-map", "0:v", "-map", "1:a"]
-    if plan.music is not None and plan.music.is_file():
-        inputs += ["-stream_loop", "-1", "-i", str(plan.music)]
+    if music is not None and music.is_file():
+        inputs += ["-stream_loop", "-1", "-i", str(music)]
         mixing = [
             "-filter_complex",
-            "[2:a]volume=0.16[m];[1:a][m]amix=inputs=2:duration=first[a]",
+            f"[2:a]volume={music_volume:.2f}[m];[1:a][m]amix=inputs=2:duration=first[a]",
             "-map",
             "0:v",
             "-map",
@@ -930,7 +965,7 @@ def render(
         "-s",
         f"{width}x{height}",
         "-r",
-        str(plan.fps),
+        str(fps),
         "-i",
         "-",
         *inputs,
@@ -947,8 +982,7 @@ def render(
         "+faststart",
         str(partial),
     ]
-    frames_total = max(1, round(plan.duration * plan.fps))
-    frames = Frames(plan, ffmpeg)
+    frames_total = max(1, round(duration * fps))
     was_stopped = False
     # ffmpeg's complaints go to a file: a pipe nobody reads while the frames
     # are written could fill up and stall both sides.
@@ -962,12 +996,12 @@ def render(
                 creationflags=_NO_WINDOW,
             )
         except OSError as error:
-            frames.close()
+            close()
             raise RenderError(f"ffmpeg would not start: {error}") from error
         assert process.stdin is not None
         try:
             for number in range(frames_total):
-                frame = frames.draw(number / plan.fps)
+                frame = draw(number / fps)
                 process.stdin.write(frame.tobytes())
                 if number % 15 == 0:
                     progress(number / frames_total)
@@ -977,7 +1011,7 @@ def render(
         except BrokenPipeError, OSError:
             pass
         finally:
-            frames.close()
+            close()
             with contextlib.suppress(OSError):
                 process.stdin.close()
             if was_stopped:

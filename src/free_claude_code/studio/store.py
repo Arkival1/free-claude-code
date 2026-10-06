@@ -19,6 +19,7 @@ from .models import (
     ExamQuestion,
     FarmAsset,
     FarmChannel,
+    FarmCharacter,
     FarmPost,
     LabChemical,
     LabProject,
@@ -63,6 +64,7 @@ _JSON_FIELDS = frozenset(
         "segments",
         "plan",
         "quiz",
+        "cast",
     }
 )
 
@@ -95,6 +97,7 @@ TABLES: Mapping[type[Record], str] = {
     FarmChannel: "studio_farm_channels",
     FarmPost: "studio_farm_posts",
     FarmAsset: "studio_farm_assets",
+    FarmCharacter: "studio_farm_characters",
     StudioFlag: "studio_flags",
 }
 
