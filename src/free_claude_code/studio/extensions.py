@@ -7,7 +7,9 @@ One link pulls in whatever a repo holds, the Claude Code way:
 - MCP servers: .mcp.json, or mcpServers in a plugin's plugin.json,
 - and a plain repo with none of those becomes one skill from its README.
 
-Everything is kept on this PC under Studio's extensions folder. MCP servers
+Everything is kept on this PC under Studio's extensions folder, and the
+downloaded repo is also kept in the repo vault: if the repo is later deleted
+from GitHub, adding it again (or restoring it) uses that copy. MCP servers
 from a repo start switched off: running one runs that repo's code, so the
 user turns each on after seeing its command.
 """
@@ -23,6 +25,8 @@ from pathlib import Path, PurePosixPath
 
 import anyio.to_thread
 import httpx
+
+from .vault import RepoVault, VaultError
 
 MAX_ZIP_BYTES = 80 * 1024 * 1024
 MAX_UNPACKED_BYTES = 300 * 1024 * 1024
@@ -93,6 +97,8 @@ class Extension:
     agents: list[AgentDef] = field(default_factory=list)
     servers: list[McpServer] = field(default_factory=list)
     plugins: list[str] = field(default_factory=list)
+    vaulted: str = ""
+    """Where the copy came from when GitHub no longer had it: the vault entry."""
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -135,6 +141,7 @@ class Extension:
                 for item in _dicts(data, "servers")
             ],
             plugins=_texts(data, "plugins"),
+            vaulted=_text(data, "vaulted"),
         )
 
 
@@ -391,10 +398,15 @@ class ExtensionLibrary:
     """The extensions folder: one folder per added repo, plus its manifest."""
 
     def __init__(
-        self, folder: Path, *, transport: httpx.AsyncBaseTransport | None = None
+        self,
+        folder: Path,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        vault: RepoVault | None = None,
     ) -> None:
         self._folder = folder
         self._transport = transport
+        self._vault = vault
 
     @property
     def folder(self) -> Path:
@@ -402,7 +414,51 @@ class ExtensionLibrary:
 
     async def add_github(self, link: str) -> Extension:
         repo = parse_link(link)
-        data = await self._download(repo)
+        vaulted = ""
+        try:
+            data = await self._download(repo)
+        except ExtensionError:
+            # Gone from GitHub (or GitHub is down): use the vault's copy.
+            kept = (
+                await self._vault.latest(repo.owner, repo.repo)
+                if self._vault is not None
+                else None
+            )
+            if kept is None or self._vault is None:
+                raise
+            try:
+                data = await self._vault.read(kept)
+            except VaultError as error:
+                raise ExtensionError(str(error)) from error
+            vaulted = kept.id
+        else:
+            if self._vault is not None:
+                await self._vault.keep(
+                    owner=repo.owner,
+                    repo=repo.repo,
+                    kind="source",
+                    name=f"{repo.repo}-{repo.ref or 'HEAD'}.zip",
+                    data=data,
+                    url=repo.zip_url,
+                    ref=repo.ref,
+                )
+        return await self._install(repo, data, vaulted)
+
+    async def restore(self, item_id: str, sub: str = "") -> Extension:
+        """Add a repo again from its vault copy, with no download at all."""
+        if self._vault is None:
+            raise ExtensionError("There is no vault on this PC.")
+        try:
+            item = await self._vault.item(item_id)
+            data = await self._vault.read(item)
+        except VaultError as error:
+            raise ExtensionError(str(error)) from error
+        if item.kind != "source":
+            raise ExtensionError("Only a repo's files can be added as an extension.")
+        repo = RepoLink(owner=item.owner, repo=item.repo, ref=item.ref, sub=sub)
+        return await self._install(repo, data, item.id)
+
+    async def _install(self, repo: RepoLink, data: bytes, vaulted: str) -> Extension:
         ext_id = f"ext_{_slug(repo.name)}_{secrets.token_hex(3)}"
 
         def work() -> Extension:
@@ -414,6 +470,7 @@ class ExtensionLibrary:
                 shutil.rmtree(home, ignore_errors=True)
                 raise
             extension.id = ext_id
+            extension.vaulted = vaulted
             extension.source = f"https://github.com/{repo.owner}/{repo.repo}" + (
                 f"/tree/{repo.ref or 'HEAD'}/{repo.sub}" if repo.sub else ""
             )

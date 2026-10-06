@@ -52,6 +52,7 @@ from .guide import (
     offline_answer,
     page_name,
 )
+from .hq import station_for, stations_view
 from .lab import text as lab_text
 from .lab.bench import LabBench
 from .lab.requests import lab_job
@@ -220,6 +221,7 @@ from .tools import (
     tool_tokens,
 )
 from .tuning import CloudTuner, LightTuner, TuningError
+from .vault import RepoVault
 from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
 from .voice import SpeechAudio, VoiceError, VoiceService, speakable
 from .weather import WeatherError, forecast, weather_request
@@ -561,8 +563,13 @@ class StudioService:
         # Jarvis's playbook until an Obsidian vault is set.
         self._playbook_home = sites_dir.parent / "playbook"
         # Skills, agents, and MCP servers added from GitHub.
+        # A copy of every repo and release Studio downloads, so they still
+        # install after the original is deleted from GitHub.
+        self.vault = RepoVault(sites_dir.parent / "vault")
         self._extensions = ExtensionLibrary(
-            sites_dir.parent / "extensions", transport=search_transport
+            sites_dir.parent / "extensions",
+            transport=search_transport,
+            vault=self.vault,
         )
         self._mcp = McpManager()
         self._library = ModelLibrary(store=store, models_dir=models_dir)
@@ -4525,6 +4532,13 @@ class StudioService:
         except ExtensionError as error:
             raise StudioError(str(error)) from error
 
+    async def restore_extension(self, item_id: str) -> Extension:
+        """Add a repo again from its copy in the vault."""
+        try:
+            return await self._extensions.restore(item_id)
+        except ExtensionError as error:
+            raise StudioError(str(error)) from error
+
     async def remove_extension(self, ext_id: str) -> None:
         extension = await self._extension(ext_id)
         for server in extension.servers:
@@ -5526,6 +5540,145 @@ class StudioService:
                 if room is not None:
                     running.update(room.member_ids)
         return running
+
+    # ------------------------------------------------------------------ HQ
+
+    async def hq(self) -> JsonObject:
+        """The whole team as the pixel HQ shows it: who is at which station
+        doing what, what each station has waiting, and the newest steps."""
+        agents = [agent for agent in await self.agents() if not agent.archived]
+        busy = await self._busy_agents(await self._active_runs())
+        latest_run: dict[str, AgentRun] = {}
+        for run in await self.runs(limit=60):
+            latest_run.setdefault(run.agent_id, run)
+        main = await self.main_agent()
+        main_chat = await self.main_chat()
+        people: list[JsonObject] = []
+        feed: list[JsonObject] = []
+        for agent in agents:
+            if agent.id == main.id:
+                chat: Chat | None = main_chat
+            else:
+                found = await self._store.find(
+                    Chat,
+                    where={"agent_id": agent.id},
+                    order_by="updated_at DESC",
+                    limit=1,
+                )
+                chat = found[0] if found else None
+            recent = await self._store.transcript(chat.id, limit=8) if chat else ()
+            if chat is not None and chat.kind == "room":
+                recent = tuple(m for m in recent if m.author == agent.name)
+            tool = ""
+            for message in reversed(recent):
+                if message.role == "tool":
+                    tool = str(message.data.get("tool") or message.author or "")
+                    break
+            live = self._live_text.get(chat.id, "") if chat else ""
+            working = agent.id in busy or bool(live)
+            run = latest_run.get(agent.id)
+            model = await self.effective_model(agent.model or self.default_model)
+            people.append(
+                {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "role": agent.role,
+                    "main": agent.id == main.id,
+                    "model": model,
+                    "local": self.runs_on_this_pc(model),
+                    "busy": working,
+                    "tool": tool,
+                    "station": station_for(agent.role, tool, working),
+                    "live": live[-160:],
+                    "task": run.goal[:200]
+                    if run and run.status in {"queued", "running"}
+                    else "",
+                    "chat_id": chat.id if chat else "",
+                }
+            )
+            feed += [
+                {
+                    "agent": agent.name,
+                    "agent_id": agent.id,
+                    "tool": str(message.data.get("tool") or message.author or ""),
+                    "text": message.text[:140],
+                    "failed": bool(message.data.get("failed")),
+                    "at": message.created_at,
+                }
+                for message in recent[-3:]
+                if message.role == "tool"
+            ]
+        counts: dict[str, int] = {}
+        notes: dict[str, str] = {}
+        pending = await self.pending_commands()
+        counts["approvals"] = len(pending)
+        if pending:
+            notes["approvals"] = f"{len(pending)} command(s) waiting for your yes"
+        studying = [
+            s for s in await self.studies() if s.status in {"planning", "learning"}
+        ]
+        counts["school"] = len(studying)
+        if studying:
+            notes["school"] = f"Learning: {studying[0].topic}"[:120]
+        todos = await self.todos()
+        counts["mailroom"] = len(todos)
+        making = await self._farm.posts(status="making")
+        counts["studio"] = len(making)
+        if making:
+            notes["studio"] = (
+                f"Making: {making[0].title} ({making[0].stage or 'working'})"[:120]
+            )
+        counts["toolshed"] = len(await self._extensions.all())
+        models = sorted({str(p["model"]) for p in people})
+        counts["servers"] = len(models)
+        notes["servers"] = ", ".join(model_label(m) for m in models[:4])
+        for person in people:
+            station = str(person["station"])
+            if station not in {
+                "approvals",
+                "school",
+                "mailroom",
+                "studio",
+                "toolshed",
+                "servers",
+            }:
+                counts[station] = counts.get(station, 0) + 1
+        feed.sort(key=lambda item: -int(str(item["at"])))
+        return {
+            "agents": people,
+            "stations": stations_view(counts, notes),
+            "pending": [item.model_dump() for item in pending[:5]],
+            "feed": feed[:14],
+        }
+
+    async def hq_say(self, agent_id: str, text: str) -> JsonObject:
+        """Talk to one agent from the HQ; it answers in the background."""
+        text = text.strip()
+        if not text:
+            raise StudioError("Write something first.")
+        agent = await self.agent(agent_id)
+        main = await self.main_agent()
+        if agent.id == main.id:
+            chat = await self.main_say(text)
+            return {"accepted": True, "chat_id": chat.id}
+        found = await self._store.find(
+            Chat,
+            where={"agent_id": agent.id, "kind": "chat"},
+            order_by="updated_at DESC",
+            limit=1,
+        )
+        chat = (
+            found[0]
+            if found
+            else await self.create_chat(agent_id=agent.id, title=f"{agent.name} (HQ)")
+        )
+
+        async def answer() -> None:
+            with contextlib.suppress(StudioError, StudioNotFoundError):
+                await self.send(chat.id, text)
+
+        self.spawn(answer())
+        return {"accepted": True, "chat_id": chat.id}
 
     async def agent_activity(self, agent_id: str, *, after: int = 0) -> JsonObject:
         """What one agent is doing: its latest task and its newest steps."""

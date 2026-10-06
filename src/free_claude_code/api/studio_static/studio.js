@@ -3,7 +3,7 @@
   "use strict";
 
   const TOKEN_KEY = "fcc.studio.token";
-  const TAB_ROUTES = ["home", "chats", "agents", "lab", "farm", "learn", "more"];
+  const TAB_ROUTES = ["home", "chats", "hq", "agents", "lab", "farm", "learn", "more"];
   const POLL_MS = 2500;
   const HIDDEN_POLL_MS = 10000;
 
@@ -3837,6 +3837,7 @@
           ),
           el("div", { class: "row" }, [
             item.source && item.source !== "you" ? el("a", { class: "pill", href: item.source, target: "_blank", rel: "noopener", text: "GitHub" }) : null,
+            item.vaulted ? el("span", { class: "pill", title: "GitHub no longer had it, so this came from the repo vault", text: "From the vault" }) : null,
             el("button", {
               class: "secondary",
               type: "button",
@@ -3865,6 +3866,43 @@
       el("details", {}, [el("summary", { text: "Add an MCP server by hand" }), serverForm]),
       status,
       ...(rows.length ? rows : [el("p", { class: "muted", text: "Nothing added yet." })]),
+    ]);
+  }
+
+  function vaultCard(vault) {
+    const items = vault.items || [];
+    const size = (bytes) => (bytes > 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+    const rows = items.map((item) =>
+      el("div", { class: "row vault-row" }, [
+        el("div", { class: "grow" }, [
+          el("strong", { text: item.full_name }),
+          el("p", { class: "muted small", text: `${item.kind === "release" ? "Release" : "Repo files"} · ${item.name} · ${size(item.size)} · kept ${new Date(item.saved_at).toLocaleDateString()} · SHA-256 ${item.sha256.slice(0, 12)}…` }),
+        ]),
+        el("a", { class: "ghost-button small", href: item.file_url, download: item.name, text: "Download" }),
+        item.kind === "source"
+          ? el("button", {
+              class: "ghost-button small",
+              type: "button",
+              text: "Restore",
+              onclick: async () => {
+                try {
+                  const added = await post(`/studio/api/vault/${item.id}/restore`, {});
+                  notify(`Added ${added.name} again from the vault copy.`);
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            })
+          : null,
+      ].filter(Boolean))
+    );
+    return card("Repo vault", [
+      el("p", {
+        class: "muted",
+        text: `Every repo and release Studio downloads is kept here, byte for byte, with its checksum. If the original is deleted from GitHub, adding it again uses this copy, and you can restore or download any copy. ${items.length} kept, ${size(vault.bytes || 0)} in all.`,
+      }),
+      ...(rows.length ? rows : [el("p", { class: "muted", text: "Nothing kept yet: add a repo from GitHub and its copy appears here." })]),
     ]);
   }
 
@@ -4136,7 +4174,7 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
@@ -4147,6 +4185,7 @@
       api("/studio/api/studies").catch(() => ({ studies: [] })),
       api("/studio/api/playbook").catch(() => null),
       api("/studio/api/extensions").catch(() => ({ extensions: [] })),
+      api("/studio/api/vault").catch(() => ({ items: [], bytes: 0 })),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -4186,6 +4225,7 @@
       learningCard(studies.studies || []),
       ...(book ? [playbookCard(book)] : []),
       extensionsCard(added.extensions || []),
+      vaultCard(repoVault),
       todoCard(todos.todos || []),
       videoCard(videos.videos || []),
       voiceCard(voiceInfo),
@@ -5206,6 +5246,7 @@
 
   const NAV_ITEMS = [
     ["Command Center", "home", "◈"],
+    ["HQ (team at work)", "hq", "▦"],
     ["Agents", "agents", "◎"],
     ["Chats", "chats", "◌"],
     ["Lab", "lab", "⚗"],
@@ -6390,6 +6431,7 @@
         case "lora": return await renderLoraJob(id);
         case "lab": return await renderLab(generation);
         case "farm": return await renderFarm(generation);
+        case "hq": return await renderHQ(generation);
         case "more": return await renderMore();
         case "settings": return await renderSettings();
         default: return go("home");
@@ -6411,6 +6453,20 @@
       api,
       post,
       remove,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  // The HQ (the team as a pixel office) lives in hq.js.
+  async function renderHQ(generation) {
+    if (!window.FCCHQ) throw new Error("The HQ didn't load. Reload the page.");
+    await window.FCCHQ.render({
+      view,
+      el,
+      api,
+      post,
       notify,
       go,
       alive: () => generation === renderGeneration,
@@ -6653,6 +6709,7 @@
         lora: "LoRA training",
         lab: "Lab",
         farm: "Content Farm",
+        hq: "HQ",
         more: "More",
         settings: "Settings",
       }[name] || "Studio"

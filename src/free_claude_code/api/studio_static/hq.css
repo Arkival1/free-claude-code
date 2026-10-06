@@ -1,0 +1,274 @@
+/* FCC Studio HQ: the pixel office of the whole team. */
+
+.hq {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: start;
+  padding: 12px;
+}
+
+.hq-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hq-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hq-head h2 {
+  margin: 0;
+  letter-spacing: 0.2em;
+}
+
+.hq-head p {
+  margin: 2px 0 0;
+}
+
+.hq-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.hq-legend .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.hq-legend .dot.busy {
+  background: #2ecc71;
+  box-shadow: 0 0 6px #2ecc71;
+}
+
+.hq-legend .dot.idle {
+  background: #6b778a;
+  margin-left: 8px;
+}
+
+.hq-stage {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #11161f;
+  box-shadow: 0 0 24px rgba(0, 200, 255, 0.08);
+}
+
+.hq-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 480 / 300;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.hq-tip {
+  position: absolute;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(5, 10, 18, 0.92);
+  color: var(--text);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.hq-feed-title {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+.hq-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.hq-feed li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hq-feed li .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hq-feed li.failed .hq-tool {
+  color: var(--bad);
+}
+
+.hq-tool {
+  color: var(--accent);
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+}
+
+.hq-panel {
+  position: sticky;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+}
+
+.hq-panel h3,
+.hq-panel h4 {
+  margin: 4px 0 0;
+}
+
+.hq-panel > .ghost-button.small {
+  align-self: flex-start;
+}
+
+.hq-team {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hq-person {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 2px 8px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hq-person:hover {
+  border-color: var(--accent);
+}
+
+.hq-person small {
+  grid-column: 2;
+}
+
+.hq-person strong:first-child {
+  grid-column: 1 / -1;
+}
+
+.hq-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  grid-row: span 2;
+}
+
+.hq-swatch.busy {
+  box-shadow: 0 0 0 2px #2ecc71;
+}
+
+.hq-status {
+  margin: 0;
+  color: var(--accent);
+}
+
+.hq-say textarea {
+  width: 100%;
+}
+
+.hq-say .row {
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.hq-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.hq-steps li {
+  padding: 6px;
+  border-left: 2px solid var(--line);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.hq-steps li.failed {
+  border-left-color: var(--bad);
+}
+
+.hq-approval {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid rgba(255, 215, 94, 0.5);
+  border-radius: 6px;
+}
+
+.hq-approval code {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  /* On a phone the office stays big enough to read; swipe to look around. */
+  .hq-stage {
+    overflow-x: auto;
+  }
+
+  .hq-canvas {
+    width: 760px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .hq {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 8px;
+  }
+
+  .hq-panel {
+    position: static;
+    max-height: none;
+  }
+}
+
+/* The office gets the whole width of the page. */
+body[data-ui="page"] .view:has(> .hq) {
+  max-width: none;
+}

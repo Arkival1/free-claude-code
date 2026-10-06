@@ -1254,6 +1254,50 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="HQ",
+        route="/studio#hq",
+        where="HQ in the tab bar (or MENU, HQ).",
+        terms=(
+            "hq",
+            "pixel",
+            "office",
+            "stations",
+            "who is working",
+            "team at work",
+            "watch agents",
+            "workflow",
+        ),
+        body=(
+            "The HQ shows the team as a pixel office. Each station is part of the "
+            "work: command desk (Jarvis), research library, code workshop, test "
+            "bench, Lab, video studio, memory archive, classroom, model room, "
+            "approval desk, toolshed, mailroom, and break room. Agents walk to the "
+            "station of the tool they are using and back to the break room when "
+            "done. Click an agent to see its task and steps, send it a message, or "
+            "stop it. Click a station to see who is there and what's waiting; the "
+            "approval desk lets you allow or refuse waiting commands."
+        ),
+    ),
+    GuideTopic(
+        title="Repo vault",
+        route="/studio#more",
+        where="Knowledge & Memory (MENU), the Repo vault card.",
+        terms=(
+            "vault",
+            "repo vault",
+            "deleted repo",
+            "backup repo",
+            "kept copy",
+            "github copy",
+        ),
+        body=(
+            "Every repo added from GitHub is kept on this PC with its checksum. If "
+            "the original is deleted from GitHub, adding it again uses the kept "
+            "copy automatically, and the Repo vault card can restore or download "
+            "any copy."
+        ),
+    ),
+    GuideTopic(
         title="Content Farm",
         route="/studio#farm",
         where=(

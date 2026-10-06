@@ -56,6 +56,7 @@ from free_claude_code.studio.playbook import PlaybookNote
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.tuning import TuningError
+from free_claude_code.studio.vault import VaultError, item_view
 from free_claude_code.studio.videos import clock, render_note
 from free_claude_code.studio.voice import MAX_AUDIO_BYTES, VoiceError
 
@@ -74,6 +75,8 @@ _ASSET_FILENAMES = frozenset(
         "lab.js",
         "farm.css",
         "farm.js",
+        "hq.css",
+        "hq.js",
         "icon.svg",
         "icon-180.png",
         "icon-192.png",
@@ -1235,6 +1238,34 @@ async def _server_models(services: ApiServices) -> list[str]:
     return sorted({info.model_id for info in infos} | configured)
 
 
+@router.get("/studio/api/hq")
+async def hq(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The team in the pixel HQ: stations, who is where, and the newest steps."""
+    return await studio.hq()
+
+
+@router.post("/studio/api/hq/agents/{agent_id}/say", status_code=202)
+async def hq_say(
+    agent_id: str,
+    payload: MessagePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Talk to one agent from the HQ; it answers in the background."""
+    return await studio.hq_say(agent_id, payload.text)
+
+
+@router.post("/studio/api/hq/agents/{agent_id}/stop")
+async def hq_stop(
+    agent_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Stop an agent's background tasks."""
+    stopped = await studio.stop_agent_work(agent_id)
+    return {"stopped": len(stopped)}
+
+
 @router.get("/studio/api/agents/{agent_id}/activity")
 async def agent_activity(
     agent_id: str,
@@ -2266,6 +2297,7 @@ def _extension(extension: Extension) -> JsonObject:
         "source": extension.source,
         "description": extension.description,
         "plugins": list(extension.plugins),
+        "vaulted": extension.vaulted,
         "skills": [
             {"name": skill.name, "description": skill.description, "kind": skill.kind}
             for skill in extension.skills
@@ -2320,6 +2352,49 @@ async def add_mcp_server(
             name=payload.name, command=command, args=args, url=payload.url
         )
     )
+
+
+@router.get("/studio/api/vault")
+async def list_vault(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Every repo and release kept on this PC, newest first."""
+    items = await studio.vault.items()
+    return {
+        "items": [item_view(item) for item in items],
+        "bytes": sum(item.size for item in items),
+        "folder": str(studio.vault.folder),
+    }
+
+
+@router.get("/studio/api/vault/{item_id}/file")
+async def vault_file(
+    item_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> FileResponse:
+    """Download a kept copy."""
+    try:
+        item = await studio.vault.item(item_id)
+        path = studio.vault.path(item)
+    except VaultError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="That copy's file is missing.")
+    return FileResponse(path, filename=item.name)
+
+
+@router.post("/studio/api/vault/{item_id}/restore")
+async def restore_from_vault(
+    item_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Add a repo again from its kept copy (no download)."""
+    return _extension(await studio.restore_extension(item_id))
+
+
+@router.delete("/studio/api/vault/{item_id}")
+async def remove_from_vault(
+    item_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"removed": await studio.vault.remove(item_id)}
 
 
 @router.delete("/studio/api/extensions/{ext_id}")

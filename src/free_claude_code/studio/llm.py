@@ -39,10 +39,12 @@ class ChatMessage:
     content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     tool_call_id: str | None = None
+    images: tuple[str, ...] = ()
+    """Pictures for a vision model, as data URLs (data:image/jpeg;base64,...)."""
 
     @classmethod
-    def user(cls, content: str) -> ChatMessage:
-        return cls(role="user", content=content)
+    def user(cls, content: str, images: tuple[str, ...] = ()) -> ChatMessage:
+        return cls(role="user", content=content, images=images)
 
     @classmethod
     def assistant(cls, content: str) -> ChatMessage:
@@ -1050,6 +1052,7 @@ def _anthropic_messages(messages: Sequence[ChatMessage]) -> list[JsonObject]:
             )
             continue
         blocks: list[JsonObject] = []
+        blocks.extend(_anthropic_image(url) for url in message.images)
         if message.content:
             blocks.append({"type": "text", "text": message.content})
         blocks.extend(
@@ -1077,9 +1080,21 @@ def _text_protocol_messages(messages: Sequence[ChatMessage]) -> list[JsonObject]
     names: dict[str, str] = {}
     wire: list[JsonObject] = []
 
-    def add(role: str, content: str) -> None:
+    def add(role: str, content: str, images: tuple[str, ...] = ()) -> None:
         if wire and wire[-1]["role"] == role:
-            wire[-1]["content"] = f"{wire[-1]['content']}\n\n{content}"
+            before = wire[-1]["content"]
+            if images or isinstance(before, list):
+                parts = (
+                    before
+                    if isinstance(before, list)
+                    else _openai_parts(str(before), ())
+                )
+                assert isinstance(parts, list)
+                wire[-1]["content"] = [*parts, *_openai_parts(content, images)]
+            else:
+                wire[-1]["content"] = f"{before}\n\n{content}"
+        elif images:
+            wire.append({"role": role, "content": _openai_parts(content, images)})
         else:
             wire.append({"role": role, "content": content})
 
@@ -1101,8 +1116,28 @@ def _text_protocol_messages(messages: Sequence[ChatMessage]) -> list[JsonObject]
             parts.append(json.dumps(directives[0]))
         elif directives:
             parts.append(json.dumps(directives))
-        add(message.role, "\n".join(parts))
+        add(message.role, "\n".join(parts), message.images)
     return wire
+
+
+def _openai_parts(text: str, images: tuple[str, ...]) -> list[JsonObject]:
+    """OpenAI-style content parts: the pictures, then the words."""
+    parts: list[JsonObject] = [
+        {"type": "image_url", "image_url": {"url": url}} for url in images
+    ]
+    if text:
+        parts.append({"type": "text", "text": text})
+    return parts
+
+
+def _anthropic_image(url: str) -> JsonObject:
+    """A data URL as an Anthropic image block."""
+    head, _, data = url.partition(",")
+    media = head.removeprefix("data:").split(";", 1)[0] or "image/jpeg"
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": media, "data": data},
+    }
 
 
 def _openai_messages(messages: Sequence[ChatMessage]) -> list[JsonObject]:
@@ -1117,7 +1152,12 @@ def _openai_messages(messages: Sequence[ChatMessage]) -> list[JsonObject]:
                 }
             )
             continue
-        entry: JsonObject = {"role": message.role, "content": message.content}
+        entry: JsonObject = {
+            "role": message.role,
+            "content": _openai_parts(message.content, message.images)
+            if message.images
+            else message.content,
+        }
         if message.tool_calls:
             entry["tool_calls"] = [
                 {

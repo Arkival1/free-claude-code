@@ -861,6 +861,24 @@ one himself with the `code_and_test` tool. Lab jobs from the main chat
 the lab tool and reports back; if its model only talks, Studio runs the make
 or mix for it. In the Lab's own chat, Studio still does it at once.
 
+**HQ.** The **HQ** tab shows the whole team as a pixel office. Every part
+of the agent workflow is a station: Jarvis's command desk, the research
+library, the code workshop, the test bench, the Lab, the video studio, the
+memory archive, the classroom, the model room, the approval desk, the
+toolshed, the mailroom, and the break room. Each agent walks to the station
+of the tool it is using right now and goes back to the break room when it's
+done; monitors, server lights, flasks, and the studio camera come alive
+while someone works there. Click an agent to see its task and steps, send it
+a message, or stop it; click a station to see what's waiting there (the
+approval desk lists commands waiting for your yes, with Allow and Refuse).
+
+**Repo vault.** Every repo added from GitHub is kept on the PC, byte for
+byte with its SHA-256, in the **Repo vault** (Settings). If the original is
+later deleted from GitHub, adding it again uses the kept copy, and any copy
+can be restored or downloaded. Outside repos built into FCC itself are kept
+under `vendor/` with their licence, release files, checksums, and source
+(`vendor/cua` holds trycua/cua's MIT-licensed Cua Driver and agent source).
+
 **Content Farm.** The **Farm** tab makes faceless videos on this PC, start
 to finish: **YouTube Shorts** (and TikToks or Reels) and **two-hour videos to
 fall asleep to** that walk through a show's entire lore, a what-if, or its fan

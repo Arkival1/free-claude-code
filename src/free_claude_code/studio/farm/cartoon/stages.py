@@ -91,7 +91,16 @@ def place_key(place: str) -> str:
 
 @functools.lru_cache(maxsize=48)
 def stage(place: str, width: int, height: int, seed: int = 0) -> Any:
-    """A place, drawn at this size (RGB). Cached: it is copied every frame."""
+    """A place, drawn at this size (RGB), with its props, a painted
+    texture, warm light, and a soft vignette. Cached: copied every frame."""
+    key = place_key(place)
+    canvas = _base_stage(key, width, height, seed)
+    _props(canvas, key, width, height, random.Random(f"props{key}{seed}"))
+    return _finish(canvas, key, random.Random(f"finish{key}{seed}"))
+
+
+def _base_stage(place: str, width: int, height: int, seed: int = 0) -> Any:
+    """The place itself: walls, ground, sky, and its big shapes (RGB)."""
     from PIL import Image, ImageDraw, ImageFilter
 
     key = place_key(place)
@@ -381,6 +390,187 @@ def stage(place: str, width: int, height: int, seed: int = 0) -> Any:
         canvas = canvas.filter(ImageFilter.SMOOTH)
         return canvas
     return Image.new("RGB", size, (120, 100, 80))
+
+
+def _props(canvas: Any, key: str, width: int, height: int, rng: random.Random) -> None:
+    """The things that make a place feel lived in."""
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    floor = height * 0.68
+    if key == "hut":
+        # Clay pots by the wall, a woven mat, a gourd hanging from a peg.
+        for n, x in enumerate((width * 0.06, width * 0.11, width * 0.94)):
+            w = width * (0.045 if n != 1 else 0.035)
+            h = w * 1.25
+            top = floor - h * 0.85
+            draw.ellipse(
+                (x - w / 2, top, x + w / 2, top + h),
+                fill=(158, 88, 52),
+                outline=(96, 52, 30),
+                width=2,
+            )
+            draw.rectangle(
+                (x - w * 0.2, top - h * 0.12, x + w * 0.2, top + h * 0.05),
+                fill=(140, 76, 44),
+            )
+            draw.arc(
+                (x - w * 0.4, top + h * 0.25, x + w * 0.4, top + h * 0.55),
+                200,
+                340,
+                fill=(190, 120, 80),
+                width=2,
+            )
+        mat = (width * 0.18, height * 0.82, width * 0.46, height * 0.92)
+        draw.rounded_rectangle(mat, radius=8, fill=(196, 160, 96))
+        for x in range(int(mat[0]) + 6, int(mat[2]) - 4, 9):
+            draw.line((x, mat[1] + 3, x, mat[3] - 3), fill=(160, 124, 70), width=2)
+        draw.ellipse(
+            (width * 0.47, height * 0.18, width * 0.52, height * 0.27),
+            fill=(186, 140, 60),
+            outline=(110, 80, 30),
+            width=2,
+        )
+        draw.line(
+            (width * 0.495, height * 0.12, width * 0.495, height * 0.19),
+            fill=(80, 60, 40),
+            width=3,
+        )
+    elif key in {"room", "classroom"}:
+        frame = (width * 0.42, height * 0.12, width * 0.56, height * 0.3)
+        if key == "room":
+            draw.rectangle(frame, fill=(120, 80, 50))
+            draw.rectangle(
+                (frame[0] + 6, frame[1] + 6, frame[2] - 6, frame[3] - 6),
+                fill=(110, 170, 200),
+            )
+            draw.polygon(
+                [
+                    (frame[0] + 6, frame[3] - 6),
+                    (frame[0] + 40, frame[1] + 30),
+                    (frame[2] - 6, frame[3] - 6),
+                ],
+                fill=(70, 130, 70),
+            )
+        draw.rectangle(
+            (width * 0.05, height * 0.44, width * 0.16, height * 0.47),
+            fill=(110, 76, 48),
+        )
+        for n in range(5):
+            colour = [
+                (192, 57, 43),
+                (41, 128, 185),
+                (39, 174, 96),
+                (241, 196, 15),
+                (142, 68, 173),
+            ][n]
+            draw.rectangle(
+                (
+                    width * 0.055 + n * 12,
+                    height * 0.395,
+                    width * 0.055 + n * 12 + 9,
+                    height * 0.44,
+                ),
+                fill=colour,
+            )
+    elif key in {"savanna", "desert"}:
+        # Far hills, the sun's glow, grass tufts, and rocks.
+        sun = (width * 0.78, height * 0.12)
+        for r, alpha in ((90, 30), (60, 50), (34, 255)):
+            draw.ellipse(
+                (sun[0] - r, sun[1] - r, sun[0] + r, sun[1] + r),
+                fill=(255, 238, 170, alpha),
+            )
+        for _n in range(26):
+            x = rng.uniform(0, width)
+            y = rng.uniform(height * 0.72, height * 0.98)
+            for blade in range(4):
+                lean = rng.uniform(-8, 8)
+                draw.line(
+                    (x + blade * 3, y, x + blade * 3 + lean, y - rng.uniform(8, 18)),
+                    fill=(150, 120, 40, 220),
+                    width=2,
+                )
+        for _n in range(4):
+            x = rng.uniform(width * 0.05, width * 0.95)
+            y = rng.uniform(height * 0.8, height * 0.95)
+            w = rng.uniform(18, 34)
+            draw.ellipse(
+                (x, y - w * 0.45, x + w, y + w * 0.1),
+                fill=(140, 120, 100),
+                outline=(100, 84, 70),
+                width=2,
+            )
+    elif key == "palace":
+        for n in range(4):
+            x = width * (0.08 + n * 0.28) + width * 0.045
+            draw.polygon(
+                [
+                    (x - 18, height * 0.1),
+                    (x + 18, height * 0.1),
+                    (x + 18, height * 0.38),
+                    (x, height * 0.33),
+                    (x - 18, height * 0.38),
+                ],
+                fill=(150, 20, 40),
+            )
+            draw.ellipse(
+                (x - 7, height * 0.18, x + 7, height * 0.24), fill=(236, 184, 40)
+            )
+    elif key == "forest":
+        for n in range(4):
+            x = width * (0.1 + n * 0.25)
+            draw.polygon(
+                [
+                    (x, height * 0.0),
+                    (x + 60, height * 0.0),
+                    (x + 160, height * 0.9),
+                    (x + 40, height * 0.9),
+                ],
+                fill=(255, 250, 200, 26),
+            )
+        for _n in range(18):
+            x = rng.uniform(0, width)
+            y = rng.uniform(height * 0.8, height)
+            for leaf in range(5):
+                angle = -1.4 + leaf * 0.7
+                draw.line(
+                    (x, y, x + math.cos(angle) * 22, y - abs(math.sin(angle)) * 22 - 6),
+                    fill=(40, 110, 50, 230),
+                    width=3,
+                )
+    elif key == "night":
+        draw.ellipse(
+            (width * 0.8, height * 0.08, width * 0.86, height * 0.19),
+            fill=(250, 245, 220),
+        )
+        draw.ellipse(
+            (width * 0.815, height * 0.07, width * 0.875, height * 0.18),
+            fill=(30, 36, 70),
+        )
+
+
+def _finish(canvas: Any, key: str, rng: random.Random) -> Any:
+    """Paint-like grain, and a vignette that pulls the eye to the middle."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+    width, height = canvas.size
+    grain = Image.effect_noise((max(1, width // 3), max(1, height // 3)), 22).resize(
+        (width, height), Image.Resampling.BILINEAR
+    )
+    grain = grain.point(lambda v: 128 + (v - 128) // 3)
+    canvas = ImageChops.overlay(canvas, Image.merge("RGB", (grain, grain, grain)))
+    vignette = Image.new("L", (width, height), 0)
+    ImageDraw.Draw(vignette).ellipse(
+        (-width * 0.15, -height * 0.25, width * 1.15, height * 1.25), fill=255
+    )
+    vignette = vignette.filter(ImageFilter.GaussianBlur(min(width, height) * 0.12))
+    dark = Image.new(
+        "RGB",
+        (width, height),
+        (20, 14, 10) if key not in {"night", "space"} else (0, 0, 10),
+    )
+    return Image.composite(canvas, Image.blend(canvas, dark, 0.45), vignette)
 
 
 @functools.lru_cache(maxsize=16)

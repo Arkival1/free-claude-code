@@ -264,11 +264,12 @@ def _posed_head(
     blink: bool,
     flip: bool,
     angle: int,
+    gaze: float = 0.5,
 ) -> Any:
     """A head facing the right way and turned, kept: turning is the slow part."""
     from PIL import Image
 
-    picture = head(look, height, feeling=feeling, mouth=mouth, gaze=0.6, blink=blink)
+    picture = head(look, height, feeling=feeling, mouth=mouth, gaze=gaze, blink=blink)
     if flip:
         picture = picture.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     if angle:
@@ -321,8 +322,21 @@ def draw_figure(
         # A picture head can't open its mouth: it bobs instead.
         tilt += math.sin(t * 2 * math.pi * 2.6) * 4
     mouth = round(mouth_open(t, placed.speaking) * 3) / 3
-    blink = (t % 3.7) < 0.12
-    upright = _posed_head(placed.look, head_h, feeling, mouth, blink, face < 0, 0)
+    # Each character blinks and glances around on their own rhythm.
+    seed = sum(map(ord, placed.look.name)) % 97
+    blink = ((t + seed * 0.37) % 3.7) < 0.12
+    gaze = (
+        0.5
+        if placed.speaking
+        else (
+            1.0
+            if math.sin(t * 0.55 + seed) > 0.6
+            else 0.5
+            if math.sin(t * 0.55 + seed) > -0.7
+            else 0.0
+        )
+    )
+    upright = _posed_head(placed.look, head_h, feeling, mouth, blink, face < 0, 0, gaze)
     # The middle of the head, above the neck and a little forward.
     head_at = (neck[0] + face * upright.width * 0.04, neck[1] - upright.height * 0.44)
     turn = pose.tip * face
@@ -334,6 +348,18 @@ def draw_figure(
         drop = body * 0.1 * min(1.0, abs(pose.tip) / 90)
         segments = [((a[0], a[1] - drop), (b[0], b[1] - drop)) for a, b in segments]
         head_at = (head_at[0], head_at[1] - drop)
+    # A soft shadow on the ground under them.
+    shadow_w = body * (0.5 if turn else 0.24)
+    shadow_x = x0 + (face * body * 0.25 if turn else 0.0)
+    ImageDraw.Draw(canvas, "RGBA").ellipse(
+        (
+            shadow_x - shadow_w,
+            ground - body * 0.025,
+            shadow_x + shadow_w,
+            ground + body * 0.025,
+        ),
+        fill=(0, 0, 0, 55),
+    )
     # The lines, into a mask just big enough for them.
     xs = [x for seg in segments for x, _ in seg]
     ys = [y for seg in segments for _, y in seg]
@@ -354,11 +380,30 @@ def draw_figure(
         for x, y in (a, b):
             r = line / 2
             draw.ellipse((x - r, y - r, x + r, y + r), fill=255)
+    # Round hands at the ends of the arms, shoes at the ends of the legs.
+    for index in (2, 4):
+        x, y = (
+            (segments[index][1][0] - left) * big,
+            (segments[index][1][1] - top) * big,
+        )
+        r = line * 1.15
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=255)
+    for index in (6, 8):
+        x, y = (
+            (segments[index][1][0] - left) * big,
+            (segments[index][1][1] - top) * big,
+        )
+        r = line * 1.05
+        toe = face * line * 1.6
+        draw.ellipse(
+            (min(x - r, x + toe), y - r * 0.8, max(x + r, x + toe), y + r * 0.8),
+            fill=255,
+        )
     mask = mask.reduce(big)
     canvas.paste((12, 12, 12), (left, top, left + mask.width, top + mask.height), mask)
     angle = round((tilt + turn) / 2) * 2
     picture = (
-        _posed_head(placed.look, head_h, feeling, mouth, blink, face < 0, angle)
+        _posed_head(placed.look, head_h, feeling, mouth, blink, face < 0, angle, gaze)
         if angle
         else upright
     )

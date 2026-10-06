@@ -203,8 +203,24 @@ def _drawn_head(
                 outline=(230, 180, 40),
                 width=stroke * 2,
             )
-    # The face.
+    # The face, lit from the front-right: shade on the far side and under the
+    # chin, a soft shine on the forehead, warm cheeks.
     draw.ellipse((left, top, right, bottom), fill=skin, outline=line, width=stroke)
+    _light_face(canvas, (left, top, right, bottom), skin, blush=not look.beard)
+    draw.ellipse((left, top, right, bottom), outline=line, width=stroke)
+    for x in (left - face_w * 0.05, right - face_w * 0.07):
+        draw.arc(
+            (
+                x + face_w * 0.03,
+                ear_y + face_h * 0.04,
+                x + face_w * 0.09,
+                ear_y + face_h * 0.14,
+            ),
+            90,
+            270 if x < cx else 450,
+            fill=shade(skin, 0.7),
+            width=stroke,
+        )
     if look.beard:
         beard_colour = (200, 200, 200) if old else hair
         draw.chord(
@@ -286,8 +302,26 @@ def _drawn_head(
             fill=(30, 30, 30),
             width=stroke * 2,
         )
-    # Nose.
+    # Nose: a big, rounded caricature nose with a nostril.
     nose_y = eye_y + eye_h * 1.25
+    draw.ellipse(
+        (
+            cx - face_w * 0.01,
+            nose_y - face_h * 0.03,
+            cx + face_w * 0.19,
+            nose_y + face_h * 0.12,
+        ),
+        fill=shade(skin, 0.9),
+    )
+    draw.ellipse(
+        (
+            cx + face_w * 0.07,
+            nose_y + face_h * 0.06,
+            cx + face_w * 0.12,
+            nose_y + face_h * 0.095,
+        ),
+        fill=shade(skin, 0.5),
+    )
     draw.arc(
         (
             cx + face_w * 0.02,
@@ -416,10 +450,78 @@ def _drawn_head(
         )
     # Hair on top, or headwear.
     _top_of_head(draw, look, left, right, top, face_w, face_h, hair, wear, stroke)
+    if look.wear in {"none", "headband", ""} and look.hair != "bald":
+        # A shine across the hair.
+        draw.arc(
+            (
+                left + face_w * 0.25,
+                top - face_h * 0.05,
+                right - face_w * 0.05,
+                top + face_h * 0.3,
+            ),
+            220,
+            290,
+            fill=shade(hair, 1.28),
+            width=stroke,
+        )
     small = canvas.resize(
         (canvas.width // SCALE, canvas.height // SCALE), Image.Resampling.LANCZOS
     )
     return small.crop(small.getbbox() or (0, 0, small.width, small.height))
+
+
+def _light_face(
+    canvas: Any,
+    box: tuple[float, float, float, float],
+    skin: tuple[int, int, int],
+    *,
+    blush: bool,
+) -> None:
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+    left, top, right, bottom = box
+    w, h = right - left, bottom - top
+    face = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(face).ellipse(box, fill=255)
+
+    def wash(
+        colour: tuple[int, int, int],
+        shapes: list[tuple[float, float, float, float]],
+        strength: int,
+        blur: float,
+    ) -> None:
+        mask = Image.new("L", canvas.size, 0)
+        draw = ImageDraw.Draw(mask)
+        for shape in shapes:
+            draw.ellipse(shape, fill=strength)
+        mask = ImageChops.multiply(mask.filter(ImageFilter.GaussianBlur(blur)), face)
+        canvas.paste(Image.new("RGBA", canvas.size, (*colour, 255)), (0, 0), mask)
+
+    wash(
+        shade(skin, 0.72),
+        [
+            (left - w * 0.5, top - h * 0.1, left + w * 0.38, bottom + h * 0.1),
+            (left, bottom - h * 0.16, right, bottom + h * 0.3),
+        ],
+        130,
+        w * 0.07,
+    )
+    wash(
+        shade(skin, 1.3),
+        [(left + w * 0.52, top + h * 0.07, left + w * 0.86, top + h * 0.3)],
+        90,
+        w * 0.05,
+    )
+    if blush:
+        wash(
+            (225, 120, 110),
+            [
+                (left + w * 0.12, top + h * 0.56, left + w * 0.32, top + h * 0.68),
+                (left + w * 0.68, top + h * 0.56, left + w * 0.88, top + h * 0.68),
+            ],
+            70,
+            w * 0.03,
+        )
 
 
 def _top_of_head(

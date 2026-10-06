@@ -111,9 +111,16 @@ def _camera(
         if target is not None:
             x, y = head_box(target, t, length, canvas=STAGE, ground=ground, height=body)
             zoom = 2.3 if kind == "close" else 1.55
-            # A slow creep in keeps a close-up alive.
-            zoom *= 1 + 0.05 * progress
-            return zoom, x, y + (body * 0.05 if kind == "close" else body * 0.32)
+            # A slow creep in keeps a close-up alive; it opens with a quick
+            # snap in, and the camera breathes a little, as if hand-held.
+            zoom *= 1 + 0.05 * progress + 0.07 * max(0.0, 1 - t / 0.25)
+            drift_x = math.sin(t * 0.9 + shot.seed) * body * 0.012
+            drift_y = math.cos(t * 0.7 + shot.seed) * body * 0.008
+            return (
+                zoom,
+                x + drift_x,
+                y + drift_y + (body * 0.05 if kind == "close" else body * 0.32),
+            )
     if kind == "push":
         return 1.0 + 0.3 * progress, width / 2, height * 0.55
     if kind == "pan":
