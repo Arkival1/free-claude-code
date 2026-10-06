@@ -12,8 +12,10 @@ import httpx
 import pytest
 
 from free_claude_code.core.json_types import JsonValue
-from free_claude_code.studio.extensions import ExtensionLibrary
-from free_claude_code.studio.llm import ToolCall
+from free_claude_code.studio.agents import SEALED_PROMPT, SEALED_TOOLS
+from free_claude_code.studio.extensions import AgentDef, ExtensionLibrary
+from free_claude_code.studio.llm import LLMReply, ToolCall
+from free_claude_code.studio.memory import SHARED_MEMORY_ID
 from free_claude_code.studio.models import Agent
 from free_claude_code.studio.starter import BUNDLE, bundled_bytes, load_starters
 from free_claude_code.studio.tools import ToolContext
@@ -352,3 +354,78 @@ async def test_a_starter_added_by_hand_is_never_added_twice(make_studio, tmp_pat
     by_hand = await studio.add_extension("https://github.com/public-apis/public-apis")
     assert await studio.ensure_starters() == []
     assert [e.id for e in await studio.extensions()] == [by_hand.id]
+
+
+# ------------------------------------------------------------ repo agents
+
+SECRET = "The user's bank PIN is 4321 and the dog is called Biscuit."
+
+
+@pytest.mark.asyncio
+async def test_repo_agents_on_the_team_never_see_memory_and_get_only_their_tools(
+    make_studio,
+):
+    def answer(system: str, prompt: str) -> LLMReply:
+        if "running notes" in system:
+            return LLMReply(text="Goal:\n- Chat")
+        return LLMReply(text="Done.")
+
+    studio, model = make_studio(
+        answer, STUDIO_PRIVATE_MEMORY=True, STUDIO_ALL_TOOLS=True
+    )
+    studio._starter_folder = BUNDLE
+    await studio.ensure_defaults()
+    await studio.ensure_starters()
+    await studio.remember(SHARED_MEMORY_ID, SECRET)
+    found = [
+        (extension, agent)
+        for extension in await studio.extensions()
+        for agent in extension.agents
+    ]
+    # Only real Claude Code agents (named and described up top) are offered:
+    # docs and templates that sit in an agents folder are not.
+    assert sorted(agent.name for _, agent in found) == [
+        "codemod-runner",
+        "token-auditor",
+    ]
+    for extension, definition in found:
+        agent = await studio.add_extension_agent(extension.id, definition.name)
+        assert agent.all_tools is False
+        assert await studio.is_private_from(agent)
+        in_use = set(await studio.tools_in_use(agent))
+        assert not in_use & SEALED_TOOLS
+        assert not in_use & {"delete_file", "web_fetch", "team_task", "manage_agent"}
+
+        chat = await studio.create_chat(agent_id=agent.id)
+        await studio.send(chat.id, "what is my bank PIN and my dog's name?")
+        call = model.calls[-1]
+        messages = call["messages"]
+        said = [m.content for m in messages] if isinstance(messages, list) else []
+        sent = "\n".join([str(call["system"]), *said])
+        assert SEALED_PROMPT in str(call["system"])
+        assert call["memory"] == ""
+        assert "4321" not in sent and "Biscuit" not in sent
+
+
+@pytest.mark.asyncio
+async def test_repos_added_before_are_read_again_with_the_agent_rule(
+    make_studio, tmp_path
+):
+    studio, _ = make_studio([])
+    files = {
+        "docs/agents/ARCHITECTURE.md": "# Architecture\nNotes, not an agent.",
+        "agents/real.md": "---\nname: real\ndescription: Does work.\n---\nWork.",
+        "LICENSE": "MIT",
+    }
+    studio._extensions._transport = github_with(files, {})
+    added = await studio.add_extension("owner/mixed")
+    assert [a.name for a in added.agents] == ["real"]
+    # A manifest written by 6.61.0, when every note in an agents folder counted.
+    added.agents.append(AgentDef(name="ARCHITECTURE", description="", prompt="x"))
+    await studio._extensions.save(added)
+    studio._starter_folder = bundle(tmp_path / "bundle", {})
+
+    await studio.ensure_starters()
+
+    [again] = await studio.extensions()
+    assert [a.name for a in again.agents] == ["real"]

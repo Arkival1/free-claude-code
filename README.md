@@ -899,7 +899,11 @@ whose licences allow it, so they install with no download and survive the
 original being deleted. roadmap.sh and free-for-dev don't allow sharing, so
 they come from GitHub on first load and are kept in the Repo vault from then
 on. Their MCP servers start switched off, and their agents join the team
-only when you click **Add to team**. Removing one sticks; **Repos that come
+only when you click **Add to team**. A repo agent thinks on your server AI,
+so it never sees your memory (it keeps its own memory area, like every
+server agent), and since someone else wrote its instructions it gets only
+the tools it asks for; give it more on its card if you trust it. Only real
+agents (a named, described Claude Code agent file) are offered. Removing one sticks; **Repos that come
 with FCC** on the Add from GitHub card adds it back. **Upload a repo zip**
 adds a repo from your PC: Studio only reads it, and it is kept in the vault.
 

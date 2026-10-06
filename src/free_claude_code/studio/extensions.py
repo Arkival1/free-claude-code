@@ -373,11 +373,16 @@ def scan(root: Path, *, base: Path, name: str) -> Extension:
         )
     for path in [*walk("agents/*.md"), *walk("commands/*.md")]:
         folder = path.parent.name
-        if path.name.lower() == "readme.md":
+        if path.name.lower() in {"readme.md", "skill.md"}:
             continue
         values, body = front_matter(path.read_text(encoding="utf-8", errors="replace"))
         if folder == "agents":
-            agent_name = values.get("name") or path.stem
+            # A Claude Code agent names and describes itself up top. Other
+            # notes kept in an agents folder (docs, templates) stay searchable
+            # text, not team members.
+            agent_name = values.get("name", "").strip()
+            if not agent_name or not values.get("description", "").strip():
+                continue
             if any(agent.name == agent_name for agent in extension.agents):
                 continue
             tools = values.get("tools", "")
@@ -620,6 +625,27 @@ class ExtensionLibrary:
         await anyio.to_thread.run_sync(
             lambda: shutil.rmtree(self._folder / ext_id, ignore_errors=True)
         )
+
+    async def rescan_agents(self, extension: Extension) -> Extension:
+        """Read an added repo's agents again with the current rules."""
+        sub = ""
+        if extension.source.startswith("https://github.com/"):
+            try:
+                sub = parse_link(extension.source).sub
+            except ExtensionError:
+                sub = ""
+        root = self._folder / extension.id / "files"
+        root = root / sub if sub else root
+
+        def work() -> Extension:
+            if not root.is_dir():
+                return extension
+            found = scan(root, base=self._folder / extension.id, name=extension.name)
+            extension.agents = found.agents
+            self._write(extension)
+            return extension
+
+        return await anyio.to_thread.run_sync(work)
 
     async def add_server(self, server: McpServer) -> Extension:
         """A server the user typed in: kept in a 'Added by hand' extension."""

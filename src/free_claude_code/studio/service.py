@@ -285,6 +285,8 @@ _DEFAULT_ROLES = {
 }
 SHARED_MEMORY_NAME = "Team memory"
 TEAM_LAYOUT_FLAG = "team_layout_v1"
+AGENT_RESCAN_FLAG = "extension_agents_v2"
+"""Added repos had their agents read again with the front-matter rule."""
 LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper", "lab", "farm"})
 """Roles that think on this PC; every other agent thinks on a server."""
 CLASS_ROLES = frozenset({"teacher", "student"})
@@ -4557,6 +4559,11 @@ class StudioService:
         async with self._starters_lock:
             if self._starters_checked:
                 return []
+            if await self._store.get(StudioFlag, AGENT_RESCAN_FLAG) is None:
+                # 6.61.0 counted any note in an agents folder as an agent.
+                for extension in await self._extensions.all():
+                    await self._extensions.rescan_agents(extension)
+                await self._store.put(StudioFlag(id=AGENT_RESCAN_FLAG, value="1"))
             added: list[Extension] = []
             waiting = False
             present = {e.source.lower(): e.id for e in await self._extensions.all()}
@@ -4741,6 +4748,8 @@ class StudioService:
         if found is None:
             raise StudioNotFoundError(f"{extension.name} has no agent {name}.")
         tools = _studio_tools(found.tools)
+        # Someone else wrote its instructions, so it gets only the tools it
+        # asks for, not every tool; the user can give it more on its card.
         return await self.create_agent(
             name=found.name,
             role="agent",
@@ -4748,6 +4757,7 @@ class StudioService:
             system_prompt=found.prompt,
             description=found.description or f"From {extension.name}.",
             tools=tools,
+            all_tools=False,
         )
 
     async def _enabled_servers(self) -> list[tuple[Extension, McpServer]]:
