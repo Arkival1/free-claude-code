@@ -1069,7 +1069,65 @@ class StudioService:
             local_control=self.settings.studio_local_control,
             main_own_memory=self.settings.studio_main_own_memory,
             learned=self._learn_call if self.settings.studio_jarvis_playbook else None,
+            built=self._offer_app_download,
         )
+
+    async def _offer_app_download(self, chat: Chat, site_ids: frozenset[str]) -> None:
+        """When agents build or change an app, the user gets it to download,
+        in the chat where it was made and in every chat that asked for it."""
+        for site_id in sorted(site_ids):
+            site = await self._store.get(SiteProject, site_id)
+            files = await self._sites.files(site_id) if site is not None else ()
+            if site is None or not files:
+                continue
+            size = sum(item.size for item in files)
+            paths = {item.path for item in files}
+            card: JsonObject = {
+                "kind": "download",
+                "site_id": site.id,
+                "name": site.name,
+                "file_name": f"{site.slug}.zip",
+                "files": len(files),
+                "bytes": size,
+                "url": f"/studio/api/sites/{site.id}/archive",
+                "preview": f"/studio/sites/{site.id}/index.html"
+                if "index.html" in paths
+                else "",
+            }
+            text = (
+                f"{site.name} is ready to download: {len(files)} file"
+                f"{'' if len(files) == 1 else 's'}, {_size_label(size)}."
+            )
+            target: Chat | None = chat
+            for _ in range(6):
+                if target is None:
+                    break
+                if not await self._same_card_last(target.id, card):
+                    await self._store.append_message(
+                        chat_id=target.id,
+                        role="event",
+                        text=text,
+                        author="studio",
+                        data=card,
+                    )
+                target = (
+                    await self._store.get(Chat, target.parent_chat_id)
+                    if target.parent_chat_id
+                    else None
+                )
+
+    async def _same_card_last(self, chat_id: str, card: JsonObject) -> bool:
+        """True when the chat already offers this app, unchanged since."""
+        for message in reversed(await self._store.transcript(chat_id, limit=30)):
+            if (
+                message.data.get("kind") == "download"
+                and message.data.get("site_id") == card["site_id"]
+            ):
+                return (
+                    message.data.get("files") == card["files"]
+                    and message.data.get("bytes") == card["bytes"]
+                )
+        return False
 
     def _tuner(self) -> LightTuner:
         settings = self.settings
@@ -7009,6 +7067,12 @@ class StudioService:
                 "web": self.web_status(),
             },
         }
+
+
+def _size_label(size: int) -> str:
+    if size >= 1_048_576:
+        return f"{size / 1_048_576:.1f} MB"
+    return f"{max(1, round(size / 1024))} KB"
 
 
 def photo_view(photo: Photo) -> JsonObject:

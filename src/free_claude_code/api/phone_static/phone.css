@@ -1105,3 +1105,43 @@ pre.notes {
   min-height: 64px;
   font-size: 0.9rem;
 }
+
+/* A finished app to download, shown like a file card. */
+.download-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  justify-self: stretch;
+  max-width: 100%;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  white-space: normal;
+}
+
+.download-card .download-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.download-card .grow {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.download-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.download-card p {
+  margin: 2px 0 0;
+}
+
+.download-card .download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

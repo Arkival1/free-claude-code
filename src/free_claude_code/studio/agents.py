@@ -1,10 +1,12 @@
 """The bounded tool loop every Studio agent runs."""
 
 import asyncio
+import functools
 import json
 import re
 from collections.abc import Awaitable, Callable, MutableMapping, Sequence
 from dataclasses import dataclass, replace
+from typing import Concatenate
 
 from loguru import logger
 
@@ -426,7 +428,9 @@ AGENT_BASE_PROMPT = (
 SITE_PROMPT = (
     "You have a project workspace. Build complete, working websites and apps: "
     "real file structure, all the code, a README. Read files back before you "
-    "finish to check your work."
+    "finish to check your work. When you finish, Studio hands the user a "
+    "Download card for the project (a .zip of every file), so say it is ready "
+    "to download; don't paste the whole code into the chat."
 )
 COMMAND_PROMPT = (
     "You can run shell commands in the project with run_command: install "
@@ -563,6 +567,26 @@ class TurnResult:
     error: str | None = None
 
 
+def _offers_downloads[**P](
+    turn: Callable[Concatenate[AgentRunner, Agent, Chat, P], Awaitable[TurnResult]],
+) -> Callable[Concatenate[AgentRunner, Agent, Chat, P], Awaitable[TurnResult]]:
+    """After a turn, hand the user a download of each app it built or changed."""
+
+    @functools.wraps(turn)
+    async def run(
+        runner: AgentRunner, agent: Agent, chat: Chat, *args: P.args, **kwargs: P.kwargs
+    ) -> TurnResult:
+        before = await runner._last_sequence(chat.id)
+        result = await turn(runner, agent, chat, *args, **kwargs)
+        if runner._built is not None and not result.failed:
+            changed = await runner._apps_changed(chat.id, after=before)
+            if changed:
+                await runner._built(chat, changed)
+        return result
+
+    return run
+
+
 class AgentRunner:
     """Drive one agent turn or one autonomous task to completion."""
 
@@ -584,8 +608,11 @@ class AgentRunner:
         local_control: bool = False,
         main_own_memory: bool = False,
         learned: Callable[[str, ToolCall], Awaitable[None]] | None = None,
+        built: Callable[[Chat, frozenset[str]], Awaitable[None]] | None = None,
     ) -> None:
         self._store = store
+        # Hands the user a download of each app a turn built or changed.
+        self._built = built
         # The main AI's calls that worked, so its playbook keeps the example.
         self._learned = learned
         # Agents on this PC direct the agents on server AIs.
@@ -1065,6 +1092,22 @@ class AgentRunner:
             sealed=sealed,
         )
 
+    async def _last_sequence(self, chat_id: str) -> int:
+        tail = await self._store.transcript(chat_id, limit=1)
+        return tail[-1].sequence if tail else 0
+
+    async def _apps_changed(self, chat_id: str, *, after: int) -> frozenset[str]:
+        """The projects this turn's own tool calls wrote to."""
+        return frozenset(
+            str(message.data["site_id"])
+            for message in await self._store.transcript(chat_id, after=after)
+            if message.role == "tool"
+            and message.author in WRITE_TOOLS
+            and message.data.get("site_id")
+            and not message.data.get("failed")
+        )
+
+    @_offers_downloads
     async def _loop(
         self,
         agent: Agent,

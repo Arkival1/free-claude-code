@@ -1094,6 +1094,15 @@ more), previewed live and downloadable as a zip. Writes are sandboxed: no path
 traversal, text source files only, a 512 KB per-file cap, and a file-count cap;
 `node_modules`, `.git`, virtualenvs, and caches are never listed or zipped.
 
+**Download a finished app.** When an agent builds or changes an app, the
+chat hands it over like a file: a **Download** card with the app's name, file
+count, and size, under the agent's last message. **Download** saves the whole
+project as one `.zip`, **Open** runs a web app in a new tab, and **Files**
+opens its project page. The card also shows up in every chat that asked
+for the work, so when Jarvis has the Builder or Coder make something, it
+lands in Jarvis's chat on the HUD too. A new card comes only when the files
+change. FCC Phone does the same on the phone.
+
 **Commands.** With `STUDIO_AGENT_COMMANDS` set to `ask` or `auto`, agents also
 get `run_command` to install packages, build, and run tests or scripts inside
 the project folder. In `ask` mode every command appears in the chat (and on

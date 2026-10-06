@@ -49,6 +49,40 @@ async function addTurn(agent, turn) {
   changed(`chat:${agent.id}`);
 }
 
+// Tools that change a project's files: a turn that used one hands the
+// project over to download, like a file in a chat.
+const BUILDING_TOOLS = new Set(["start_project", "write_file", "edit_file", "delete_file", "use_photo", "restore_file"]);
+
+function noteBuilt(ctx, call) {
+  if (BUILDING_TOOLS.has(call.name) && ctx.project) ctx.built.add(ctx.project.id);
+}
+
+/** Put a download card for each project built in the agent's chat, unless
+ * the chat already offers it unchanged. */
+async function handOver(agent, projectIds) {
+  if (!agent || !projectIds.size) return;
+  const { projectById } = await import("./projects.js");
+  const chat = await chatOf(agent.id);
+  for (const id of projectIds) {
+    const project = projectById(id);
+    if (!project) continue;
+    const names = Object.keys(project.files);
+    if (!names.length) continue;
+    const bytes = names.reduce((sum, name) => sum + new TextEncoder().encode(String(project.files[name])).length, 0);
+    const offered = [...chat].reverse().find((turn) => turn.role === "download" && turn.project_id === id);
+    if (offered && offered.files === names.length && offered.bytes === bytes) continue;
+    await addTurn(agent, {
+      role: "download",
+      project_id: id,
+      name: project.name,
+      file_name: `${project.slug}.zip`,
+      files: names.length,
+      bytes,
+      text: `${project.name} is ready to download.`,
+    });
+  }
+}
+
 async function history(agent) {
   const turns = (await chatOf(agent.id)).filter((turn) => turn.role === "user" || turn.role === "assistant");
   return turns.slice(-HISTORY_TURNS).map((turn) => ({ role: turn.role, content: turn.text }));
@@ -94,13 +128,17 @@ export async function answer(agent, text, { project } = {}) {
   const convo = await history(agent);
   await addTurn(agent, { role: "user", text });
   convo.push({ role: "user", content: text });
-  const ctx = { project: project || null, depth: 0, chain: [agent.id] };
+  const ctx = { project: project || null, depth: 0, chain: [agent.id], built: new Set() };
   try {
     const said = await loop(agent, systemPrompt(agent, text, ctx), convo, ctx, {
       maxRounds: agent.role === "builder" ? 30 : 8,
-      onTool: (call, result) => addTurn(agent, { role: "tool", text: `${call.name}: ${result.split("\n")[0].slice(0, 180)}` }),
+      onTool: (call, result) => {
+        noteBuilt(ctx, call);
+        return addTurn(agent, { role: "tool", text: `${call.name}: ${result.split("\n")[0].slice(0, 180)}` });
+      },
     });
     await addTurn(agent, { role: "assistant", text: said });
+    await handOver(agent, ctx.built);
     return said;
   } catch (error) {
     await addTurn(agent, { role: "error", text: error.message });
@@ -118,11 +156,12 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
   setBusy(agent, true);
   feed(agent.name, `Started: ${goal.slice(0, 100)}`, "start");
   await addTurn(agent, { role: "task", text: `Job from ${by}: ${goal}` });
-  const ctx = { project, depth, chain: [...chain, agent.id] };
+  const ctx = { project, depth, chain: [...chain, agent.id], built: new Set() };
   try {
     const result = await loop(agent, systemPrompt(agent, goal, ctx), [{ role: "user", content: goal }], ctx, {
       maxRounds: agent.role === "builder" ? 30 : agent.role === "tester" ? 20 : 10,
       onTool: async (call, output) => {
+        noteBuilt(ctx, call);
         job.steps += 1;
         feed(agent.name, `${call.name}: ${output.split("\n")[0].slice(0, 120)}`, "tool");
         await addTurn(agent, { role: "tool", text: `${call.name}: ${output.split("\n")[0].slice(0, 180)}` });
@@ -132,6 +171,9 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
     job.status = "done";
     job.result = result;
     await addTurn(agent, { role: "assistant", text: result });
+    // The agent that did the work and every agent that handed the job down
+    // (Jarvis included) get the app to download.
+    for (const id of ctx.chain) await handOver(state.agents.find((item) => item.id === id), ctx.built);
     feed(agent.name, `Finished: ${result.split("\n")[0].slice(0, 120)}`, "done");
     return `${agent.name} finished${ctx.project ? ` (project ${ctx.project.name})` : ""}: ${result}`;
   } catch (error) {

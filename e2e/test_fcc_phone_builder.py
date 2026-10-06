@@ -410,3 +410,37 @@ def test_look_at_site_checks_every_page(page: Page, admin_base_url: str) -> None
         assert f"{name}.html, Phone (390px wide):" in report, report
     assert "index.html, Computer (1280px wide):" in report
     assert report.startswith("Looked at the site: it looks right"), report
+
+
+def test_a_finished_app_comes_to_the_chat_ready_to_download(
+    page: Page, admin_base_url: str
+) -> None:
+    fake_gemini(page)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Have Builder make a page for my bakery")
+    talk.press("Enter")
+
+    # Jarvis handed the job down, so the app comes back to Jarvis too.
+    card = page.locator(".hud-line.download-card")
+    expect(card).to_contain_text("Sunrise Bakery", timeout=15000)
+    expect(card).to_contain_text("sunrise-bakery.zip · 2 files")
+    with page.expect_download() as waiting:
+        card.get_by_role("button", name="Download Sunrise Bakery").click()
+    assert waiting.value.suggested_filename == "sunrise-bakery.zip"
+    with zipfile.ZipFile(io.BytesIO(waiting.value.path().read_bytes())) as archive:
+        names = archive.namelist()
+    assert any(name.endswith("index.html") for name in names)
+    assert any(name.endswith("style.css") for name in names)
+
+    go(page, "chat/builder")
+    builder_card = page.locator(".messages .download-card")
+    expect(builder_card).to_have_count(1)
+    box = builder_card.bounding_box()
+    assert box is not None and box["width"] <= 390, "fits the phone"
+    builder_card.get_by_role("button", name="Open").click()
+    expect(page.frame_locator("iframe.preview").locator("h1")).to_have_text(
+        "Sunrise Bakery"
+    )

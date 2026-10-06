@@ -39,6 +39,12 @@ PAGE = (
 )
 
 
+async def last_reply(studio, chat_id: str) -> str:
+    """The agent's last words (Studio's download card can follow them)."""
+    transcript = await studio.transcript(chat_id)
+    return next(m.text for m in reversed(transcript) if m.role == "assistant")
+
+
 def sent(call: dict) -> str:
     messages = call["messages"]
     return "\n".join(m.content for m in messages) if isinstance(messages, list) else ""
@@ -146,7 +152,7 @@ async def test_a_garbled_tool_call_is_sent_back_instead_of_ending_the_job(make_s
 
     assert UNREADABLE_NOTE in sent(model.calls[1])
     assert "Sunrise Bakery" in await studio.workspace.read(site.id, "index.html")
-    assert (await studio.transcript(chat.id))[-1].text == "Built it."
+    assert await last_reply(studio, chat.id) == "Built it."
 
 
 @pytest.mark.asyncio
@@ -243,7 +249,7 @@ async def test_a_full_context_is_squeezed_and_tried_again(make_studio):
 
     await studio.send(chat.id, "make the bakery page")
 
-    assert (await studio.transcript(chat.id))[-1].text == "Done."
+    assert await last_reply(studio, chat.id) == "Done."
     assert calls["n"] == 3
 
 
@@ -268,7 +274,7 @@ async def test_ending_in_plain_words_still_runs_the_check(make_studio):
 
     assert "Not finished yet. check_project found problems" in sent(model.calls[2])
     assert "no <title>" in sent(model.calls[2])
-    assert (await studio.transcript(chat.id))[-1].text == "Fixed and done."
+    assert await last_reply(studio, chat.id) == "Fixed and done."
 
 
 @pytest.mark.asyncio

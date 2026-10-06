@@ -36,7 +36,8 @@ async def test_agent_searches_then_writes_a_page(make_studio, web_tools):
     roles = [message.role for message in transcript]
     assert roles[0] == "user"
     assert "tool" in roles
-    assert transcript[-1].role == "assistant"
+    assert transcript[-2].role == "assistant"
+    assert transcript[-1].data["kind"] == "download", "the page, ready to download"
 
 
 @pytest.mark.asyncio

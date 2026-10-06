@@ -4,6 +4,7 @@ import { el, button, go, notify, meter, ago } from "../ui.js";
 import { createCoreOrb } from "../orb.js";
 import { brainOf, brainReady, modelOf, PROVIDERS } from "../brains.js";
 import { answer, isBusy } from "../agents.js";
+import { downloadCard } from "./chat.js";
 import { speak, micButton } from "../voice.js";
 import * as engine from "../engine.js";
 
@@ -114,7 +115,9 @@ export function render(view) {
     }
     refs.log.replaceChildren(
       ...chat.map((turn) =>
-        el("div", { class: `hud-line ${turn.role}` }, [
+        turn.role === "download"
+          ? downloadCard(turn, { hud: true })
+          : el("div", { class: `hud-line ${turn.role}` }, [
           el("span", { class: "hud-tag", text: turn.role === "user" ? "YOU" : turn.role === "assistant" ? main.name.toUpperCase() : turn.role === "tool" ? "TOOL" : "!" }),
           el("span", { text: turn.text }),
         ])

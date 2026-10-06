@@ -475,8 +475,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         route="/studio#agents",
         where=(
             "Ask on the HUD ('have Builder make ...') or use Agents, Run an agent "
-            "task. The result opens on its Site page with Open full screen and "
-            "Download .zip."
+            "task. When it's done, a Download card appears in the chat (and on "
+            "the HUD): Download saves the app as a .zip, Open runs it, Files "
+            "opens its Site page (Open full screen, Download .zip)."
         ),
         terms=(
             "apps",
@@ -492,6 +493,8 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "project",
             "preview",
             "zip",
+            "download",
+            "download my app",
             "html",
             "python",
             "game",

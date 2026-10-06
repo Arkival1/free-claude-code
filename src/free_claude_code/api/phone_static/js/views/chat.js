@@ -4,9 +4,31 @@ import { el, button, card, go, notify, openSheet, closeSheet } from "../ui.js";
 import { answer, runTask, isBusy } from "../agents.js";
 import { brainOf, brainReady, PROVIDERS, modelOf } from "../brains.js";
 import { speak, micButton } from "../voice.js";
-import { createProject, findProject } from "../projects.js";
+import { createProject, findProject, projectById, zipProject, download } from "../projects.js";
 import { store } from "../store.js";
 import { addPhoto, setNote, photoLine } from "../photos.js";
+
+/** A finished app, handed over like a file: save every file as a .zip,
+ * or open the project to see and try it. */
+export function downloadCard(turn, { hud = false } = {}) {
+  const bytes = Number(turn.bytes || 0);
+  const size = bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  const files = Number(turn.files || 0);
+  const project = projectById(turn.project_id);
+  return el("div", { class: hud ? "hud-line download-card" : "msg download-card" }, [
+    el("span", { class: "download-icon", text: "📦", "aria-hidden": "true" }),
+    el("div", { class: "grow" }, [
+      el("strong", { text: turn.name || "App" }),
+      el("p", { class: "muted small", text: project ? `${turn.file_name} · ${files} file${files === 1 ? "" : "s"} · ${size}` : "This project was deleted." }),
+    ]),
+    project
+      ? el("div", { class: "row download-actions" }, [
+          button("Download", () => download(turn.file_name || `${project.slug}.zip`, zipProject(project)), { class: "primary", "aria-label": `Download ${turn.name || "the app"}` }),
+          button("Open", () => go(`projects/${project.id}`)),
+        ])
+      : null,
+  ]);
+}
 
 export async function renderList(view) {
   const rows = await Promise.all(
@@ -119,7 +141,9 @@ export async function render(view, agentId) {
   const draw = async () => {
     const chat = await chatOf(agent.id);
     const nodes = chat.map((turn) =>
-      turn.role === "tool"
+      turn.role === "download"
+        ? downloadCard(turn)
+        : turn.role === "tool"
         ? el("div", { class: "msg tool", text: `⚙ ${turn.text}` })
         : turn.role === "task"
           ? el("div", { class: "msg task", text: `▶ ${turn.text}` })

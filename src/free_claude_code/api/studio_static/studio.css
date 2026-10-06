@@ -618,6 +618,66 @@ code.command {
   border-color: var(--warn);
 }
 
+/* A finished app to download, shown like a file card. */
+.download-card {
+  align-self: stretch;
+  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+}
+
+.download-card .download-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.download-card .grow {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.download-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.download-card p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.download-card .download-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.download-card .button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--tap, 44px);
+  padding: 0 16px;
+  border-radius: 999px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.download-card .button-link.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.download-card .button-link.secondary {
+  border: 1px solid var(--line);
+  color: inherit;
+}
+
 /* ------------------------------------------------------------------ HUD */
 /* The main AI's command center: a cyan console around a living gold core.
    iPhone first; grows into a three-column dashboard on a PC screen. */
@@ -2813,3 +2873,14 @@ h3.subhead {
 .speed-advice { color: var(--accent); }
 
 .engine-failed { color: var(--warn); border-left: 3px solid var(--warn); padding: 6px 10px; background: rgba(255, 181, 71, 0.08); }
+
+/* The download card inside the HUD's conversation. */
+.hud-line.download-card {
+  display: flex;
+  white-space: normal;
+  margin: 6px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--hud-amber, var(--accent));
+  border-radius: 14px;
+  background: var(--hud-panel, var(--surface-2));
+}

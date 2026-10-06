@@ -747,10 +747,41 @@
     ];
   }
 
+  // A finished app, handed over like a file: download it as a .zip (with
+  // everything it needs, minus node_modules and caches), open it, or see its files.
+  function appDownloadCard(data, hud = false) {
+    const key = token();
+    const withKey = (url) => `${url}${key ? `?token=${encodeURIComponent(key)}` : ""}`;
+    const bytes = Number(data.bytes || 0);
+    const size = bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    const files = Number(data.files || 0);
+    return el("div", { class: hud ? "hud-line download-card" : "bubble download-card" }, [
+      el("span", { class: "download-icon", text: "📦", "aria-hidden": "true" }),
+      el("div", { class: "grow" }, [
+        el("strong", { text: data.name || "App" }),
+        el("p", { class: "muted small", text: `${data.file_name || "app.zip"} · ${files} file${files === 1 ? "" : "s"} · ${size}` }),
+      ]),
+      el("div", { class: "row download-actions" }, [
+        el("a", {
+          class: "button-link primary",
+          href: withKey(data.url),
+          download: data.file_name || "app.zip",
+          text: "Download",
+          "aria-label": `Download ${data.name || "the app"}`,
+        }),
+        data.preview
+          ? el("a", { class: "button-link secondary", href: withKey(data.preview), target: "_blank", rel: "noreferrer", text: "Open" })
+          : null,
+        el("button", { class: "secondary", type: "button", text: "Files", onclick: () => go(`site/${data.site_id}`) }),
+      ]),
+    ]);
+  }
+
   function messageBubble(message) {
     const role = ["user", "assistant", "tool", "event"].includes(message.role)
       ? message.role
       : "event";
+    if (message.data && message.data.kind === "download") return appDownloadCard(message.data);
     if (message.data && message.data.kind === "approval") {
       const requestId = message.data.request_id;
       const actions = el("div", { class: "row" });
@@ -5137,6 +5168,7 @@
 
   function hudLine(message) {
     const data = message.data || {};
+    if (data.kind === "download") return appDownloadCard(data, true);
     if (data.kind === "approval") {
       const actions = el("div", { class: "row" });
       if (pendingCommands.has(data.request_id)) {
