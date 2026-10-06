@@ -33,7 +33,15 @@ MAX_UNPACKED_BYTES = 300 * 1024 * 1024
 MAX_SKILL_CHARS = 16_000
 README_SKILL_CHARS = 8_000
 MAX_FOUND = 300
+MAX_SKILLS = 2_000
+"""Skill repos can hold hundreds of skills (one per technique or tool)."""
+TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt", ".rst"})
+MAX_SEARCH_BYTES = 60 * 1024 * 1024
+"""Text read from one repo per search: lists like public-apis are large."""
+MAX_SEARCH_FILE = 4 * 1024 * 1024
 MANIFEST = "extension.json"
+UPLOAD_OWNER = "uploaded"
+"""The vault's owner name for repo zips the user uploads."""
 PLUGIN_ROOT = "${CLAUDE_PLUGIN_ROOT}"
 _GITHUB = re.compile(
     r"^(?:https?://)?(?:www\.)?github\.com/(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+?)"
@@ -99,6 +107,8 @@ class Extension:
     plugins: list[str] = field(default_factory=list)
     vaulted: str = ""
     """Where the copy came from when GitHub no longer had it: the vault entry."""
+    origin: str = ""
+    """'' (GitHub), 'bundled' (came with FCC), or 'upload' (a zip from the user)."""
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -142,6 +152,7 @@ class Extension:
             ],
             plugins=_texts(data, "plugins"),
             vaulted=_text(data, "vaulted"),
+            origin=_text(data, "origin"),
         )
 
 
@@ -233,11 +244,15 @@ def _unpack(data: bytes, into: Path, sub: str) -> Path:
     try:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as error:
-        raise ExtensionError("GitHub sent something that isn't a zip.") from error
+        raise ExtensionError("That isn't a zip file.") from error
     total = 0
     into.mkdir(parents=True, exist_ok=True)
+    names = [info.filename for info in archive.infolist() if not info.is_dir()]
+    tops = {PurePosixPath(name).parts[0] for name in names if PurePosixPath(name).parts}
+    # GitHub zips hold one top folder; a folder zipped by hand may not.
+    strip = 1 if len(tops) == 1 and all("/" in name for name in names) else 0
     for info in archive.infolist():
-        parts = PurePosixPath(info.filename).parts[1:]
+        parts = PurePosixPath(info.filename).parts[strip:]
         if not parts or info.is_dir():
             continue
         if any(part in {"..", ""} or part.startswith("/") for part in parts):
@@ -327,31 +342,55 @@ def scan(root: Path, *, base: Path, name: str) -> Extension:
             extension.servers += _servers_from(servers, plugin_dir)
     for listing in walk(".mcp.json"):
         extension.servers += _servers_from(_read_json(listing), listing.parent)
-    for path in walk("SKILL.md"):
+    # Repos often copy one skill into .claude/, .codex/, .cursor/ and skills/:
+    # the visible copy is kept and the rest are left out by name.
+    skill_files = sorted(
+        (
+            path
+            for path in root.rglob("SKILL.md")
+            if not skipped & set(path.relative_to(root).parts)
+        ),
+        key=lambda path: (
+            any(part.startswith(".") for part in path.relative_to(root).parts),
+            path.relative_to(root).as_posix(),
+        ),
+    )
+    named: set[str] = set()
+    for path in skill_files:
+        if len(extension.skills) >= MAX_SKILLS:
+            break
         values, _ = front_matter(path.read_text(encoding="utf-8", errors="replace"))
+        skill_name = values.get("name") or path.parent.name
+        if skill_name.casefold() in named:
+            continue
+        named.add(skill_name.casefold())
         extension.skills.append(
             Skill(
-                name=values.get("name") or path.parent.name,
+                name=skill_name,
                 description=values.get("description", "")[:400],
                 path=_relative(path, base),
             )
         )
-    for path in walk("*.md"):
+    for path in [*walk("agents/*.md"), *walk("commands/*.md")]:
         folder = path.parent.name
-        if folder not in {"agents", "commands"} or path.name.lower() == "readme.md":
+        if path.name.lower() == "readme.md":
             continue
         values, body = front_matter(path.read_text(encoding="utf-8", errors="replace"))
         if folder == "agents":
+            agent_name = values.get("name") or path.stem
+            if any(agent.name == agent_name for agent in extension.agents):
+                continue
             tools = values.get("tools", "")
             extension.agents.append(
                 AgentDef(
-                    name=values.get("name") or path.stem,
+                    name=agent_name,
                     description=values.get("description", "")[:400],
                     prompt=body.strip()[:MAX_SKILL_CHARS],
                     tools=[t.strip() for t in tools.split(",") if t.strip()],
                 )
             )
-        else:
+        elif f"/{path.stem}".casefold() not in named:
+            named.add(f"/{path.stem}".casefold())
             first = next((line for line in body.splitlines() if line.strip()), "")
             extension.skills.append(
                 Skill(
@@ -456,9 +495,49 @@ class ExtensionLibrary:
         if item.kind != "source":
             raise ExtensionError("Only a repo's files can be added as an extension.")
         repo = RepoLink(owner=item.owner, repo=item.repo, ref=item.ref, sub=sub)
+        if item.owner == UPLOAD_OWNER:
+            return await self._install(
+                repo, data, item.id, origin="upload", source=item.url
+            )
         return await self._install(repo, data, item.id)
 
-    async def _install(self, repo: RepoLink, data: bytes, vaulted: str) -> Extension:
+    async def add_archive(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        data: bytes,
+        origin: str,
+        ref: str = "",
+        source: str = "",
+        file_name: str = "",
+    ) -> Extension:
+        """Add a repo from a zip already in hand: a copy that came with FCC, or
+        one the user uploaded. The zip is kept in the vault like a download."""
+        if len(data) > MAX_ZIP_BYTES:
+            raise ExtensionError("That zip is too big to add (over 80 MB).")
+        link = RepoLink(owner=owner, repo=repo, ref=ref, sub="")
+        if self._vault is not None:
+            await self._vault.keep(
+                owner=owner,
+                repo=repo,
+                kind="source",
+                name=file_name or f"{repo}-{ref[:7] or 'HEAD'}.zip",
+                data=data,
+                url=source,
+                ref=ref,
+            )
+        return await self._install(link, data, "", origin=origin, source=source)
+
+    async def _install(
+        self,
+        repo: RepoLink,
+        data: bytes,
+        vaulted: str,
+        *,
+        origin: str = "",
+        source: str = "",
+    ) -> Extension:
         ext_id = f"ext_{_slug(repo.name)}_{secrets.token_hex(3)}"
 
         def work() -> Extension:
@@ -471,8 +550,10 @@ class ExtensionLibrary:
                 raise
             extension.id = ext_id
             extension.vaulted = vaulted
-            extension.source = f"https://github.com/{repo.owner}/{repo.repo}" + (
-                f"/tree/{repo.ref or 'HEAD'}/{repo.sub}" if repo.sub else ""
+            extension.origin = origin
+            extension.source = source or (
+                f"https://github.com/{repo.owner}/{repo.repo}"
+                + (f"/tree/{repo.ref or 'HEAD'}/{repo.sub}" if repo.sub else "")
             )
             if not (extension.skills or extension.agents or extension.servers):
                 shutil.rmtree(home, ignore_errors=True)
@@ -550,6 +631,107 @@ class ExtensionLibrary:
         server.enabled = True
         extension.servers.append(server)
         return await self.save(extension)
+
+    async def search(self, query: str, *, limit: int = 12) -> list[dict[str, object]]:
+        """Lines in every added repo's text (guides, lists, roadmaps, skills)
+        that best match the words asked for, newest repos last."""
+        words = re.findall(r"[a-z0-9+#][a-z0-9+#.-]+", query.lower())[:10]
+        if not words:
+            return []
+        extensions = await self.all()
+
+        def work() -> list[dict[str, object]]:
+            hits: list[tuple[float, str, str, int, str]] = []
+            skipped = {".git", "node_modules", ".venv", "__pycache__", "dist", "build"}
+            for extension in extensions:
+                root = self._folder / extension.id / "files"
+                if not root.is_dir():
+                    continue
+                budget = MAX_SEARCH_BYTES
+                for path in sorted(root.rglob("*")):
+                    if path.suffix.lower() not in TEXT_SUFFIXES or not path.is_file():
+                        continue
+                    if skipped & set(path.relative_to(root).parts):
+                        continue
+                    size = path.stat().st_size
+                    if size > MAX_SEARCH_FILE:
+                        continue
+                    budget -= size
+                    if budget < 0:
+                        break
+                    text = path.read_text(encoding="utf-8", errors="replace")
+                    lowered = text.lower()
+                    if not any(word in lowered for word in words):
+                        continue
+                    relative = path.relative_to(root).as_posix()
+                    in_name = sum(0.5 for word in words if word in relative.lower())
+                    for number, line in enumerate(text.splitlines(), 1):
+                        low = line.lower()
+                        found = sum(1 for word in words if word in low)
+                        if found:
+                            score = (
+                                found
+                                + in_name
+                                + (
+                                    0.5
+                                    if line.lstrip().startswith(("#", "|", "-", "*"))
+                                    else 0
+                                )
+                            )
+                            hits.append(
+                                (
+                                    score,
+                                    extension.name,
+                                    relative,
+                                    number,
+                                    line.strip()[:300],
+                                )
+                            )
+            hits.sort(key=lambda hit: -hit[0])
+            chosen: list[dict[str, object]] = []
+            per_file: dict[str, int] = {}
+            for score, name, relative, number, line in hits:
+                key = f"{name}/{relative}"
+                if per_file.get(key, 0) >= 3:
+                    continue
+                per_file[key] = per_file.get(key, 0) + 1
+                chosen.append(
+                    {
+                        "repo": name,
+                        "file": relative,
+                        "line": number,
+                        "text": line,
+                        "score": score,
+                    }
+                )
+                if len(chosen) >= limit:
+                    break
+            return chosen
+
+        return await anyio.to_thread.run_sync(work)
+
+    async def read_file(self, repo: str, relative: str, *, around: int = 0) -> str:
+        """A text file from an added repo, or the part around one line."""
+        extensions = await self.all()
+        wanted = repo.strip().lower()
+        extension = next(
+            (e for e in extensions if e.name.lower() == wanted), None
+        ) or next((e for e in extensions if wanted and wanted in e.name.lower()), None)
+        if extension is None:
+            raise ExtensionError(f"No added repo is called '{repo}'.")
+
+        def work() -> str:
+            root = (self._folder / extension.id / "files").resolve()
+            path = (root / relative.strip().lstrip("/")).resolve()
+            if root not in path.parents or not path.is_file():
+                raise ExtensionError(f"{extension.name} has no file {relative}.")
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            if around:
+                start = max(0, around - 40)
+                return "\n".join(lines[start : start + 120])
+            return "\n".join(lines)[:MAX_SKILL_CHARS]
+
+        return await anyio.to_thread.run_sync(work)
 
     async def skill_text(self, extension: Extension, skill: Skill) -> str:
         def work() -> str:

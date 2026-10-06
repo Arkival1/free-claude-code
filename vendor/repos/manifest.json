@@ -1,0 +1,301 @@
+{
+  "version": 1,
+  "repos": [
+    {
+      "owner": "OpenHands",
+      "repo": "openhands",
+      "commit": "b0a1a2d1368a50a890b69ef45c54e1a74140b677",
+      "licence": "MIT",
+      "about": "AI software engineer platform: its agent skills and guides.",
+      "file": "OpenHands__openhands.zip",
+      "sha256": "da8a2302287de243484a59ca24a71b19f99c9fd52c46ea794e29013d1d00b67a",
+      "size": 148175
+    },
+    {
+      "owner": "florinpop17",
+      "repo": "app-ideas",
+      "commit": "9e8dd00f10b881babc273d66949b7ffa0e310097",
+      "licence": "MIT",
+      "about": "Hundreds of app ideas by level, to practise building.",
+      "file": "florinpop17__app-ideas.zip",
+      "sha256": "35af0aa6dd7003050c15b9e9ee955620a4cf27aacc20de241cab599d4a53c73b",
+      "size": 113635
+    },
+    {
+      "owner": "nilbuild",
+      "repo": "developer-roadmap",
+      "commit": "2282f21b6fd9f967f5a4f43729322ec656882f43",
+      "licence": "roadmap.sh licence (personal use only)",
+      "about": "roadmap.sh: step-by-step developer roadmaps.",
+      "left_out": "Its licence allows personal use only and forbids sharing its content, so FCC does not ship it. Studio adds it from GitHub on first load and keeps that copy in the Repo vault on your PC."
+    },
+    {
+      "owner": "ossu",
+      "repo": "computer-science",
+      "commit": "33d44a44e3526ede8e862bf1ad50ae5ae7a2f112",
+      "licence": "MIT",
+      "about": "A free, self-taught computer science degree path.",
+      "file": "ossu__computer-science.zip",
+      "sha256": "3ff9882e177f2c96123ce3bed073681b3ef05e4997a492fa442e3c475c1c5e3d",
+      "size": 62380
+    },
+    {
+      "owner": "vectorize-io",
+      "repo": "hindsight",
+      "commit": "9269b88417ed263e5a8350f2e416ca2b322756b1",
+      "licence": "MIT",
+      "about": "Hindsight agent memory: docs, skills and integrations.",
+      "file": "vectorize-io__hindsight.zip",
+      "sha256": "bb2e06c70ac8afe08d3c8ddb1aa5220b410d7f900af8fc672dadf3e838fac7dc",
+      "size": 4059792
+    },
+    {
+      "owner": "google",
+      "repo": "ax",
+      "commit": "ac2332829f22360ff97b0ba34d94dd0dd782f17e",
+      "licence": "Apache-2.0",
+      "about": "Google AX: agent experience guides.",
+      "file": "google__ax.zip",
+      "sha256": "290fbde3147e1389401c65afd5393a76b5205032edeaa192f1a91c31c740a8e2",
+      "size": 24224
+    },
+    {
+      "owner": "paperclipai",
+      "repo": "paperclip",
+      "commit": "0fe47882cfcb12082035113c59ca96091c46ebfc",
+      "licence": "MIT",
+      "about": "Paperclip: running teams of AI agents; skills and docs.",
+      "file": "paperclipai__paperclip.zip",
+      "sha256": "aabb92dc2df951686a10dd8c664fc577259f01cc29345df833e8574895b78127",
+      "size": 3510001
+    },
+    {
+      "owner": "stablyai",
+      "repo": "orca",
+      "commit": "842c6c667a86d66d55b8cc3b2486ea6be5c56fcc",
+      "licence": "MIT",
+      "about": "Orca: AI agent workspace; skills and docs.",
+      "file": "stablyai__orca.zip",
+      "sha256": "bf61f2418b80a8fc01659af83cac541b9d7f0a7638a033d5c224d1c0b4cb73b2",
+      "size": 1368887
+    },
+    {
+      "owner": "agent-substrate",
+      "repo": "substrate",
+      "commit": "601c03ba59f7a72e38caebb96a5f365c7fc480c3",
+      "licence": "Apache-2.0",
+      "about": "Substrate: agent runtime; skills and docs.",
+      "file": "agent-substrate__substrate.zip",
+      "sha256": "dace7cd2dc2351ff3c3a759be512e34e4393508b89e358a7733a0a6b140c2ea4",
+      "size": 471700
+    },
+    {
+      "owner": "calesthio",
+      "repo": "OpenMontage",
+      "commit": "9327439db69021ab4b0e2776729bf3b58fdb5a87",
+      "licence": "AGPL-3.0",
+      "about": "OpenMontage: AI video production skills and pipelines.",
+      "file": "calesthio__OpenMontage.zip",
+      "sha256": "4de53dab340554ffdfb9a2748d71b397d612575548bc03d312e471adbe36238c",
+      "size": 4075043
+    },
+    {
+      "owner": "leonxlnx",
+      "repo": "taste-skill",
+      "commit": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+      "licence": "MIT",
+      "about": "Taste skills: anti-slop design rules for premium frontends.",
+      "file": "leonxlnx__taste-skill.zip",
+      "sha256": "ca2cf0d353224f1a691682aaf7b5ef361e494b5bced85126cbbbda6316a83093",
+      "size": 159290
+    },
+    {
+      "owner": "aishwaryanr",
+      "repo": "awesome-generative-ai-guide",
+      "commit": "45f73c38d3657b690811ff45b3a06cd338cc7697",
+      "licence": "MIT",
+      "about": "Generative AI guide, incl. the free agentic AI crash course.",
+      "file": "aishwaryanr__awesome-generative-ai-guide.zip",
+      "sha256": "10301879eae52e628ccfd2cff021540d6821eb3a030628f199b8e96f368673b5",
+      "size": 1756141
+    },
+    {
+      "owner": "volcengine",
+      "repo": "OpenViking",
+      "commit": "10f368145f43e672486e3c692981ee8cc97a581a",
+      "licence": "AGPL-3.0",
+      "about": "OpenViking: context database for agents; skills and docs.",
+      "file": "volcengine__OpenViking.zip",
+      "sha256": "43015f01f19e44aff248a47a553b8f82244bf02588a474b3f1520fb13bf13567",
+      "size": 2456932
+    },
+    {
+      "owner": "ai-boost",
+      "repo": "awesome-harness-engineering",
+      "commit": "7a88f06b91d03d23606324d55f02bd91e7b4a4a3",
+      "licence": "CC0-1.0",
+      "about": "Curated list on agent harness engineering.",
+      "file": "ai-boost__awesome-harness-engineering.zip",
+      "sha256": "6d0a16226893e166f70a89f8cef5f6cf96c8f22900234d0536871cb8f4f31d48",
+      "size": 92486
+    },
+    {
+      "owner": "mukul975",
+      "repo": "anthropic-cybersecurity-skills",
+      "commit": "54a798831d2266a3ca61ce68a7acb80b81160d57",
+      "licence": "Apache-2.0",
+      "about": "Hundreds of defensive security skills (read-only guides).",
+      "file": "mukul975__anthropic-cybersecurity-skills.zip",
+      "sha256": "5622cfec97874e2899e64e63edb57a674b9b5db67d87d340143f0b1a8573498a",
+      "size": 8775424
+    },
+    {
+      "owner": "cathrynlavery",
+      "repo": "diagram-design",
+      "commit": "d1376371965f513d99cc9ec388835d255c5c88d5",
+      "licence": "MIT",
+      "about": "Diagram design skill: clear, good-looking diagrams.",
+      "file": "cathrynlavery__diagram-design.zip",
+      "sha256": "9a4bdac31040cc90d4470325ff23bec890f88d77e2213308a7027e75301d3ce8",
+      "size": 1377189
+    },
+    {
+      "owner": "k-dense-ai",
+      "repo": "scientific-agent-skills",
+      "commit": "92ace75ac21efe19a620434e0ca4e356081fe807",
+      "licence": "MIT",
+      "about": "Scientific agent skills: biology, chemistry, data, papers.",
+      "file": "k-dense-ai__scientific-agent-skills.zip",
+      "sha256": "4e148d031a0de6cc9d41be49228a85ba7deac2512823adcb3f5b185e00c452ff",
+      "size": 8140610
+    },
+    {
+      "owner": "rohitg00",
+      "repo": "agentmemory",
+      "commit": "007a1a7fe8646a03d8652eb0712400cc6f0fcca3",
+      "licence": "Apache-2.0",
+      "about": "agentmemory: persistent memory for coding agents.",
+      "file": "rohitg00__agentmemory.zip",
+      "sha256": "c333667f8380ac66893a4637317db48f478ec6e6667d863c11f70c3f096840ef",
+      "size": 1839166
+    },
+    {
+      "owner": "steven2358",
+      "repo": "awesome-generative-ai",
+      "commit": "3e16ff8a97ef579f74b76c498fa831605702af1f",
+      "licence": "CC0-1.0",
+      "about": "Curated list of generative AI tools and projects.",
+      "file": "steven2358__awesome-generative-ai.zip",
+      "sha256": "8a895af86d120eaa67e52335bc38ab5b59f6eba5c1bd9aae9f67e750f1ff173d",
+      "size": 36203
+    },
+    {
+      "owner": "usestrix",
+      "repo": "strix",
+      "commit": "f1386cad37964197a483ff43c25161f9d933f050",
+      "licence": "Apache-2.0",
+      "about": "Strix security-testing agent: its skills as read-only guides.",
+      "file": "usestrix__strix.zip",
+      "sha256": "18ef8f316d4faee1ea5a82e4f38cbed3686b16e100c62bc57a849f6838572969",
+      "size": 424377
+    },
+    {
+      "owner": "public-apis",
+      "repo": "public-apis",
+      "commit": "874e5879d20843f7c2a5822cef4c0752127b3775",
+      "licence": "MIT",
+      "about": "A big list of free public APIs.",
+      "file": "public-apis__public-apis.zip",
+      "sha256": "6095e39cae377df07c3143cf8351de219412e70fa64e96db5b80327731121d49",
+      "size": 97805
+    },
+    {
+      "owner": "ripienaar",
+      "repo": "free-for-dev",
+      "commit": "a7fadd27348951630611badee831be988d6d9951",
+      "licence": "no licence file",
+      "about": "Free tiers for developers: hosting, APIs, tools.",
+      "left_out": "It has no licence file, so FCC may not redistribute it. Studio adds it from GitHub on first load and keeps that copy in the Repo vault on your PC."
+    },
+    {
+      "owner": "langflow-ai",
+      "repo": "langflow",
+      "commit": "f9b283243d2fdd8502cb4ffd606c3058cff5017e",
+      "licence": "MIT",
+      "about": "Langflow: visual AI workflow builder; skills and docs.",
+      "file": "langflow-ai__langflow.zip",
+      "sha256": "d9d15623d31194252f5a978188c68381e46be6a3d65157d83e4c448e3d8d200b",
+      "size": 4039010
+    },
+    {
+      "owner": "supermemoryai",
+      "repo": "supermemory",
+      "commit": "58ef43ba5c0327904e85219e77084292f01daa3e",
+      "licence": "MIT",
+      "about": "Supermemory: memory API for AI; skill and docs.",
+      "file": "supermemoryai__supermemory.zip",
+      "sha256": "ed33cc26e814357127fd9e57c42890d0deb76a8bf7a31853575f38da99495668",
+      "size": 438924
+    },
+    {
+      "owner": "letta-ai",
+      "repo": "letta",
+      "commit": "5bcdd177d70fa2b31a754cfcd801e77b2e1ab16a",
+      "licence": "Apache-2.0",
+      "about": "Letta (MemGPT): stateful agents with memory; overview.",
+      "file": "letta-ai__letta.zip",
+      "sha256": "2419addd6c2f68a234f70e4f17014740218177e72f27d2759c1d92c3c90409dd",
+      "size": 19556
+    },
+    {
+      "owner": "letta-ai",
+      "repo": "letta-code",
+      "commit": "4b028fab07c69edaac2ddb4f7b9a43573ff20d81",
+      "licence": "Apache-2.0",
+      "about": "Letta Code: where Letta's code lives now; skills and docs.",
+      "file": "letta-ai__letta-code.zip",
+      "sha256": "8dd1ca6c2c2467e29cda3fac16c0240651f1153cf1149c11cc747a02f96f4e16",
+      "size": 450280
+    },
+    {
+      "owner": "ultraworkers",
+      "repo": "claw-code",
+      "commit": "08106b0c3771ef5b4a5aa176acccd460e88b7325",
+      "licence": "MIT",
+      "about": "Claw Code: open agent harness; docs and plugins.",
+      "file": "ultraworkers__claw-code.zip",
+      "sha256": "0904980ec3e5da5f8e7739386763abc25d0565f26a06cb747d5d56424ebcf985",
+      "size": 689833
+    },
+    {
+      "owner": "Anil-matcha",
+      "repo": "AI-Youtube-Shorts-Generator",
+      "commit": "a57bb938ba50bf9654c2d5ca2af1295163454349",
+      "licence": "MIT",
+      "about": "Auto-clip: turn long videos into Shorts (from the auto-clip topic).",
+      "file": "Anil-matcha__AI-Youtube-Shorts-Generator.zip",
+      "sha256": "0c1c0e3d13b143f7116dd3570ddbde41a0e3ac53684cbe5933b912b6a90e71b8",
+      "size": 11631
+    },
+    {
+      "owner": "milanm",
+      "repo": "DevOps-Roadmap",
+      "commit": "d7499e6dabe2fc54be85a28952080c0b6be857b3",
+      "licence": "Apache-2.0",
+      "about": "DevOps roadmap (from the developer-roadmap topic).",
+      "file": "milanm__DevOps-Roadmap.zip",
+      "sha256": "88bdf498b25bb184b1f0178e4267c68ec3374bc9b1abbf13cd22bc0f1f0815dd",
+      "size": 15877
+    },
+    {
+      "owner": "rudra496",
+      "repo": "devroadmaps",
+      "commit": "104d7bc31f3ade603c13ba7efa79968aca42cd15",
+      "licence": "MIT",
+      "about": "Developer roadmaps in Markdown (from the developer-roadmap topic).",
+      "file": "rudra496__devroadmaps.zip",
+      "sha256": "775d717bb16202b09a3cf21eb5f6d63ed0dc11e6af9eb922e99c62e3a6f37674",
+      "size": 17883
+    }
+  ]
+}

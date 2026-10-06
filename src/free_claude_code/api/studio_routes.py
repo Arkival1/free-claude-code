@@ -29,6 +29,7 @@ from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
 from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.extensions import MAX_ZIP_BYTES as MAX_REPO_ZIP_BYTES
 from free_claude_code.studio.extensions import Extension
 from free_claude_code.studio.farm.farm import FarmError
 from free_claude_code.studio.farm.library import (
@@ -490,6 +491,8 @@ async def bootstrap(
 ) -> JsonObject:
     """Create the starter agents, and fetch the guide model only when asked."""
     created = await studio.ensure_defaults()
+    # The repos that come with FCC are added in the background on first load.
+    studio.spawn(studio.ensure_starters())
     asset = (
         await studio.ensure_guide_model()
         if payload is not None and payload.download_guide
@@ -2298,6 +2301,7 @@ def _extension(extension: Extension) -> JsonObject:
         "description": extension.description,
         "plugins": list(extension.plugins),
         "vaulted": extension.vaulted,
+        "origin": extension.origin,
         "skills": [
             {"name": skill.name, "description": skill.description, "kind": skill.kind}
             for skill in extension.skills
@@ -2334,6 +2338,45 @@ async def add_extension(
 ) -> JsonObject:
     """Pull in everything a GitHub repo offers."""
     return _extension(await studio.add_extension(payload.url))
+
+
+@router.post("/studio/api/extensions/upload")
+async def upload_extension(
+    request: Request,
+    name: str = "repo.zip",
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Add a repo from a zip on this PC. It is kept in the vault."""
+    declared = int(request.headers.get("content-length") or 0)
+    if declared > MAX_REPO_ZIP_BYTES:
+        raise HTTPException(status_code=413, detail="That zip is over 80 MB.")
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > MAX_REPO_ZIP_BYTES:
+            raise HTTPException(status_code=413, detail="That zip is over 80 MB.")
+        chunks.append(chunk)
+    return _extension(await studio.upload_extension(name, b"".join(chunks)))
+
+
+@router.get("/studio/api/starters")
+async def list_starters(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The outside repos that come with FCC, and which are added now."""
+    return {"starters": await studio.starters()}
+
+
+@router.post("/studio/api/starters/add")
+async def add_starter(
+    payload: ExtensionPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Add one of the repos that come with FCC again."""
+    return _extension(await studio.add_starter(payload.url))
 
 
 @router.post("/studio/api/extensions/servers")

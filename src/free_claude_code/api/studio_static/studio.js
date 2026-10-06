@@ -3712,7 +3712,7 @@
 
   // The user's to-do list. Jarvis and the Helper add to it too, and Jarvis
   // announces reminders on the HUD when they are due.
-  function extensionsCard(list) {
+  function extensionsCard(list, starters = []) {
     const status = el("p", { class: "muted", hidden: true });
     const say = (text) => {
       status.hidden = false;
@@ -3734,6 +3734,63 @@
         }
       },
     }, [link, el("div", { class: "row" }, [el("button", { class: "primary", type: "submit", text: "Add from GitHub" })])]);
+    // A repo zip from this PC (GitHub's "Download ZIP", or a folder zipped by
+    // hand). Studio only reads it, and keeps it in the repo vault.
+    const zipInput = el("input", {
+      type: "file",
+      accept: ".zip,application/zip",
+      class: "visually-hidden",
+      "aria-label": "Repo zip file",
+      onchange: async () => {
+        const file = zipInput.files[0];
+        zipInput.value = "";
+        if (!file) return;
+        say(`Adding ${file.name}…`);
+        try {
+          const added = await sendFile(`/studio/api/extensions/upload?name=${encodeURIComponent(file.name)}`, file, (done, total) => say(`Uploading ${file.name}… ${Math.round((100 * done) / (total || 1))}%`));
+          notify(`Added ${added.name}: ${added.skills.length} skill(s), ${added.agents.length} agent(s), ${added.servers.length} MCP server(s).`);
+          render();
+        } catch (error) {
+          say(error.message);
+        }
+      },
+    });
+    const uploadButton = el("button", { class: "secondary", type: "button", text: "Upload a repo zip", onclick: () => zipInput.click() });
+    const startersList = starters.length
+      ? el("details", { class: "starter-repos" }, [
+          el("summary", { text: `Repos that come with FCC (${starters.filter((item) => item.extension_id).length} of ${starters.length} added)` }),
+          el("p", {
+            class: "muted small",
+            text: "These are added on first load and work offline: FCC keeps a checked copy of each one, so they keep working if the original repo is deleted. Their MCP servers stay off until you turn them on, and their agents join the team only when you add them.",
+          }),
+          ...starters.map((item) =>
+            el("div", { class: "row starter-row" }, [
+              el("div", { class: "grow" }, [
+                el("strong", { text: item.name }),
+                el("p", { class: "muted small", text: `${item.about} · ${item.licence}${item.extension_id ? ` · ${item.skills} skill(s)` : ""}` }),
+                item.left_out ? el("p", { class: "muted small", text: item.left_out }) : null,
+              ]),
+              item.extension_id
+                ? el("span", { class: "pill good", text: "Added" })
+                : el("button", {
+                    class: "secondary",
+                    type: "button",
+                    text: item.left_out ? "Add from GitHub" : "Add again",
+                    "aria-label": `Add ${item.name} again`,
+                    onclick: async () => {
+                      say(`Adding ${item.name}…`);
+                      try {
+                        await post("/studio/api/starters/add", { url: item.name });
+                        render();
+                      } catch (error) {
+                        say(error.message);
+                      }
+                    },
+                  }),
+            ])
+          ),
+        ])
+      : null;
     const serverName = el("input", { type: "text", placeholder: "Name, e.g. files", "aria-label": "Server name" });
     const serverCommand = el("input", { type: "text", placeholder: "Command, e.g. npx -y @modelcontextprotocol/server-filesystem C:\\Users\\me\\Documents", "aria-label": "Server command" });
     const serverUrl = el("input", { type: "url", placeholder: "…or a web address for an HTTP server", "aria-label": "Server address" });
@@ -3772,7 +3829,10 @@
           item.skills.length
             ? el("details", {}, [
                 el("summary", { text: "Skills and commands" }),
-                el("ul", {}, item.skills.map((skill) => el("li", { text: `${skill.name}: ${skill.description || "(no description)"}` }))),
+                el("ul", {}, [
+                  ...item.skills.slice(0, 150).map((skill) => el("li", { text: `${skill.name}: ${skill.description || "(no description)"}` })),
+                  item.skills.length > 150 ? el("li", { class: "muted", text: `…and ${item.skills.length - 150} more. Agents find the right one with the skill tool's search.` }) : null,
+                ]),
               ])
             : null,
           ...item.agents.map((agent) =>
@@ -3836,8 +3896,10 @@
             ])
           ),
           el("div", { class: "row" }, [
-            item.source && item.source !== "you" ? el("a", { class: "pill", href: item.source, target: "_blank", rel: "noopener", text: "GitHub" }) : null,
-            item.vaulted ? el("span", { class: "pill", title: "GitHub no longer had it, so this came from the repo vault", text: "From the vault" }) : null,
+            item.source && item.source.startsWith("https://") ? el("a", { class: "pill", href: item.source, target: "_blank", rel: "noopener", text: "GitHub" }) : null,
+            item.vaulted && item.origin !== "upload" ? el("span", { class: "pill", title: "GitHub no longer had it, so this came from the repo vault", text: "From the vault" }) : null,
+            item.origin === "bundled" ? el("span", { class: "pill good", title: "FCC keeps a checked copy of this repo, so it works even if GitHub loses it", text: "Comes with FCC" }) : null,
+            item.origin === "upload" ? el("span", { class: "pill", title: "Added from a zip on this PC; the zip is kept in the repo vault", text: "Uploaded" }) : null,
             el("button", {
               class: "secondary",
               type: "button",
@@ -3860,12 +3922,18 @@
     return card("Add from GitHub", [
       el("p", {
         class: "muted",
-        text: "Paste a GitHub link and the team gets what the repo holds: skills (SKILL.md), Claude Code plugins (agents, commands, MCP servers), and plain repos as a skill from their README. Agents read skills with the skill tool and use switched-on MCP servers with the mcp tool.",
+        text: "Paste a GitHub link (or upload a repo zip) and the team gets what the repo holds: skills (SKILL.md), Claude Code plugins (agents, commands, MCP servers), guides and lists. Agents search and read them with the skill tool and use switched-on MCP servers with the mcp tool. Every repo is kept in the repo vault, so it still works if it's deleted from GitHub.",
       }),
       addForm,
+      el("div", { class: "row" }, [uploadButton, zipInput]),
+      startersList,
       el("details", {}, [el("summary", { text: "Add an MCP server by hand" }), serverForm]),
       status,
-      ...(rows.length ? rows : [el("p", { class: "muted", text: "Nothing added yet." })]),
+      ...(rows.length > 6
+        ? [el("details", { class: "added-repos" }, [el("summary", { text: `Added repos (${rows.length}) — ${list.reduce((n, item) => n + item.skills.length, 0)} skills` }), ...rows])]
+        : rows.length
+          ? rows
+          : [el("p", { class: "muted", text: "Nothing added yet." })]),
     ]);
   }
 
@@ -4174,7 +4242,7 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault, starterRepos] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
@@ -4186,6 +4254,7 @@
       api("/studio/api/playbook").catch(() => null),
       api("/studio/api/extensions").catch(() => ({ extensions: [] })),
       api("/studio/api/vault").catch(() => ({ items: [], bytes: 0 })),
+      api("/studio/api/starters").catch(() => ({ starters: [] })),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -4224,7 +4293,7 @@
       ]),
       learningCard(studies.studies || []),
       ...(book ? [playbookCard(book)] : []),
-      extensionsCard(added.extensions || []),
+      extensionsCard(added.extensions || [], starterRepos.starters || []),
       vaultCard(repoVault),
       todoCard(todos.todos || []),
       videoCard(videos.videos || []),

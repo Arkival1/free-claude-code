@@ -879,6 +879,30 @@ can be restored or downloaded. Outside repos built into FCC itself are kept
 under `vendor/` with their licence, release files, checksums, and source
 (`vendor/cua` holds trycua/cua's MIT-licensed Cua Driver and agent source).
 
+**Repos that come with FCC.** FCC ships 30 outside repos ready to use the
+moment Studio starts. Among them:
+
+- OpenHands, hindsight, paperclip, orca, substrate, OpenMontage,
+  taste-skill, OpenViking, diagram-design, agentmemory, strix, Langflow,
+  supermemory, Letta and Letta Code, and claw-code,
+- the cybersecurity and scientific agent-skill packs (about 1,000 skills),
+- guides and lists: Google AX, app-ideas, OSSU computer science, the
+  generative AI guide (with its agentic AI crash course),
+  awesome-harness-engineering, awesome-generative-ai, public-apis,
+  free-for-dev, roadmap.sh and two more roadmaps, and an auto-clip Shorts
+  generator.
+
+Each is added like a GitHub link, so every agent can search and read it with
+the `skill` tool (`search` finds the right skill and the matching lines in
+every repo's text). `vendor/repos` keeps a checked copy (SHA-256) of the 28
+whose licences allow it, so they install with no download and survive the
+original being deleted. roadmap.sh and free-for-dev don't allow sharing, so
+they come from GitHub on first load and are kept in the Repo vault from then
+on. Their MCP servers start switched off, and their agents join the team
+only when you click **Add to team**. Removing one sticks; **Repos that come
+with FCC** on the Add from GitHub card adds it back. **Upload a repo zip**
+adds a repo from your PC: Studio only reads it, and it is kept in the vault.
+
 **Content Farm.** The **Farm** tab makes faceless videos on this PC, start
 to finish: **YouTube Shorts** (and TikToks or Reels) and **two-hour videos to
 fall asleep to** that walk through a show's entire lore, a what-if, or its fan

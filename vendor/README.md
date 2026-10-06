@@ -17,3 +17,4 @@ installed from there when GitHub no longer has it.
 | Folder | Upstream | Licence | Used for |
 | --- | --- | --- | --- |
 | [`cua/`](cua/README.md) | https://github.com/trycua/cua | MIT | Kept for a planned PC-control feature (not used yet) |
+| [`repos/`](repos/README.md) | 30 repos (OpenHands, hindsight, paperclip, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, active on first load |

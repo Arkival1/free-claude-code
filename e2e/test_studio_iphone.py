@@ -1,7 +1,9 @@
 """The Studio app on an iPhone-sized viewport: reachable, sized, installable."""
 
+import io
 import re
 import struct
+import zipfile
 
 from playwright.sync_api import Page, ViewportSize, expect
 
@@ -822,6 +824,35 @@ def test_the_add_from_github_card_takes_links_and_servers(
     added.get_by_label("GitHub link").fill("not a link")
     added.get_by_role("button", name="Add from GitHub").click()
     expect(added).to_contain_text("Paste a GitHub link")
+
+
+def test_a_repo_zip_from_this_pc_is_added(page: Page, admin_base_url: str) -> None:
+    open_studio(page, admin_base_url, "more")
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as archive:
+        archive.writestr(
+            "notes-main/skills/ship/SKILL.md",
+            "---\nname: ship\ndescription: How we ship.\n---\nSteps.",
+        )
+    card = page.locator(
+        ".card", has=page.get_by_role("heading", name="Add from GitHub")
+    )
+    expect(card.get_by_role("button", name="Upload a repo zip")).to_be_visible()
+    card.get_by_label("Repo zip file").set_input_files(
+        {
+            "name": "notes.zip",
+            "mimeType": "application/zip",
+            "buffer": zipped.getvalue(),
+        }
+    )
+    card = page.locator(
+        ".card", has=page.get_by_role("heading", name="Add from GitHub")
+    )
+    row = card.locator(".extension-row", has_text="uploaded/notes")
+    expect(row).to_contain_text("1 skill(s)")
+    expect(row.locator(".pill", has_text="Uploaded")).to_be_visible()
+    # Kept in the repo vault too, so it can come back later.
+    expect(page.locator(".vault-row", has_text="uploaded/notes")).to_be_visible()
 
 
 def test_to_dos_can_be_added_and_ticked_off(page: Page, admin_base_url: str) -> None:

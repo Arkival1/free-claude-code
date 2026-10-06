@@ -36,7 +36,14 @@ from .convo_notes import NotesKeeper
 from .crew import Crew
 from .downloads import CURATED_MODELS, ModelLibrary
 from .engine import ENGINE_ARCHIVE, Engine, EngineError, not_a_model
-from .extensions import Extension, ExtensionError, ExtensionLibrary, McpServer
+from .extensions import (
+    UPLOAD_OWNER,
+    Extension,
+    ExtensionError,
+    ExtensionLibrary,
+    McpServer,
+    Skill,
+)
 from .farm.farm import ContentFarm, FarmError, channel_view, whole
 from .farm.formats import style_of
 from .farm.render import video_tools
@@ -200,6 +207,7 @@ from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
 from .search import SearchBudget, SearchError, StudioSearch
 from .sites import SiteWorkspace, slugify
+from .starter import StarterRepo, bundled_bytes, load_starters
 from .store import StudioNotFoundError, StudioStore
 from .team_models import (
     find_agent_name,
@@ -550,8 +558,13 @@ class StudioService:
         search_transport: httpx.AsyncBaseTransport | None = None,
         voice_transport: httpx.AsyncBaseTransport | None = None,
         server_models: Callable[[], Sequence[str]] | None = None,
+        starter_repos: Path | None = None,
     ) -> None:
         self._store = store
+        # Outside repos that come with FCC (vendor/repos), added on first load.
+        self._starter_folder = starter_repos
+        self._starters_lock = asyncio.Lock()
+        self._starters_checked = False
         self._server_models = server_models or (lambda: ())
         self._web_tools = web_tools
         self._search_transport = search_transport
@@ -4532,6 +4545,119 @@ class StudioService:
         except ExtensionError as error:
             raise StudioError(str(error)) from error
 
+    async def ensure_starters(self) -> list[Extension]:
+        """Add every starter repo not added before; a removed one stays removed.
+
+        A starter that came with FCC installs from its checked copy with no
+        download. One whose licence keeps it out of FCC comes from GitHub and
+        is kept in the vault; if GitHub can't be reached it is tried again on
+        the next load."""
+        if self._starter_folder is None or self._starters_checked:
+            return []
+        async with self._starters_lock:
+            if self._starters_checked:
+                return []
+            added: list[Extension] = []
+            waiting = False
+            present = {e.source.lower(): e.id for e in await self._extensions.all()}
+            for starter in load_starters(self._starter_folder):
+                if await self._store.get(StudioFlag, starter.flag) is not None:
+                    continue
+                if starter.source.lower() in present:
+                    # Added already (by hand, or a load cut short): never twice.
+                    await self._store.put(
+                        StudioFlag(
+                            id=starter.flag, value=present[starter.source.lower()]
+                        )
+                    )
+                    continue
+                try:
+                    extension = await self._add_starter(starter)
+                except (ExtensionError, OSError) as error:
+                    logger.warning(
+                        "Starter repo {} not added: {}", starter.full_name, error
+                    )
+                    waiting = True
+                    continue
+                await self._store.put(StudioFlag(id=starter.flag, value=extension.id))
+                added.append(extension)
+            self._starters_checked = not waiting
+            return added
+
+    async def _add_starter(self, starter: StarterRepo) -> Extension:
+        folder = self._starter_folder
+        if starter.bundled and folder is not None:
+            data = await anyio.to_thread.run_sync(bundled_bytes, folder, starter)
+            return await self._extensions.add_archive(
+                owner=starter.owner,
+                repo=starter.repo,
+                data=data,
+                origin="bundled",
+                ref=starter.commit,
+                source=starter.source,
+                file_name=starter.file,
+            )
+        return await self._extensions.add_github(starter.source)
+
+    async def starters(self) -> list[JsonObject]:
+        """The repos that come with FCC, and whether each is added now."""
+        added = {e.source.lower(): e for e in await self._extensions.all()}
+        rows: list[JsonObject] = []
+        for starter in load_starters(self._starter_folder):
+            extension = added.get(starter.source.lower())
+            rows.append(
+                {
+                    "name": starter.full_name,
+                    "source": starter.source,
+                    "about": starter.about,
+                    "licence": starter.licence,
+                    "commit": starter.commit,
+                    "bundled": starter.bundled,
+                    "left_out": starter.left_out,
+                    "extension_id": extension.id if extension else "",
+                    "skills": len(extension.skills) if extension else 0,
+                }
+            )
+        return rows
+
+    async def add_starter(self, name: str) -> Extension:
+        """Add one starter repo again (after it was removed)."""
+        wanted = name.strip().lower()
+        starter = next(
+            (
+                s
+                for s in load_starters(self._starter_folder)
+                if s.full_name.lower() == wanted
+            ),
+            None,
+        )
+        if starter is None:
+            raise StudioError(f"{name} isn't one of the repos that come with FCC.")
+        try:
+            extension = await self._add_starter(starter)
+        except ExtensionError as error:
+            raise StudioError(str(error)) from error
+        await self._store.put(StudioFlag(id=starter.flag, value=extension.id))
+        return extension
+
+    async def upload_extension(self, file_name: str, data: bytes) -> Extension:
+        """A repo zip from the user's PC, added like a GitHub link and kept in
+        the vault so it can be added again later. Its files are only read:
+        nothing in it runs, and its MCP servers start switched off."""
+        stem = Path(file_name.replace("\\", "/")).name.rsplit(".", 1)[0]
+        name = re.sub(r"[^\w.-]+", "-", stem).strip("-.")[:60] or "repo"
+        try:
+            return await self._extensions.add_archive(
+                owner=UPLOAD_OWNER,
+                repo=name,
+                data=data,
+                origin="upload",
+                source=f"upload:{name}",
+                file_name=f"{name}.zip",
+            )
+        except ExtensionError as error:
+            raise StudioError(str(error)) from error
+
     async def restore_extension(self, item_id: str) -> Extension:
         """Add a repo again from its copy in the vault."""
         try:
@@ -4634,11 +4760,32 @@ class StudioService:
 
     async def _skill_tool(self, call: ToolCall) -> ToolOutcome:
         action = str(call.arguments.get("action") or "list").lower()
+        if not self._starters_lock.locked():
+            # Mid-install (on startup) the tool uses what's added so far.
+            await self.ensure_starters()
         everything = [
             (extension, skill)
             for extension in await self._extensions.all()
             for skill in extension.skills
         ]
+        if action == "search":
+            return await self._skill_search(call, everything)
+        repo = str(call.arguments.get("repo") or "").strip()
+        file = str(call.arguments.get("file") or "").strip()
+        if action == "read" and repo and file:
+            line = call.arguments.get("line")
+            around = (
+                int(line)
+                if isinstance(line, int | float | str) and str(line).isdigit()
+                else 0
+            )
+            text = await self._extensions.read_file(repo, file, around=around)
+            return ToolOutcome(
+                text=f"{repo}/{file}"
+                + (f" (around line {around})" if around else "")
+                + f":\n{text}",
+                data={"tool": "skill", "repo": repo, "file": file},
+            )
         if action == "read":
             wanted = (
                 str(call.arguments.get("name") or "").strip().lstrip("/").casefold()
@@ -4674,11 +4821,74 @@ class StudioService:
                 "(Add from GitHub).",
                 data={"tool": "skill"},
             )
-        lines = [
-            f"- {skill.name}: {skill.description or '(no description)'} [{extension.name}]"
-            for extension, skill in everything[:80]
-        ]
-        return ToolOutcome(text="Skills:\n" + "\n".join(lines), data={"tool": "skill"})
+        if repo:
+            everything = [
+                pair
+                for pair in everything
+                if repo.casefold() in pair[0].name.casefold()
+            ]
+        if len(everything) <= 80:
+            lines = [
+                f"- {skill.name}: {skill.description or '(no description)'} [{extension.name}]"
+                for extension, skill in everything
+            ]
+            return ToolOutcome(
+                text="Skills:\n" + "\n".join(lines), data={"tool": "skill"}
+            )
+        # Big skill repos (hundreds of skills) are shown per repo; search finds
+        # the right one.
+        counts: dict[str, int] = {}
+        for extension, _ in everything:
+            counts[extension.name] = counts.get(extension.name, 0) + 1
+        lines = [f"- {name}: {count} skills" for name, count in counts.items()]
+        return ToolOutcome(
+            text=f"{len(everything)} skills in {len(counts)} repos:\n"
+            + "\n".join(lines)
+            + "\nUse action search with a query to find the right skill or guide, "
+            "or action list with repo to list one repo's skills.",
+            data={"tool": "skill"},
+        )
+
+    async def _skill_search(
+        self, call: ToolCall, everything: list[tuple[Extension, Skill]]
+    ) -> ToolOutcome:
+        query = str(call.arguments.get("query") or call.arguments.get("name") or "")
+        words = [w for w in re.findall(r"[a-z0-9+#]+", query.casefold()) if len(w) > 1]
+        if not words:
+            raise ValueError("search needs a query, like 'kubernetes security'.")
+        scored: list[tuple[int, Extension, Skill]] = []
+        for extension, skill in everything:
+            name = skill.name.casefold()
+            blurb = skill.description.casefold()
+            score = sum(3 for w in words if w in name) + sum(
+                1 for w in words if w in blurb
+            )
+            if score:
+                scored.append((score, extension, skill))
+        scored.sort(key=lambda item: -item[0])
+        parts: list[str] = []
+        if scored:
+            parts.append("Skills (read one with action read and its name):")
+            parts += [
+                f"- {skill.name}: {skill.description[:200] or '(no description)'} [{extension.name}]"
+                for _, extension, skill in scored[:12]
+            ]
+        found = await self._extensions.search(query)
+        if found:
+            parts.append(
+                "In the added repos' guides and lists (read more with action read, "
+                "repo, file and line):"
+            )
+            parts += [
+                f"- {hit['repo']}/{hit['file']}:{hit['line']}: {hit['text']}"
+                for hit in found
+            ]
+        if not parts:
+            return ToolOutcome(
+                text=f"Nothing in the added repos matches '{query}'.",
+                data={"tool": "skill"},
+            )
+        return ToolOutcome(text="\n".join(parts), data={"tool": "skill"})
 
     async def _mcp_tool(self, call: ToolCall) -> ToolOutcome:
         action = str(call.arguments.get("action") or "servers").lower()

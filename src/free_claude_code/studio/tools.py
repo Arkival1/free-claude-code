@@ -458,16 +458,36 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name=SKILL_TOOL,
         description=(
-            "Skills the user added from GitHub (Claude-style SKILL.md files, "
-            "commands, and repo guides). action list shows each skill's name and "
-            "what it is for; action read with a name gives its full "
-            "instructions. Read one when it fits the job, then follow it."
+            "Skills and knowledge from repos added to Studio (Claude-style "
+            "SKILL.md files, commands, guides, roadmaps, and lists like public "
+            "APIs or free dev tools). action search with a query finds the "
+            "right skill and the matching lines in every repo's text; action "
+            "read with a name gives a skill's full instructions, or with repo, "
+            "file and line shows that part of a repo's file; action list shows "
+            "the skills (with repo: one repo's). Search first when unsure, read "
+            "the one that fits the job, then follow it."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["list", "read"]},
+                "action": {"type": "string", "enum": ["search", "list", "read"]},
+                "query": {
+                    "type": "string",
+                    "description": "search: what you need, e.g. 'react form validation'.",
+                },
                 "name": {"type": "string", "description": "read: the skill's name."},
+                "repo": {
+                    "type": "string",
+                    "description": "read or list: the repo, e.g. public-apis/public-apis.",
+                },
+                "file": {
+                    "type": "string",
+                    "description": "read: a file in the repo, as search shows it.",
+                },
+                "line": {
+                    "type": "integer",
+                    "description": "read: show the part of the file around this line.",
+                },
             },
             "required": ["action"],
         },

@@ -360,7 +360,12 @@ async def test_saying_make_in_the_farm_chat_makes_them(make_studio):
     assert channel.niche == "planets"
     posts = await studio.farm.posts(channel.id)
     assert len(posts) == 3
-    note = str(model.calls[-1]["studio_note"])
+    # The agent's reply; the farm's own writing calls can finish after it.
+    note = next(
+        str(call["studio_note"])
+        for call in reversed(model.calls)
+        if call["studio_note"]
+    )
     assert "Studio already did this in the Content Farm" in note
     await studio.shutdown()
 

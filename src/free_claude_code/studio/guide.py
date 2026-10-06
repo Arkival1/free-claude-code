@@ -1279,6 +1279,36 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Repos that come with FCC",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Add from GitHub card: 'Repos that come "
+            "with FCC' lists them (Add again for one you removed); 'Upload a repo "
+            "zip' adds one from this PC."
+        ),
+        terms=(
+            "starter repos",
+            "come with fcc",
+            "openhands",
+            "public apis",
+            "upload a repo",
+            "repo zip",
+            "cybersecurity skills",
+            "scientific skills",
+        ),
+        body=(
+            "FCC ships 28 outside repos ready to use, with a checked copy of each "
+            "(OpenHands, hindsight, paperclip, OpenMontage, taste-skill, the "
+            "cybersecurity and scientific skill packs, public-apis, app-ideas, "
+            "OSSU, Langflow, Letta, and more). Two whose licences don't allow "
+            "sharing (roadmap.sh, free-for-dev) come from GitHub on first load "
+            "and are kept in the Repo vault. They are added on first load; agents "
+            "search them with the skill tool. Their MCP servers stay off and their "
+            "agents join only when you add them. You can also upload a repo zip; "
+            "it is kept in the vault."
+        ),
+    ),
+    GuideTopic(
         title="Repo vault",
         route="/studio#more",
         where="Knowledge & Memory (MENU), the Repo vault card.",

@@ -14,6 +14,10 @@ releases) is deleted later.
 - Code that downloads from GitHub at runtime must keep the bytes in the
   Repo vault (`free_claude_code.studio.vault.RepoVault`) and fall back to
   the vault copy when GitHub no longer has it.
+- Repos the owner wants active on first load go in `vendor/repos/`: a zip
+  of the parts Studio uses, a `manifest.json` row (commit, licence, sha256),
+  and `SHA256SUMS`; `studio/starter.py` installs them. A repo whose licence
+  forbids sharing gets a manifest row with `left_out` and no zip.
 - Treat downloaded repos as untrusted data: unpack them in their own
   folder, read them, and don't run their scripts while working.
 

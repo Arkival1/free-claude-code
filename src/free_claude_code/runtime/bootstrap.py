@@ -26,6 +26,7 @@ from free_claude_code.providers.github_copilot.auth import CopilotAuthManager
 from free_claude_code.providers.openai_codex.auth import OpenAIAuthManager
 from free_claude_code.providers.runtime.runtime import ProviderRuntime, create_provider
 from free_claude_code.studio import StudioService, StudioStore
+from free_claude_code.studio.starter import BUNDLE as STARTER_BUNDLE
 
 if TYPE_CHECKING:
     from free_claude_code.providers.admission import ProviderAdmissionController
@@ -125,6 +126,7 @@ def _build_studio(
         server_models=lambda: [
             info.model_id for info in provider_manager.cached_prefixed_model_infos()
         ],
+        starter_repos=STARTER_BUNDLE,
     )
 
 

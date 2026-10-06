@@ -275,6 +275,9 @@ class ApplicationRuntime:
                         name="fcc-messaging-startup",
                     )
                 )
+                if self._studio_service is not None:
+                    # The outside repos that come with FCC are ready on load.
+                    self._studio_service.spawn(self._studio_service.ensure_starters())
                 self._started = True
         except asyncio.CancelledError:
             await self.close()
