@@ -4362,15 +4362,17 @@
           el("span", { text: "Notes" }),
           el("span", { text: String(vault.note_count) }),
         ]),
-        vault.candidates.length
-          ? el("p", {
-              class: "muted",
-              text: `Vaults found on this device: ${vault.candidates.join(", ")}`,
-            })
-          : el("p", {
-              class: "muted",
-              text: "Set STUDIO_OBSIDIAN_VAULT in the admin settings to the vault folder. On iOS that is usually in iCloud Drive under iCloud~md~obsidian.",
-            }),
+        vault.path
+          ? null
+          : vault.candidates.length
+            ? el("p", {
+                class: "muted",
+                text: `Vaults found on this device: ${vault.candidates.join(", ")}. Put one in Settings, Obsidian Vault.`,
+              })
+            : el("p", {
+                class: "muted",
+                text: "Set Obsidian Vault in Settings to your vault's folder. On iOS that is usually in iCloud Drive under iCloud~md~obsidian.",
+              }),
         el("p", {
           class: "muted",
           text: vault.memory_sync
@@ -4385,6 +4387,7 @@
               try {
                 const result = await post("/studio/api/obsidian/memory/sync");
                 notify(`Pulled ${result.pulled} edit(s), wrote ${result.written} note(s).`);
+                render();
               } catch (error) {
                 notify(error.message);
               }
@@ -4397,6 +4400,7 @@
               try {
                 const result = await post("/studio/api/obsidian/memory/pull");
                 notify(`Pulled ${result.pulled} edit(s) from Obsidian.`);
+                render();
               } catch (error) {
                 notify(error.message);
               }
