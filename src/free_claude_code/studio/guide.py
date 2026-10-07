@@ -1308,8 +1308,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "and are kept in the Repo vault. They are added on first load; agents "
             "search them with the skill tool. Their MCP servers stay off and their "
             "agents join only when you add them; a repo agent thinks on the "
-            "server AI, so it never sees your memory (it keeps its own memory "
-            "area), and it gets only the tools it asks for. You can also upload "
+            "server AI, so it never sees your memory; it keeps its own memory "
+            "(remember and recall) and gets only the tools it asks for. Jarvis "
+            "hands it jobs with a briefing: say 'have <agent> do ...'. You can also upload "
             "a repo zip; it is kept in the vault."
         ),
     ),

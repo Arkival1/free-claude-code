@@ -15,11 +15,13 @@ from free_claude_code.core.json_types import JsonValue
 from free_claude_code.studio.agents import SEALED_PROMPT, SEALED_TOOLS
 from free_claude_code.studio.extensions import AgentDef, ExtensionLibrary
 from free_claude_code.studio.llm import LLMReply, ToolCall
-from free_claude_code.studio.memory import SHARED_MEMORY_ID
-from free_claude_code.studio.models import Agent
+from free_claude_code.studio.memory import SHARED_MEMORY_ID, server_area
+from free_claude_code.studio.models import Agent, AgentRun, StudioFlag
+from free_claude_code.studio.service import OWN_MEMORY_FLAG
 from free_claude_code.studio.starter import BUNDLE, bundled_bytes, load_starters
 from free_claude_code.studio.tools import ToolContext
 from tests.api.support import create_test_app
+from tests.studio.conftest import tool_reply
 from tests.studio.test_extensions import repo_zip
 
 ASKED_FOR = {
@@ -429,3 +431,76 @@ async def test_repos_added_before_are_read_again_with_the_agent_rule(
 
     [again] = await studio.extensions()
     assert [a.name for a in again.agents] == ["real"]
+
+
+@pytest.mark.asyncio
+async def test_a_repo_agent_teams_up_with_jarvis_and_keeps_its_own_memory(
+    make_studio,
+):
+    finding = "Spacing drift: 13/14/15px used interchangeably in ui/src."
+    asked = {"job": False}
+
+    def answer(system: str, prompt: str) -> LLMReply:
+        if "your briefing is all it gets" in system:
+            return LLMReply(text="Audit the spacing tokens in ui/src.")
+        if "running notes" in system:
+            return LLMReply(text="Goal:\n- Chat")
+        if "You inventory design-system debt" in system and not asked["job"]:
+            asked["job"] = True
+            return tool_reply("remember", {"text": finding})
+        return LLMReply(text="Done.")
+
+    studio, model = make_studio(
+        answer,
+        STUDIO_PRIVATE_MEMORY=True,
+        STUDIO_MAIN_AGENT_MODEL="local/jarvis-8b",
+        STUDIO_LOCAL_CONTROL=True,
+    )
+    studio._starter_folder = BUNDLE
+    await studio.ensure_defaults()
+    await studio.ensure_starters()
+    await studio.remember(SHARED_MEMORY_ID, SECRET)
+    extension = next(e for e in await studio.extensions() if e.agents)
+    auditor = await studio.add_extension_agent(extension.id, "token-auditor")
+    assert {"remember", "recall"} <= set(await studio.tools_in_use(auditor))
+
+    # Jarvis, on this PC, hands it the job with a briefing.
+    await studio.main_say("Have token-auditor check the spacing", background=False)
+    await studio.wait_for_background()
+    [run] = await studio.store.find(AgentRun, where={"agent_id": auditor.id})
+    assert "Briefing from Jarvis:\nAudit the spacing tokens" in run.goal
+
+    # What it remembered is its own: in its own area, not the team's.
+    own = await studio._memory().entries(server_area(auditor.id))
+    assert finding in {entry.text for entry in own}
+    team = await studio._memory().entries(SHARED_MEMORY_ID)
+    assert finding not in {entry.text for entry in team}
+
+    # Next time, it gets its own memory back, and still none of the user's.
+    chat = await studio.create_chat(agent_id=auditor.id)
+    await studio.send(chat.id, "what did you find about spacing?")
+    call = model.calls[-1]
+    assert finding in str(call["memory"])
+    assert "4321" not in str(call["memory"]) and "Biscuit" not in str(call["memory"])
+
+
+@pytest.mark.asyncio
+async def test_repo_agents_added_before_get_their_memory_tools(make_studio):
+    studio, _ = make_studio([])
+    studio._starter_folder = BUNDLE
+    await studio.ensure_starters()
+    extension = next(e for e in await studio.extensions() if e.agents)
+    auditor = await studio.add_extension_agent(extension.id, "token-auditor")
+    # As 6.61.1 added it: only the tools it asked for.
+    await studio.update_agent(
+        auditor.id,
+        {"tools": [t for t in auditor.tools if t not in {"remember", "recall"}]},
+    )
+    await studio._store.delete(StudioFlag, OWN_MEMORY_FLAG)
+    studio._starters_checked = False
+
+    await studio.ensure_starters()
+
+    fixed = await studio._store.require(Agent, auditor.id)
+    assert {"remember", "recall"} <= set(fixed.tools)
+    assert fixed.all_tools is False

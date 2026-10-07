@@ -900,9 +900,13 @@ original being deleted. roadmap.sh and free-for-dev don't allow sharing, so
 they come from GitHub on first load and are kept in the Repo vault from then
 on. Their MCP servers start switched off, and their agents join the team
 only when you click **Add to team**. A repo agent thinks on your server AI,
-so it never sees your memory (it keeps its own memory area, like every
-server agent), and since someone else wrote its instructions it gets only
-the tools it asks for; give it more on its card if you trust it. Only real
+so it never sees your memory, and since someone else wrote its instructions
+it gets only the tools it asks for (give it more on its card if you trust
+it), plus **remember** and **recall** for its own memory area: what it
+learns stays its own, and comes back to it next time. Jarvis and the other
+agents on this PC team up with it: say *"have token-auditor check the
+spacing"* and Jarvis hands it the job with a briefing written from what Jarvis
+knows, so the repo agent gets what the job needs and nothing more. Only real
 agents (a named, described Claude Code agent file) are offered. Removing one sticks; **Repos that come
 with FCC** on the Add from GitHub card adds it back. **Upload a repo zip**
 adds a repo from your PC: Studio only reads it, and it is kept in the vault.
