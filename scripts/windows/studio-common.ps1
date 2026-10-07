@@ -86,6 +86,9 @@ function Get-StudioExtras {
     }
     # Pillow and ffmpeg: the Content Farm renders its videos with them.
     $extras += @("--extra", "studio_video")
+    # Playwright and yt-dlp: the desktop browser agents drive (your own Edge
+    # or Chrome) and listening to videos that have no captions.
+    $extras += @("--extra", "studio_desk")
     if ($WithTraining) {
         $extras += @("--extra", "lora")
     }

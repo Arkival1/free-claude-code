@@ -1317,9 +1317,10 @@ The full transcript is kept with its times. Each video also goes into the
 team's memory as a short entry with its link and notes id, so any agent's
 recall finds it. Agents use two tools:
 
-- `study_video` (Researcher and Jarvis): give it a link and, optionally, what
-  the team should learn from it. Give Jarvis or the Researcher a YouTube link
-  in chat and they study it.
+- `study_video` (Researcher and Jarvis): give it a link (YouTube or any other
+  video site) or a video file's path on this PC and, optionally, what the
+  team should learn from it; `show` also plays it in the desktop browser.
+  Give Jarvis or the Researcher a video in chat and they watch it.
 - `video_notes` (every starter agent): search the studied videos; it returns
   the best match's notes and the exact transcript parts about the question,
   each with a link that starts the video at that moment.
@@ -1330,6 +1331,34 @@ notes, search the transcript, jump to any moment, or forget it. Research
 studies its videos in the background, one at a time, so it never waits on
 them; with no model running, notes are built from the transcript's most
 telling sentences instead.
+
+**Watching videos on this PC.** A video with no captions (or on another site,
+or a file on this PC) is listened to here: `yt-dlp` fetches only its sound and
+Whisper (the same speech recognition as Jarvis's ears) writes down what is
+said, with times. If the sound can't be downloaded (YouTube sometimes asks
+downloaders to sign in), Studio plays the video in the desktop browser at
+double speed and records its sound as it plays instead. The sound is deleted
+once it is heard; nothing leaves the PC. Files must be in your own folders
+(Videos, Downloads, Desktop, …), and only agents that think on this PC watch
+them, so a server AI never hears your recordings. Videos up to
+`STUDIO_WATCH_MAX_MINUTES` (120) are listened to; it takes about a tenth of
+the video's length on a fast PC, plus half its length when it is recorded in
+the browser.
+
+**Desktop browser.** Jarvis and the Researcher have `desktop_browser`: a real
+browser window on your desktop, your own Edge or Chrome (`STUDIO_DESK_BROWSER`:
+auto, edge, chrome, or chromium), that they drive while you watch. Its actions
+are search (the web or YouTube), open, read (long pages in parts), links,
+click (a link by its number), scroll, back, play, pause, watch (play the
+page's video and turn it into video notes), buttons, press, and close. It has
+its own Studio profile, so it never sees your passwords, cookies, or tabs.
+Agents only read and follow links: they never type, sign in, buy, or download,
+press only harmless buttons (accept, close, show more, next, play), and never
+open this PC or your home network. Ask in chat, for example *"open YouTube,
+find a video on sourdough and watch it with me"*. **Knowledge & Memory →
+Desktop browser** shows what it has open and closes it; `STUDIO_DESK_VISIBLE`
+off keeps it out of sight. It needs the `studio_desk` extra (Playwright and
+yt-dlp), which the Windows installer adds.
 
 **Learn mode.** Jarvis can teach himself a subject. Say *"Jarvis, learn
 electrical engineering"* (or *study*, *teach yourself*, *master*, *become an

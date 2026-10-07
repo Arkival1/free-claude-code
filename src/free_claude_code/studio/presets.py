@@ -18,6 +18,7 @@ RESEARCHER_TOOLS: tuple[str, ...] = (
     "conversation",
     "research",
     "study_video",
+    "desktop_browser",
     "video_notes",
     "web_search",
     "web_fetch",
@@ -45,6 +46,14 @@ RESEARCHER_PROMPT = (
     "agents can use them. Every video research reads is turned into video "
     "notes for the team; when the user gives you a video, study it with "
     "study_video, and look back at studied videos with video_notes."
+)
+_OLD_RESEARCHER_PROMPT_V3 = RESEARCHER_PROMPT
+RESEARCHER_PROMPT += (
+    " When the user wants you to look at something live, or to watch a "
+    "video with them, use desktop_browser: it is a real browser window on "
+    "their desktop (search, open, read, click links by number, scroll, "
+    "play), and its watch action plays the video and studies it into notes, "
+    "listening to it on this PC when it has no captions."
 )
 BUILDER_PROMPT = (
     "Build complete, working websites, apps, and games on your own. For a new "
@@ -508,7 +517,17 @@ ASSISTANT_PROMPT = (
 )
 
 TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("Internet", ("web_search", "web_fetch", "research", "study_video", "weather")),
+    (
+        "Internet",
+        (
+            "web_search",
+            "web_fetch",
+            "research",
+            "study_video",
+            "desktop_browser",
+            "weather",
+        ),
+    ),
     (
         "Code and files",
         (
@@ -703,6 +722,7 @@ _OLD_RESEARCHER_PROMPT_V2 = RESEARCHER_PROMPT.split(" Every video research")[0]
 PROMPT_UPGRADES: dict[str, str] = {
     _OLD_RESEARCHER_PROMPT_V1: RESEARCHER_PROMPT,
     _OLD_RESEARCHER_PROMPT_V2: RESEARCHER_PROMPT,
+    _OLD_RESEARCHER_PROMPT_V3: RESEARCHER_PROMPT,
     _OLD_BUILDER_PROMPT_V1: BUILDER_PROMPT,
     _OLD_BUILDER_PROMPT_V2: BUILDER_PROMPT,
     _OLD_HELPER_PROMPT_V1: HELPER_PROMPT,

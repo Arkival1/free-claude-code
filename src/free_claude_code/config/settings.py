@@ -843,6 +843,15 @@ class Settings(BaseModel):
     studio_web_access: NonEmptyString = Field(
         default="all", validation_alias="STUDIO_WEB_ACCESS"
     )
+    studio_desk_browser: NonEmptyString = Field(
+        default="auto", validation_alias="STUDIO_DESK_BROWSER"
+    )
+    studio_desk_visible: bool = Field(
+        default=True, validation_alias="STUDIO_DESK_VISIBLE"
+    )
+    studio_watch_max_minutes: int = Field(
+        default=120, ge=5, le=600, validation_alias="STUDIO_WATCH_MAX_MINUTES"
+    )
     studio_search_provider: NonEmptyString = Field(
         default="auto", validation_alias="STUDIO_SEARCH_PROVIDER"
     )
@@ -1042,6 +1051,16 @@ class Settings(BaseModel):
     def validate_studio_engine_build(cls, value: str) -> str:
         if value not in ("vulkan", "cpu"):
             raise ValueError("STUDIO_ENGINE_BUILD must be vulkan or cpu.")
+        return value
+
+    @field_validator("studio_desk_browser")
+    @classmethod
+    def validate_studio_desk_browser(cls, value: str) -> str:
+        if value not in ("auto", "edge", "chrome", "chromium"):
+            raise ValueError(
+                "STUDIO_DESK_BROWSER must be 'auto', 'edge', 'chrome', or "
+                f"'chromium', got {value!r}"
+            )
         return value
 
     @field_validator("studio_web_access")

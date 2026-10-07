@@ -45,7 +45,10 @@ def test_the_app_opens_studio_in_its_own_window():
     output = dry_run("studio-app.ps1")
 
     assert "start hidden: uv run --python cpython-3.14.0-windows-x86_64-none" in output
-    assert "--extra studio_voice --extra studio_video fcc-server" in output
+    assert (
+        "--extra studio_voice --extra studio_video --extra studio_desk fcc-server"
+        in output
+    )
     assert "--app=http://localhost:8082/studio" in output
     assert "--user-data-dir=" in output
     assert "stop the server when the window closes" in output
@@ -57,7 +60,7 @@ def test_the_app_can_leave_the_server_running_for_a_phone():
 
     assert "--app=http://localhost:9000/studio" in output
     assert "studio_voice" not in output
-    assert "--extra studio_video fcc-server" in output
+    assert "--extra studio_video --extra studio_desk fcc-server" in output
     assert "stop the server" not in output
 
 
@@ -95,5 +98,5 @@ def test_the_browser_launcher_still_works():
     )
     assert (
         "uv run --python cpython-3.14.0-windows-x86_64-none --extra studio_voice "
-        "--extra studio_video fcc-server" in output
+        "--extra studio_video --extra studio_desk fcc-server" in output
     )

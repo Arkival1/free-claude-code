@@ -4,15 +4,18 @@ import asyncio
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
+import httpx
 from loguru import logger
 
 from .llm import ChatMessage, StudioLLMError, StudioModelRouter
 from .memory import keywords
 from .models import VideoNote, now_ms
-from .platforms import PlatformPage, PlatformReader, youtube_id
+from .platforms import PlatformError, PlatformPage, PlatformReader, youtube_id
 from .research import excerpt, relevance
 from .store import StudioStore
+from .video_ears import VideoEars, VideoEarsError
 
 CHUNK_CHARS = 7_000
 MAX_CHUNKS = 8
@@ -73,7 +76,10 @@ def clock(seconds: int) -> str:
 
 
 def at(url: str, seconds: int) -> str:
-    """A link that starts the video at a moment."""
+    """A link that starts the video at a moment (YouTube links; other videos
+    keep their link and the time is shown beside it)."""
+    if youtube_id(url) is None:
+        return url
     return f"{url}&t={max(0, seconds)}s"
 
 
@@ -192,13 +198,24 @@ class VideoStudy:
         model: Callable[[], Awaitable[str]],
         remember: Callable[[VideoNote], Awaitable[str]],
         lock: asyncio.Lock | None = None,
+        ears: VideoEars | None = None,
     ) -> None:
+        self._ears = ears
         self._store = store
         self._reader = reader
         self._router = router
         self._model = model
         self._remember = remember
         self._lock = lock or asyncio.Lock()
+
+    def local_file(self, target: str) -> Path | None:
+        """The video file on this PC a target names, or None for a link."""
+        if self._ears is None:
+            return None
+        try:
+            return self._ears.local_file(target)
+        except VideoEarsError as error:
+            raise VideoError(str(error)) from error
 
     async def note(self, note_id: str) -> VideoNote | None:
         return await self._store.get(VideoNote, note_id)
@@ -219,24 +236,43 @@ class VideoStudy:
         studied_by: str = "",
         page: PlatformPage | None = None,
     ) -> VideoNote:
-        """Read a video's transcript and turn it into notes for the team."""
+        """Watch a video and turn what it says into notes for the team.
+
+        YouTube captions are read when there are some; otherwise, and for
+        other sites and video files on this PC, Studio listens to the video
+        with Whisper on this computer.
+        """
         video = youtube_id(url)
-        if video is None:
-            raise VideoError("That is not a YouTube video link.")
-        known = await self.find_by_video(video)
+        try:
+            local = self._ears.local_file(url) if self._ears else None
+        except VideoEarsError as error:
+            raise VideoError(str(error)) from error
+        if video is None and local is None and (self._ears is None or "://" not in url):
+            raise VideoError(
+                "Give a video link, or the path of a video file on this PC."
+            )
+        key = video or (self._ears.key_for(url) if self._ears else url)
+        known = await self.find_by_video(key)
         if known is not None and (not focus or focus == known.focus):
             return known
-        if page is None:
-            page = await self._reader.youtube_video(url)
-        if not page.transcript or not page.segments:
-            raise VideoError(
-                page.note or "This video has no transcript YouTube would share."
-            )
+        if page is None and video is not None:
+            try:
+                page = await self._reader.youtube_video(url)
+            except PlatformError, httpx.HTTPError:
+                if self._ears is None:
+                    raise
+        if page is None or not page.transcript or not page.segments:
+            if self._ears is None:
+                note = page.note if page is not None else ""
+                raise VideoError(
+                    note or "This video has no transcript YouTube would share."
+                )
+            page = await self._listen(url, page)
         # One study at a time, so a local model is not asked for several at once.
         async with self._lock:
             digest = await self._digest(page, focus)
         fields: dict[str, object] = {
-            "video_id": video,
+            "video_id": key,
             "url": page.url,
             "title": page.title,
             "summary": digest.summary,
@@ -256,6 +292,28 @@ class VideoStudy:
         note = note.model_copy(update={"memory_id": memory_id, "updated_at": now_ms()})
         await self._store.put(note)
         return note
+
+    async def _listen(self, url: str, page: PlatformPage | None) -> PlatformPage:
+        """Hear the video on this PC when there are no captions to read."""
+        if self._ears is None:
+            raise VideoError("Listening to videos is not available here.")
+        try:
+            heard = await self._ears.listen(url)
+        except VideoEarsError as error:
+            if page is None:
+                raise VideoError(str(error)) from error
+            reason = page.note or "This video has no captions YouTube would share."
+            raise VideoError(f"{reason} {error}") from error
+        title = page.title if page is not None and page.title else heard.title
+        text = page.text if page is not None else title
+        return PlatformPage(
+            platform=page.platform if page is not None else "video",
+            url=page.url if page is not None else heard.url,
+            title=title,
+            text=text,
+            transcript=True,
+            segments=heard.segments,
+        )
 
     async def notes(self, query: str = "", *, limit: int = 8) -> list[VideoNote]:
         """Studied videos, best match for a query first, else newest first."""

@@ -34,6 +34,14 @@ from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .convo_notes import NotesKeeper
 from .crew import Crew
+from .desk import (
+    INSTALL_HINT,
+    DeskBrowser,
+    DeskError,
+    Opener,
+    desk_package_ready,
+    playwright_opener,
+)
 from .downloads import CURATED_MODELS, ModelLibrary
 from .engine import ENGINE_ARCHIVE, Engine, EngineError, not_a_model
 from .extensions import (
@@ -231,6 +239,7 @@ from .tools import (
 )
 from .tuning import CloudTuner, LightTuner, TuningError
 from .vault import RepoVault
+from .video_ears import Fetch, Hear, VideoEars, VideoEarsError, ytdlp_fetch
 from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
 from .voice import SpeechAudio, VoiceError, VoiceService, speakable
 from .weather import WeatherError, forecast, weather_request
@@ -570,8 +579,21 @@ class StudioService:
         voice_transport: httpx.AsyncBaseTransport | None = None,
         server_models: Callable[[], Sequence[str]] | None = None,
         starter_repos: Path | None = None,
+        desk_opener: Opener | None = None,
+        media_home: Path | None = None,
+        hear: Hear | None = None,
+        fetch: Fetch | None = None,
     ) -> None:
         self._store = store
+        # The desktop browser agents drive, opened on first use and kept
+        # open between turns; and how videos with no captions are heard.
+        self._desk_opener = desk_opener
+        self._desk: DeskBrowser | None = None
+        self._desk_config: tuple[str, bool, bool] | None = None
+        self._media_home = media_home or Path.home()
+        self._hear = hear
+        self._fetch = fetch
+        self._data_root = sites_dir.parent
         # Outside repos that come with FCC (vendor/repos), added on first load.
         self._starter_folder = starter_repos
         self._starters_lock = asyncio.Lock()
@@ -949,7 +971,94 @@ class StudioService:
             model=self._video_model,
             remember=self._remember_video,
             lock=self._video_lock,
+            ears=self._ears(),
         )
+
+    def _ears(self) -> VideoEars:
+        """Listening to videos on this PC with the main AI's ears (Whisper)."""
+        settings = self.settings
+        voice = self.local_voice()
+        return VideoEars(
+            hear=self._hear or voice.hear_file,
+            work=self._data_root / "listening",
+            home=self._media_home,
+            max_minutes=settings.studio_watch_max_minutes,
+            fetch=self._fetch or ytdlp_fetch,
+            allow_private=settings.web_fetch_allow_private_networks,
+            ready=(lambda: True) if self._hear else listen_package_ready,
+            record=self._record_in_desk,
+        )
+
+    async def _record_in_desk(
+        self, url: str, folder: Path, max_minutes: int
+    ) -> tuple[Path, str, float]:
+        """When a web video's sound cannot be downloaded, play it in the
+        desktop browser and record it as it plays."""
+        if self._desk_opener is None and not desk_package_ready():
+            raise VideoEarsError(INSTALL_HINT)
+        try:
+            return await self.desk_browser().record_sound(
+                url, folder, max_minutes=max_minutes, by="Video notes"
+            )
+        except DeskError as error:
+            raise VideoEarsError(f"Could not listen to it: {error}") from error
+
+    def desk_browser(self) -> DeskBrowser:
+        """The browser window on the desktop the agents drive (one, shared)."""
+        settings = self.settings
+        config = (
+            settings.studio_desk_browser,
+            settings.studio_desk_visible,
+            settings.web_fetch_allow_private_networks,
+        )
+        if self._desk is None or (config != self._desk_config and not self._desk.open):
+            opener = self._desk_opener or playwright_opener(
+                self._data_root / "desk-browser",
+                browser=config[0],
+                visible=config[1],
+            )
+            self._desk = DeskBrowser(opener, allow_private=config[2])
+            self._desk_config = config
+        return self._desk
+
+    def desk_status(self) -> JsonObject:
+        """For the app: whether the desktop browser is installed and open."""
+        desk = self._desk
+        shot = desk.state.shot if desk is not None else None
+        return {
+            "installed": self._desk_opener is not None or desk_package_ready(),
+            "open": bool(desk and desk.open),
+            "url": shot.url if shot else "",
+            "title": shot.title if shot else "",
+            "used_by": desk.state.used_by if desk is not None else "",
+            "listening": self._hear is not None or listen_package_ready(),
+        }
+
+    async def show_video(self, url: str) -> JsonObject:
+        """Play a video (a link or a file on this PC) in the desktop browser."""
+        desk = self.desk_browser()
+        try:
+            local = self._videos().local_file(url)
+            if local is not None:
+                await desk.show_file(local, by="You")
+            else:
+                await desk.go(url, by="You")
+            await desk.video("play", by="You")
+        except (DeskError, VideoError) as error:
+            raise StudioError(str(error)) from error
+        return self.desk_status()
+
+    async def open_in_desk(self, url: str) -> JsonObject:
+        """Open a page in the desktop browser for the user."""
+        try:
+            await self.desk_browser().go(url, by="You")
+        except DeskError as error:
+            raise StudioError(str(error)) from error
+        return self.desk_status()
+
+    async def close_desk_browser(self) -> None:
+        if self._desk is not None:
+            await self._desk.close()
 
     async def _video_model(self) -> str:
         """Videos are studied with the Researcher's model, like its research."""
@@ -993,10 +1102,19 @@ class StudioService:
 
         self.spawn(study())
 
-    async def study_video(self, url: str, *, focus: str = "") -> VideoNote:
-        """Study a video the user gives Studio."""
+    async def study_video(
+        self, url: str, *, focus: str = "", show: bool = False
+    ) -> VideoNote:
+        """Watch a video the user gives Studio (a link or a file on this PC),
+        playing it in the desktop browser too when asked."""
+        videos = self._videos()
+        if show:
+            try:
+                await self.show_video(url)
+            except StudioError as error:  # the notes still get made
+                logger.info("Studio: could not play {} on the desktop: {}", url, error)
         try:
-            note = await self._videos().study(url, focus=focus, source="user")
+            note = await videos.study(url, focus=focus, source="user")
         except (VideoError, PlatformError, httpx.HTTPError) as error:
             raise StudioError(str(error)) from error
         await self._after_memory_change([], wait=False)
@@ -1059,6 +1177,7 @@ class StudioService:
             all_tools=settings.studio_all_tools,
             image_transport=self._search_transport,
             photos=self._photos,
+            desk=self.desk_browser(),
         )
 
     def _runner(self) -> AgentRunner:
@@ -1211,6 +1330,7 @@ class StudioService:
                 await self._farm_pilot
         await self._engine.stop()
         await self._mcp.close()
+        await self.close_desk_browser()
 
     # ----------------------------------------------------------- the engine
 

@@ -756,9 +756,25 @@ def test_video_notes_have_a_place_to_paste_a_link(
 
     videos = page.locator(".card", has=page.get_by_role("heading", name="Video notes"))
     expect(videos).to_be_visible()
-    expect(videos.get_by_label("YouTube link")).to_be_visible()
-    expect(videos.get_by_role("button", name="Study it")).to_be_visible()
+    expect(videos.get_by_label("Video link or file")).to_be_visible()
+    expect(videos.get_by_label("Play it in the desktop browser")).not_to_be_checked()
+    expect(videos.get_by_role("button", name="Watch it")).to_be_visible()
     expect(videos).to_contain_text("Research saves every video it reads here")
+    expect(videos).to_contain_text("Copy as path")
+
+
+def test_the_desktop_browser_card_says_what_it_does(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url, "more")
+
+    desk = page.locator(
+        ".card", has=page.get_by_role("heading", name="Desktop browser")
+    )
+    expect(desk).to_be_visible()
+    expect(desk.get_by_label("Page to open")).to_be_visible()
+    expect(desk).to_contain_text("never sees your passwords, cookies, or tabs")
+    expect(desk.get_by_role("button", name="Close it")).to_have_count(0)
 
 
 def test_jarvis_can_be_given_a_subject_to_learn(

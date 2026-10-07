@@ -1247,6 +1247,48 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_DESK_BROWSER",
+        "Desktop Browser",
+        "studio",
+        "select",
+        settings_attr="studio_desk_browser",
+        options=(
+            ConfigOptionSpec("auto", "Edge, else Chrome (recommended)"),
+            ConfigOptionSpec("edge", "Microsoft Edge"),
+            ConfigOptionSpec("chrome", "Google Chrome"),
+            ConfigOptionSpec("chromium", "Playwright's Chromium"),
+        ),
+        description=(
+            "The browser window agents drive on your desktop to research and "
+            "play videos. It uses its own Studio profile, never your "
+            "passwords, cookies, or tabs."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_DESK_VISIBLE",
+        "Show The Desktop Browser",
+        "studio",
+        "boolean",
+        settings_attr="studio_desk_visible",
+        description=(
+            "On, you see the window and can watch the agents browse and "
+            "watch along with videos. Off, it works out of sight."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_WATCH_MAX_MINUTES",
+        "Longest Video To Listen To",
+        "studio",
+        "number",
+        settings_attr="studio_watch_max_minutes",
+        advanced=True,
+        description=(
+            "Videos with no captions are listened to on this PC with speech "
+            "recognition; longer videos take longer (about a tenth of their "
+            "length on a fast PC)."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_WEB_ACCESS",
         "Agents On The Internet",
         "studio",

@@ -1134,8 +1134,8 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         title="Video notes",
         route="/studio#more",
         where=(
-            "Knowledge & Memory (MENU), Video notes card: paste a YouTube link "
-            "and press Study it, or Open a studied video."
+            "Knowledge & Memory (MENU), Video notes card: paste a video link or "
+            "a video file's path and press Watch it, or Open a studied video."
         ),
         terms=(
             "video",
@@ -1146,19 +1146,59 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "watch",
             "video notes",
             "study video",
+            "video file",
+            "no captions",
         ),
         body=(
             "Every YouTube video research reads, and any video you give Studio, "
             "is turned into video notes: a summary, key points, steps, names, and "
-            "warnings, plus the full transcript with times. The notes go into the "
-            "team's memory with the link, so every agent can use them, and agents "
-            "look back at the exact parts with the video_notes tool, each with a "
-            "link to that moment. Give Jarvis or the Researcher a link, or paste "
-            "it on the Video notes card; add what the team should learn from it "
-            "to focus the notes. Open a note to read it, search the transcript, "
-            "jump to a moment, or forget the video."
+            "warnings, plus the full transcript with times. YouTube, other video "
+            "sites, and video files on this PC all work (in File Explorer, Shift "
+            "+ right-click a video, Copy as path, and paste it). When a video has "
+            "no captions, Studio listens to it on this PC with speech "
+            "recognition (Whisper), so nothing leaves your computer. The notes "
+            "go into the team's memory with the link, so every agent can use "
+            "them, and agents look back at the exact parts with the video_notes "
+            "tool. Give Jarvis or the Researcher a video, or paste it on the "
+            "Video notes card; tick 'Play it in the desktop browser' to watch "
+            "along. Open a note to read it, search the transcript, jump to a "
+            "moment, or forget the video."
         ),
-        asks=("How does deep research work?", "Where is memory?"),
+        asks=("What is the desktop browser?", "Where is memory?"),
+    ),
+    GuideTopic(
+        title="Desktop browser",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), the Desktop browser card; Settings, "
+            "Studio: Desktop Browser and Show The Desktop Browser."
+        ),
+        terms=(
+            "desktop browser",
+            "control my desktop",
+            "use my desktop",
+            "my browser",
+            "edge",
+            "chrome",
+            "browse",
+            "watch with me",
+            "play the video",
+            "computer use",
+        ),
+        body=(
+            "Jarvis and the Researcher can drive a real browser window on your "
+            "desktop (your Edge or Chrome) while you watch: they search, read "
+            "pages, click links, scroll, go back, and play and pause videos, and "
+            "their watch action plays a video and turns it into video notes. "
+            "Ask in the chat, for example 'open YouTube, find a video on "
+            "sourdough and watch it'. The window has its own Studio profile, so "
+            "it never sees your passwords, cookies, or tabs; agents never type, "
+            "sign in, buy, or download, and only press harmless buttons (accept, "
+            "show more, next). It opens on first use and stays open; close it on "
+            "the Desktop browser card. The Windows installer adds it; otherwise "
+            "run uv sync --extra studio_desk."
+        ),
+        asks=("How do video notes work?", "What can Jarvis do?"),
     ),
     GuideTopic(
         title="Memory",

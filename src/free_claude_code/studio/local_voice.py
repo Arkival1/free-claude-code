@@ -451,6 +451,30 @@ class LocalVoice:
     async def transcribe(self, wav: bytes) -> str:
         return await anyio.to_thread.run_sync(lambda: self.recognize(wav))
 
+    def hear_file(
+        self, path: Path, max_minutes: int
+    ) -> tuple[list[tuple[float, str]], float]:
+        """What a video or sound file says, piece by piece with when each
+        piece starts, and how long it is (runs on a thread). Whisper reads
+        the sound out of any video file itself."""
+        segments, info = self._listener().transcribe(
+            str(path),
+            language=self._language or None,
+            beam_size=1,
+            vad_filter=True,
+            condition_on_previous_text=False,
+        )
+        length = float(info.duration or 0)
+        if length > max_minutes * 60:
+            raise LocalVoiceError(
+                f"The video is {int(length) // 60} minutes long; agents listen "
+                f"to videos up to {max_minutes} minutes (Settings)."
+            )
+        return (
+            [(float(piece.start), piece.text.strip()) for piece in segments],
+            length,
+        )
+
     def timed_words(self, wav: bytes) -> list[tuple[str, float, float]]:
         """Each word heard and when (seconds), for lyrics over music (runs
         on a thread)."""

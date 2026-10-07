@@ -10,6 +10,7 @@ from free_claude_code.studio.llm import LLMReply, StudioLLMError, StudioModelRou
 from free_claude_code.studio.memory import SHARED_MEMORY_ID
 from free_claude_code.studio.models import MemoryEntry, VideoNote
 from free_claude_code.studio.platforms import caption_segments
+from free_claude_code.studio.video_ears import VideoEarsError
 from free_claude_code.studio.videos import parse_digest, passages, plain_digest
 from tests.api.support import create_test_app
 
@@ -85,8 +86,18 @@ def studio_with(tmp_path, store, web_tools, studio_settings, replies, **settings
         router=StudioModelRouter(proxy=model, local=model),
         search_transport=youtube(seen),
         voice_transport=youtube(seen),
+        hear=no_speech,
+        fetch=no_video,
     )
     return studio, model, seen
+
+
+def no_speech(path, minutes):
+    raise VideoEarsError("nothing to hear in a test")
+
+
+def no_video(url, folder, minutes):
+    raise VideoEarsError(f"no video at {url}")
 
 
 def test_captions_keep_their_times():
@@ -216,9 +227,12 @@ async def test_research_turns_the_videos_it_reads_into_notes(
 
 
 @pytest.mark.asyncio
-async def test_a_video_without_captions_cannot_be_studied(
-    tmp_path, store, web_tools, studio_settings
+async def test_a_video_without_captions_needs_speech_recognition(
+    tmp_path, store, web_tools, studio_settings, monkeypatch
 ):
+    monkeypatch.setattr(
+        "free_claude_code.studio.service.listen_package_ready", lambda: False
+    )
     model = ScriptedLLM([DIGEST])
     values = studio_settings()
     studio = StudioService(
@@ -231,10 +245,12 @@ async def test_a_video_without_captions_cannot_be_studied(
         search_transport=youtube([], captions=False),
     )
 
-    with pytest.raises(StudioError, match="captions"):
+    with pytest.raises(StudioError, match=r"captions.*speech recognition"):
         await studio.study_video(LINK)
-    with pytest.raises(StudioError, match="not a YouTube"):
+    with pytest.raises(StudioError, match="speech recognition"):
         await studio.study_video("https://example.com/video")
+    with pytest.raises(StudioError, match="video link, or the path"):
+        await studio.study_video("not a video")
     assert model.calls == []
 
 

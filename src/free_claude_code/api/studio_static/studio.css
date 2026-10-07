@@ -2884,3 +2884,15 @@ h3.subhead {
   border-radius: 14px;
   background: var(--hud-panel, var(--surface-2));
 }
+
+/* A checkbox with its words beside it (Video notes: play it on the desktop). */
+.check-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+}
+.check-row input {
+  width: auto;
+  flex: none;
+}

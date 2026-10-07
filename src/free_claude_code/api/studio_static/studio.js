@@ -4150,16 +4150,22 @@
     );
   }
 
-  // Videos the Researcher turned into notes for the team. Paste a link to
-  // study one; open a note to read it and jump to any moment of the video.
+  // Videos the Researcher turned into notes for the team. Paste a link (or
+  // a video file's path on this PC) to watch one; open a note to read it and
+  // jump to any moment of the video.
   function videoCard(videos) {
-    const link = el("input", { type: "url", placeholder: "Paste a YouTube link", "aria-label": "YouTube link" });
+    const link = el("input", {
+      type: "text",
+      placeholder: "Paste a video link, or a video file's path on this PC",
+      "aria-label": "Video link or file",
+    });
     const focus = el("input", { type: "text", placeholder: "What should the team learn from it? (optional)", "aria-label": "Focus" });
+    const show = el("input", { type: "checkbox", "aria-label": "Play it in the desktop browser" });
     const status = el("p", { class: "muted", hidden: true });
     const study = el("button", {
       class: "primary",
       type: "submit",
-      text: "Study it",
+      text: "Watch it",
     });
     const form = el("form", {
       class: "video-study",
@@ -4168,9 +4174,14 @@
         if (!link.value.trim()) return;
         study.disabled = true;
         status.hidden = false;
-        status.textContent = "Reading the transcript and writing notes… a local model can take a minute.";
+        status.textContent =
+          "Watching: reading its captions, or listening to it on this PC when it has none, then writing notes… a long video can take a few minutes.";
         try {
-          const note = await post("/studio/api/videos", { url: link.value.trim(), focus: focus.value.trim() });
+          const note = await post("/studio/api/videos", {
+            url: link.value.trim(),
+            focus: focus.value.trim(),
+            show: show.checked,
+          });
           link.value = "";
           focus.value = "";
           status.hidden = true;
@@ -4182,7 +4193,13 @@
           study.disabled = false;
         }
       },
-    }, [link, focus, el("div", { class: "row" }, [study]), status]);
+    }, [
+      link,
+      focus,
+      el("label", { class: "check-row" }, [show, el("span", { text: "Play it in the desktop browser so I can watch along" })]),
+      el("div", { class: "row" }, [study]),
+      status,
+    ]);
     const rows = videos.length
       ? videos.map((video) =>
           el("div", { class: "list-item video-row" }, [
@@ -4210,7 +4227,61 @@
     return card(
       "Video notes",
       [form, ...rows],
-      "Videos turned into notes the agents use: summary, key points, steps, and the transcript with times. Every note is also in the team's memory."
+      "Videos turned into notes the agents use: summary, key points, steps, and the transcript with times. YouTube, other sites, and video files on this PC (in File Explorer, Shift + right-click a video, Copy as path). Videos with no captions are listened to on this PC. Every note is also in the team's memory."
+    );
+  }
+
+  // The browser window on the desktop the agents drive to research and to
+  // play videos while the user watches.
+  function deskCard(desk) {
+    const address = el("input", { type: "text", placeholder: "A page to open, e.g. youtube.com", "aria-label": "Page to open" });
+    const status = el("p", { class: "muted", hidden: true });
+    const run = async (path, payload) => {
+      status.hidden = false;
+      status.textContent = "Working…";
+      try {
+        await post(path, payload);
+        status.hidden = true;
+        render();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+    const state = !desk.installed
+      ? el("p", {
+          class: "muted",
+          text: "Not installed yet: run the Windows installer again (it adds it), or run uv sync --extra studio_desk.",
+        })
+      : desk.open
+        ? el("p", {}, [
+            el("strong", { text: "Open: " }),
+            el("span", { text: desk.title || desk.url || "a blank page" }),
+            desk.used_by ? el("span", { class: "muted", text: ` · last used by ${desk.used_by}` }) : null,
+          ])
+        : el("p", { class: "muted", text: "Closed. It opens by itself when an agent needs it." });
+    return card(
+      "Desktop browser",
+      [
+        state,
+        el("form", {
+          class: "row",
+          onsubmit: (event) => {
+            event.preventDefault();
+            if (address.value.trim()) run("/studio/api/desk/open", { url: address.value.trim() });
+          },
+        }, [
+          address,
+          el("button", { class: "secondary", type: "submit", text: "Open", disabled: !desk.installed }),
+          desk.open
+            ? el("button", { class: "danger", type: "button", text: "Close it", onclick: () => run("/studio/api/desk/close", {}) })
+            : null,
+        ]),
+        desk.listening
+          ? null
+          : el("p", { class: "muted", text: "Listening to videos with no captions needs speech recognition: set up the voice in Voice below." }),
+        status,
+      ],
+      "A real Edge or Chrome window on your desktop that Jarvis and the Researcher drive while you watch: they search, read pages, click links, scroll, and play videos, then turn them into notes. It has its own Studio profile, so it never sees your passwords, cookies, or tabs, and agents never type, sign in, or buy. Say \"open YouTube and watch a video about …\" in the chat."
     );
   }
 
@@ -4222,15 +4293,19 @@
             el(numbered ? "ol" : "ul", {}, items.map((item) => el("li", { text: item }))),
           ]
         : [];
+    const youtube = /youtube\.com\/watch|youtu\.be\//.test(note.url);
+    const web = /^https?:\/\//.test(note.url);
     const moment = (line) =>
       el("div", { class: "video-line" }, [
-        el("a", {
-          class: "pill",
-          href: `${note.url}&t=${line.seconds}s`,
-          target: "_blank",
-          rel: "noopener",
-          text: line.at,
-        }),
+        youtube
+          ? el("a", {
+              class: "pill",
+              href: `${note.url}&t=${line.seconds}s`,
+              target: "_blank",
+              rel: "noopener",
+              text: line.at,
+            })
+          : el("span", { class: "pill", text: line.at }),
         el("span", { text: line.text }),
       ]);
     const find = el("input", { type: "search", placeholder: "Find in the transcript", "aria-label": "Find in the transcript" });
@@ -4242,7 +4317,21 @@
       }
     });
     openSheet(note.title, [
-      el("p", {}, [el("a", { href: note.url, target: "_blank", rel: "noopener", text: "Watch on YouTube" })]),
+      el("p", { class: "row" }, [
+        web ? el("a", { href: note.url, target: "_blank", rel: "noopener", text: youtube ? "Watch on YouTube" : "Open the video" }) : el("span", { class: "muted", text: note.url }),
+        el("button", {
+          class: "secondary",
+          type: "button",
+          text: "Play in the desktop browser",
+          onclick: async () => {
+            try {
+              await post("/studio/api/desk/play", { url: note.url });
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+      ]),
       note.focus ? el("p", { class: "muted", text: `Studied for: ${note.focus}` }) : null,
       note.summary ? el("p", { text: note.summary }) : null,
       ...list("Key points", note.points),
@@ -4273,7 +4362,7 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault, starterRepos] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault, starterRepos, desk] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
@@ -4286,6 +4375,7 @@
       api("/studio/api/extensions").catch(() => ({ extensions: [] })),
       api("/studio/api/vault").catch(() => ({ items: [], bytes: 0 })),
       api("/studio/api/starters").catch(() => ({ starters: [] })),
+      api("/studio/api/desk").catch(() => ({ installed: false, open: false })),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -4328,6 +4418,7 @@
       vaultCard(repoVault),
       todoCard(todos.todos || []),
       videoCard(videos.videos || []),
+      deskCard(desk),
       voiceCard(voiceInfo),
       webCard(overview.settings.web),
       connectCard(connect),

@@ -101,6 +101,7 @@ TOOL_STATION: dict[str, str] = {
             "ask_researcher",
             "find_images",
             "weather",
+            "desktop_browser",
         ),
         "library",
     ),

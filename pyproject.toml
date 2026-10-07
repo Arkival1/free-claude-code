@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.63.1"
+version = "6.64.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -73,6 +73,12 @@ studio_video = [
     "pillow>=12.0.0",
     "imageio-ffmpeg>=0.6.0",
     "numpy>=2.0.0",
+]
+# The desktop browser (drives the user's own Edge or Chrome) and listening to
+# web videos that have no captions (yt-dlp fetches only their sound).
+studio_desk = [
+    "playwright>=1.55.0",
+    "yt-dlp>=2026.1.0",
 ]
 # LoRA weight training on this computer (Studio). A GPU is strongly advised.
 lora = [
@@ -186,6 +192,9 @@ allowed-unresolved-imports = [
     "numpy",
     # Optional Content Farm video maker (studio_video extra).
     "imageio_ffmpeg",
+    # Optional desktop browser and video listening (studio_desk extra).
+    "yt_dlp",
+    "yt_dlp.utils",
     # Optional LoRA trainer, run with whatever Python has these installed.
     "peft",
     "huggingface_hub",

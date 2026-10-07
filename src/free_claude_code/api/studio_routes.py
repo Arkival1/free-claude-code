@@ -124,8 +124,13 @@ class TodoPayload(BaseModel):
 
 
 class VideoPayload(BaseModel):
-    url: str = Field(min_length=1, max_length=500)
+    url: str = Field(min_length=1, max_length=1000)
     focus: str = Field(default="", max_length=300)
+    show: bool = False
+
+
+class DeskPayload(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
 
 
 class TeachPayload(BaseModel):
@@ -823,9 +828,48 @@ async def study_video(
     studio: StudioService = Depends(get_studio),
     _: None = Access,
 ) -> JsonObject:
-    """Study a YouTube video into notes for the agents."""
-    note = await studio.study_video(payload.url, focus=payload.focus)
+    """Watch a video (a link, or a file on this PC) into notes for the agents."""
+    note = await studio.study_video(payload.url, focus=payload.focus, show=payload.show)
     return _video_json(note, full=True)
+
+
+@router.get("/studio/api/desk")
+async def desk_status(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The desktop browser the agents drive: installed, open, and its page."""
+    return studio.desk_status()
+
+
+@router.post("/studio/api/desk/open")
+async def desk_open(
+    payload: DeskPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Open a page in the desktop browser."""
+    return await studio.open_in_desk(payload.url)
+
+
+@router.post("/studio/api/desk/play")
+async def desk_play(
+    payload: DeskPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Play a video (a link or a file on this PC) in the desktop browser."""
+    return await studio.show_video(payload.url)
+
+
+@router.post("/studio/api/desk/close")
+async def desk_close(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Close the desktop browser window."""
+    await studio.close_desk_browser()
+    return studio.desk_status()
 
 
 @router.get("/studio/api/videos/{note_id}")

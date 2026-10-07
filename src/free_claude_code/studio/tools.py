@@ -26,6 +26,8 @@ from free_claude_code.core.json_types import JsonObject
 from .assistant_tools import calculate
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
+from .desk import DeskBrowser, DeskError
+from .desk import render as render_desk
 from .images import FoundImage, ImageError, download_image, find_images
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
@@ -75,6 +77,7 @@ ASK_HELPER_TOOL = "ask_helper"
 APP_HELP_TOOL = "app_help"
 CHECK_PROJECT_TOOL = "check_project"
 STUDY_VIDEO_TOOL = "study_video"
+DESK_TOOL = "desktop_browser"
 START_PROJECT_TOOL = "start_project"
 POLISH_TOOL = "polish_check"
 RESTORE_FILE_TOOL = "restore_file"
@@ -96,7 +99,7 @@ HELPER_ROLE = "helper"
 MAX_SEARCH_MATCHES = 60
 MAX_READ_LINES = 400
 NETWORK_TOOLS = frozenset(
-    {*WEB_TOOLS, RESEARCH_TOOL, "study_video", "weather", *IMAGE_TOOLS}
+    {*WEB_TOOLS, RESEARCH_TOOL, "study_video", DESK_TOOL, "weather", *IMAGE_TOOLS}
 )
 # Look-ups that change nothing, so several asked for at once run together.
 PARALLEL_TOOLS = frozenset(
@@ -361,22 +364,93 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name=STUDY_VIDEO_TOOL,
         description=(
-            "Study a YouTube video: read its transcript and turn it into notes "
-            "the team can use (summary, key points, steps, names, warnings), "
-            "saved in video notes and in memory with its link. Use it when the "
-            "user gives you a video, or a video matters for the task. Say what "
-            "to focus on when only part of it matters."
+            "Watch a video and turn it into notes the team can use (summary, "
+            "key points, steps, names, warnings), saved in video notes and in "
+            "memory with its link. Works with YouTube links, other video "
+            "links, and video files on this PC (give the file's path). It "
+            "reads captions when there are some, and otherwise listens to the "
+            "video with speech recognition on this computer. Use it when the "
+            "user gives you a video, or a video matters for the task. Say "
+            "what to focus on when only part of it matters; set show to true "
+            "to play it in the desktop browser so the user can watch along."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "The YouTube link."},
+                "url": {
+                    "type": "string",
+                    "description": "The video link, or a video file's path on this PC.",
+                },
                 "focus": {
                     "type": "string",
                     "description": "Optional: what the team wants from it.",
                 },
+                "show": {
+                    "type": "boolean",
+                    "description": "Optional: also play it in the desktop browser.",
+                },
             },
             "required": ["url"],
+        },
+    ),
+    ToolSpec(
+        name=DESK_TOOL,
+        description=(
+            "A real browser window on the user's desktop (their Edge or "
+            "Chrome, with Studio's own profile) that you drive while they "
+            "watch: research the live web and watch videos. Actions: search "
+            "(query; where web or youtube), open (url), read (the page's text; "
+            "part for more), links (query filters them), click (a link's "
+            "number), scroll (down or up), back, play and pause (the page's "
+            "video), watch (play the page's video and study it into notes; "
+            "focus), buttons (the harmless buttons you may press), press "
+            "(a button's words, like accept, show more or next), close. You "
+            "only read and follow links: never type, sign in, or buy. Cite "
+            "the pages you used by their address."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "search",
+                        "open",
+                        "read",
+                        "links",
+                        "click",
+                        "scroll",
+                        "back",
+                        "play",
+                        "pause",
+                        "watch",
+                        "buttons",
+                        "press",
+                        "close",
+                    ],
+                },
+                "query": {
+                    "type": "string",
+                    "description": "search: what to look for; links: words to filter by.",
+                },
+                "where": {"type": "string", "enum": ["web", "youtube"]},
+                "url": {"type": "string", "description": "open: the page's link."},
+                "number": {
+                    "type": "integer",
+                    "description": "click: the link's number from read or links.",
+                },
+                "part": {
+                    "type": "integer",
+                    "description": "read: which part of a long page (1, 2, …).",
+                },
+                "direction": {"type": "string", "enum": ["down", "up"]},
+                "text": {"type": "string", "description": "press: the button's words."},
+                "focus": {
+                    "type": "string",
+                    "description": "watch: what the team wants from the video.",
+                },
+            },
+            "required": ["action"],
         },
     ),
     ToolSpec(
@@ -1214,6 +1288,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     MANAGE_AGENT_TOOL,
     WEATHER_TOOL,
     STUDY_VIDEO_TOOL,
+    DESK_TOOL,
     VIDEO_NOTES_TOOL,
     TODO_TOOL,
     CALCULATE_TOOL,
@@ -1457,7 +1532,9 @@ class AgentToolbox:
         all_tools: bool = False,
         image_transport: httpx.AsyncBaseTransport | None = None,
         photos: PhotoLibrary | None = None,
+        desk: DeskBrowser | None = None,
     ) -> None:
+        self._desk = desk
         self._web = web_tools
         self._photos = photos
         self._sites = sites
@@ -1649,6 +1726,8 @@ class AgentToolbox:
                     return await self._assistant(call, context)
                 case "study_video":
                     return await self._study_video(call, context)
+                case "desktop_browser":
+                    return await self._desktop_browser(call, context)
                 case "video_notes":
                     return await self._video_notes(call)
                 case _:
@@ -1661,6 +1740,7 @@ class AgentToolbox:
             SiteError,
             ImageError,
             PhotoError,
+            DeskError,
             WebFetchEgressViolation,
             CommandError,
             SearchError,
@@ -2217,13 +2297,130 @@ class AgentToolbox:
             raise ValueError("Video notes are not available here.")
         url = str(call.arguments.get("url", "")).strip()
         focus = str(call.arguments.get("focus") or "").strip()
+        local = self._videos.local_file(url)
+        if local is not None and context.memory_owner:
+            raise ValueError(
+                "Videos on this PC are only watched by agents that think on "
+                "this PC: ask the main AI or the Helper."
+            )
+        shown = ""
+        if call.arguments.get("show") is True and self._desk is not None:
+            try:
+                if local is not None:
+                    await self._desk.show_file(local, by=context.agent_name)
+                else:
+                    await self._desk.go(url, by=context.agent_name)
+                await self._desk.video("play", by=context.agent_name)
+                shown = "Playing it in the desktop browser.\n\n"
+            except DeskError as error:
+                shown = f"(Could not show it in the desktop browser: {error})\n\n"
         note = await self._videos.study(
             url, focus=focus, source="agent", studied_by=context.agent_name
         )
         return ToolOutcome(
-            text=render_note(note),
+            text=shown + render_note(note),
             data={
                 "tool": STUDY_VIDEO_TOOL,
+                "video": note.id,
+                "url": note.url,
+                "title": note.title,
+            },
+        )
+
+    async def _desktop_browser(
+        self, call: ToolCall, context: ToolContext
+    ) -> ToolOutcome:
+        desk = self._desk
+        if desk is None:
+            raise ValueError("The desktop browser is not available here.")
+        args = call.arguments
+        action = str(args.get("action") or "").strip().lower()
+        by = context.agent_name
+        part = 1
+        query = ""
+        match action:
+            case "search":
+                where = str(args.get("where") or "web")
+                shot = await desk.search(
+                    str(args.get("query") or ""), where=where, by=by
+                )
+            case "open":
+                shot = await desk.go(str(args.get("url") or ""), by=by)
+            case "read":
+                shot = await desk.look(part=_int_arg(args.get("part")) or 0, by=by)
+                part = desk.state.part
+            case "links":
+                shot = await desk.look(by=by)
+                query = str(args.get("query") or "").strip()
+            case "click":
+                number = _int_arg(args.get("number")) or 0
+                shot = await desk.follow(number, by=by)
+            case "scroll":
+                down = str(args.get("direction") or "down") != "up"
+                shot = await desk.scroll(down=down, by=by)
+                part = desk.state.part
+            case "back":
+                shot = await desk.back(by=by)
+            case "play" | "pause":
+                shot = await desk.video(action, by=by)
+            case "buttons":
+                found = await desk.buttons()
+                text = (
+                    "Buttons you may press: "
+                    + ", ".join(f"'{label}'" for _, label in found)
+                    if found
+                    else "No harmless buttons to press on this page."
+                )
+                return ToolOutcome(
+                    text=text, data={"tool": DESK_TOOL, "action": action}
+                )
+            case "press":
+                shot = await desk.press(str(args.get("text") or ""), by=by)
+            case "watch":
+                return await self._desk_watch(call, context)
+            case "close":
+                await desk.close()
+                return ToolOutcome(
+                    text="Closed the desktop browser.",
+                    data={"tool": DESK_TOOL, "action": action},
+                )
+            case _:
+                raise ValueError(
+                    "Pick an action: search, open, read, links, click, scroll, "
+                    "back, play, pause, watch, buttons, press or close."
+                )
+        return ToolOutcome(
+            text=render_desk(shot, part=part, query=query),
+            data={
+                "tool": DESK_TOOL,
+                "action": action,
+                "url": shot.url,
+                "title": shot.title,
+            },
+        )
+
+    async def _desk_watch(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        """Play the video on the page and study it into notes."""
+        desk = self._desk
+        if desk is None or self._videos is None:
+            raise ValueError("Watching videos is not available here.")
+        shot = desk.state.shot
+        if shot is None:
+            raise DeskError("Open a video page first (search with where youtube).")
+        if not shot.video:
+            shot = await desk.look(by=context.agent_name)
+        if not shot.video:
+            raise DeskError("This page has no video: open one first.")
+        await desk.video("play", by=context.agent_name)
+        focus = str(call.arguments.get("focus") or "").strip()
+        note = await self._videos.study(
+            shot.url, focus=focus, source="agent", studied_by=context.agent_name
+        )
+        return ToolOutcome(
+            text="Playing it in the desktop browser.\n\n" + render_note(note),
+            data={
+                "tool": DESK_TOOL,
+                "action": "watch",
                 "video": note.id,
                 "url": note.url,
                 "title": note.title,
