@@ -77,7 +77,10 @@ STATIONS: tuple[Station, ...] = (
     ),
     Station("approvals", "Approval desk", "Commands waiting for your yes.", ""),
     Station(
-        "toolshed", "Toolshed", "Skills and MCP servers added from GitHub.", "more"
+        "toolshed",
+        "Toolshed",
+        "Skills and MCP servers from GitHub; repo agents pick up tools here.",
+        "more",
     ),
     Station(
         "mailroom",
@@ -136,7 +139,7 @@ TOOL_STATION: dict[str, str] = {
         "archive",
     ),
     "learn": "school",
-    **dict.fromkeys(("skill", "mcp"), "toolshed"),
+    **dict.fromkeys(("skill", "mcp", "toolshed"), "toolshed"),
     **dict.fromkeys(
         ("todo", "ask_agent", "team_task", "ask_helper", "team_status", "stop_agent"),
         "mailroom",

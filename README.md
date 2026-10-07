@@ -903,7 +903,14 @@ only when you click **Add to team**. A repo agent thinks on your server AI,
 so it never sees your memory, and since someone else wrote its instructions
 it gets only the tools it asks for (give it more on its card if you trust
 it), plus **remember** and **recall** for its own memory area: what it
-learns stays its own, and comes back to it next time. Jarvis and the other
+learns stays its own, and comes back to it next time. When a job needs a tool
+it doesn't have, it walks to the HQ **Toolshed** and takes it (`toolshed`,
+action `list` then `take`), for that job only. The shelf never holds the
+user's own things (to-dos, photos, projects, this PC's status), memory on a
+server AI, running the team, or the Content Farm; those come only from the
+agent's card. The Toolshed is locked while **Every Tool** is off, and
+commands still wait for your approval. Every agent only ever uses tools it
+has: a call to any other tool is refused. Jarvis and the other
 agents on this PC team up with it: say *"have token-auditor check the
 spacing"* and Jarvis hands it the job with a briefing written from what Jarvis
 knows, so the repo agent gets what the job needs and nothing more. Only real

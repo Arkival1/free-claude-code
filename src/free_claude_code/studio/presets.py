@@ -549,7 +549,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Memory",
         ("remember", "recall", "video_notes", "conversation", "knowledge", "learn"),
     ),
-    ("Added from GitHub", ("skill", "mcp")),
+    ("Added from GitHub", ("skill", "mcp", "toolshed")),
     (
         "Everyday",
         (

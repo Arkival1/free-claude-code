@@ -5,7 +5,7 @@ import functools
 import json
 import re
 from collections.abc import Awaitable, Callable, MutableMapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Concatenate
 
 from loguru import logger
@@ -24,6 +24,7 @@ from .llm import (
     StudioLLMError,
     StudioModelRouter,
     ToolCall,
+    ToolSpec,
     model_missing,
     unreadable_tool_call,
 )
@@ -38,8 +39,11 @@ from .tools import (
     FINISH_TOOL,
     LEAD_TOOLS,
     MAIN_ROLE,
+    NOT_IN_THE_SHED,
     PARALLEL_TOOLS,
     SEALED_TOOLS,
+    TOOL_SPEC_BY_NAME,
+    TOOLSHED_TOOL,
     AgentToolbox,
     ToolContext,
     ToolOutcome,
@@ -567,6 +571,76 @@ class TurnResult:
     error: str | None = None
 
 
+TOOLSHED_PROMPT = (
+    "You start with a small set of tools. When the job needs one you don't "
+    "have, go to the toolshed: toolshed action list shows what is on the "
+    "shelf, and action take picks up what you need for this job."
+)
+
+
+@dataclass(slots=True)
+class Toolshed:
+    """The HQ toolshed for one job: tools an agent may pick up and keep until
+    the job ends. Nothing on the shelf reads the user's own things or runs
+    the team; those come only from the agent's card."""
+
+    shelf: tuple[str, ...]
+    locked: bool = False
+    taken: list[str] = field(default_factory=list)
+
+    def answer(self, call: ToolCall) -> ToolOutcome:
+        action = str(call.arguments.get("action") or "list").lower()
+        if self.locked:
+            return ToolOutcome(
+                text=(
+                    "The toolshed is locked: Every Tool is off in Studio settings, "
+                    "so work with the tools you have."
+                ),
+                data={"tool": TOOLSHED_TOOL, "locked": True},
+                failed=True,
+            )
+        here = [name for name in self.shelf if name not in self.taken]
+        if action != "take":
+            lines = [
+                f"- {name}: {TOOL_SPEC_BY_NAME[name].description.split('. ')[0]}"
+                for name in here
+            ]
+            return ToolOutcome(
+                text=(
+                    "On the shelf (take what the job needs):\n" + "\n".join(lines)
+                    if lines
+                    else "The shelf is empty: you have every tool you may take."
+                ),
+                data={"tool": TOOLSHED_TOOL, "action": "list", "shelf": here},
+            )
+        raw = call.arguments.get("tools")
+        wanted = [str(item).strip() for item in raw] if isinstance(raw, list) else []
+        if not wanted and isinstance(raw, str):
+            wanted = [item.strip() for item in raw.split(",")]
+        picked = [name for name in dict.fromkeys(wanted) if name in here]
+        refused = [name for name in wanted if name and name not in here]
+        self.taken.extend(picked)
+        parts = []
+        if picked:
+            parts.append(f"Took {', '.join(picked)} from the toolshed for this job.")
+        if refused:
+            parts.append(
+                f"Not on the shelf: {', '.join(refused)}. (The user's own things "
+                "and running the team never are; the user can give those on your "
+                "card.)"
+            )
+        return ToolOutcome(
+            text=" ".join(parts) or "Say which tools to take (see action list).",
+            data={
+                "tool": TOOLSHED_TOOL,
+                "action": "take",
+                "taken": picked,
+                "why": str(call.arguments.get("why") or "")[:300],
+            },
+            failed=not picked,
+        )
+
+
 def _offers_downloads[**P](
     turn: Callable[Concatenate[AgentRunner, Agent, Chat, P], Awaitable[TurnResult]],
 ) -> Callable[Concatenate[AgentRunner, Agent, Chat, P], Awaitable[TurnResult]]:
@@ -739,6 +813,8 @@ class AgentRunner:
             agent.role, agent.tools
         ):
             parts.append(TEAM_PROMPT)
+        if TOOLSHED_TOOL in agent.tools:
+            parts.append(TOOLSHED_PROMPT)
         if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):
             parts.append(WEB_PROMPT)
         elif self._toolbox.web_paused(agent.tools, role=agent.role):
@@ -1134,13 +1210,22 @@ class AgentRunner:
         names = (
             () if talk_only else self._toolbox.tool_names(agent.tools, role=agent.role)
         )
-        specs = tool_specs(
-            names,
-            commands_enabled=self._toolbox.commands_enabled,
-            shared_memory=self._toolbox.shared_memory and agent.memory_enabled,
-            delegation=self._toolbox.delegation_allowed(agent.role, names)
-            or context.can_delegate,
-            main_memory=context.main_memory,
+
+        def specs_for(names: tuple[str, ...]) -> tuple[ToolSpec, ...]:
+            return tool_specs(
+                names,
+                commands_enabled=self._toolbox.commands_enabled,
+                shared_memory=self._toolbox.shared_memory and agent.memory_enabled,
+                delegation=self._toolbox.delegation_allowed(agent.role, names)
+                or context.can_delegate,
+                main_memory=context.main_memory,
+            )
+
+        specs = specs_for(names)
+        shed = (
+            self._toolshed(agent, names, sealed=sealed)
+            if TOOLSHED_TOOL in names
+            else None
         )
         # The instructions stay the same from message to message; what memory
         # recalls for this message rides on the message itself. A local
@@ -1484,7 +1569,17 @@ class AgentRunner:
                     author=agent.name,
                     data={"partial": True},
                 )
-            outcomes = await self._run_calls(reply.tool_calls, context, sealed=sealed)
+            outcomes = await self._run_calls(
+                reply.tool_calls,
+                context,
+                sealed=sealed,
+                offered=frozenset(spec.name for spec in specs),
+                shed=shed,
+            )
+            if shed is not None and set(shed.taken) - set(names):
+                # Tools taken from the toolshed are in hand from the next step.
+                names = tuple(dict.fromkeys((*names, *shed.taken)))
+                specs = specs_for(names)
             wrote = any(
                 call.name in WRITE_TOOLS and not outcome.failed
                 for call, outcome in zip(reply.tool_calls, outcomes, strict=True)
@@ -1554,12 +1649,39 @@ class AgentRunner:
             error="step_limit",
         )
 
+    def _toolshed(
+        self, agent: Agent, names: Sequence[str], *, sealed: bool
+    ) -> Toolshed:
+        """What this agent may pick up for one job."""
+        if not self._toolbox.every_tool_allowed:
+            return Toolshed(shelf=(), locked=True)
+        candidates = [
+            name
+            for name in TOOL_SPEC_BY_NAME
+            if name not in names
+            and name not in NOT_IN_THE_SHED
+            and not (sealed and name in SEALED_TOOLS)
+            and not (name == COMMAND_TOOL and not self._toolbox.commands_enabled)
+        ]
+        return Toolshed(shelf=self._toolbox.tool_names(candidates, role=agent.role))
+
     async def _run_calls(
-        self, calls: Sequence[ToolCall], context: ToolContext, *, sealed: bool = False
+        self,
+        calls: Sequence[ToolCall],
+        context: ToolContext,
+        *,
+        sealed: bool = False,
+        offered: frozenset[str] | None = None,
+        shed: Toolshed | None = None,
     ) -> list[ToolOutcome]:
-        """Run tool calls; look-ups that change nothing run at the same time."""
+        """Run tool calls; look-ups that change nothing run at the same time.
+
+        ``offered``: the tools the agent was given this step; a call to any
+        other tool is refused, so an agent only ever uses tools it has."""
 
         async def run(call: ToolCall) -> ToolOutcome:
+            if call.name == TOOLSHED_TOOL and shed is not None:
+                return shed.answer(call)
             if sealed and call.name in SEALED_TOOLS:
                 return ToolOutcome(
                     text=(
@@ -1567,6 +1689,21 @@ class AgentRunner:
                         "can't read it. Work from your briefing, or say what you need."
                     ),
                     data={"tool": call.name, "private": True},
+                    failed=True,
+                )
+            if (
+                offered is not None
+                and call.name not in offered
+                and not self._toolbox.refuses_itself(call.name)
+            ):
+                where = (
+                    " Take it from the toolshed first (toolshed, action take)."
+                    if shed is not None and call.name in shed.shelf
+                    else ""
+                )
+                return ToolOutcome(
+                    text=f"{call.name} isn't one of your tools for this job.{where}",
+                    data={"tool": call.name, "not_yours": True},
                     failed=True,
                 )
             return await self._toolbox.run(call, context)

@@ -1296,6 +1296,7 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "public apis",
             "upload a repo",
             "repo zip",
+            "toolshed",
             "cybersecurity skills",
             "scientific skills",
         ),
@@ -1309,7 +1310,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "search them with the skill tool. Their MCP servers stay off and their "
             "agents join only when you add them; a repo agent thinks on the "
             "server AI, so it never sees your memory; it keeps its own memory "
-            "(remember and recall) and gets only the tools it asks for. Jarvis "
+            "(remember and recall) and gets only the tools it asks for; for "
+            "anything else a job needs it goes to the HQ Toolshed and takes it "
+            "for that job (never your to-dos, photos, or memory). Jarvis "
             "hands it jobs with a briefing: say 'have <agent> do ...'. You can also upload "
             "a repo zip; it is kept in the vault."
         ),

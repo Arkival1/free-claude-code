@@ -87,6 +87,7 @@ LAB_TOOL = "lab"
 FARM_TOOL = "farm"
 CODE_TOOL = "code_and_test"
 SKILL_TOOL = "skill"
+TOOLSHED_TOOL = "toolshed"
 MCP_TOOL = "mcp"
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
@@ -453,6 +454,31 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "versions_back": {"type": "integer"},
             },
             "required": ["path"],
+        },
+    ),
+    ToolSpec(
+        name=TOOLSHED_TOOL,
+        description=(
+            "The HQ toolshed: tools you don't have yet. action list shows what is "
+            "on the shelf and what each one does; action take with tools (their "
+            "names) and why picks them up for this job. They go back on the "
+            "shelf when the job ends. Take only what the job needs."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "take"]},
+                "tools": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "take: the tools' names, from list.",
+                },
+                "why": {
+                    "type": "string",
+                    "description": "take: what you need them for.",
+                },
+            },
+            "required": ["action"],
         },
     ),
     ToolSpec(
@@ -1145,8 +1171,31 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         LAB_TOOL,
         FARM_TOOL,
         CODE_TOOL,
+        TOOLSHED_TOOL,
     }
 )
+NOT_IN_THE_SHED = frozenset(
+    {
+        *MAIN_ONLY_TOOLS,
+        *DELEGATION_TOOLS,
+        AGENT_MODEL_TOOL,
+        TODO_TOOL,
+        SYSTEM_STATUS_TOOL,
+        PROJECTS_TOOL,
+        CODE_TOOL,
+        FARM_TOOL,
+        LEARN_TOOL,
+        "ask_helper",
+        "ask_researcher",
+        "list_photos",
+        "use_photo",
+        TOOLSHED_TOOL,
+        FINISH_TOOL,
+    }
+)
+"""Never on the toolshed's shelf: the user's own things (to-dos, photos,
+projects, this PC), running the team, and the Content Farm. Agents get these
+only when the user gives them on the agent's card."""
 MAIN_TOOL_NAMES: tuple[str, ...] = (
     ASK_AGENT_TOOL,
     TEAM_TASK_TOOL,
@@ -1446,9 +1495,24 @@ class AgentToolbox:
         extra = (
             name
             for name in ALL_TOOL_NAMES
-            if name not in names and (role == MAIN_ROLE or name not in MAIN_ONLY_TOOLS)
+            if name not in names
+            and name != TOOLSHED_TOOL
+            and (role == MAIN_ROLE or name not in MAIN_ONLY_TOOLS)
         )
         return (*names, *extra)
+
+    def refuses_itself(self, name: str) -> bool:
+        """Calls the toolbox turns down on its own, with a clearer reason than
+        "not one of your tools": web tools while web access is off, and
+        handing work on (only the main AI and its leads may)."""
+        return name in DELEGATION_TOOLS or (
+            name in NETWORK_TOOLS and not self.web_enabled
+        )
+
+    @property
+    def every_tool_allowed(self) -> bool:
+        """The Every Tool setting: off, agents keep to their own tools."""
+        return self._all_tools
 
     @property
     def commands_enabled(self) -> bool:

@@ -223,6 +223,7 @@ from .tools import (
     MAIN_ROLE,
     MAIN_TOOL_NAMES,
     TOOL_SPEC_BY_NAME,
+    TOOLSHED_TOOL,
     AgentToolbox,
     ToolContext,
     ToolOutcome,
@@ -290,6 +291,10 @@ OWN_MEMORY_FLAG = "extension_agent_memory_v1"
 """Repo agents added in 6.61.1 were given remember and recall."""
 OWN_MEMORY_TOOLS = ("remember", "recall")
 """A repo agent's own memory (its own area while it thinks on a server)."""
+TOOLSHED_FLAG = "extension_agent_toolshed_v1"
+"""Repo agents already on the team were given the toolshed."""
+REPO_AGENT_EXTRAS = (*OWN_MEMORY_TOOLS, TOOLSHED_TOOL)
+"""What every repo agent gets beyond the tools it asks for."""
 """Added repos had their agents read again with the front-matter rule."""
 LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper", "lab", "farm"})
 """Roles that think on this PC; every other agent thinks on a server."""
@@ -1695,6 +1700,7 @@ class StudioService:
                     name
                     for name in ALL_TOOL_NAMES
                     if name not in agent.tools
+                    and name != TOOLSHED_TOOL
                     and (agent.role == MAIN_ROLE or name not in MAIN_ONLY_TOOLS)
                 ),
             )
@@ -4626,9 +4632,13 @@ class StudioService:
                 for extension in await self._extensions.all():
                     await self._extensions.rescan_agents(extension)
                 await self._store.put(StudioFlag(id=AGENT_RESCAN_FLAG, value="1"))
-            if await self._store.get(StudioFlag, OWN_MEMORY_FLAG) is None:
-                await self._give_repo_agents_memory()
-                await self._store.put(StudioFlag(id=OWN_MEMORY_FLAG, value="1"))
+            for flag, extra in (
+                (OWN_MEMORY_FLAG, OWN_MEMORY_TOOLS),
+                (TOOLSHED_FLAG, (TOOLSHED_TOOL,)),
+            ):
+                if await self._store.get(StudioFlag, flag) is None:
+                    await self._give_repo_agents(extra)
+                    await self._store.put(StudioFlag(id=flag, value="1"))
             added: list[Extension] = []
             waiting = False
             present = {e.source.lower(): e.id for e in await self._extensions.all()}
@@ -4656,8 +4666,8 @@ class StudioService:
             self._starters_checked = not waiting
             return added
 
-    async def _give_repo_agents_memory(self) -> None:
-        """6.61.1 left remember and recall off the repo agents on the team."""
+    async def _give_repo_agents(self, extra: Sequence[str]) -> None:
+        """Give the repo agents already on the team tools added since."""
         prompts = {
             (definition.name, definition.prompt.strip())
             for extension in await self._extensions.all()
@@ -4669,7 +4679,7 @@ class StudioService:
                 or (agent.name, agent.system_prompt.strip()) not in prompts
             ):
                 continue
-            missing = [tool for tool in OWN_MEMORY_TOOLS if tool not in agent.tools]
+            missing = [tool for tool in extra if tool not in agent.tools]
             if missing:
                 await self.update_agent(agent.id, {"tools": [*agent.tools, *missing]})
 
@@ -4831,8 +4841,9 @@ class StudioService:
             raise StudioNotFoundError(f"{extension.name} has no agent {name}.")
         # Someone else wrote its instructions, so it gets only the tools it
         # asks for, not every tool (the user can give it more on its card),
-        # plus remember and recall for its own memory.
-        tools = tuple(dict.fromkeys((*_studio_tools(found.tools), *OWN_MEMORY_TOOLS)))
+        # plus remember and recall for its own memory, and the toolshed to
+        # pick up more for a job.
+        tools = tuple(dict.fromkeys((*_studio_tools(found.tools), *REPO_AGENT_EXTRAS)))
         return await self.create_agent(
             name=found.name,
             role="agent",

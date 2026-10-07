@@ -172,8 +172,8 @@ async def test_each_agent_can_be_chosen_for_every_tool(make_studio):
     assert set(model.calls[-1]["tools"]) == {
         name
         for name in ALL_TOOL_NAMES
-        if name not in MAIN_ONLY_TOOLS and name != "run_command"
-    }, "run_command waits for Agent Commands"
+        if name not in MAIN_ONLY_TOOLS and name not in {"run_command", "toolshed"}
+    }, "run_command waits for Agent Commands; every tool needs no toolshed"
     with pytest.raises(Exception, match="Guide keeps its few tools"):
         await studio.set_every_tool(agents["Guide"].id, True)
 
