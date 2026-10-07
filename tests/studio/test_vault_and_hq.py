@@ -191,7 +191,9 @@ def test_agents_go_to_the_station_of_their_tool():
     assert station_for("builder", "run_command", busy=True) == "testbench"
     assert station_for("coder", "", busy=True) == "workshop"
     assert station_for("farm", "farm", busy=True) == "studio"
-    assert station_for("tester", "test_code", busy=False) == "lounge"
+    assert station_for("tester", "test_code", busy=False) == "mailroom"
+    assert station_for("coder", "", busy=False) == "mailroom"
+    assert station_for("helper", "", busy=False) == "lounge"
     assert station_for("main", "", busy=False) == "desk"
     assert station_for("main", "remember", busy=True) == "archive"
     ids = [station.id for station in STATIONS]
@@ -234,6 +236,8 @@ async def test_the_hq_shows_who_is_where_and_you_can_talk_to_them(make_studio):
             and people["Researcher"]["tool"] == "web_search"
         )
         assert people["Builder"]["station"] == "lounge"
+        assert people["Coder"]["station"] == "mailroom"
+        assert people["Tester"]["station"] == "mailroom"
         main = next(person for person in hq["agents"] if person["main"])
         assert main["station"] == "desk"
         library = next(

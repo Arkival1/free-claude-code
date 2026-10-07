@@ -1316,7 +1316,8 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "bench, Lab, video studio, memory archive, classroom, model room, "
             "approval desk, toolshed, mailroom, and break room. Agents walk to the "
             "station of the tool they are using and back to the break room when "
-            "done. Click an agent to see its task and steps, send it a message, or "
+            "done; the Coder and the Tester wait in the mailroom for their next "
+            "coding job. Click an agent to see its task and steps, send it a message, or "
             "stop it. Click a station to see who is there and what's waiting; the "
             "approval desk lets you allow or refuse waiting commands."
         ),

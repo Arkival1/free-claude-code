@@ -867,7 +867,8 @@ library, the code workshop, the test bench, the Lab, the video studio, the
 memory archive, the classroom, the model room, the approval desk, the
 toolshed, the mailroom, and the break room. Each agent walks to the station
 of the tool it is using right now and goes back to the break room when it's
-done; monitors, server lights, flasks, and the studio camera come alive
+done (the Coder and the Tester wait in the mailroom for their next coding
+job); monitors, server lights, flasks, and the studio camera come alive
 while someone works there. Click an agent to see its task and steps, send it
 a message, or stop it; click a station to see what's waiting there (the
 approval desk lists commands waiting for your yes, with Allow and Refuse).

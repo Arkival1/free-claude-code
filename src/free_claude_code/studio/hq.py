@@ -85,7 +85,8 @@ STATIONS: tuple[Station, ...] = (
     Station(
         "mailroom",
         "Mailroom",
-        "To-dos, reminders, and jobs passed between agents.",
+        "To-dos, reminders, and jobs passed between agents. The Coder and "
+        "the Tester wait here for their next coding job.",
         "more",
     ),
     Station("lounge", "Break room", "Agents with nothing to do right now.", "agents"),
@@ -162,15 +163,19 @@ ROLE_HOME: dict[str, str] = {
     "assistant": "mailroom",
 }
 
+IDLE_HOME: dict[str, str] = {"coder": "mailroom", "tester": "mailroom"}
+"""Where an agent waits between jobs, when not the break room: the Coder and
+the Tester wait in the mailroom for the next coding job handed to them."""
+
 
 def station_for(role: str, tool: str, busy: bool) -> str:
     """Where an agent is: the station of its tool while it works, its own
-    station when the tool has none, and the break room when idle (Jarvis
-    stays at his desk)."""
+    station when the tool has none, and between jobs the break room (the
+    Coder and the Tester wait in the mailroom; Jarvis stays at his desk)."""
     if role == "main":
         return TOOL_STATION.get(tool, "desk") if busy and tool else "desk"
     if not busy:
-        return "lounge"
+        return IDLE_HOME.get(role, "lounge")
     return TOOL_STATION.get(tool) or ROLE_HOME.get(role, "workshop")
 
 
