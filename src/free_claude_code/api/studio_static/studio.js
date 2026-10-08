@@ -217,6 +217,41 @@
     poller = setInterval(job, POLL_MS);
   }
 
+  // Pages that update themselves (Model Control, downloads, running jobs)
+  // repaint in place: the scroll position and open sections stay as they
+  // were, and nothing repaints while the user is changing a field, so an
+  // update never throws them back to the top or wipes what they typed.
+  let pageEdited = false;
+  view.addEventListener("input", () => {
+    pageEdited = true;
+  });
+  view.addEventListener("change", () => {
+    pageEdited = true;
+  });
+
+  function userIsEditing() {
+    const active = document.activeElement;
+    const typing =
+      active && view.contains(active) && active.matches("input:not([type=checkbox]):not([type=radio]), select, textarea");
+    return pageEdited || Boolean(typing);
+  }
+
+  async function repaintInPlace(paint) {
+    if (userIsEditing()) return false;
+    const top = window.scrollY;
+    const open = [...view.querySelectorAll("details")].map((section) => section.open);
+    await paint();
+    [...view.querySelectorAll("details")].forEach((section, index) => {
+      if (open[index] !== undefined) section.open = open[index];
+    });
+    window.scrollTo(0, top);
+    return true;
+  }
+
+  function pollPage(paint) {
+    startPolling(() => repaintInPlace(paint).catch(() => stopPolling()));
+  }
+
   function stopPolling() {
     if (poller) clearInterval(poller);
     poller = null;
@@ -1892,7 +1927,7 @@
       el("div", { class: "transcript" }, data.messages.map(messageBubble))
     );
     if (["queued", "running"].includes(data.run.status)) {
-      startPolling(() => renderTask(runId).catch(() => stopPolling()));
+      pollPage(() => renderTask(runId));
     } else {
       stopPolling();
     }
@@ -2156,7 +2191,7 @@
       )
     );
     if (["planning", "teaching", "examining"].includes(course.status)) {
-      startPolling(() => renderClass(courseId).catch(() => stopPolling()));
+      pollPage(() => renderClass(courseId));
     } else {
       stopPolling();
     }
@@ -2586,9 +2621,19 @@
     const busy =
       installing ||
       data.models.some((model) => model.state === "loading" || (model.speed_hunt && model.speed_hunt.state === "running"));
-    engineTimer = setTimeout(() => {
-      if (generation === renderGeneration && location.hash === "#engine") render();
-    }, busy ? 1500 : 6000);
+    // Updates in place (not a full reload), so the page keeps its place and
+    // a model's open Settings, and waits while you change something.
+    const again = () => {
+      engineTimer = setTimeout(async () => {
+        if (generation !== renderGeneration || location.hash !== "#engine") return;
+        try {
+          if (!(await repaintInPlace(renderEngine))) again();
+        } catch {
+          again();
+        }
+      }, busy ? 1500 : 6000);
+    };
+    again();
   }
 
   // The same estimate the server makes (gguf_info.estimate_memory), redone
@@ -2976,7 +3021,7 @@
       )
     );
     if (data.assets.some((asset) => ["queued", "downloading", "extracting"].includes(asset.status))) {
-      startPolling(() => renderModels().catch(() => stopPolling()));
+      pollPage(() => renderModels());
     } else {
       stopPolling();
     }
@@ -3526,7 +3571,7 @@
     if (generation !== renderGeneration) return;
     view.replaceChildren(...nodes);
     if (active || busy) {
-      startPolling(() => renderLoraJob(jobId).catch(() => stopPolling()));
+      pollPage(() => renderLoraJob(jobId));
     } else {
       stopPolling();
     }
@@ -3623,7 +3668,7 @@
       ])
     );
     if (["queued", "running"].includes(job.status)) {
-      startPolling(() => renderJob(jobId).catch(() => stopPolling()));
+      pollPage(() => renderJob(jobId));
     } else {
       stopPolling();
     }
@@ -6591,6 +6636,7 @@
   async function render() {
     renderGeneration += 1;
     const generation = renderGeneration;
+    pageEdited = false;
     stopPolling();
     stopListening();
     teardownHud();

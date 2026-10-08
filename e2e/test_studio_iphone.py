@@ -1019,6 +1019,59 @@ def test_any_file_dropped_on_model_control_is_explained(
     expect(page.locator(".engine-model", has_text="tiny-coder-1b")).to_be_visible()
 
 
+def test_model_control_updates_without_jumping_to_the_top(
+    page: Page, admin_base_url: str
+) -> None:
+    page.clock.install()
+    open_studio(page, admin_base_url, "engine")
+    page.get_by_label("Choose a file to add").set_input_files(
+        files=[
+            {
+                "name": "tiny-coder-1b-q4_k_m.gguf",
+                "mimeType": "application/octet-stream",
+                "buffer": _tiny_gguf(),
+            }
+        ]
+    )
+    page.locator(".sheet-panel .row").get_by_role("button", name="Close").click()
+    model = page.locator(".engine-model", has_text="tiny-coder-1b")
+    expect(model).to_be_visible()
+    checks: list[str] = []
+    page.on(
+        "request",
+        lambda request: (
+            checks.append(request.url)
+            if request.url.endswith("/studio/api/engine")
+            else None
+        ),
+    )
+
+    page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+    scrolled = page.evaluate("() => window.scrollY")
+    assert scrolled > 100, "the page is long enough to scroll on a phone"
+    page.clock.run_for(7000)
+    for _ in range(50):
+        if checks:
+            break
+        page.wait_for_timeout(100)
+    assert checks, "Model Control checked for news"
+    page.wait_for_timeout(300)
+    expect(model).to_be_visible()
+    assert page.evaluate("() => window.scrollY") == scrolled, "it kept its place"
+
+    settings = model.locator("details.engine-settings")
+    settings.locator("summary").click()
+    context = model.get_by_label(re.compile("^Context for tiny-coder-1b"))
+    picked = context.locator("option").last.get_attribute("value")
+    assert picked is not None
+    context.select_option(picked)
+    before = len(checks)
+    page.clock.run_for(20000)
+    assert len(checks) == before, "no update while a setting is being changed"
+    expect(settings).to_have_attribute("open", "")
+    expect(context).to_have_value(picked)
+
+
 def test_a_file_can_be_attached_to_a_message(page: Page, admin_base_url: str) -> None:
     open_hud(page, admin_base_url)
     expect(page.get_by_role("button", name="Attach a file")).to_be_visible()
