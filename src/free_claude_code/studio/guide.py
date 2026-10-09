@@ -1383,6 +1383,37 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Image engine (painted cartoons)",
+        route="/studio#more",
+        where="Knowledge & Memory (MENU), the Image engine card; Settings, Cartoon Art.",
+        terms=(
+            "image engine",
+            "painted",
+            "ai art",
+            "stable diffusion",
+            "stable-diffusion.cpp",
+            "teen titans",
+            "ben 10",
+            "cartoon art",
+            "art style",
+            "lora",
+        ),
+        body=(
+            "Cartoons can be painted instead of drawn: the image engine "
+            "(stable-diffusion.cpp on the graphics card) paints every place "
+            "and character in the early-2000s superhero cartoon style (Teen "
+            "Titans, Ben 10: Alien Force). On the Image engine card press Set "
+            "up the image engine once (it downloads the engine and the style, "
+            "about 5 GB; the smaller style needs about 3.4 GB for 4-6 GB "
+            "cards), then Paint a test to see it. Each character is painted "
+            "once (plus their talking mouth and the feelings a story needs) "
+            "and reused in every video, so they always look the same. With "
+            "Cartoon Art on auto, cartoons are painted as soon as the engine "
+            "is ready. No graphics card? Set Image Engine to the online "
+            "service and add its address and key."
+        ),
+    ),
+    GuideTopic(
         title="Repo vault",
         route="/studio#more",
         where="Knowledge & Memory (MENU), the Repo vault card.",

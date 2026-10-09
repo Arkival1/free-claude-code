@@ -33,6 +33,7 @@ from ..models import FarmChannel, FarmCharacter, FarmPost, now_ms
 from ..store import StudioStore
 from . import animated, formats, longform
 from .animated import AnimatedError, Hear
+from .cartoon.aiart import ArtBook, Paint
 from .fandom import Fandom
 from .formats import Script, style_of
 from .library import LibraryError, MediaLibrary
@@ -163,7 +164,13 @@ class ContentFarm:
         pexels_key: Callable[[], str] = lambda: "",
         hear: Hear | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        paint: Paint | None = None,
+        paints: Callable[[], bool] = lambda: False,
+        art_style: Callable[[], str] = lambda: "superhero",
     ) -> None:
+        self._paint = paint
+        self._paints = paints
+        self._art_style = art_style
         self._store = store
         self._root = root
         self._think = think
@@ -181,6 +188,12 @@ class ContentFarm:
         """One video at a time: rendering uses every core."""
         self._stopped: set[str] = set()
         self._recovered = False
+
+    def art_book(self) -> ArtBook | None:
+        """Where painted cartoon art is kept, when cartoons are painted."""
+        if self._paint is None or not self._paints():
+            return None
+        return ArtBook(self._root / "art", self._art_style(), self._paint)
 
     # ------------------------------------------------------------ channels
 

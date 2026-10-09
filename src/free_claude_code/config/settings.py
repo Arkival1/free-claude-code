@@ -62,6 +62,9 @@ def _validate_model_ref(value: str) -> str:
     return value
 
 
+IMAGE_STYLES = ("superhero", "superhero-small")
+"""The image engine's styles (studio.image_engine.STYLES, kept in step by a test)."""
+
 class Settings(BaseModel):
     """Validated application settings with no file or process I/O."""
 
@@ -670,6 +673,27 @@ class Settings(BaseModel):
     studio_farm_video_size: NonEmptyString = Field(
         default="720p", validation_alias="STUDIO_FARM_VIDEO_SIZE"
     )
+    studio_cartoon_art: NonEmptyString = Field(
+        default="auto", validation_alias="STUDIO_CARTOON_ART"
+    )
+    studio_image_source: NonEmptyString = Field(
+        default="pc", validation_alias="STUDIO_IMAGE_SOURCE"
+    )
+    studio_image_build: NonEmptyString = Field(
+        default="vulkan", validation_alias="STUDIO_IMAGE_BUILD"
+    )
+    studio_image_style: NonEmptyString = Field(
+        default="superhero", validation_alias="STUDIO_IMAGE_STYLE"
+    )
+    studio_image_cloud_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_IMAGE_CLOUD_URL"
+    )
+    studio_image_cloud_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_IMAGE_CLOUD_KEY"
+    )
+    studio_image_cloud_model: NonEmptyString = Field(
+        default="gpt-image-1", validation_alias="STUDIO_IMAGE_CLOUD_MODEL"
+    )
     studio_farm_music: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_FARM_MUSIC"
     )
@@ -1043,6 +1067,36 @@ class Settings(BaseModel):
             raise ValueError(
                 "STUDIO_VOICE_EARS must be tiny.en, base.en, small.en, or "
                 f"medium.en, got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_cartoon_art")
+    @classmethod
+    def validate_studio_cartoon_art(cls, value: str) -> str:
+        if value not in ("auto", "painted", "drawn"):
+            raise ValueError("STUDIO_CARTOON_ART must be auto, painted, or drawn.")
+        return value
+
+    @field_validator("studio_image_source")
+    @classmethod
+    def validate_studio_image_source(cls, value: str) -> str:
+        if value not in ("pc", "cloud"):
+            raise ValueError("STUDIO_IMAGE_SOURCE must be pc or cloud.")
+        return value
+
+    @field_validator("studio_image_build")
+    @classmethod
+    def validate_studio_image_build(cls, value: str) -> str:
+        if value not in ("vulkan", "cpu"):
+            raise ValueError("STUDIO_IMAGE_BUILD must be vulkan or cpu.")
+        return value
+
+    @field_validator("studio_image_style")
+    @classmethod
+    def validate_studio_image_style(cls, value: str) -> str:
+        if value not in IMAGE_STYLES:
+            raise ValueError(
+                f"STUDIO_IMAGE_STYLE must be one of {', '.join(IMAGE_STYLES)}."
             )
         return value
 

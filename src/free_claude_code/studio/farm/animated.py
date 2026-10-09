@@ -11,17 +11,20 @@ the big words out across the screen.
 import json
 import random
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
 import anyio
+from loguru import logger
 
 from free_claude_code.core.json_types import JsonObject
 
 from ..models import FarmChannel, FarmCharacter, FarmPost
 from . import beats as beat
 from .beats import BeatError, Sung
+from .cartoon.aiart import FEELINGS, ArtBook, ArtError
 from .cartoon.film import CartoonFrames, Film, Scene
 from .cartoon.heads import AGES, HAIR, WEAR, Look, colour
 from .cartoon.puppet import FEEL_OF, Placed
@@ -53,6 +56,8 @@ class Line(Protocol):
     _music: Callable[[], Path | None]
 
     def folder(self, post: FarmPost) -> Path: ...
+
+    def art_book(self) -> ArtBook | None: ...
 
     def media_path(self, post: FarmPost, media: JsonObject) -> Path | None: ...
 
@@ -309,6 +314,79 @@ def _actors(
     return tuple(placed)
 
 
+def setting_of(scene: Mapping[str, object]) -> str:
+    return str(scene.get("setting") or scene.get("place") or "hut").strip()
+
+
+def cast_in(scene: Mapping[str, object]) -> list[Mapping[str, object]]:
+    """The characters in a scene (written by a model, so checked)."""
+    raw = scene.get("cast")
+    if not isinstance(raw, list):
+        return []
+    return [a for a in raw if isinstance(a, Mapping) and a.get("name")]
+
+
+async def paint_cartoon(
+    book: ArtBook,
+    cast: list[FarmCharacter],
+    looks: dict[str, tuple[Look, str]],
+    scenes: Sequence[Mapping[str, object]],
+) -> tuple[dict[str, tuple[Look, str]], dict[str, Path]]:
+    """Every place the story goes and every character in it, painted (or
+    taken from the art kept from earlier videos)."""
+    places: dict[str, Path] = {}
+    for scene in scenes:
+        setting = setting_of(scene)
+        if setting not in places:
+            places[setting] = await book.place(setting)
+    felt: dict[str, set[str]] = {}
+    for scene in scenes:
+        for actor in cast_in(scene):
+            feel = str(actor.get("feel") or "") or FEEL_OF.get(
+                str(actor.get("action") or ""), ""
+            )
+            felt.setdefault(str(actor.get("name")).lower(), set()).add(feel)
+    painted = dict(looks)
+    for character in cast:
+        key = character.name.lower()
+        if key not in felt or key not in looks:
+            continue
+        sprites = await book.character(
+            character.name,
+            character.description,
+            character_details(character),
+            feelings=tuple(f for f in FEELINGS if f in felt[key]),
+        )
+        look, voice = looks[key]
+        painted[key] = (replace(look, sprites=sprites), voice)
+    # Characters the writer made up (no cast card) are painted from their
+    # names, so nobody is left a stick figure among painted ones.
+    names = {
+        str(actor.get("name")).lower(): str(actor.get("name"))
+        for scene in scenes
+        for actor in cast_in(scene)
+    }
+    for key, name in names.items():
+        if key in painted:
+            continue
+        sprites = await book.character(
+            name, "", "", feelings=tuple(f for f in FEELINGS if f in felt.get(key, ()))
+        )
+        painted[key] = (Look(name=name, sprites=sprites), "")
+    return painted, places
+
+
+def character_details(character: FarmCharacter) -> str:
+    """Words for the painter from the drawn look's choices."""
+    words = {"kid": "child", "old": "elderly"}.get(character.age, "")
+    extras = [
+        "beard" if character.beard else "",
+        "earrings" if character.earrings else "",
+        "glasses" if character.glasses else "",
+    ]
+    return ", ".join(w for w in (words, *extras) if w)
+
+
 async def finish_cartoon(
     farm: Line,
     post: FarmPost,
@@ -319,7 +397,20 @@ async def finish_cartoon(
     lengths: list[float],
 ) -> FarmPost:
     """Animate the voiced screenplay and render it."""
-    looks = await _looks(farm, await cast_of(farm, channel))
+    cast = await cast_of(farm, channel)
+    looks = await _looks(farm, cast)
+    places: dict[str, Path] = {}
+    book = farm.art_book()
+    if book is not None:
+        post = await farm._stage(post, "Painting the places and characters", 50)
+        try:
+            looks, places = await paint_cartoon(book, cast, looks, scenes)
+        except ArtError as error:
+            # Drawn art still makes the video; the reason shows on the post.
+            logger.info("Studio: cartoon painting stopped, drawing instead: {}", error)
+            data = {**data, "art_note": f"Painting stopped ({error}); drawn instead."}
+            places = {}
+            looks = await _looks(farm, cast)
     size = frame_size(channel, farm._video_size())
     timed: list[Scene] = []
     words: tuple = ()
@@ -329,6 +420,7 @@ async def finish_cartoon(
         camera = str(scene.get("camera") or "wide")
         shot = CartoonShot(
             place=str(scene.get("place") or "hut"),
+            picture=places.get(setting_of(scene)),
             actors=_actors(scene, looks),
             camera=camera,
             focus=str(scene.get("focus") or scene.get("speaker") or ""),

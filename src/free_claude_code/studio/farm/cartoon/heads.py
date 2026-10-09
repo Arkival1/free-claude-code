@@ -85,6 +85,8 @@ class Look:
     earrings: bool = False
     glasses: bool = False
     head_image: Path | None = field(default=None, compare=False)
+    sprites: Any = field(default=None, compare=False)
+    """Painted cut-out pictures (an aiart.Sprites) drawn instead of a body."""
 
     def filled(self) -> Look:
         """Every blank chosen from the name, so a character always looks the same."""
@@ -101,6 +103,7 @@ class Look:
             earrings=self.earrings,
             glasses=self.glasses,
             head_image=self.head_image,
+            sprites=self.sprites,
         )
 
 

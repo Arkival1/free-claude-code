@@ -774,6 +774,20 @@ def test_claw_code_can_be_built_from_studio(page: Page, admin_base_url: str) -> 
     ).to_be_visible()
 
 
+def test_the_image_engine_can_be_set_up_from_studio(
+    page: Page, admin_base_url: str
+) -> None:
+    open_studio(page, admin_base_url, "more")
+
+    engine = page.locator(".card", has=page.get_by_role("heading", name="Image engine"))
+    expect(engine).to_be_visible()
+    expect(engine).to_contain_text("Teen Titans")
+    expect(engine).to_contain_text("Not set up yet")
+    expect(
+        engine.get_by_role("button", name="Set up the image engine")
+    ).to_be_visible()
+
+
 def test_the_desktop_browser_card_says_what_it_does(
     page: Page, admin_base_url: str
 ) -> None:

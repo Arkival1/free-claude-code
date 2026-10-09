@@ -882,6 +882,54 @@ async def claw_open(
     return studio.open_claw(payload.folder)
 
 
+class ImageSamplePayload(BaseModel):
+    prompt: str = ""
+    kind: str = "character"
+
+
+@router.get("/studio/api/image-engine")
+async def image_engine_status(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The image engine: installed, its style downloaded, painting now."""
+    return studio.image_status()
+
+
+@router.post("/studio/api/image-engine/install")
+async def image_engine_install(
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Download stable-diffusion.cpp and the style; the status shows how far."""
+    _on_this_pc(request)
+    return studio.start_image_install()
+
+
+@router.post("/studio/api/image-engine/sample")
+async def image_engine_sample(
+    payload: ImageSamplePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Paint a test picture, to see the style."""
+    return studio.start_image_sample(payload.prompt, payload.kind)
+
+
+@router.get("/studio/api/image-engine/sample.png")
+async def image_engine_sample_picture(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> FileResponse:
+    path = studio.image_sample_path
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="No test picture yet.")
+    return FileResponse(
+        path, media_type="image/png", headers={"cache-control": "no-store"}
+    )
+
+
 @router.get("/studio/api/desk")
 async def desk_status(
     studio: StudioService = Depends(get_studio),

@@ -981,6 +981,27 @@ length, and the times it posts.
   walk"*. The writer plans every shot (who is in it, what they do, where
   they stand, the camera). In the editor, change any line, place, camera,
   or who is in a shot (*"Sundiata crawl left, Sogolon cry right"*).
+- **Painted cartoons** (the image engine): set up **Knowledge & Memory →
+  Image engine** once and cartoons are painted instead of drawn, in the
+  early-2000s superhero cartoon style (Teen Titans, Ben 10: Alien Force,
+  Justice League). [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
+  runs on your graphics card (the Vulkan build, so AMD cards like an RX 580
+  work) with Pony Diffusion V6 XL, a DC-animated style LoRA, and
+  SDXL-Lightning for speed (8 steps). **Set up the image engine** downloads
+  the engine and the style once (about 5 GB; *superhero-small* is about
+  3.4 GB for 4–6 GB cards), checks every file's SHA-256, and keeps them in
+  the Repo vault, so they still install if they leave GitHub or Hugging
+  Face. **Paint a test** shows a character or place in the style. The
+  writer says where each shot happens in its own words (*"a rooftop over
+  the city at night"*), and each place is painted once. Each character is
+  painted once, full body, and cut out, plus a talking mouth and the
+  feelings the story needs, made from that same picture so they look the
+  same in every shot and every video; they breathe, walk, lean into
+  punches, jump and fall as cut-outs, and only their mouth moves when they
+  talk. Settings: **Cartoon Art** (auto: painted once the engine is ready;
+  painted; drawn), **Image Engine** (this PC, or an online OpenAI-style
+  images service with **Online Image Service**, **Key**, and **Model**),
+  **Image Engine Build** (Vulkan or CPU), **Image Style**.
 - **Music edits** (style *Music edit (beat for beat)*): upload the song to
   the Media library (MP3, WAV, M4A, or a video with the song in it) along
   with clips from the show. The farm finds the song's tempo and every beat,

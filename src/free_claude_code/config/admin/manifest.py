@@ -719,6 +719,94 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_CARTOON_ART",
+        "Cartoon Art",
+        "studio",
+        "select",
+        settings_attr="studio_cartoon_art",
+        options=(
+            ConfigOptionSpec("auto", "Painted when the image engine is set up"),
+            ConfigOptionSpec("painted", "Painted by the image engine (AI art)"),
+            ConfigOptionSpec("drawn", "Drawn by Studio (stick bodies, fast)"),
+        ),
+        description=(
+            "How cartoons look. Painted: the image engine paints every place "
+            "and character in the chosen style once, then animates them."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_SOURCE",
+        "Image Engine",
+        "studio",
+        "select",
+        settings_attr="studio_image_source",
+        options=(
+            ConfigOptionSpec("pc", "This PC (stable-diffusion.cpp, free, offline)"),
+            ConfigOptionSpec("cloud", "An online image service (needs a key)"),
+        ),
+        description=(
+            "Where painted pictures are made. This PC needs a graphics card with "
+            "about 8 GB (or 4 GB with the smaller style); set it up on Settings, "
+            "Image engine."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_BUILD",
+        "Image Engine Build",
+        "studio",
+        "select",
+        settings_attr="studio_image_build",
+        options=(
+            ConfigOptionSpec("vulkan", "Graphics card (Vulkan: AMD, NVIDIA, Intel)"),
+            ConfigOptionSpec("cpu", "Processor only (very slow)"),
+        ),
+        description="Which stable-diffusion.cpp build Install downloads.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_STYLE",
+        "Image Style",
+        "studio",
+        "select",
+        settings_attr="studio_image_style",
+        options=(
+            ConfigOptionSpec("superhero", "2000s superhero cartoon (8 GB card)"),
+            ConfigOptionSpec(
+                "superhero-small", "2000s superhero cartoon, smaller (4-6 GB)"
+            ),
+        ),
+        description=(
+            "The look of painted pictures: the early-2000s superhero cartoon "
+            "style (Teen Titans, Ben 10: Alien Force, Justice League)."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_CLOUD_URL",
+        "Online Image Service",
+        "studio",
+        "text",
+        settings_attr="studio_image_cloud_url",
+        description=(
+            "An OpenAI-style images API, e.g. https://api.openai.com/v1, used "
+            "when Image Engine is set to the online service."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_CLOUD_KEY",
+        "Online Image Service Key",
+        "studio",
+        "secret",
+        settings_attr="studio_image_cloud_key",
+        description="The online image service's API key.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_CLOUD_MODEL",
+        "Online Image Model",
+        "studio",
+        "text",
+        settings_attr="studio_image_cloud_model",
+        description="The service's image model, e.g. gpt-image-1.",
+    ),
+    ConfigFieldSpec(
         "STUDIO_FARM_PEXELS_KEY",
         "Content Farm Pexels Key",
         "studio",

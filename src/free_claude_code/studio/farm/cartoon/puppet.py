@@ -297,6 +297,26 @@ def draw_figure(
     from PIL import Image, ImageDraw
 
     pose = pose_for(placed.action, t, length)
+    if placed.look.sprites is not None:
+        from .sprite import draw_sprite
+
+        draw_sprite(
+            canvas,
+            placed.look.sprites,
+            action=placed.action,
+            feeling=placed.feeling or FEEL_OF.get(placed.action, ""),
+            speaking=placed.speaking,
+            x=where(placed, t, length) * canvas.width,
+            facing=placed.facing,
+            t=t,
+            ground=ground,
+            height=height,
+            lift=pose.lift,
+            tip=pose.tip,
+            sink=pose.sink,
+            seed=sum(map(ord, placed.look.name)) % 97,
+        )
+        return
     kid = placed.look.filled().age == "kid"
     body = height * (0.78 if kid else 1.0)
     face = placed.facing
@@ -442,6 +462,12 @@ def head_box(
     x = where(placed, t, length) * canvas[0]
     if pose.tip:
         return x + placed.facing * height * 0.45, ground - height * 0.1
+    if placed.look.sprites is not None:
+        from .sprite import SPRITE_HEIGHT
+
+        return x, ground - height * SPRITE_HEIGHT * (
+            0.86 - pose.sink
+        ) - pose.lift * height
     kid = placed.look.filled().age == "kid"
     body = height * (0.78 if kid else 1.0)
     return x, ground - body * (0.95 - pose.sink) - pose.lift * body

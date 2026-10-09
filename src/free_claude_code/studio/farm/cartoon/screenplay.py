@@ -73,7 +73,8 @@ def screenplay_prompt(
         lines.append(f"Facts to use (true):\n{facts}")
     lines.append(
         'JSON shape: {"title": "...", "series": "a short series name", '
-        '"shots": [{"place": "hut", "cast": [{"name": "...", "action": '
+        '"shots": [{"place": "hut", "setting": "where exactly, in a few '
+        'words, with the time of day", "cast": [{"name": "...", "action": '
         '"crawl", "at": "left|center|right", "feel": "sad|happy|angry|'
         'surprised|scared|neutral"}], "camera": "wide", "speaker": '
         '"narrator or a character name", "say": "one sentence"}], '
@@ -127,6 +128,7 @@ def parse_screenplay(reply: str, *, idea: str, cast_names: list[str]) -> JsonObj
     raw = data.get("shots") or data.get("scenes")
     shots: list[JsonObject] = []
     place = "hut"
+    setting = ""
     previous: list[JsonObject] = []
     known = {name.lower(): name for name in cast_names}
     for item in raw if isinstance(raw, list) else []:
@@ -137,6 +139,10 @@ def parse_screenplay(reply: str, *, idea: str, cast_names: list[str]) -> JsonObj
             continue
         if item.get("place"):
             place = place_key(str(item.get("place")))
+            setting = _clean(item.get("place"), 120)
+        if item.get("setting"):
+            # The writer's own words for where it is, for painted places.
+            setting = _clean(item.get("setting"), 120)
         cast: list[JsonObject] = []
         raw_cast = item.get("cast") or item.get("characters")
         for actor in raw_cast if isinstance(raw_cast, list) else []:
@@ -177,6 +183,7 @@ def parse_screenplay(reply: str, *, idea: str, cast_names: list[str]) -> JsonObj
                 "show": " ".join([place, *(str(a["name"]) for a in cast)])[:120],
                 "text": "",
                 "place": place,
+                "setting": setting or place,
                 "cast": cast[:4],
                 "camera": camera,
                 "focus": focus or speaker,

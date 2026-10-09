@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import re
+import secrets
 import socket
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -53,6 +54,7 @@ from .extensions import (
     McpServer,
     Skill,
 )
+from .farm.cartoon.aiart import ArtError
 from .farm.farm import ContentFarm, FarmError, channel_view, whole
 from .farm.formats import style_of
 from .farm.render import video_tools
@@ -69,6 +71,8 @@ from .guide import (
     page_name,
 )
 from .hq import station_for, stations_view
+from .image_cloud import CloudSettings, ImageCloudError, make_picture
+from .image_engine import ImageEngine, ImageEngineError, Picture
 from .lab import text as lab_text
 from .lab.bench import LabBench
 from .lab.requests import lab_job
@@ -636,6 +640,16 @@ class StudioService:
             gpu_gb=lambda: self.settings.studio_engine_gpu_gb,
             vault=self.vault,
         )
+        # Pictures painted on this PC (stable-diffusion.cpp) for cartoons.
+        self.image_engine = ImageEngine(
+            models_dir / "image-engine",
+            build=lambda: self.settings.studio_image_build,
+            style=lambda: self.settings.studio_image_style,
+            vault=self.vault,
+        )
+        self.image_transport: httpx.AsyncBaseTransport | None = None
+        """Tests point the online image service here."""
+        self._image_sample: JsonObject = {"state": "idle", "error": "", "made": 0}
         self._router = router or self._build_router(settings_provider())
         self._tasks: set[asyncio.Task[object]] = set()
         self._room_locks: dict[str, asyncio.Lock] = {}
@@ -674,6 +688,12 @@ class StudioService:
             pexels_key=lambda: self.settings.studio_farm_pexels_key or "",
             hear=self._farm_hear,
             transport=search_transport,
+            paint=self._farm_paint,
+            paints=self.paints_cartoons,
+            art_style=lambda: (
+                ("cloud-" if self.settings.studio_image_source == "cloud" else "")
+                + self.settings.studio_image_style
+            ),
         )
         self._farm_busy = 0
         self._farm_error: str | None = None
@@ -1060,6 +1080,145 @@ class StudioService:
         except DeskError as error:
             raise StudioError(str(error)) from error
         return self.desk_status()
+
+    # ------------------------------------------------------------ image engine
+
+    def image_cloud(self) -> CloudSettings:
+        return CloudSettings(
+            base_url=self.settings.studio_image_cloud_url or "",
+            api_key=self.settings.studio_image_cloud_key or "",
+            model=self.settings.studio_image_cloud_model,
+        )
+
+    def painting_ready(self) -> bool:
+        """Whether pictures can be painted now (this PC's engine, or online)."""
+        if self.settings.studio_image_source == "cloud":
+            return self.image_cloud().ready
+        return self.image_engine.ready()
+
+    def paints_cartoons(self) -> bool:
+        art = self.settings.studio_cartoon_art
+        return art == "painted" or (art == "auto" and self.painting_ready())
+
+    def image_status(self) -> JsonObject:
+        return self.image_engine.status() | {
+            "source": self.settings.studio_image_source,
+            "cloud_ready": self.image_cloud().ready,
+            "painting_ready": self.painting_ready(),
+            "cartoon_art": self.settings.studio_cartoon_art,
+            "sample": dict(self._image_sample),
+        }
+
+    def start_image_install(self) -> JsonObject:
+        """Download stable-diffusion.cpp and the style, in the background."""
+
+        async def work() -> None:
+            try:
+                if self.image_engine.binary() is None:
+                    await self.image_engine.install()
+                if not self.image_engine.style_ready():
+                    await self.image_engine.setup_style()
+            except ImageEngineError as error:
+                logger.info("Studio: image engine setup stopped: {}", error)
+
+        busy = {"checking", "downloading", "unpacking"}
+        if (
+            self.image_engine.install_state.state not in busy
+            and self.image_engine.setup_state.state != "downloading"
+        ):
+            self.spawn(work())
+        return self.image_status()
+
+    @property
+    def image_sample_path(self) -> Path:
+        return self._models_dir / "image-engine" / "sample.png"
+
+    def start_image_sample(self, prompt: str, kind: str = "character") -> JsonObject:
+        """Paint a test picture in the background, to see the style."""
+        if not self.painting_ready():
+            raise StudioError("Set up the image engine first.")
+        if self._image_sample.get("state") == "painting":
+            return self.image_status()
+        from .farm.cartoon.aiart import (
+            PLACE_SIZE,
+            SPRITE_SIZE,
+            character_prompt,
+            place_prompt,
+        )
+
+        words = " ".join(prompt.split())[:300] or "a teenage superhero"
+        place = kind == "place"
+        text = place_prompt(words) if place else character_prompt(words, words)
+        size = PLACE_SIZE if place else SPRITE_SIZE
+        self._image_sample = {"state": "painting", "error": "", "made": 0}
+
+        async def work() -> None:
+            out = self.image_sample_path.with_name("sample-new.png")
+            try:
+                await self.paint(text, size, secrets.randbelow(100_000), out)
+                out.replace(self.image_sample_path)
+                self._image_sample = {"state": "ready", "error": "", "made": now_ms()}
+            except (StudioError, OSError) as error:
+                self._image_sample = {"state": "failed", "error": str(error), "made": 0}
+
+        self.spawn(work())
+        return self.image_status()
+
+    async def install_image_archive(self, archive: Path) -> JsonObject:
+        try:
+            await self.image_engine.install_archive(archive)
+        except ImageEngineError as error:
+            raise StudioError(str(error)) from error
+        return self.image_status()
+
+    async def paint(
+        self,
+        prompt: str,
+        size: tuple[int, int],
+        seed: int,
+        out: Path,
+        start_from: Path | None = None,
+        strength: float = 0.5,
+    ) -> Path:
+        """Paint one picture with whichever image engine is chosen."""
+        try:
+            if self.settings.studio_image_source == "cloud":
+                style = self.image_engine.style()
+                return await make_picture(
+                    self.image_cloud(),
+                    f"{style.prompt}, {prompt}",
+                    out,
+                    size=size,
+                    start_from=start_from,
+                    transport=self.image_transport,
+                )
+            return await self.image_engine.make(
+                Picture(
+                    prompt=prompt,
+                    width=size[0],
+                    height=size[1],
+                    seed=seed,
+                    start_from=start_from,
+                    strength=strength,
+                ),
+                out,
+            )
+        except (ImageEngineError, ImageCloudError) as error:
+            raise StudioError(str(error)) from error
+
+    async def _farm_paint(
+        self,
+        prompt: str,
+        size: tuple[int, int],
+        seed: int,
+        out: Path,
+        start_from: Path | None,
+        strength: float,
+    ) -> Path:
+        try:
+            return await self.paint(prompt, size, seed, out, start_from, strength)
+        except StudioError as error:
+            raise ArtError(str(error)) from error
 
     def claw_status(self) -> JsonObject:
         return self.claw.status()

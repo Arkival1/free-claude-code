@@ -4276,6 +4276,105 @@
     );
   }
 
+  // The image engine: paints cartoon places and characters on this PC
+  // (stable-diffusion.cpp with a cartoon style), or with an online service.
+  function gigabytes(bytes) {
+    return `${(bytes / 1e9).toFixed(1)} GB`;
+  }
+
+  function imageCard(info) {
+    const status = el("p", { class: "muted", role: "status", hidden: true });
+    const say = (text) => {
+      status.hidden = !text;
+      status.textContent = text || "";
+    };
+    const install = info.install || {};
+    const setup = info.setup || {};
+    const sample = info.sample || {};
+    const downloading = ["checking", "downloading", "unpacking"].includes(install.state) || setup.state === "downloading";
+    const painting = info.busy || sample.state === "painting";
+    const cloud = info.source === "cloud";
+    let state;
+    if (cloud) {
+      state = info.cloud_ready ? "Painting with your online image service." : "Add the online image service's address and key in Settings.";
+    } else if (downloading) {
+      const part = install.state && install.state !== "ready" && install.state !== "idle" && install.state !== "failed" ? install : setup;
+      const share = part.total ? ` ${Math.round((part.done / part.total) * 100)}% of ${gigabytes(part.total)}` : "";
+      state = `Downloading${part === install ? " the engine" : " the style"}…${share}`;
+    } else if (install.state === "failed") {
+      state = `The engine download stopped: ${install.error}`;
+    } else if (setup.state === "failed") {
+      state = `The style download stopped: ${setup.error}`;
+    } else if (info.ready) {
+      state = `Ready: ${info.style_label} (engine ${info.version || "installed"}).`;
+    } else {
+      state = `Not set up yet. Set up downloads the engine and the style (about ${gigabytes(info.style_size || 0)}), once.`;
+    }
+    const words = el("input", { type: "text", placeholder: "Who or where to paint, e.g. a teen hero with spiky hair", "aria-label": "What to paint" });
+    const kind = el("select", { "aria-label": "Character or place" }, [
+      el("option", { value: "character", text: "Character" }),
+      el("option", { value: "place", text: "Place" }),
+    ]);
+    const art = { auto: "painted once the engine is set up", painted: "painted", drawn: "drawn by Studio" }[info.cartoon_art] || info.cartoon_art;
+    const node = card(
+      "Image engine",
+      [
+        el("p", { class: install.state === "failed" || setup.state === "failed" ? "warn" : "", text: state }),
+        el("p", { class: "muted", text: `Cartoons are ${art}. Change it in Settings (Cartoon Art, Image Engine, Image Style).` }),
+        !cloud && !info.ready
+          ? el("div", { class: "row" }, [
+              el("button", {
+                class: "primary",
+                type: "button",
+                text: "Set up the image engine",
+                disabled: downloading,
+                onclick: async () => {
+                  try {
+                    await post("/studio/api/image-engine/install", {});
+                    render();
+                  } catch (error) {
+                    say(error.message);
+                  }
+                },
+              }),
+            ])
+          : null,
+        info.painting_ready
+          ? el("form", {
+              class: "row",
+              onsubmit: async (event) => {
+                event.preventDefault();
+                try {
+                  await post("/studio/api/image-engine/sample", { prompt: words.value.trim(), kind: kind.value });
+                  render();
+                } catch (error) {
+                  say(error.message);
+                }
+              },
+            }, [words, kind, el("button", { class: "secondary", type: "submit", text: "Paint a test", disabled: painting })])
+          : null,
+        painting ? el("p", { class: "muted", text: info.steps ? `Painting… step ${info.step} of ${info.steps}` : "Painting…" }) : null,
+        sample.state === "failed" ? el("p", { class: "warn", text: `The test stopped: ${sample.error}` }) : null,
+        sample.state === "ready"
+          ? el("img", { class: "image-sample", src: `/studio/api/image-engine/sample.png?made=${sample.made}`, alt: "The test picture" })
+          : null,
+        status,
+      ],
+      "Paints every place and character in a cartoon in the early-2000s superhero cartoon style (Teen Titans, Ben 10: Alien Force) with stable-diffusion.cpp on your graphics card, free and offline. Each character is painted once and reused, so they look the same in every video. The engine and the style are kept in the Repo vault, so they still install if they leave GitHub or Hugging Face."
+    );
+    if (downloading || painting) {
+      setTimeout(async () => {
+        if (!document.body.contains(node)) return;
+        try {
+          node.replaceWith(imageCard(await api("/studio/api/image-engine")));
+        } catch {
+          /* the next page load shows it */
+        }
+      }, 2500);
+    }
+    return node;
+  }
+
   // Claw Code: built on this PC from FCC's own copy of its source, and
   // opened in a terminal connected to FCC (so it uses FCC's models).
   function clawCard(claw) {
@@ -4484,7 +4583,7 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault, starterRepos, desk, claw] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault, starterRepos, desk, claw, imageInfo] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
@@ -4499,6 +4598,7 @@
       api("/studio/api/starters").catch(() => ({ starters: [] })),
       api("/studio/api/desk").catch(() => ({ installed: false, open: false })),
       api("/studio/api/claw").catch(() => null),
+      api("/studio/api/image-engine").catch(() => null),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -4542,6 +4642,7 @@
       todoCard(todos.todos || []),
       videoCard(videos.videos || []),
       deskCard(desk),
+      ...(imageInfo ? [imageCard(imageInfo)] : []),
       ...(claw ? [clawCard(claw)] : []),
       voiceCard(voiceInfo),
       webCard(overview.settings.web),
