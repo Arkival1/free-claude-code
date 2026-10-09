@@ -29,6 +29,7 @@ from free_claude_code.core.version import package_version
 from . import system_monitor
 from .agents import SEALED_TOOLS, AgentRunner, TurnResult
 from .assistant_tools import describe_time, now_line, parse_when
+from .claw import ClawCode, ClawError
 from .code_loop import code_and_test, project_name
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
@@ -594,6 +595,8 @@ class StudioService:
         self._hear = hear
         self._fetch = fetch
         self._data_root = sites_dir.parent
+        # Claw Code, built on this PC from FCC's own copy (vendor/claw-code).
+        self.claw = ClawCode(self._data_root / "claw-code")
         # Outside repos that come with FCC (vendor/repos), added on first load.
         self._starter_folder = starter_repos
         self._starters_lock = asyncio.Lock()
@@ -631,6 +634,7 @@ class StudioService:
             binary_override=lambda: self.settings.studio_engine_path or "",
             models_at_once=lambda: self.settings.studio_engine_models_at_once,
             gpu_gb=lambda: self.settings.studio_engine_gpu_gb,
+            vault=self.vault,
         )
         self._router = router or self._build_router(settings_provider())
         self._tasks: set[asyncio.Task[object]] = set()
@@ -829,6 +833,7 @@ class StudioService:
             whisper_size=settings.studio_voice_ears,
             language=settings.studio_voice_language or "",
             transport=self._voice_transport,
+            vault=self.vault,
         )
 
     def voice_engines(self) -> tuple[str, str]:
@@ -1055,6 +1060,28 @@ class StudioService:
         except DeskError as error:
             raise StudioError(str(error)) from error
         return self.desk_status()
+
+    def claw_status(self) -> JsonObject:
+        return self.claw.status()
+
+    def build_claw(self) -> JsonObject:
+        try:
+            return self.claw.start_build()
+        except ClawError as error:
+            raise StudioError(str(error)) from error
+
+    def open_claw(self, folder: str = "") -> JsonObject:
+        """Open Claw Code in a terminal on this PC, connected to FCC."""
+        place = (
+            Path(folder.strip().strip('"')).expanduser()
+            if folder.strip()
+            else Path.home()
+        )
+        try:
+            self.claw.open_terminal(place)
+        except (ClawError, OSError) as error:
+            raise StudioError(str(error)) from error
+        return self.claw.status() | {"opened_in": str(place)}
 
     async def close_desk_browser(self) -> None:
         if self._desk is not None:

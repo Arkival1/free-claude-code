@@ -18,9 +18,17 @@ from typing import Any
 
 import anyio.to_thread
 import httpx
+from loguru import logger
 
 from free_claude_code.core.json_types import JsonObject
 
+from .vault import RepoVault, VaultError
+
+KOKORO_OWNER, KOKORO_REPO, KOKORO_TAG = (
+    "thewh1teagle",
+    "kokoro-onnx",
+    "model-files-v1.0",
+)
 KOKORO_BASE = (
     "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
 )
@@ -197,7 +205,9 @@ class LocalVoice:
         whisper_size: str = "base.en",
         language: str = "en",
         transport: httpx.AsyncBaseTransport | None = None,
+        vault: RepoVault | None = None,
     ) -> None:
+        self._vault = vault
         self._root = root
         self._model_name, self._model_size = KOKORO_MODELS.get(
             quality, KOKORO_MODELS["high"]
@@ -283,19 +293,22 @@ class LocalVoice:
             )
             for path, size in files:
                 if path.is_file() and path.stat().st_size == size:
+                    await self._keep(path)
                     continue
                 base = done
 
                 async def report(got: int, base: int = base) -> None:
                     await progress(base + got, state.total, "Downloading the voice")
 
+                url = f"{KOKORO_BASE}{path.name}"
                 try:
-                    await self._download(
-                        f"{KOKORO_BASE}{path.name}", path, size, report
-                    )
+                    await self._download(url, path, size, report)
                 except (httpx.HTTPError, OSError, LocalVoiceError) as error:
-                    state.errors.append(f"Voice download failed: {error}")
-                    break
+                    # The release is gone or GitHub is down: use the kept copy.
+                    if not await self._from_vault(path, size):
+                        state.errors.append(f"Voice download failed: {error}")
+                        break
+                await self._keep(path)
                 done += size
         else:
             state.errors.append(
@@ -307,6 +320,39 @@ class LocalVoice:
                 await anyio.to_thread.run_sync(self._listener)
             except Exception as error:  # faster-whisper raises many kinds
                 state.errors.append(f"Speech recognition download failed: {error}")
+
+    async def _keep(self, path: Path) -> None:
+        """Keep the voice files in the Repo vault (linked, so no extra
+        space), so a new setup works if the release leaves GitHub."""
+        if self._vault is None or self._vault.has(
+            KOKORO_OWNER, KOKORO_REPO, name=path.name, size=path.stat().st_size
+        ):
+            return
+        try:
+            await self._vault.keep_file(
+                owner=KOKORO_OWNER,
+                repo=KOKORO_REPO,
+                kind="release",
+                path=path,
+                url=f"{KOKORO_BASE}{path.name}",
+                ref=KOKORO_TAG,
+            )
+        except (OSError, VaultError) as error:
+            logger.info("Studio: could not keep {} in the vault: {}", path.name, error)
+
+    async def _from_vault(self, path: Path, size: int) -> bool:
+        if self._vault is None:
+            return False
+        kept = await self._vault.latest(
+            KOKORO_OWNER, KOKORO_REPO, kind="release", name=path.name
+        )
+        if kept is None or kept.size != size:
+            return False
+        try:
+            await self._vault.restore_file(kept, path)
+        except VaultError, OSError:
+            return False
+        return True
 
     async def _download(
         self,

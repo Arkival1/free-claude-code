@@ -285,8 +285,10 @@ def draw_figure(
     length: float,
     ground: float,
     height: float,
+    view: tuple[float, float, float, float] | None = None,
 ) -> None:
-    """Draw one character on the stage canvas (RGB), feet on `ground`.
+    """Draw one character on the stage canvas (RGB), feet on `ground`; only
+    the part inside `view` (what the camera sees) is drawn.
 
     The joints are worked out (and turned over, for a fall) as points; the
     lines are drawn twice the size into a small mask and shrunk, so they
@@ -365,12 +367,13 @@ def draw_figure(
     ys = [y for seg in segments for _, y in seg]
     pad = width * 2
     left, top = int(min(xs) - pad), int(min(ys) - pad)
+    right, bottom = int(max(xs) + pad), int(max(ys) + pad)
+    if view is not None:
+        left, top = max(left, int(view[0]) - 4), max(top, int(view[1]) - 4)
+        right = max(left + 1, min(right, int(view[2]) + 4))
+        bottom = max(top + 1, min(bottom, int(view[3]) + 4))
     big = 2
-    mask = Image.new(
-        "L",
-        ((int(max(xs) + pad) - left + 1) * big, (int(max(ys) + pad) - top + 1) * big),
-        0,
-    )
+    mask = Image.new("L", ((right - left + 1) * big, (bottom - top + 1) * big), 0)
     draw = ImageDraw.Draw(mask)
     line = max(2, round(width * big))
     for start, end in segments:

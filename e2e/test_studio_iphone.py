@@ -763,6 +763,17 @@ def test_video_notes_have_a_place_to_paste_a_link(
     expect(videos).to_contain_text("Copy as path")
 
 
+def test_claw_code_can_be_built_from_studio(page: Page, admin_base_url: str) -> None:
+    open_studio(page, admin_base_url, "more")
+
+    claw = page.locator(".card", has=page.get_by_role("heading", name="Claw Code"))
+    expect(claw).to_be_visible()
+    expect(claw).to_contain_text("works even if its GitHub repo is deleted")
+    expect(
+        claw.get_by_role("button", name=re.compile("Build Claw Code|Build again"))
+    ).to_be_visible()
+
+
 def test_the_desktop_browser_card_says_what_it_does(
     page: Page, admin_base_url: str
 ) -> None:

@@ -24,6 +24,7 @@ from fastapi.responses import (
 )
 from pydantic import BaseModel, Field
 
+from free_claude_code.api.admin_security import require_loopback_admin
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
@@ -127,6 +128,10 @@ class VideoPayload(BaseModel):
     url: str = Field(min_length=1, max_length=1000)
     focus: str = Field(default="", max_length=300)
     show: bool = False
+
+
+class ClawPayload(BaseModel):
+    folder: str = Field(default="", max_length=1000)
 
 
 class DeskPayload(BaseModel):
@@ -831,6 +836,50 @@ async def study_video(
     """Watch a video (a link, or a file on this PC) into notes for the agents."""
     note = await studio.study_video(payload.url, focus=payload.focus, show=payload.show)
     return _video_json(note, full=True)
+
+
+def _on_this_pc(request: Request) -> None:
+    """Things that start programs on the PC are only done from the PC itself,
+    with the same checks as the Admin UI (address, Host, and Origin), so a
+    web page open in the browser can't trigger them."""
+    try:
+        require_loopback_admin(request)
+    except HTTPException as error:
+        raise HTTPException(
+            status_code=403, detail="Do this on the PC running Studio."
+        ) from error
+
+
+@router.get("/studio/api/claw")
+async def claw_status(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Claw Code: FCC's copy, Rust, and whether it is built."""
+    return studio.claw_status()
+
+
+@router.post("/studio/api/claw/build")
+async def claw_build(
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Build Claw Code from FCC's copy; the status shows the progress."""
+    _on_this_pc(request)
+    return studio.build_claw()
+
+
+@router.post("/studio/api/claw/open")
+async def claw_open(
+    payload: ClawPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Open Claw Code in a terminal on this PC, connected to FCC."""
+    _on_this_pc(request)
+    return studio.open_claw(payload.folder)
 
 
 @router.get("/studio/api/desk")

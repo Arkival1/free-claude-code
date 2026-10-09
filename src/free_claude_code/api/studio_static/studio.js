@@ -4276,6 +4276,83 @@
     );
   }
 
+  // Claw Code: built on this PC from FCC's own copy of its source, and
+  // opened in a terminal connected to FCC (so it uses FCC's models).
+  function clawCard(claw) {
+    const folder = el("input", { type: "text", placeholder: "Folder to work in (empty: your home folder)", "aria-label": "Claw Code folder" });
+    const status = el("p", { class: "muted", role: "status", hidden: true });
+    const log = el("pre", { class: "engine-log claw-log", text: (claw.log || []).join("\n") });
+    const say = (text) => {
+      status.hidden = !text;
+      status.textContent = text || "";
+    };
+    const building = claw.state === "building";
+    const state = !claw.bundled
+      ? "FCC's copy of Claw Code is missing: reinstall FCC."
+      : building
+        ? "Building… the first build takes a few minutes."
+        : claw.built
+          ? `Built and ready (${claw.commit}).`
+          : claw.state === "failed"
+            ? `The build stopped: ${claw.error}`
+            : claw.rust
+              ? "Not built yet. Press Build Claw Code."
+              : claw.rust_help;
+    const node = card(
+      "Claw Code",
+      [
+        el("p", { class: claw.state === "failed" ? "warn" : "", text: state }),
+        el("div", { class: "row" }, [
+          el("button", {
+            class: claw.built ? "secondary" : "primary",
+            type: "button",
+            text: claw.built ? "Build again" : "Build Claw Code",
+            disabled: building || !claw.bundled,
+            onclick: async () => {
+              try {
+                await post("/studio/api/claw/build", {});
+                render();
+              } catch (error) {
+                say(error.message);
+              }
+            },
+          }),
+          !claw.rust
+            ? el("a", { class: "button-link secondary", href: "https://rustup.rs", target: "_blank", rel: "noopener", text: "Get Rust" })
+            : null,
+        ]),
+        claw.built
+          ? el("form", {
+              class: "row",
+              onsubmit: async (event) => {
+                event.preventDefault();
+                try {
+                  const opened = await post("/studio/api/claw/open", { folder: folder.value.trim() });
+                  say(`Opened in ${opened.opened_in}.`);
+                } catch (error) {
+                  say(error.message);
+                }
+              },
+            }, [folder, el("button", { class: "primary", type: "submit", text: "Open Claw Code" })])
+          : null,
+        status,
+        claw.log && claw.log.length ? el("details", { open: building || claw.state === "failed" }, [el("summary", { text: "Build log" }), log]) : null,
+      ],
+      "Claw Code is an open coding agent for the terminal, like Claude Code. FCC keeps its source, so it works even if its GitHub repo is deleted: Studio builds it on this PC (Rust needed) and opens it connected to FCC, so it thinks with your models, local ones included. In a terminal, fcc-claw does the same."
+    );
+    if (building) {
+      setTimeout(async () => {
+        if (!document.body.contains(node)) return;
+        try {
+          node.replaceWith(clawCard(await api("/studio/api/claw")));
+        } catch {
+          /* the next page load shows it */
+        }
+      }, 3000);
+    }
+    return node;
+  }
+
   // The browser window on the desktop the agents drive to research and to
   // play videos while the user watches.
   function deskCard(desk) {
@@ -4407,7 +4484,7 @@
 
   async function renderMore() {
     const generation = renderGeneration;
-    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault, starterRepos, desk] = await Promise.all([
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault, starterRepos, desk, claw] = await Promise.all([
       api("/studio/api/overview"),
       api("/studio/api/obsidian"),
       api("/studio/api/agents"),
@@ -4421,6 +4498,7 @@
       api("/studio/api/vault").catch(() => ({ items: [], bytes: 0 })),
       api("/studio/api/starters").catch(() => ({ starters: [] })),
       api("/studio/api/desk").catch(() => ({ installed: false, open: false })),
+      api("/studio/api/claw").catch(() => null),
     ]);
     const picker = el("select", {}, [
       overview.settings.shared_memory
@@ -4464,6 +4542,7 @@
       todoCard(todos.todos || []),
       videoCard(videos.videos || []),
       deskCard(desk),
+      ...(claw ? [clawCard(claw)] : []),
       voiceCard(voiceInfo),
       webCard(overview.settings.web),
       connectCard(connect),

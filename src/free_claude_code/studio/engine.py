@@ -51,7 +51,9 @@ from .gguf_info import GGUFError, GGUFInfo, estimate_memory, read_gguf_info
 from .model_inspect import HEAD_BYTES, file_advice, identify, model_report
 from .models import EngineModelSettings, now_ms
 from .store import StudioStore
+from .vault import RepoVault, VaultError, VaultItem
 
+ENGINE_OWNER, ENGINE_REPO = "ggml-org", "llama.cpp"
 RELEASES_URL = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
 RECENT_RELEASES_URL = (
     "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=8"
@@ -223,7 +225,9 @@ class Engine:
         models_at_once: Callable[[], int] = lambda: 1,
         gpu_gb: Callable[[], float] = lambda: 8.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        vault: RepoVault | None = None,
     ) -> None:
+        self._vault = vault
         self._root = root
         self._store = store
         self._folders = folders
@@ -297,27 +301,15 @@ class Engine:
             raise EngineError("The engine is already being downloaded.")
         self.install_state = state = InstallState(state="checking")
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0, read=120.0),
-                follow_redirects=True,
-                transport=self._transport,
-            ) as client:
-                tag, url, size = await self._find_download(client)
-                state.state, state.version, state.total = "downloading", tag, size
-                self._root.mkdir(parents=True, exist_ok=True)
-                archive = self._root / url.rsplit("/", 1)[-1]
-                async with client.stream("GET", url) as response:
-                    if response.status_code >= 400:
-                        raise EngineError(
-                            f"The download answered {response.status_code}."
-                        )
-                    if not state.total:
-                        length = response.headers.get("content-length", "")
-                        state.total = int(length) if length.isdigit() else 0
-                    with archive.open("wb") as handle:
-                        async for chunk in response.aiter_bytes(1 << 20):
-                            await anyio.to_thread.run_sync(handle.write, chunk)
-                            state.done += len(chunk)
+            try:
+                tag, archive = await self._download(state)
+            except (httpx.HTTPError, OSError, ValueError, EngineError) as error:
+                # GitHub is down, or the release is gone: use the kept copy.
+                kept = await self._kept_build()
+                if kept is None:
+                    raise
+                logger.info("Studio: engine from the vault ({}): {}", kept.name, error)
+                tag, archive = await self._from_vault(kept)
             state.state = "unpacking"
             if self.running:
                 await self.stop()
@@ -328,6 +320,73 @@ class Engine:
             state.state = "failed"
             state.error = f"{error} {self.manual_hint()}"
             raise EngineError(str(error)) from error
+
+    async def _download(self, state: InstallState) -> tuple[str, Path]:
+        """Download this PC's build from GitHub, keeping a copy in the vault."""
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, read=120.0),
+            follow_redirects=True,
+            transport=self._transport,
+        ) as client:
+            tag, url, size = await self._find_download(client)
+            state.state, state.version, state.total = "downloading", tag, size
+            self._root.mkdir(parents=True, exist_ok=True)
+            archive = self._root / url.rsplit("/", 1)[-1]
+            async with client.stream("GET", url) as response:
+                if response.status_code >= 400:
+                    raise EngineError(f"The download answered {response.status_code}.")
+                if not state.total:
+                    length = response.headers.get("content-length", "")
+                    state.total = int(length) if length.isdigit() else 0
+                # Into a new file, then moved into place: the old one may be
+                # linked to the vault's copy, which must never be overwritten.
+                partial = archive.with_name(archive.name + ".part")
+                partial.unlink(missing_ok=True)
+                with partial.open("wb") as handle:
+                    async for chunk in response.aiter_bytes(1 << 20):
+                        await anyio.to_thread.run_sync(handle.write, chunk)
+                        state.done += len(chunk)
+                archive.unlink(missing_ok=True)
+                partial.replace(archive)
+        if self._vault is not None:
+            try:
+                await self._vault.keep_file(
+                    owner=ENGINE_OWNER,
+                    repo=ENGINE_REPO,
+                    kind="release",
+                    path=archive,
+                    url=url,
+                    ref=tag,
+                )
+            except (OSError, VaultError) as error:
+                logger.info("Studio: could not keep the engine in the vault: {}", error)
+        return tag, archive
+
+    async def _kept_build(self) -> VaultItem | None:
+        """The newest intact vault copy of a build for this PC."""
+        if self._vault is None:
+            return None
+        pattern = asset_pattern(self._build())
+        for item in await self._vault.items():
+            if (
+                item.full_name.lower() == f"{ENGINE_OWNER}/{ENGINE_REPO}"
+                and item.kind == "release"
+                and pattern.search(item.name)
+                and ENGINE_ARCHIVE.match(item.name)
+                and await self._vault.intact(item)
+            ):
+                return item
+        return None
+
+    async def _from_vault(self, item: VaultItem) -> tuple[str, Path]:
+        assert self._vault is not None
+        found = ENGINE_ARCHIVE.match(item.name)
+        tag = found.group(1).lower() if found else item.ref
+        try:
+            archive = await self._vault.restore_file(item, self._root / item.name)
+        except VaultError as error:
+            raise EngineError(str(error)) from error
+        return tag, archive
 
     def manual_hint(self) -> str:
         """How to install the engine by hand when the download can't run."""

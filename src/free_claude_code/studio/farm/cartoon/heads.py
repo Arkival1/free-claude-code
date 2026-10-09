@@ -19,6 +19,7 @@ FEELINGS = ("neutral", "happy", "sad", "angry", "surprised", "scared", "smug")
 HAIR = ("short", "afro", "long", "bald", "bun", "braids", "spiky", "curly")
 WEAR = ("none", "wrap", "crown", "turban", "cap", "hood", "helmet", "headband", "hat")
 AGES = ("kid", "adult", "old")
+IRISES = ((92, 58, 32), (70, 44, 26), (58, 98, 140), (76, 110, 64), (120, 84, 40))
 SKINS = ("#f2c9a0", "#e0ac7e", "#c68a5a", "#9b6a43", "#7a4f30", "#5a3a22")
 HAIR_COLOURS = (
     "#1d1a18",
@@ -152,9 +153,10 @@ def _drawn_head(
     bottom = top + face_h
     skin = colour(look.skin)
     line = shade(skin, 0.45)
-    stroke = max(2, big // 70)
+    stroke = max(2, big // 52)
     hair = colour(look.hair_colour, (40, 30, 25))
     wear = colour(look.wear_colour, (60, 160, 240))
+    iris = random.Random(f"eyes{look.name.lower()}").choice(IRISES)
 
     # Hair behind the face.
     if look.hair == "afro":
@@ -251,12 +253,28 @@ def _drawn_head(
             )
             continue
         draw.ellipse(box, fill=(255, 255, 255), outline=(20, 20, 20), width=stroke)
-        pupil = eye_h * (0.5 if feeling != "scared" else 0.32)
-        px = x + eye_w / 2 + gaze * eye_w * 0.22 - pupil / 2
+        pupil = eye_h * (0.62 if feeling != "scared" else 0.4)
+        px = x + eye_w / 2 + gaze * eye_w * 0.2 - pupil / 2
         py = eye_y + eye_h / 2 - pupil / 2 + (eye_h * 0.08 if feeling == "sad" else 0)
-        draw.ellipse((px, py, px + pupil, py + pupil), fill=(15, 15, 15))
+        # A coloured iris, a dark pupil, and two catch-lights.
         draw.ellipse(
-            (px + pupil * 0.2, py + pupil * 0.15, px + pupil * 0.45, py + pupil * 0.4),
+            (px, py, px + pupil, py + pupil),
+            fill=iris,
+            outline=shade(iris, 0.45),
+            width=max(1, stroke // 2),
+        )
+        core = pupil * 0.5
+        cxp, cyp = px + pupil / 2, py + pupil / 2
+        draw.ellipse(
+            (cxp - core / 2, cyp - core / 2, cxp + core / 2, cyp + core / 2),
+            fill=(12, 10, 12),
+        )
+        draw.ellipse(
+            (px + pupil * 0.18, py + pupil * 0.12, px + pupil * 0.46, py + pupil * 0.4),
+            fill=(255, 255, 255),
+        )
+        draw.ellipse(
+            (px + pupil * 0.6, py + pupil * 0.6, px + pupil * 0.74, py + pupil * 0.74),
             fill=(255, 255, 255),
         )
         # Lids: heavy when sad, sleepy when old or smug, low and angled when angry.
@@ -450,20 +468,6 @@ def _drawn_head(
         )
     # Hair on top, or headwear.
     _top_of_head(draw, look, left, right, top, face_w, face_h, hair, wear, stroke)
-    if look.wear in {"none", "headband", ""} and look.hair != "bald":
-        # A shine across the hair.
-        draw.arc(
-            (
-                left + face_w * 0.25,
-                top - face_h * 0.05,
-                right - face_w * 0.05,
-                top + face_h * 0.3,
-            ),
-            220,
-            290,
-            fill=shade(hair, 1.28),
-            width=stroke,
-        )
     small = canvas.resize(
         (canvas.width // SCALE, canvas.height // SCALE), Image.Resampling.LANCZOS
     )
@@ -686,41 +690,118 @@ def _hair_top(
     hair: tuple[int, int, int],
     stroke: int,
 ) -> None:
+    """Hair on top of the head: a shape that follows the skull, inked round,
+    with strands and a shine where the light catches it."""
     cx = (left + right) / 2
+    ink = shade(hair, 0.45) if sum(hair) > 120 else (8, 6, 6)
+    lit = shade(hair, 1.45) if sum(hair) > 90 else (86, 80, 92)
+    rng = random.Random(f"hair{look.name}")
     if look.hair == "bald":
+        draw.arc(
+            (left + w * 0.5, top + h * 0.04, right - w * 0.08, top + h * 0.3),
+            200,
+            280,
+            fill=shade(colour(look.skin), 1.35),
+            width=stroke * 2,
+        )
         if look.age == "old":
-            draw.arc(
-                (left, top + h * 0.15, left + w * 0.25, top + h * 0.5),
-                120,
-                250,
-                fill=(230, 230, 230),
-                width=stroke * 3,
-            )
+            for x0 in (left - w * 0.02, right - w * 0.16):
+                draw.chord(
+                    (x0, top + h * 0.22, x0 + w * 0.18, top + h * 0.48),
+                    90 if x0 < cx else 270,
+                    270 if x0 < cx else 450,
+                    fill=(225, 225, 225),
+                    outline=(150, 150, 150),
+                    width=stroke,
+                )
         return
     if look.hair == "spiky":
-        points = [(left, top + h * 0.3)]
-        for n in range(7):
-            x = left + (n + 0.5) * w / 7
-            points += [(x, top - h * 0.18), (x + w / 14, top + h * 0.08)]
-        points += [(right, top + h * 0.3)]
-        draw.polygon(points, fill=hair)
+        points = [(left - w * 0.02, top + h * 0.32)]
+        for n in range(8):
+            x = left + (n + 0.5) * w / 8
+            points += [
+                (x - w * 0.02, top - h * rng.uniform(0.14, 0.24)),
+                (x + w / 16, top + h * 0.06),
+            ]
+        points += [(right + w * 0.02, top + h * 0.32)]
+        draw.polygon(points, fill=hair, outline=ink, width=stroke)
+        for n in range(4):
+            x = left + (n + 1.2) * w / 5.5
+            draw.line(
+                (x, top + h * 0.02, x + w * 0.05, top - h * 0.1), fill=lit, width=stroke
+            )
         return
     if look.hair == "bun":
-        draw.ellipse(
-            (cx - w * 0.17, top - h * 0.26, cx + w * 0.17, top + h * 0.04), fill=hair
+        bun = (cx - w * 0.18, top - h * 0.3, cx + w * 0.18, top + h * 0.04)
+        draw.ellipse(bun, fill=hair, outline=ink, width=stroke)
+        draw.arc(
+            (
+                bun[0] + w * 0.05,
+                bun[1] + h * 0.04,
+                bun[2] - w * 0.08,
+                bun[3] - h * 0.08,
+            ),
+            200,
+            300,
+            fill=lit,
+            width=stroke,
         )
     if look.hair == "curly":
-        for n in range(9):
-            x = left + n * w / 8.5
+        for n in range(10):
+            x = left - w * 0.02 + n * w / 9
+            y = top + h * rng.uniform(-0.1, -0.04)
+            r = w * rng.uniform(0.075, 0.095)
             draw.ellipse(
-                (x - w * 0.07, top - h * 0.08, x + w * 0.09, top + h * 0.12), fill=hair
+                (x - r, y - r, x + r, y + r), fill=hair, outline=ink, width=stroke
             )
-    draw.chord((left, top - h * 0.04, right, top + h * 0.5), 180, 360, fill=hair)
-    draw.chord(
-        (left - w * 0.01, top + h * 0.02, cx + w * 0.1, top + h * 0.32),
-        170,
-        300,
-        fill=hair,
+    # The cap of hair: the top of the skull, down to a curved hairline that
+    # rises over the forehead and comes down to the temples.
+    rx, ry = w / 2 + w * 0.03, h / 2 + h * 0.05
+    cy = top + h / 2
+    crown = [
+        (cx + rx * math.cos(math.radians(a)), cy + ry * math.sin(math.radians(a)))
+        for a in range(195, 346, 5)
+    ]
+    hairline = []
+    for n in range(13):
+        u = n / 12
+        x = right + w * 0.015 - u * (w * 1.03)
+        dip = 0.05 * math.exp(-(((u - 0.62) / 0.12) ** 2))  # the side part
+        y = top + h * (0.33 - 0.2 * math.sin(math.pi * u) + dip)
+        hairline.append((x, y))
+    draw.polygon([*crown, *hairline], fill=hair, outline=ink, width=stroke)
+    # Strands sweeping from the crown down to the hairline, and a shine.
+    strand = shade(hair, 0.7) if sum(hair) > 120 else (48, 44, 50)
+    crown_at = (cx - w * 0.06, top + h * 0.02)
+    for x, y in hairline[1:-1:2]:
+        mid = (
+            crown_at[0]
+            + (x - crown_at[0]) * 0.55
+            + (w * 0.04 if x < crown_at[0] else -w * 0.04),
+            crown_at[1] + (y - crown_at[1]) * 0.45,
+        )
+        draw.line(
+            [
+                (
+                    crown_at[0] + (x - crown_at[0]) * 0.18,
+                    crown_at[1] + (y - crown_at[1]) * 0.18 + h * 0.03,
+                ),
+                mid,
+                (
+                    crown_at[0] + (x - crown_at[0]) * 0.85,
+                    crown_at[1] + (y - crown_at[1]) * 0.85,
+                ),
+            ],
+            fill=strand,
+            width=max(1, stroke // 2 + 1),
+            joint="curve",
+        )
+    draw.arc(
+        (left + w * 0.3, top + h * 0.0, right - w * 0.08, top + h * 0.3),
+        215,
+        285,
+        fill=lit,
+        width=stroke * 2,
     )
 
 

@@ -1359,6 +1359,30 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Claw Code",
+        route="/studio#more",
+        where="Knowledge & Memory (MENU), the Claw Code card; or fcc-claw in a terminal.",
+        terms=(
+            "claw",
+            "claw code",
+            "claw-code",
+            "coding agent",
+            "terminal agent",
+            "fcc-claw",
+            "rust",
+        ),
+        body=(
+            "Claw Code is an open coding agent for the terminal, like Claude "
+            "Code. FCC keeps its full source, so it works even if its GitHub "
+            "repo is deleted. On the Claw Code card press Build Claw Code "
+            "(it needs Rust from rustup.rs once; the first build takes a few "
+            "minutes), then Open Claw Code with the folder to work in: a "
+            "terminal opens with Claw Code connected to FCC, so it thinks with "
+            "your models, local ones included. In any terminal, fcc-claw does "
+            "the same."
+        ),
+    ),
+    GuideTopic(
         title="Repo vault",
         route="/studio#more",
         where="Knowledge & Memory (MENU), the Repo vault card.",
@@ -1371,10 +1395,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "github copy",
         ),
         body=(
-            "Every repo added from GitHub is kept on this PC with its checksum. If "
-            "the original is deleted from GitHub, adding it again uses the kept "
-            "copy automatically, and the Repo vault card can restore or download "
-            "any copy."
+            "Every repo added from GitHub is kept on this PC with its checksum, "
+            "and so are the engine (llama.cpp) and voice files Studio downloads. "
+            "If the original is deleted from GitHub, Studio installs from the "
+            "kept copy automatically, and the Repo vault card can restore or "
+            "download any copy. The 28 starter repos and Claw Code come inside "
+            "FCC itself."
         ),
     ),
     GuideTopic(

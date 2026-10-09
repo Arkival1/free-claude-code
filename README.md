@@ -876,9 +876,13 @@ approval desk lists commands waiting for your yes, with Allow and Refuse).
 **Repo vault.** Every repo added from GitHub is kept on the PC, byte for
 byte with its SHA-256, in the **Repo vault** (Settings). If the original is
 later deleted from GitHub, adding it again uses the kept copy, and any copy
-can be restored or downloaded. Outside repos built into FCC itself are kept
-under `vendor/` with their licence, release files, checksums, and source
-(`vendor/cua` holds trycua/cua's MIT-licensed Cua Driver and agent source).
+can be restored or downloaded. The built-in engine (llama.cpp) and the voice
+files are kept the same way when they download (as a hard link, so the big
+files take no extra space), and install from the kept copy when their
+GitHub release is gone. Outside repos built into FCC itself are kept under
+`vendor/` with their licence, release files, checksums, and source
+(`vendor/claw-code` holds Claw Code's source; `vendor/cua` holds trycua/cua's
+MIT-licensed Cua Driver and agent source).
 
 **Repos that come with FCC.** FCC ships 30 outside repos ready to use the
 moment Studio starts. Among them:
@@ -961,10 +965,14 @@ length, and the times it posts.
   download, post it, and mark it posted. **Autopilot** keeps a day of videos
   ready while the app is open.
 - **Animated cartoon stories** (style *Animated cartoon story*): the look of
-  the big history cartoon accounts. Characters with big heads on stick bodies
-  act out a story in painted places (a hut, a village, the savanna, a palace,
-  a battlefield, and more), filmed with a moving camera (wide, medium,
-  close-up, push in, pan). A narrator tells it with one big word at a time
+  the big history cartoon accounts. Characters with big, detailed heads
+  (hair with a real hairline, strands and shine, coloured eyes, inked
+  outlines) on stick bodies act out a story in 16 painted places drawn in
+  layers with light and shade (a hut with a cooking fire, a market village,
+  the savanna, a palace hall with columns and a throne, a forest, a city, a
+  night sky, a classroom, a beach, snow, space, and more), filmed with a
+  moving camera (wide, medium, close-up, push in, pan). Close-ups are drawn
+  at up to three times the size, so faces stay sharp. A narrator tells it with one big word at a time
   on screen. A tall short shows the 16:9 cartoon on a wooden board under a
   white series-title box. Add your own characters on the **Characters**
   tab: their skin, hair, head wear, age, beard, earrings, glasses, or a face
@@ -1332,6 +1340,15 @@ notes, search the transcript, jump to any moment, or forget it. Research
 studies its videos in the background, one at a time, so it never waits on
 them; with no model running, notes are built from the transcript's most
 telling sentences instead.
+
+**Claw Code.** FCC keeps the full source of
+[Claw Code](https://github.com/ultraworkers/claw-code) (MIT; `vendor/claw-code`),
+an open coding agent for the terminal, so it works even if its repo is
+deleted. **Knowledge & Memory → Claw Code** builds it on this PC with one
+click (Rust needed, from https://rustup.rs; the first build takes a few
+minutes) and **Open Claw Code** starts it in a terminal connected to FCC, so
+it thinks with your models, local ones included. `fcc-claw` does the same
+from any terminal. Building and opening only work from the PC itself.
 
 **Watching videos on this PC.** A video with no captions (or on another site,
 or a file on this PC) is listened to here: `yt-dlp` fetches only its sound and

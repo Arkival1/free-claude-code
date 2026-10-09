@@ -9,8 +9,11 @@ and the user can download or restore any copy from the vault card.
 
 import hashlib
 import json
+import os
 import re
 import secrets
+import shutil
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -61,9 +64,30 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _link_or_copy(source: Path, target: Path) -> None:
+    partial = target.with_name(target.name + ".part")
+    partial.unlink(missing_ok=True)
+    try:
+        os.link(source, partial)
+    except OSError:
+        shutil.copyfile(source, partial)
+    partial.replace(target)
+
+
 class RepoVault:
     def __init__(self, folder: Path) -> None:
         self._folder = folder
+        # Keeps can run at once (an engine download and the voice setup);
+        # the index is read and rewritten by one at a time.
+        self._index_lock = threading.Lock()
 
     @property
     def folder(self) -> Path:
@@ -116,6 +140,10 @@ class RepoVault:
         digest = sha256(data)
 
         def work() -> VaultItem:
+            with self._index_lock:
+                return locked()
+
+        def locked() -> VaultItem:
             items = self._read()
             for item in items:
                 if (
@@ -149,6 +177,84 @@ class RepoVault:
 
         return await anyio.to_thread.run_sync(work)
 
+    async def keep_file(
+        self,
+        *,
+        owner: str,
+        repo: str,
+        kind: str,
+        path: Path,
+        url: str,
+        ref: str = "",
+    ) -> VaultItem:
+        """Keep a big downloaded file (an engine build, a voice model) without
+        reading it all into memory. The vault's copy is a hard link when the
+        disk allows it, so it takes no extra space; otherwise a copy."""
+
+        def work() -> VaultItem:
+            digest = _file_sha256(path)
+            with self._index_lock:
+                return locked(digest)
+
+        def locked(digest: str) -> VaultItem:
+            items = self._read()
+            for item in items:
+                if (
+                    item.sha256 == digest
+                    and item.full_name.lower() == f"{owner}/{repo}".lower()
+                    and self.path(item).is_file()
+                ):
+                    return item
+            folder = f"{_safe(owner)}__{_safe(repo)}"
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            file = f"{folder}/{stamp}-{digest[:8]}-{_safe(path.name)}"
+            target = self._folder / file
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _link_or_copy(path, target)
+            item = VaultItem(
+                id=f"vlt_{secrets.token_hex(5)}",
+                owner=owner,
+                repo=repo,
+                kind=kind,
+                name=path.name,
+                ref=ref,
+                url=url,
+                sha256=digest,
+                size=path.stat().st_size,
+                saved_at=int(time.time() * 1000),
+                file=file,
+            )
+            self._write([*items, item])
+            return item
+
+        return await anyio.to_thread.run_sync(work)
+
+    def has(self, owner: str, repo: str, *, name: str, size: int) -> bool:
+        """Whether a file of this name and size is kept (a quick look that
+        doesn't read it, to skip keeping a big file twice)."""
+        return any(
+            item.full_name.lower() == f"{owner}/{repo}".lower()
+            and item.name == name
+            and item.size == size
+            and self.path(item).is_file()
+            for item in self._read()
+        )
+
+    async def restore_file(self, item: VaultItem, target: Path) -> Path:
+        """Put a kept file back at target (linked when the disk allows),
+        after checking it is still the exact bytes that were kept."""
+
+        def work() -> Path:
+            source = self.path(item)
+            if not source.is_file() or _file_sha256(source) != item.sha256:
+                raise VaultError(f"The vault copy of {item.name} is damaged.")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.unlink(missing_ok=True)
+            _link_or_copy(source, target)
+            return target
+
+        return await anyio.to_thread.run_sync(work)
+
     async def items(self) -> list[VaultItem]:
         found = await anyio.to_thread.run_sync(self._read)
         return sorted(found, key=lambda item: -item.saved_at)
@@ -176,7 +282,7 @@ class RepoVault:
     async def intact(self, item: VaultItem) -> bool:
         def work() -> bool:
             path = self.path(item)
-            return path.is_file() and sha256(path.read_bytes()) == item.sha256
+            return path.is_file() and _file_sha256(path) == item.sha256
 
         return await anyio.to_thread.run_sync(work)
 
@@ -191,6 +297,10 @@ class RepoVault:
 
     async def remove(self, item_id: str) -> bool:
         def work() -> bool:
+            with self._index_lock:
+                return locked()
+
+        def locked() -> bool:
             items = self._read()
             kept = [item for item in items if item.id != item_id]
             if len(kept) == len(items):

@@ -66,21 +66,23 @@ def spot(value: object, default: float) -> float:
 
 
 def paint(shot: CartoonShot, t: float, length: float, size: tuple[int, int]) -> Any:
-    """The shot at t seconds, filmed at `size` (RGB)."""
+    """The shot at t seconds, filmed at `size` (RGB).
+
+    The stage is drawn big enough that the part the camera sees is at least
+    as sharp as the film: a wide shot at 1.5x, a medium at 2x, a close-up
+    at 3x, so faces stay crisp when the camera moves in.
+    """
     from PIL import Image
 
-    width, height = STAGE
+    zoom, cx, cy = _camera(shot, t, length, STAGE[1] * GROUND, STAGE[1] * FIGURE)
+    scale = _sharpness(zoom, size)
+    width, height = round(STAGE[0] * scale), round(STAGE[1] * scale)
     canvas = stage_for(
         shot.place, width, height, picture=shot.picture, seed=shot.seed
     ).copy()
     ground = height * GROUND
     body = height * FIGURE
-    # Characters further back (higher on screen) are drawn first.
-    for placed in sorted(
-        shot.actors, key=lambda p: p.action in {"lie", "fall", "crawl"}
-    ):
-        draw_figure(canvas, placed, t=t, length=length, ground=ground, height=body)
-    zoom, cx, cy = _camera(shot, t, length, ground, body)
+    cx, cy = cx * scale, cy * scale
     crop_w, crop_h = width / zoom, height / zoom
     if shot.shake:
         rng = random.Random(int(t * 30))
@@ -88,9 +90,33 @@ def paint(shot: CartoonShot, t: float, length: float, size: tuple[int, int]) -> 
         cy += rng.uniform(-1, 1) * height * 0.01
     left = min(max(0.0, cx - crop_w / 2), width - crop_w)
     top = min(max(0.0, cy - crop_h / 2), height - crop_h)
+    view = (left, top, left + crop_w, top + crop_h)
+    # Characters on the ground are drawn last, in front of those standing.
+    for placed in sorted(
+        shot.actors, key=lambda p: p.action in {"lie", "fall", "crawl"}
+    ):
+        draw_figure(
+            canvas, placed, t=t, length=length, ground=ground, height=body, view=view
+        )
+    if round(crop_w) == size[0] and round(crop_h) == size[1]:
+        x = min(max(0, round(left)), width - size[0])
+        y = min(max(0, round(top)), height - size[1])
+        return canvas.crop((x, y, x + size[0], y + size[1]))
     return canvas.resize(
-        size, Image.Resampling.BILINEAR, box=(left, top, left + crop_w, top + crop_h)
+        size,
+        Image.Resampling.BICUBIC,
+        box=(left, top, left + crop_w, top + crop_h),
+        reducing_gap=2.0,
     )
+
+
+def _sharpness(zoom: float, size: tuple[int, int]) -> float:
+    """How much bigger than 1280x720 to draw, for this zoom and film size."""
+    needed = max(size[0] / STAGE[0], size[1] / STAGE[1]) * zoom
+    for scale in (1.0, 1.5, 2.0, 3.0):
+        if scale >= needed * 0.85:
+            return scale
+    return 3.0
 
 
 def _camera(

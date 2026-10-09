@@ -657,7 +657,8 @@ code.command {
   gap: 8px;
 }
 
-.download-card .button-link {
+.download-card .button-link,
+.card .button-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -673,7 +674,8 @@ code.command {
   color: var(--accent-ink);
 }
 
-.download-card .button-link.secondary {
+.download-card .button-link.secondary,
+.card .button-link.secondary {
   border: 1px solid var(--line);
   color: inherit;
 }
@@ -2895,4 +2897,9 @@ h3.subhead {
 .check-row input {
   width: auto;
   flex: none;
+}
+
+/* Claw Code's build log. */
+.claw-log {
+  max-height: 220px;
 }
