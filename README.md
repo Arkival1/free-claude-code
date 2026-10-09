@@ -872,6 +872,14 @@ job); monitors, server lights, flasks, and the studio camera come alive
 while someone works there. Click an agent to see its task and steps, send it
 a message, or stop it; click a station to see what's waiting there (the
 approval desk lists commands waiting for your yes, with Allow and Refuse).
+A job you send the Coder from the HQ runs the same way as one from Jarvis:
+in its own project (named as you named it: *"an app called Tip Calculator"*),
+coded by the Coder, then tested by the Tester, up to three rounds; a job for
+the Builder or the Tester gets a project to work in too. Starter agents an
+update adds (like the Coder and the Tester) join a team made before it, and
+a starter agent you delete stays deleted. A model on this PC (llama.cpp, LM
+Studio, Ollama) gets up to 20 minutes per step, so a slow PC finishes long
+agent prompts instead of timing out.
 
 **Repo vault.** Every repo added from GitHub is kept on the PC, byte for
 byte with its SHA-256, in the **Repo vault** (Settings). If the original is

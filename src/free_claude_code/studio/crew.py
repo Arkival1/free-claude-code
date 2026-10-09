@@ -512,7 +512,9 @@ class Crew:
         if site is not None:
             return site
         return await self._host.create_site(
-            name=_title_from(task), description=task[:200], agent_id=owner.id
+            name=project.strip() or _title_from(task),
+            description=task[:200],
+            agent_id=owner.id,
         )
 
     async def _named_project(self, task: str) -> SiteProject | None:

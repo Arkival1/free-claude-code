@@ -302,6 +302,10 @@ DEFAULT_AGENT_NAMES = frozenset(
     {*_DEFAULT_ROLES, GUIDE_AGENT_NAME, TEACHER_AGENT_NAME, STUDENT_AGENT_NAME}
 )
 """The starter team Studio fills in (the main AI is found by its role)."""
+HQ_CHATS_READ = 3
+"""How many of an agent's newest chats the HQ reads its steps from."""
+HQ_PROJECT_ROLES = frozenset({"builder", "tester"})
+"""Agents that work in a project: a job from the HQ gets one."""
 REMOVED_DEFAULT_FLAG = "removed_default:"
 """A starter agent the user deleted (by name), so it isn't made again."""
 SHARED_MEMORY_NAME = "Team memory"
@@ -558,6 +562,19 @@ def _todo_lines(items: Sequence[TodoItem], *, now: datetime) -> str:
     return "\n".join(lines)
 
 
+LOCAL_MODEL_SECONDS = 1200.0
+"""How long an agent waits for a model on this PC through the proxy (llama.cpp,
+LM Studio, Ollama): a big agent prompt on a CPU takes minutes to read."""
+SERVER_MODEL_SECONDS = 180.0
+
+
+def _proxy_timeout(model: str) -> float:
+    descriptor = PROVIDER_CATALOG.get(parse_provider_type(model))
+    if descriptor is not None and descriptor.local:
+        return LOCAL_MODEL_SECONDS
+    return SERVER_MODEL_SECONDS
+
+
 def _default_tools() -> tuple[str, ...]:
     return DEFAULT_TOOL_NAMES
 
@@ -757,6 +774,7 @@ class StudioService:
             base_url=f"http://127.0.0.1:{settings.port}",
             token=settings.proxy_auth_token if settings.proxy_auth_enabled else "",
             default_model=self.default_model,
+            timeout_for=_proxy_timeout,
         )
         local = LocalOpenAILLM(
             base_url=self._local_url,
@@ -6195,25 +6213,36 @@ class StudioService:
         people: list[JsonObject] = []
         feed: list[JsonObject] = []
         for agent in agents:
-            if agent.id == main.id:
-                chat: Chat | None = main_chat
-            else:
-                found = await self._store.find(
+            # A job from the HQ or a code loop runs in its own task chat, so
+            # the steps are read from the agent's few newest chats, not only
+            # the one that changed last (that is often just a download card).
+            found = list(
+                await self._store.find(
                     Chat,
                     where={"agent_id": agent.id},
                     order_by="updated_at DESC",
-                    limit=1,
+                    limit=HQ_CHATS_READ,
                 )
-                chat = found[0] if found else None
-            recent = await self._store.transcript(chat.id, limit=8) if chat else ()
-            if chat is not None and chat.kind == "room":
-                recent = tuple(m for m in recent if m.author == agent.name)
+            )
+            if agent.id == main.id:
+                found = [main_chat, *(c for c in found if c.id != main_chat.id)]
+            chat: Chat | None = found[0] if found else None
+            recent_steps: list[Message] = []
+            for each in found[:HQ_CHATS_READ]:
+                steps = await self._store.transcript(each.id, limit=8)
+                if each.kind == "room":
+                    steps = tuple(m for m in steps if m.author == agent.name)
+                recent_steps += steps
+            recent = tuple(sorted(recent_steps, key=lambda m: m.created_at)[-8:])
             tool = ""
             for message in reversed(recent):
                 if message.role == "tool":
                     tool = str(message.data.get("tool") or message.author or "")
                     break
-            live = self._live_text.get(chat.id, "") if chat else ""
+            live = next(
+                (self._live_text[c.id] for c in found if self._live_text.get(c.id)),
+                "",
+            )
             working = agent.id in busy or bool(live)
             run = latest_run.get(agent.id)
             model = await self.effective_model(agent.model or self.default_model)
@@ -6311,6 +6340,40 @@ class StudioService:
             if found
             else await self.create_chat(agent_id=agent.id, title=f"{agent.name} (HQ)")
         )
+        if agent.role == "coder":
+            # A job for the Coder runs as one from Jarvis does: in its own
+            # project, coded, then tested by the Tester, reported here.
+            await self._store.append_message(
+                chat_id=chat.id, role="user", text=text, author="user"
+            )
+            try:
+                line = await self.start_code_loop(text, parent_chat_id=chat.id)
+            except StudioError as error:
+                line = str(error)
+            await self._store.append_message(
+                chat_id=chat.id, role="assistant", text=line, author=agent.name
+            )
+            return {"accepted": True, "chat_id": chat.id}
+        if agent.role in HQ_PROJECT_ROLES and not chat.site_id:
+            # Making and testing need a project to work in: the one the job
+            # names, or a new one titled from it.
+            site = await Crew(
+                store=self._store,
+                host=self,
+                helper_pipeline=self.settings.studio_helper_pipeline,
+            ).project_for(
+                ToolContext(
+                    agent_id=agent.id,
+                    chat_id=chat.id,
+                    agent_name=agent.name,
+                    agent_role=agent.role,
+                ),
+                project_name(text),
+                task=text,
+                owner=agent,
+            )
+            chat = chat.model_copy(update={"site_id": site.id})
+            await self._store.put(chat)
 
         async def answer() -> None:
             with contextlib.suppress(StudioError, StudioNotFoundError):

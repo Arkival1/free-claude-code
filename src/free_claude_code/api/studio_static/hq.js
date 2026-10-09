@@ -564,16 +564,40 @@
       rect(g2, x + 5, y - 4, 1, 2, "#ffd75e");
       rect(g2, x + 8, y - 3, 1, 1, "#ffd75e");
     }
-    // Name tag, and what they're doing in a bubble.
-    const name = String(info.name || "").slice(0, 10);
-    const tagW = textWidth(name) + 4;
-    // Neighbours' tags take turns high and low so they don't overlap.
-    const tagY = y + 20 + (walking ? 0 : ((sprite.slot || 0) % 2) * 7);
-    rect(g2, sprite.x - tagW / 2, tagY, tagW, 7, "rgba(5,8,14,0.75)");
-    text(g2, name, sprite.x - tagW / 2 + 2, tagY + 1, info.busy ? "#ffffff" : "#9aa6b8");
+    // The name tag is placed after everyone is drawn, so tags never overlap.
+    tags.push({ sprite, name: String(info.name || "").slice(0, 10), y: y + 20 });
     if (working) bubble(g2, sprite, x, y, t);
     else if (!info.busy && !walking && info.station === "lounge" && Math.floor(t / 3 + sprite.seed) % 4 === 0) {
       text(g2, "z", x + 11, y - 3 - Math.round((t * 2) % 3), "#9fb3d9");
+    }
+  }
+
+  // Name tags: each goes in the first of three rows under its owner where
+  // it overlaps no other tag. In a crowded room the busy, the hovered, the
+  // chosen and Jarvis get a row first; anyone left over is in the team list.
+  const tags = [];
+  function drawTags(g2) {
+    const picked = (tag) => {
+      const id = tag.sprite.id;
+      return (
+        (state.selected && state.selected.kind === "agent" && state.selected.id === id) ||
+        (state.hover && state.hover.kind === "agent" && state.hover.id === id)
+      );
+    };
+    const rank = (tag) => (picked(tag) ? 0 : tag.sprite.info.busy ? 1 : tag.sprite.info.main ? 2 : 3);
+    const placed = [];
+    for (const tag of [...tags].sort((a, b) => rank(a) - rank(b) || a.sprite.x - b.sprite.x)) {
+      const w = textWidth(tag.name) + 4;
+      const left = tag.sprite.x - w / 2;
+      for (let row = 0; row < 3; row += 1) {
+        const top = tag.y + row * 8;
+        const clash = placed.some((p) => Math.abs(p.top - top) < 8 && left < p.left + p.w + 2 && p.left < left + w + 2);
+        if (clash) continue;
+        placed.push({ left, top, w });
+        rect(g2, left, top, w, 7, "rgba(5,8,14,0.8)");
+        text(g2, tag.name, left + 2, top + 1, tag.sprite.info.busy || picked(tag) ? "#ffffff" : "#9aa6b8");
+        break;
+      }
     }
   }
 
@@ -651,7 +675,9 @@
       g.strokeRect(box.x - 3.5, box.row.top - 11.5, box.w + 7, box.row.bottom - box.row.top + 16);
     }
     const sprites = [...state.agents.values()].sort((a, b) => a.y - b.y);
+    tags.length = 0;
     for (const sprite of sprites) drawAgent(g, sprite, state.t);
+    drawTags(g);
     frame = requestAnimationFrame(draw);
   }
 

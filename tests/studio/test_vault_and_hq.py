@@ -15,6 +15,7 @@ from free_claude_code.studio.llm import (
     _openai_messages,
     _text_protocol_messages,
 )
+from free_claude_code.studio.models import Chat
 from free_claude_code.studio.vault import RepoVault, VaultError
 from tests.api.support import create_test_app
 from tests.studio.test_extensions import repo_zip
@@ -271,6 +272,34 @@ async def test_the_hq_shows_who_is_where_and_you_can_talk_to_them(make_studio):
 
 
 @pytest.mark.asyncio
+async def test_the_hq_feed_shows_steps_from_a_task_chat(make_studio):
+    """A job's steps land in its own task chat; a newer chat holding only the
+    download card must not hide them from the HQ."""
+    studio, _ = make_studio([])
+    await studio.ensure_defaults()
+    coder = next(a for a in await studio.agents() if a.name == "Coder")
+    work = await studio.create_chat(agent_id=coder.id, title="Code this")
+    await studio._store.append_message(
+        chat_id=work.id,
+        role="tool",
+        text="Wrote index.html (1448 bytes).",
+        author="write_file",
+        data={"tool": "write_file"},
+    )
+    hq_chat = await studio.create_chat(agent_id=coder.id, title="Coder (HQ)")
+    await studio._store.append_message(
+        chat_id=hq_chat.id, role="event", text="Ready to download.", author="studio"
+    )
+    view = await studio.hq()
+    assert [(item["agent"], item["tool"]) for item in view["feed"]] == [
+        ("Coder", "write_file")
+    ]
+    coder_view = next(p for p in view["agents"] if p["name"] == "Coder")
+    assert coder_view["chat_id"] == hq_chat.id
+    assert coder_view["station"] == "mailroom"
+
+
+@pytest.mark.asyncio
 async def test_a_team_made_before_an_update_gets_its_new_agents(make_studio):
     """The Coder and the Tester came in an update: a team made before it
     gets them in the HQ (in the mailroom), without being made again."""
@@ -305,5 +334,49 @@ async def test_a_starter_agent_the_user_deletes_stays_deleted(make_studio):
         view = await studio.hq()
         assert "Tester" not in {a["name"] for a in view["agents"]}
         assert "Coder" in {a["name"] for a in view["agents"]}
+    finally:
+        await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_job_for_the_coder_from_hq_goes_to_the_coder_and_tester(
+    make_studio, monkeypatch
+):
+    """A job typed to the Coder in the HQ runs like one from Jarvis: in its
+    own project, coded, then tested by the Tester."""
+    studio, _ = make_studio([])
+    started: list[tuple[str, str | None]] = []
+
+    async def start(goal: str, *, project: str = "", parent_chat_id=None, caller=None):
+        started.append((goal, parent_chat_id))
+        return (
+            "Coder is coding it in the 'Tip Calculator' project; then Tester tests it."
+        )
+
+    monkeypatch.setattr(studio, "start_code_loop", start)
+    try:
+        await studio.ensure_defaults()
+        coder = next(a for a in await studio.agents() if a.name == "Coder")
+        result = await studio.hq_say(coder.id, "Make a tip calculator web app")
+        assert started == [("Make a tip calculator web app", result["chat_id"])]
+        said = [m.text for m in await studio._store.transcript(result["chat_id"])]
+        assert said[0] == "Make a tip calculator web app"
+        assert "Tester tests it" in said[1]
+    finally:
+        await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_builder_job_from_hq_gets_a_project_to_work_in(make_studio):
+    studio, _ = make_studio(["On it."])
+    try:
+        await studio.ensure_defaults()
+        builder = next(a for a in await studio.agents() if a.name == "Builder")
+        result = await studio.hq_say(builder.id, "Build a bakery website")
+        chat = await studio._store.get(Chat, result["chat_id"])
+        assert chat is not None and chat.site_id
+        site = await studio.site(chat.site_id)
+        assert "bakery" in site.name.lower()
+
     finally:
         await studio.shutdown()

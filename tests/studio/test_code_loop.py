@@ -130,3 +130,21 @@ async def test_jarvis_hands_a_coding_job_to_the_coder_and_tester(make_studio):
         c for c in reversed(model.calls) if "the user's main AI" in str(c["system"])
     )
     assert "Tester says it works." in str(follow_up["prompt"])
+
+
+@pytest.mark.parametrize(
+    ("goal", "name"),
+    [
+        (
+            "Make a small web app called Tip Calculator: one index.html page",
+            "Tip Calculator",
+        ),
+        ('build a site named "Joe Bakery" with prices', "Joe Bakery"),
+        ("make an app called Budgeter that tracks money", "Budgeter"),
+        ("code me a snake game in python", "Snake game in python"),
+    ],
+)
+def test_a_project_is_named_as_the_user_named_it(goal, name):
+    from free_claude_code.studio.code_loop import project_name
+
+    assert project_name(goal) == name

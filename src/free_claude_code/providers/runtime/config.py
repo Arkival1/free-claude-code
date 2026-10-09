@@ -49,6 +49,12 @@ def require_provider_credential(
     raise ApplicationUnavailableError(message)
 
 
+LOCAL_READ_TIMEOUT = 900.0
+"""How long a model on this PC may go quiet: it reads the whole prompt before
+its first word, and a long agent prompt on a CPU or a small graphics card
+takes minutes."""
+
+
 def build_provider_config(
     descriptor: ProviderDescriptor, settings: Settings
 ) -> ProviderConfig:
@@ -82,7 +88,11 @@ def build_provider_config(
         rate_limit=settings.provider_rate_limit,
         rate_window=settings.provider_rate_window,
         max_concurrency=settings.provider_max_concurrency,
-        http_read_timeout=settings.http_read_timeout,
+        http_read_timeout=(
+            max(settings.http_read_timeout, LOCAL_READ_TIMEOUT)
+            if descriptor.local
+            else settings.http_read_timeout
+        ),
         http_write_timeout=settings.http_write_timeout,
         http_connect_timeout=settings.http_connect_timeout,
         proxy=proxy,

@@ -379,12 +379,15 @@ class ProxyLLM:
         default_model: str,
         timeout: float = 180.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        timeout_for: Callable[[str], float] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
         self._default_model = default_model
         self._timeout = timeout
         self._transport = transport
+        self._timeout_for = timeout_for
+        """A model's own limit (a model on this PC may take minutes)."""
 
     async def complete(
         self,
@@ -423,11 +426,12 @@ class ProxyLLM:
         }
         if self._token:
             headers["x-api-key"] = self._token
+        chosen = str(payload["model"])
         body = await _post_json(
             f"{self._base_url}/v1/messages",
             payload,
             headers=headers,
-            timeout=self._timeout,
+            timeout=self._timeout_for(chosen) if self._timeout_for else self._timeout,
             transport=self._transport,
         )
         return _anthropic_reply(body)
@@ -442,7 +446,7 @@ class LocalOpenAILLM:
         base_url: str | Callable[[], str],
         api_key: str = "",
         default_model: str = "",
-        timeout: float = 300.0,
+        timeout: float = 1200.0,
         transport: httpx.AsyncBaseTransport | None = None,
         fast: Callable[[], bool] = lambda: True,
     ) -> None:
@@ -741,7 +745,7 @@ class LocalOpenAILLM:
                                 shown = visible
                                 on_text(visible)
             except httpx.HTTPError as error:
-                raise StudioLLMError(f"Model endpoint unreachable: {error}") from error
+                raise StudioLLMError(_unreachable(error, self._timeout)) from error
         body = {
             "model": served,
             "choices": [
@@ -1006,6 +1010,16 @@ class StudioModelRouter:
             )
 
 
+def _unreachable(error: httpx.HTTPError, timeout: float) -> str:
+    """Why a model call failed, never blank (a timeout's own text is empty)."""
+    if isinstance(error, httpx.TimeoutException):
+        return (
+            f"Model endpoint unreachable: the model took longer than "
+            f"{timeout:.0f} s to answer ({type(error).__name__})."
+        )
+    return f"Model endpoint unreachable: {error or type(error).__name__}"
+
+
 async def _post_json(
     url: str,
     payload: JsonObject,
@@ -1018,7 +1032,7 @@ async def _post_json(
         try:
             response = await client.post(url, json=payload, headers=dict(headers))
         except httpx.HTTPError as error:
-            raise StudioLLMError(f"Model endpoint unreachable: {error}") from error
+            raise StudioLLMError(_unreachable(error, timeout)) from error
         if response.status_code >= 400:
             raise StudioLLMError(
                 f"Model endpoint returned {response.status_code}: {response.text[:400]}"

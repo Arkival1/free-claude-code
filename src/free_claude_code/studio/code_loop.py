@@ -117,8 +117,19 @@ _LEAD = re.compile(
 )
 
 
+_CALLED = re.compile(
+    r"\b(?:called|named|titled)\s+[\"'“]?([A-Za-z0-9][\w' &-]{1,40}?)[\"'”]?"
+    r"(?=\s*(?:[:.,;!?(]|\s(?:that|which|with|where|for|to|and|in)\b|$))",
+    re.IGNORECASE,
+)
+
+
 def project_name(goal: str) -> str:
-    """'code me a snake game in python' becomes 'Snake game in python'."""
+    """'code me a snake game in python' becomes 'Snake game in python';
+    'make an app called Tip Calculator: ...' becomes 'Tip Calculator'."""
+    called = _CALLED.search(goal)
+    if called:
+        return called.group(1).strip()
     words = _LEAD.sub("", goal).split()[:5]
     name = " ".join(words).strip(" .,!?")
     return name[:1].upper() + name[1:] if name else "New project"
