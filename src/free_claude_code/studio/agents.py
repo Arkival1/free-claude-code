@@ -195,7 +195,9 @@ CUT_OFF_NOTE = (
     "written. Write big files in parts: write_file with the first part, then "
     "write_file with append true for each next part."
 )
-LOOK_TOOLS = frozenset({"read_file", "list_files", "search_files", "polish_check"})
+LOOK_TOOLS = frozenset(
+    {"read_file", "list_files", "search_files", "polish_check", "try_page"}
+)
 """Look-ups that return the same thing until a file changes."""
 SEEN_NOTE = (
     "(Studio) You already did exactly this and nothing has changed since, so "

@@ -32,6 +32,13 @@ from .images import FoundImage, ImageError, download_image, find_images
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
 from .models import MemoryEntry
+from .page_try import (
+    PageReport,
+    PageTryError,
+    page_try_ready,
+    parse_steps,
+    try_page,
+)
 from .photos import PhotoError, PhotoLibrary
 from .photos import describe as describe_photo
 from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
@@ -80,6 +87,7 @@ STUDY_VIDEO_TOOL = "study_video"
 DESK_TOOL = "desktop_browser"
 START_PROJECT_TOOL = "start_project"
 POLISH_TOOL = "polish_check"
+TRY_PAGE_TOOL = "try_page"
 RESTORE_FILE_TOOL = "restore_file"
 VIDEO_NOTES_TOOL = "video_notes"
 FIND_IMAGES_TOOL = "find_images"
@@ -479,6 +487,55 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "the project look finished."
         ),
         parameters={"type": "object", "properties": {}},
+    ),
+    ToolSpec(
+        name=TRY_PAGE_TOOL,
+        description=(
+            "Use a web page of the project like a real user, in a hidden "
+            "phone-sized browser: type into boxes, pick options, click "
+            "buttons, then read what the page shows and compare it with what "
+            "it should show. Reports steps that failed, values that weren't "
+            "what you expected, pop-up boxes, script errors, missing files, "
+            "and sideways scrolling. Reading code can't prove a page works; "
+            "this can. Example steps: "
+            '[{"do": "fill", "target": "Bill amount", "value": "50"}, '
+            '{"do": "click", "target": "Add"}, '
+            '{"do": "read", "target": "#total", "expect": "$57.50"}]'
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "string",
+                    "description": "The page file (default index.html).",
+                },
+                "steps": {
+                    "type": "array",
+                    "description": (
+                        "What a user does, in order. do is fill, select, "
+                        "click, press, check, uncheck, wait, or read. target "
+                        "is a #id, .class, or CSS selector, or a field's "
+                        "label, a button's text, or text on the page. value "
+                        "is what to type or pick (press: the key; wait: "
+                        "milliseconds). On read, expect is what it should show."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "do": {"type": "string"},
+                            "target": {"type": "string"},
+                            "value": {"type": "string"},
+                            "expect": {"type": "string"},
+                        },
+                        "required": ["do"],
+                    },
+                },
+                "desktop": {
+                    "type": "boolean",
+                    "description": "A desktop-sized window instead of a phone.",
+                },
+            },
+        },
     ),
     ToolSpec(
         name=START_PROJECT_TOOL,
@@ -1533,8 +1590,10 @@ class AgentToolbox:
         image_transport: httpx.AsyncBaseTransport | None = None,
         photos: PhotoLibrary | None = None,
         desk: DeskBrowser | None = None,
+        page_tryer: Callable[..., Awaitable[PageReport]] = try_page,
     ) -> None:
         self._desk = desk
+        self._try_page_with = page_tryer
         self._web = web_tools
         self._photos = photos
         self._sites = sites
@@ -1691,6 +1750,8 @@ class AgentToolbox:
                     return await self._check_project(context)
                 case "polish_check":
                     return await self._polish_check(context)
+                case "try_page":
+                    return await self._try_page(call, context)
                 case "start_project":
                     return await self._start_project(call, context)
                 case "restore_file":
@@ -2533,6 +2594,35 @@ class AgentToolbox:
             text = "The pages look finished: nothing to polish."
         return ToolOutcome(
             text=text, data={"tool": POLISH_TOOL, "site_id": site_id, "notes": notes}
+        )
+
+    async def _try_page(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        site_id = self._require_site(context)
+        if self._try_page_with is try_page and not page_try_ready():
+            raise ValueError(
+                "Trying pages needs the desktop browser part. Run the Windows "
+                "installer again, or: uv sync --extra studio_desk"
+            )
+        page = str(call.arguments.get("page") or "index.html")
+        steps = parse_steps(call.arguments.get("steps"))
+        try:
+            report = await self._try_page_with(
+                self._sites.directory(site_id),
+                page,
+                steps,
+                phone=not bool(call.arguments.get("desktop")),
+            )
+        except PageTryError as error:
+            raise ValueError(str(error)) from error
+        return ToolOutcome(
+            text=report.render(),
+            data={
+                "tool": TRY_PAGE_TOOL,
+                "site_id": site_id,
+                "page": report.page,
+                "passed": report.passed,
+                "problems": report.problems[:20],
+            },
         )
 
     async def _check_project(self, context: ToolContext) -> ToolOutcome:

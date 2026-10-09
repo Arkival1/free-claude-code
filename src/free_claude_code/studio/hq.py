@@ -124,7 +124,14 @@ TOOL_STATION: dict[str, str] = {
         "workshop",
     ),
     **dict.fromkeys(
-        ("run_command", "test_code", "check_project", "polish_check", "code_and_test"),
+        (
+            "run_command",
+            "test_code",
+            "check_project",
+            "polish_check",
+            "try_page",
+            "code_and_test",
+        ),
         "testbench",
     ),
     "lab": "lab",

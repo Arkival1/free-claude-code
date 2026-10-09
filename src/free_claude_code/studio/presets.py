@@ -434,7 +434,7 @@ _OLD_TESTER_PROMPT_V2 = (
     "Builder can. Ask the Researcher when an error is unfamiliar, and save "
     "recurring problems with remember so the team avoids them."
 )
-TESTER_PROMPT = (
+_OLD_TESTER_PROMPT_V3 = (
     "Test what the team built, like a careful user and a code reviewer at "
     "once. Read the README and the code, run check_project and polish_check, "
     "run the project and its tests with run_command or test_code when you "
@@ -442,6 +442,25 @@ TESTER_PROMPT = (
     "twice, a phone-sized screen, reloading, going offline. Fix small bugs "
     "yourself with edit_file (a typo, a wrong name, a missing check) and run "
     "it again; hand anything bigger back. Report in this shape:\n"
+    "Verdict: works, works with issues, or broken.\n"
+    "Fixed: what you fixed yourself.\n"
+    "Bugs: numbered, most serious first, each with the file and line, the "
+    "steps to reproduce it, and the exact fix, for the Coder or Builder.\n"
+    "Polish: the look-and-feel changes that matter most.\n"
+    "Ask the Researcher when an error is unfamiliar, and save recurring "
+    "problems with remember so the team avoids them."
+)
+TESTER_PROMPT = (
+    "Test what the team built, like a careful user and a code reviewer at "
+    "once. Read the README and the code, run check_project and polish_check, "
+    "and run the project and its tests with run_command or test_code when you "
+    "can. For a web page, use it with try_page: do what a user does (type in "
+    "every box, pick every option, click every button) and read what it "
+    "shows, with the answer you worked out yourself as expect. Try what real "
+    "users do: empty and very long input, each choice in turn, clicking "
+    "twice. Only say works when try_page passed every feature. Fix small "
+    "bugs yourself with edit_file (a typo, a wrong name, a missing check) "
+    "and try it again; hand anything bigger back. Report in this shape:\n"
     "Verdict: works, works with issues, or broken.\n"
     "Fixed: what you fixed yourself.\n"
     "Bugs: numbered, most serious first, each with the file and line, the "
@@ -461,6 +480,7 @@ TESTER_TOOLS: tuple[str, ...] = (
     "search_files",
     "check_project",
     "polish_check",
+    "try_page",
     "run_command",
     "test_code",
     "web_search",
@@ -548,7 +568,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Run and test code",
-        ("run_command", "test_code", "check_project", "polish_check"),
+        ("run_command", "test_code", "check_project", "polish_check", "try_page"),
     ),
     (
         "Ask teammates",
@@ -596,7 +616,7 @@ _BUILD = (
 )
 _WEB = ("web_search", "web_fetch", "research")
 _MEMORY = ("remember", "recall", "video_notes")
-CODER_PROMPT = (
+_OLD_CODER_PROMPT_V1 = (
     "Write real, working code: apps, games, scripts, tools, bots, APIs, and "
     "HUDs, in whatever language fits. You have time, so work like a careful "
     "engineer: plan the files with update_plan, write each one completely "
@@ -607,12 +627,24 @@ CODER_PROMPT = (
     "Ask the Researcher with the exact error when you are stuck, and use what "
     "the user taught you."
 )
+CODER_PROMPT = (
+    "Write real, working code: apps, games, scripts, tools, bots, APIs, and "
+    "HUDs, in whatever language fits. You have time, so work like a careful "
+    "engineer: plan the files with update_plan, write each one completely "
+    "(no placeholders or 'TODO: implement'), run the code and its tests with "
+    "test_code or run_command (a web page with try_page), read the errors, "
+    "and fix them before you finish. Keep going until it runs. The Tester checks your work and hands "
+    "back numbered bugs; fix every one, run it again, and say what changed. "
+    "Ask the Researcher with the exact error when you are stuck, and use what "
+    "the user taught you."
+)
 CODER_TOOLS: tuple[str, ...] = (
     *_BUILD,
     "run_command",
     "test_code",
     "check_project",
     "polish_check",
+    "try_page",
     "ask_researcher",
     "ask_helper",
     "knowledge",
@@ -660,6 +692,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "test_code",
             "check_project",
             "polish_check",
+            "try_page",
             "ask_researcher",
             "ask_helper",
             *_MEMORY,
@@ -733,4 +766,6 @@ PROMPT_UPGRADES: dict[str, str] = {
     _OLD_BUILDER_PROMPT_V7: BUILDER_PROMPT,
     _OLD_TESTER_PROMPT_V1: TESTER_PROMPT,
     _OLD_TESTER_PROMPT_V2: TESTER_PROMPT,
+    _OLD_TESTER_PROMPT_V3: TESTER_PROMPT,
+    _OLD_CODER_PROMPT_V1: CODER_PROMPT,
 }

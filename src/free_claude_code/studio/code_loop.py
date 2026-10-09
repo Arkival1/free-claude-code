@@ -82,8 +82,8 @@ def coder_task(goal: str, project: str) -> str:
     return (
         f"Code this in the '{project}' project: {goal}\n"
         "Take as long as it needs: plan with update_plan, write every file, run "
-        "it and its tests with test_code or run_command, and fix what fails "
-        "before you finish. The Tester checks your work next, so finish with a "
+        "it and its tests with test_code or run_command (use a web page with "
+        "try_page), and fix what fails before you finish. The Tester checks your work next, so finish with a "
         "short note of what you built, how to run it, and anything unfinished."
     )
 
@@ -91,9 +91,12 @@ def coder_task(goal: str, project: str) -> str:
 def tester_task(goal: str, project: str, number: int) -> str:
     return (
         f"Round {number}: test the '{project}' project. The job was: {goal}\n"
-        "Read the code, run it and its tests, and try what real users do. Fix "
-        "small bugs yourself with edit_file (a typo, a wrong name, a missing "
-        "check). Report in this shape, the verdict first:\n"
+        "Read the code, run it and its tests, and try what real users do. For "
+        "a web page, use every feature with try_page and read the result with "
+        "the answer you worked out as expect; only say works when it passed. "
+        "Fix small bugs yourself with edit_file (a typo, a wrong name, a "
+        "missing check) and try it again. Report in this shape, the verdict "
+        "first:\n"
         "Verdict: works, works with issues, or broken.\n"
         "Fixed: what you fixed yourself.\n"
         "Bugs: numbered, most serious first, each with the file, the steps to "

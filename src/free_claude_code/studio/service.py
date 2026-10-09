@@ -165,6 +165,7 @@ from .orders import (
     web_request,
     worth_routing,
 )
+from .page_try import PageReport, try_page
 from .phone_link import (
     MAX_MEMORY_CHARS,
     MAX_PULL,
@@ -275,6 +276,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "start_project",
         "restore_file",
         "polish_check",
+        "try_page",
         "conversation",
         "knowledge",
         "find_images",
@@ -616,6 +618,8 @@ class StudioService:
         # The desktop browser agents drive, opened on first use and kept
         # open between turns; and how videos with no captions are heard.
         self._desk_opener = desk_opener
+        # The hidden browser try_page uses; tests put a stand-in here.
+        self._page_tryer: Callable[..., Awaitable[PageReport]] = try_page
         self._desk: DeskBrowser | None = None
         self._desk_config: tuple[str, bool, bool] | None = None
         self._media_home = media_home or Path.home()
@@ -1390,6 +1394,7 @@ class StudioService:
             image_transport=self._search_transport,
             photos=self._photos,
             desk=self.desk_browser(),
+            page_tryer=self._page_tryer,
         )
 
     def _runner(self) -> AgentRunner:

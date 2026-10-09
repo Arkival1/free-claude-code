@@ -1229,10 +1229,22 @@ reviewer at once: it reads the code, runs `check_project` and `polish_check`,
 runs the project and its tests when commands are allowed, tries what real
 users do (empty and very long input, double clicks, a phone-sized screen,
 reloads, going offline), and reports a *Verdict*, numbered *Bugs* (file and
-line, steps to reproduce, exact fix), and *Polish*. It never edits files, so
-the Builder makes the fixes. Say "have Tester check the snake game"; a project
+line, steps to reproduce, exact fix), and *Polish*. It fixes small bugs
+itself with `edit_file` and hands bigger ones to the Builder or the Coder. Say "have Tester check the snake game"; a project
 named in a task is found by name. Jarvis has the Tester check bigger builds
 and hands its fixes back to the Builder.
+
+**Trying a page like a user (`try_page`).** Reading code can't prove a page
+works: a local model once built a Tip Calculator whose custom-tip box changed
+nothing until you touched another box, and the Tester read the code and said
+it worked. Now the Tester, the Coder, and the Builder use the page itself.
+`try_page` opens a page of the project in a hidden phone-sized browser, types
+into boxes, picks options, clicks buttons, and reads what the page shows
+against the answer the agent worked out (*"#tip should show $9.00"*). It
+reports each step, any value that wasn't what was expected, pop-up boxes,
+script errors, missing files, and a page wider than the phone screen. The
+Tester only says *works* when it passed. It uses the same browser part as the
+desktop browser (Playwright's Chromium, or the Edge or Chrome on your PC).
 
 </details>
 
