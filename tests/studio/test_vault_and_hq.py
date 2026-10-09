@@ -429,3 +429,44 @@ async def test_stop_in_the_hq_stops_a_job_given_in_the_hq(make_studio):
         assert await studio.stop_agent_work(helper.id) == []
     finally:
         await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_tasks_cut_off_by_closing_studio_stop_showing_as_working(make_studio):
+    """A task running when Studio closed stays "running" in the store; after
+    a restart nothing runs it, so it must not keep its agent busy forever."""
+    from free_claude_code.studio.models import AgentRun
+    from free_claude_code.studio.service import INTERRUPTED_NOTE
+
+    studio, _ = make_studio([])
+    await studio.ensure_defaults()
+    tester = next(a for a in await studio.agents() if a.name == "Tester")
+    coder = next(a for a in await studio.agents() if a.name == "Coder")
+    chat = await studio.create_chat(agent_id=tester.id, title="Round 1")
+    left = []
+    for agent in (tester, coder):
+        run = AgentRun.model_validate(
+            {
+                "agent_id": agent.id,
+                "chat_id": chat.id,
+                "goal": "Round 1: test it",
+                "status": "running",
+                "created_at": studio._started_at - 1000,
+            }
+        )
+        await studio._store.put(run)
+        left.append(run)
+    people = {p["name"]: p for p in (await studio.hq())["agents"]}
+    assert people["Tester"]["busy"] and people["Coder"]["busy"]
+
+    # Stop clears one even though nothing here runs it.
+    stopped = await studio.stop_agent_work(coder.id)
+    assert [run.status for run in stopped] == ["cancelled"]
+
+    assert await studio.end_interrupted_runs() == 1
+    people = {p["name"]: p for p in (await studio.hq())["agents"]}
+    assert not people["Tester"]["busy"] and not people["Coder"]["busy"]
+    tested = await studio.run(left[0].id)
+    assert tested.status == "failed" and tested.error == INTERRUPTED_NOTE
+    assert (await studio.transcript(chat.id))[-1].text == INTERRUPTED_NOTE
+    assert await studio.end_interrupted_runs() == 0

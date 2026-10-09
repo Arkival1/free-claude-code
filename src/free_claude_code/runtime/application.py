@@ -280,6 +280,10 @@ class ApplicationRuntime:
                     # join a team made before it), and the outside repos that
                     # come with FCC are ready on load.
                     self._studio_service.spawn(self._studio_service.ensure_defaults())
+                    # Tasks cut off when FCC last closed stop showing as working.
+                    self._studio_service.spawn(
+                        self._studio_service.end_interrupted_runs()
+                    )
                     self._studio_service.spawn(self._studio_service.ensure_starters())
                 self._started = True
         except asyncio.CancelledError:

@@ -878,7 +878,9 @@ coded by the Coder, then tested by the Tester, up to three rounds; a job for
 the Builder or the Tester works in the project it names (*"test the Tip
 Calculator"*), or gets a new one. **Stop** stops whatever the agent is doing:
 a job you gave it in the HQ, its turn in a Coder/Tester job (which then ends
-there), or a task from Jarvis. The HQ's *Newest steps* list each agent's
+there), or a task from Jarvis. A task cut off by closing Studio (or a
+crash) is closed when Studio starts again, with a note in its chat, so its
+agent doesn't look busy forever. The HQ's *Newest steps* list each agent's
 steps from all of its recent work. Starter agents an
 update adds (like the Coder and the Tester) join a team made before it, and
 a starter agent you delete stays deleted. A model on this PC (llama.cpp, LM

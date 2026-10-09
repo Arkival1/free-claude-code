@@ -306,6 +306,9 @@ DEFAULT_AGENT_NAMES = frozenset(
 )
 """The starter team Studio fills in (the main AI is found by its role)."""
 HQ_CHATS_READ = 3
+INTERRUPTED_NOTE = (
+    "Studio was closed before this task finished. Ask again to pick it up."
+)
 """How many of an agent's newest chats the HQ reads its steps from."""
 HQ_PROJECT_ROLES = frozenset({"builder", "tester"})
 """Agents that work in a project: a job from the HQ gets one."""
@@ -739,6 +742,9 @@ class StudioService:
         self._stand_in_note = ""
         self._video_lock = asyncio.Lock()
         self._run_jobs: dict[str, asyncio.Task[object]] = {}
+        # Tasks made before this moment and still "running" were cut off when
+        # Studio last closed; nothing here runs them.
+        self._started_at = now_ms()
         # Chat turns started from the HQ, so Stop reaches them too:
         # agent id -> {turn: (chat id, what it was asked)}.
         self._hq_turns: dict[str, dict[asyncio.Task[object], tuple[str, str]]] = {}
@@ -3647,11 +3653,14 @@ class StudioService:
             if run.status not in {"queued", "running"}:
                 continue
             job = self._run_jobs.pop(run.id, None)
-            if job is None:
+            # A task from before Studio last closed has no job here; it is
+            # cleared all the same, so the agent is free again.
+            if job is None and run.created_at >= self._started_at:
                 continue
-            job.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await job
+            if job is not None:
+                job.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await job
             current = await self._store.require(AgentRun, run.id)
             finished = current.model_copy(
                 update={
@@ -5998,6 +6007,38 @@ class StudioService:
         return await self._store.find(
             AgentRun, where=where, order_by="created_at DESC", limit=limit
         )
+
+    async def end_interrupted_runs(self) -> int:
+        """Close tasks Studio was closed (or crashed) in the middle of.
+
+        Nothing runs them after a restart, so left alone they would show their
+        agent working forever in the HQ and to the main AI. Run once at start,
+        before any new task begins."""
+        ended = 0
+        for run in await self._active_runs():
+            if run.id in self._run_jobs or run.created_at >= self._started_at:
+                continue
+            await self._store.put(
+                run.model_copy(
+                    update={
+                        "status": "failed",
+                        "error": INTERRUPTED_NOTE,
+                        "updated_at": now_ms(),
+                    }
+                )
+            )
+            with contextlib.suppress(StudioNotFoundError, StudioError):
+                await self._store.append_message(
+                    chat_id=run.chat_id,
+                    role="event",
+                    text=INTERRUPTED_NOTE,
+                    author="studio",
+                    data={"kind": "run_finished", "run_id": run.id, "status": "failed"},
+                )
+            ended += 1
+        if ended:
+            logger.info("Studio: closed {} task(s) left unfinished last time", ended)
+        return ended
 
     async def _active_runs(self) -> tuple[AgentRun, ...]:
         """Tasks still going, without reading every task ever run."""
