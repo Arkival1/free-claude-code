@@ -61,7 +61,8 @@ def test_it_catches_a_box_that_does_nothing(tmp_path: Path):
     again = run(
         tmp_path,
         [
-            {"do": "fill", "target": "#bill", "value": "50"},
+            # A bare id, as small models write it, works too.
+            {"do": "fill", "target": "bill", "value": "50"},
             {"do": "select", "target": "#pct", "value": "custom"},
             {"do": "fill", "target": "#custom", "value": "18"},
             {"do": "read", "target": "Tip:", "expect": "$9.00"},
@@ -87,5 +88,6 @@ def test_it_reports_pop_ups_errors_missing_files_and_a_too_wide_page(tmp_path: P
     assert "missingFunction" in text
     assert "Missing file: gone.css" in text
     assert "Step 2 (click #nothing) couldn't be done" in text
+    assert 'The page has: button "Save"' in text
     assert "wider than a phone screen" in text
     assert not report.passed

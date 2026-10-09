@@ -875,7 +875,11 @@ approval desk lists commands waiting for your yes, with Allow and Refuse).
 A job you send the Coder from the HQ runs the same way as one from Jarvis:
 in its own project (named as you named it: *"an app called Tip Calculator"*),
 coded by the Coder, then tested by the Tester, up to three rounds; a job for
-the Builder or the Tester gets a project to work in too. Starter agents an
+the Builder or the Tester works in the project it names (*"test the Tip
+Calculator"*), or gets a new one. **Stop** stops whatever the agent is doing:
+a job you gave it in the HQ, its turn in a Coder/Tester job (which then ends
+there), or a task from Jarvis. The HQ's *Newest steps* list each agent's
+steps from all of its recent work. Starter agents an
 update adds (like the Coder and the Tester) join a team made before it, and
 a starter agent you delete stays deleted. A model on this PC (llama.cpp, LM
 Studio, Ollama) gets up to 20 minutes per step, so a slow PC finishes long

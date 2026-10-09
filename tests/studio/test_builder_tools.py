@@ -49,6 +49,11 @@ async def test_reading_a_numbered_section(make_studio):
     )
     whole = await run(studio, context, "read_file", path="src/app.js")
     assert whole.text.startswith("const total = 1;")
+    past = await run(studio, context, "read_file", path="src/app.js", start_line=100)
+    assert past.text == (
+        "src/app.js has only 4 lines, so there is nothing from line 100. "
+        "Read from start_line 1."
+    )
 
 
 @pytest.mark.asyncio

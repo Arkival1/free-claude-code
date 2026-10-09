@@ -1953,6 +1953,14 @@ class AgentToolbox:
             return ToolOutcome(text=text, data=data)
         lines = content.splitlines()
         first = max(1, start or 1)
+        if first > len(lines):
+            return ToolOutcome(
+                text=(
+                    f"{path} has only {len(lines)} lines, so there is nothing "
+                    f"from line {first}. Read from start_line 1."
+                ),
+                data={**data, "start_line": first, "end_line": len(lines)},
+            )
         count = max(1, min(MAX_READ_LINES, limit or MAX_READ_LINES))
         shown = lines[first - 1 : first - 1 + count]
         numbered = "\n".join(

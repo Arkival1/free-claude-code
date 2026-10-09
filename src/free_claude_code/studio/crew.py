@@ -481,7 +481,7 @@ class Crew:
         name = project.strip()
         if not name:
             # "Have Tester check the snake game": the task names a project.
-            named = await self._named_project(task)
+            named = await self.named_project(task)
             if named is not None:
                 return named
         if not name and owner.role == RESEARCHER_ROLE and not context.site_id:
@@ -517,7 +517,7 @@ class Crew:
             agent_id=owner.id,
         )
 
-    async def _named_project(self, task: str) -> SiteProject | None:
+    async def named_project(self, task: str) -> SiteProject | None:
         """The project a task mentions by name, longest name first."""
         lowered = f" {' '.join(re.findall(r'[a-z0-9]+', task.lower()))} "
         sites = sorted(await self._host.sites(), key=lambda site: -len(site.name))

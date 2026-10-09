@@ -1,5 +1,7 @@
 """The Coder and the Tester take turns until the job works."""
 
+import asyncio
+
 import pytest
 
 from free_claude_code.studio.code_loop import code_and_test, verdict
@@ -148,3 +150,31 @@ def test_a_project_is_named_as_the_user_named_it(goal, name):
     from free_claude_code.studio.code_loop import project_name
 
     assert project_name(goal) == name
+
+
+@pytest.mark.asyncio
+async def test_stop_in_the_hq_stops_a_coding_job_mid_round(make_studio):
+    """The Tester's round runs inside the Coder/Tester job; Stop must reach it
+    and end the job, not let the Coder start another round."""
+    testing = asyncio.Event()
+
+    async def respond(system: str, prompt: str):
+        if "Round 1: test" in prompt:
+            testing.set()
+            await asyncio.Event().wait()  # a slow local model, mid-answer
+        return tool_reply("finish", {"summary": "Built tips.html."})
+
+    studio, model = make_studio(respond)
+    await studio.ensure_defaults()
+    tester = await studio.agent_by_name("Tester")
+    assert tester is not None
+
+    await studio.start_code_loop("code me a tip calculator", parent_chat_id=None)
+    await asyncio.wait_for(testing.wait(), timeout=5)
+    stopped = await studio.stop_agent_work(tester.id)
+    await asyncio.wait_for(studio.wait_for_background(), timeout=5)
+
+    assert [run.status for run in stopped] == ["cancelled"]
+    runs = sorted(await studio.runs(), key=lambda run: run.created_at)
+    assert [run.status for run in runs] == ["succeeded", "cancelled"]
+    assert not any("Round 2" in str(call["prompt"]) for call in model.calls)

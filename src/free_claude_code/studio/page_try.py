@@ -30,6 +30,16 @@ BROWSER_CHANNELS = ("", "msedge", "chrome")
 ACTIONS = ("fill", "select", "click", "press", "check", "uncheck", "wait", "read")
 _CSS = re.compile(r"^[#.\[*]|^[a-z][a-z0-9-]*(?:[#.\[:]\S*)?$|\s[>~+]\s")
 """Looks like a CSS selector: #id, .class, [attr], a tag, or a > b."""
+_NAME = re.compile(r"^[A-Za-z][\w-]*$")
+"""A bare id or name (bill-amount), which small models often give without #."""
+CONTROLS_JS = """() => [...document.querySelectorAll(
+  'input, select, textarea, button, a[href], [role=button]'
+)].filter(e => e.offsetParent !== null || e.tagName === 'INPUT').slice(0, 20).map(e => {
+  const tag = e.tagName.toLowerCase();
+  const label = (e.labels && e.labels[0] ? e.labels[0].innerText : e.innerText || e.value || '').trim();
+  const where = e.id ? '#' + e.id : e.name ? `${tag}[name=${e.name}]` : tag;
+  return label ? `${where} "${label.slice(0, 30)}"` : where;
+})"""
 
 
 class PageTryError(RuntimeError):
@@ -217,6 +227,10 @@ async def _find(tab: Any, target: str) -> Any:
                 return found.first
         except Exception:  # not valid CSS after all; try it as words
             css = False
+    if _NAME.match(target):
+        found = tab.locator(f'[id="{target}"], [name="{target}"]')
+        if await found.count():
+            return found.first
     for found in (
         tab.get_by_label(target),
         tab.get_by_role("button", name=target),
@@ -285,11 +299,21 @@ async def _do(tab: Any, number: int, step: Step, report: PageReport) -> bool:
     except Exception as error:
         first = str(error).splitlines()[0] if str(error) else type(error).__name__
         logger.debug("Studio: try_page step {} failed: {}", number, first)
+        controls = await _controls(tab)
         report.problems.append(
             f"Step {number} ({label}) couldn't be done: {first[:240]}. Check "
             "the target exists and is visible (use #id, a label, or button text)."
+            + (f" The page has: {', '.join(controls)}." if controls else "")
         )
         return False
+
+
+async def _controls(tab: Any) -> list[str]:
+    """The page's boxes and buttons, to name in a failed step's report."""
+    try:
+        return [str(item) for item in await tab.evaluate(CONTROLS_JS)]
+    except Exception:
+        return []
 
 
 async def _shown(found: Any, timeout: float) -> str:

@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import anyio.to_thread
 import httpx
@@ -738,6 +739,9 @@ class StudioService:
         self._stand_in_note = ""
         self._video_lock = asyncio.Lock()
         self._run_jobs: dict[str, asyncio.Task[object]] = {}
+        # Chat turns started from the HQ, so Stop reaches them too:
+        # agent id -> {turn: (chat id, what it was asked)}.
+        self._hq_turns: dict[str, dict[asyncio.Task[object], tuple[str, str]]] = {}
         self._study_jobs: dict[str, asyncio.Task[object]] = {}
         self._reminders_checked = -_REMINDER_SECONDS
         self._speech_cache: dict[tuple[object, ...], bytes] = {}
@@ -3665,6 +3669,28 @@ class StudioService:
                 data={"kind": "run_finished", "run_id": run.id, "status": "cancelled"},
             )
             stopped.append(finished)
+        for turn, (chat_id, asked) in tuple(self._hq_turns.get(agent_id, {}).items()):
+            turn.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await turn
+            await self._store.append_message(
+                chat_id=chat_id,
+                role="event",
+                text="Stopped by the user.",
+                author="studio",
+                data={"kind": "turn_stopped"},
+            )
+            stopped.append(
+                AgentRun.model_validate(
+                    {
+                        "agent_id": agent_id,
+                        "chat_id": chat_id,
+                        "goal": asked,
+                        "status": "cancelled",
+                        "error": "Stopped by the user.",
+                    }
+                )
+            )
         return stopped
 
     async def team_report(self) -> str:
@@ -6013,13 +6039,33 @@ class StudioService:
         await self._post_handoff(agent, goal, parent_chat_id, run.id)
         note = await self._room_note(run) if parent_chat_id else ""
         async with self._working(agent.id):
-            finished = await self._runner().run_task(
-                agent,
-                chat,
-                run,
-                note=note,
-                fallback_model=await self._fallback_model(agent),
+            # Its own job, so Stop in the HQ or the chat reaches a task that
+            # something (a code loop, the main AI) is waiting on.
+            job = self.spawn(
+                self._runner().run_task(
+                    agent,
+                    chat,
+                    run,
+                    note=note,
+                    fallback_model=await self._fallback_model(agent),
+                )
             )
+            self._run_jobs[run.id] = job
+            try:
+                finished = cast(AgentRun, await job)
+            except asyncio.CancelledError:
+                waiting = asyncio.current_task()
+                if not job.cancelled() or (waiting and waiting.cancelling()):
+                    raise
+                finished = run.model_copy(
+                    update={
+                        "status": "cancelled",
+                        "error": "Stopped by the user.",
+                        "updated_at": now_ms(),
+                    }
+                )
+            finally:
+                self._run_jobs.pop(run.id, None)
         if parent_chat_id:
             await self._share_in_room(agent, finished)
         await self._refresh_site_count(site_id)
@@ -6359,32 +6405,43 @@ class StudioService:
                 chat_id=chat.id, role="assistant", text=line, author=agent.name
             )
             return {"accepted": True, "chat_id": chat.id}
-        if agent.role in HQ_PROJECT_ROLES and not chat.site_id:
+        if agent.role in HQ_PROJECT_ROLES:
             # Making and testing need a project to work in: the one the job
-            # names, or a new one titled from it.
-            site = await Crew(
+            # names ("test the Tip Calculator"), else the one this chat has,
+            # else a new one titled from the job.
+            crew = Crew(
                 store=self._store,
                 host=self,
                 helper_pipeline=self.settings.studio_helper_pipeline,
-            ).project_for(
-                ToolContext(
-                    agent_id=agent.id,
-                    chat_id=chat.id,
-                    agent_name=agent.name,
-                    agent_role=agent.role,
-                ),
-                project_name(text),
-                task=text,
-                owner=agent,
             )
-            chat = chat.model_copy(update={"site_id": site.id})
-            await self._store.put(chat)
+            named = await crew.named_project(text)
+            site_id = named.id if named else chat.site_id
+            if not site_id:
+                site_id = (
+                    await crew.project_for(
+                        ToolContext(
+                            agent_id=agent.id,
+                            chat_id=chat.id,
+                            agent_name=agent.name,
+                            agent_role=agent.role,
+                        ),
+                        project_name(text),
+                        task=text,
+                        owner=agent,
+                    )
+                ).id
+            if site_id != chat.site_id:
+                chat = chat.model_copy(update={"site_id": site_id})
+                await self._store.put(chat)
 
         async def answer() -> None:
             with contextlib.suppress(StudioError, StudioNotFoundError):
                 await self.send(chat.id, text)
 
-        self.spawn(answer())
+        turn = self.spawn(answer())
+        turns = self._hq_turns.setdefault(agent.id, {})
+        turns[turn] = (chat.id, text)
+        turn.add_done_callback(lambda done: turns.pop(done, None))
         return {"accepted": True, "chat_id": chat.id}
 
     async def agent_activity(self, agent_id: str, *, after: int = 0) -> JsonObject:

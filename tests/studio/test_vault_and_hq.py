@@ -1,6 +1,7 @@
 """6.60: the repo vault (outside repos survive their deletion), pictures for
 vision models, and the pixel HQ of the whole team."""
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -378,5 +379,53 @@ async def test_a_builder_job_from_hq_gets_a_project_to_work_in(make_studio):
         site = await studio.site(chat.site_id)
         assert "bakery" in site.name.lower()
 
+    finally:
+        await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_hq_job_naming_a_project_works_in_that_project(make_studio):
+    studio, _ = make_studio(["On it."])
+    try:
+        await studio.ensure_defaults()
+        tester = next(a for a in await studio.agents() if a.name == "Tester")
+        made = await studio.create_site(name="Tip Calculator")
+        other = await studio.create_site(name="Snake Game")
+
+        said = await studio.hq_say(tester.id, "Test the Tip Calculator project")
+        chat = await studio._store.get(Chat, said["chat_id"])
+        assert chat is not None and chat.site_id == made.id
+        assert len(await studio.sites()) == 2, "no new empty project"
+
+        again = await studio.hq_say(tester.id, "Now test the snake game")
+        chat = await studio._store.get(Chat, again["chat_id"])
+        assert chat is not None and chat.site_id == other.id
+    finally:
+        await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_stop_in_the_hq_stops_a_job_given_in_the_hq(make_studio):
+    answering = asyncio.Event()
+
+    async def respond(system: str, prompt: str):
+        answering.set()
+        await asyncio.Event().wait()  # a slow local model, mid-answer
+
+    studio, _ = make_studio(respond)
+    try:
+        await studio.ensure_defaults()
+        helper = next(a for a in await studio.agents() if a.name == "Helper")
+        said = await studio.hq_say(helper.id, "Plan my week")
+        await asyncio.wait_for(answering.wait(), timeout=5)
+
+        stopped = await studio.stop_agent_work(helper.id)
+
+        assert [(run.goal, run.status) for run in stopped] == [
+            ("Plan my week", "cancelled")
+        ]
+        messages = await studio.transcript(said["chat_id"])
+        assert messages[-1].text == "Stopped by the user."
+        assert await studio.stop_agent_work(helper.id) == []
     finally:
         await studio.shutdown()
