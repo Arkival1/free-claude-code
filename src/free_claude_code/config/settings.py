@@ -65,6 +65,7 @@ def _validate_model_ref(value: str) -> str:
 IMAGE_STYLES = ("superhero", "superhero-small")
 """The image engine's styles (studio.image_engine.STYLES, kept in step by a test)."""
 
+
 class Settings(BaseModel):
     """Validated application settings with no file or process I/O."""
 

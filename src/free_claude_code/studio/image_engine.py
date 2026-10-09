@@ -93,6 +93,17 @@ class Style:
     sampler: str = "euler"
     scheduler: str = "sgm_uniform"
     about: str = ""
+    scenery_weights: tuple[float, ...] = ()
+    """The LoRAs' weights for places (a character style LoRA greys
+    backgrounds out at full strength; 0 leaves one out); empty keeps the
+    usual weights."""
+    scenery_steps: int = 0
+    """Places are painted once and kept, so they can take the slow, full
+    recipe (real colour guidance) instead of the speed LoRA's; 0 keeps the
+    usual steps."""
+    scenery_cfg: float = 5.5
+    scenery_sampler: str = "dpm++2m"
+    scenery_scheduler: str = "karras"
 
     def files(self) -> tuple[ModelFile, ...]:
         return (self.model, *(lora for lora, _ in self.loras))
@@ -157,6 +168,8 @@ STYLES: dict[str, Style] = {
                 "d5a3a5204e4ac9043f2e42c616ef6884457c450da0f8cb6f69982ef4649e5ddf",
             ),
             loras=((DCAU, 0.9), (LIGHTNING, 1.0)),
+            scenery_weights=(0.45, 0.0),
+            scenery_steps=24,
             prompt=SUPERHERO_PROMPT,
             negative=SUPERHERO_NEGATIVE,
             about="Best quality: needs about 8 GB on the graphics card.",
@@ -170,6 +183,8 @@ STYLES: dict[str, Style] = {
                 "f25f621cc552b35a0340b7915093ecbb7d02acc7963f89a86fa3e7c3baaf26e4",
             ),
             loras=((DCAU, 0.9), (LIGHTNING, 1.0)),
+            scenery_weights=(0.45, 0.0),
+            scenery_steps=24,
             prompt=SUPERHERO_PROMPT,
             negative=SUPERHERO_NEGATIVE,
             about="A little softer, about two thirds of the memory.",
@@ -233,6 +248,8 @@ class Picture:
     """Change this picture instead of starting from noise (img2img)."""
     strength: float = 0.5
     """How much of start_from to change, 0 (none) to 1 (all)."""
+    scenery: bool = False
+    """A place with nobody in it (the style LoRA is used lightly)."""
 
 
 @dataclass
@@ -573,9 +590,19 @@ class ImageEngine:
         binary = self.binary()
         if binary is None:
             raise ImageEngineError("Install the image engine first.")
+        weights = [weight for _, weight in style.loras]
+        if picture.scenery and len(style.scenery_weights) == len(weights):
+            weights = list(style.scenery_weights)
         loras = " ".join(
-            f"<lora:{Path(lora.local).stem}:{weight:g}>" for lora, weight in style.loras
+            f"<lora:{Path(lora.local).stem}:{weight:g}>"
+            for (lora, _), weight in zip(style.loras, weights, strict=True)
+            if weight > 0
         )
+        full = picture.scenery and style.scenery_steps > 0
+        steps = style.scenery_steps if full else style.steps
+        cfg = style.scenery_cfg if full else style.cfg
+        sampler = style.scenery_sampler if full else style.sampler
+        scheduler = style.scenery_scheduler if full else style.scheduler
         command = [
             str(binary),
             "-m", str(self.models_dir / style.model.local),
@@ -584,10 +611,10 @@ class ImageEngine:
             "--negative-prompt", ", ".join(x for x in (style.negative, picture.negative) if x),
             "-W", str(_multiple(picture.width)),
             "-H", str(_multiple(picture.height)),
-            "--steps", str(style.steps),
-            "--cfg-scale", f"{style.cfg:g}",
-            "--sampling-method", style.sampler,
-            "--scheduler", style.scheduler,
+            "--steps", str(steps),
+            "--cfg-scale", f"{cfg:g}",
+            "--sampling-method", sampler,
+            "--scheduler", scheduler,
             "-s", str(picture.seed),
             "-t", str(self._threads()),
             "--vae-tiling",

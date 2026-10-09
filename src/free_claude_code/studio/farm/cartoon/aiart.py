@@ -32,7 +32,10 @@ FEELING_WORDS = {
 TALK_WORDS = "open mouth, talking"
 VARIANT_STRENGTH = 0.42
 TALK_STRENGTH = 0.32
-PLACE_TAIL = "no humans, scenery, wide establishing shot, detailed painted background"
+PLACE_TAIL = (
+    "no humans, scenery, wide establishing shot, animation background art, "
+    "vibrant colors, colorful, rich saturated palette, clean lines"
+)
 SPRITE_TAIL = (
     "solo, full body, standing, three-quarter view, simple background, "
     "plain white background, character turnaround"
@@ -92,7 +95,7 @@ class ArtBook:
         out = self.folder / "places" / f"{_key(prompt, str(seed))}.png"
         if not out.is_file():
             await self._paint(prompt, PLACE_SIZE, seed, out, None, 1.0)
-            polish(out)
+            polish(out, colour=1.0)
         return out
 
     async def character(
@@ -155,14 +158,16 @@ class ArtBook:
         return Sprites(base=base, talk=talk, feelings=tuple(kept))
 
 
-def polish(path: Path) -> Path:
+def polish(path: Path, colour: float = 1.18) -> Path:
     """Crisper ink and fuller colour, as on TV: fast painting (few steps,
-    a squeezed model) comes out a little washed and soft."""
+    a squeezed model) comes out a little washed and soft. Places, painted
+    with the full recipe, only need the crisper ink (colour=1)."""
     from PIL import Image, ImageEnhance, ImageFilter
 
     with Image.open(path) as opened:
         picture = opened.convert("RGB")
-    picture = ImageEnhance.Color(picture).enhance(1.18)
+    if colour != 1:
+        picture = ImageEnhance.Color(picture).enhance(colour)
     picture = ImageEnhance.Contrast(picture).enhance(1.08)
     picture = picture.filter(
         ImageFilter.UnsharpMask(radius=1.6, percent=70, threshold=2)

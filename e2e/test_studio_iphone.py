@@ -783,9 +783,7 @@ def test_the_image_engine_can_be_set_up_from_studio(
     expect(engine).to_be_visible()
     expect(engine).to_contain_text("Teen Titans")
     expect(engine).to_contain_text("Not set up yet")
-    expect(
-        engine.get_by_role("button", name="Set up the image engine")
-    ).to_be_visible()
+    expect(engine.get_by_role("button", name="Set up the image engine")).to_be_visible()
 
 
 def test_the_desktop_browser_card_says_what_it_does(

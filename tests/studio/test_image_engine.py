@@ -290,7 +290,8 @@ async def test_an_online_image_service_paints_when_chosen(make_studio, tmp_path)
     def service(request: httpx.Request) -> httpx.Response:
         sent.append(request)
         return httpx.Response(
-            200, json={"data": [{"b64_json": base64.b64encode(b"\x89PNG fake").decode()}]}
+            200,
+            json={"data": [{"b64_json": base64.b64encode(b"\x89PNG fake").decode()}]},
         )
 
     studio, _ = make_studio(
@@ -322,17 +323,28 @@ async def test_a_stopped_picture_stops_the_painter(tmp_path, tiny_style):
     import asyncio
     import os
 
-    slow = FAKE_SD.replace("for step in range(1, 5):", "import time\ntime.sleep(30)\nfor step in range(1, 5):")
+    slow = FAKE_SD.replace(
+        "for step in range(1, 5):",
+        "import time\ntime.sleep(30)\nfor step in range(1, 5):",
+    )
     data = io.BytesIO()
     with zipfile.ZipFile(data, "w") as bundle:
         bundle.writestr("sd-cli", slow)
-    files = {this_pc_name(): data.getvalue(), "model.gguf": MODEL, "toon.safetensors": LORA}
+    files = {
+        this_pc_name(): data.getvalue(),
+        "model.gguf": MODEL,
+        "toon.safetensors": LORA,
+    }
     paint = engine(tmp_path, hub(files))
     await paint.install()
     await paint.setup_style()
     job = asyncio.ensure_future(paint.make(Picture(prompt="x"), tmp_path / "x.png"))
     await asyncio.sleep(1.0)
-    pids = [p for p in os.listdir("/proc") if p.isdigit()] if os.path.isdir("/proc") else []
+    pids = (
+        [p for p in os.listdir("/proc") if p.isdigit()]
+        if os.path.isdir("/proc")
+        else []
+    )
     job.cancel()
     with pytest.raises(asyncio.CancelledError):
         await job
@@ -355,3 +367,45 @@ def test_the_settings_offer_every_style():
     from free_claude_code.config.settings import IMAGE_STYLES
 
     assert tuple(image_engine.STYLES) == IMAGE_STYLES
+
+
+@pytest.mark.asyncio
+async def test_places_use_the_style_lightly(tmp_path, monkeypatch, tiny_style):
+    from dataclasses import replace
+
+    monkeypatch.setitem(
+        image_engine.STYLES, "tiny", replace(tiny_style, scenery_weights=(0.4,))
+    )
+    files = {this_pc_name(): sd_zip(), "model.gguf": MODEL, "toon.safetensors": LORA}
+    paint = engine(tmp_path, hub(files))
+    await paint.install()
+    await paint.setup_style()
+    person = paint.command(Picture(prompt="hero"), tmp_path / "a.png")
+    place = paint.command(Picture(prompt="city", scenery=True), tmp_path / "b.png")
+    assert "<lora:toon:0.8>" in person[person.index("-p") + 1]
+    assert "<lora:toon:0.4>" in place[place.index("-p") + 1]
+
+
+@pytest.mark.asyncio
+async def test_places_get_the_full_colour_recipe(tmp_path, tiny_style):
+    files = {this_pc_name(): sd_zip(), "model.gguf": MODEL, "toon.safetensors": LORA}
+    paint = engine(tmp_path, hub(files))
+    await paint.install()
+    style = image_engine.STYLES["superhero"]
+    person = paint.command(Picture(prompt="hero"), tmp_path / "a.png", style)
+    place = paint.command(
+        Picture(prompt="city", scenery=True), tmp_path / "b.png", style
+    )
+
+    def flag(command: list[str], name: str) -> str:
+        return command[command.index(name) + 1]
+
+    # Characters: the fast 8-step speed LoRA.
+    assert "<lora:lightning8:1>" in flag(person, "-p")
+    assert flag(person, "--steps") == "8" and flag(person, "--cfg-scale") == "1"
+    # Places (painted once, kept): full steps with real colour guidance,
+    # the style LoRA light, and no speed LoRA.
+    assert "lightning8" not in flag(place, "-p")
+    assert "<lora:dcau:0.45>" in flag(place, "-p")
+    assert flag(place, "--steps") == "24" and flag(place, "--cfg-scale") == "5.5"
+    assert flag(place, "--sampling-method") == "dpm++2m"

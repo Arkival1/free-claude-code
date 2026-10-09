@@ -993,7 +993,9 @@ length, and the times it posts.
   the Repo vault, so they still install if they leave GitHub or Hugging
   Face. **Paint a test** shows a character or place in the style. The
   writer says where each shot happens in its own words (*"a rooftop over
-  the city at night"*), and each place is painted once. Each character is
+  the city at night"*), and each place is painted once, with the full
+  24-step recipe and real colour guidance (a few minutes on an 8 GB card),
+  since it is kept and reused. Each character is
   painted once, full body, and cut out, plus a talking mouth and the
   feelings the story needs, made from that same picture so they look the
   same in every shot and every video; they breathe, walk, lean into

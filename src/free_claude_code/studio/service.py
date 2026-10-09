@@ -1200,6 +1200,8 @@ class StudioService:
                     seed=seed,
                     start_from=start_from,
                     strength=strength,
+                    # Places are painted wide, characters tall.
+                    scenery=size[0] > size[1],
                 ),
                 out,
             )
