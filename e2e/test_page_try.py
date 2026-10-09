@@ -70,6 +70,12 @@ def test_it_catches_a_box_that_does_nothing(tmp_path: Path):
     )
     assert again.passed, again.render()
 
+    # A wrong id (a small model's guess) is answered with the ids there are.
+    guessed = run(tmp_path, [{"do": "read", "target": "#tip-total"}])
+    (problem,) = guessed.problems
+    assert "Fix the step, not the page" in problem
+    assert '#tip "$0.00"' in problem and '#bill "Bill Amount ($)"' in problem
+
 
 def test_it_reports_pop_ups_errors_missing_files_and_a_too_wide_page(tmp_path: Path):
     (tmp_path / "index.html").write_text(

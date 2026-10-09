@@ -32,14 +32,28 @@ _CSS = re.compile(r"^[#.\[*]|^[a-z][a-z0-9-]*(?:[#.\[:]\S*)?$|\s[>~+]\s")
 """Looks like a CSS selector: #id, .class, [attr], a tag, or a > b."""
 _NAME = re.compile(r"^[A-Za-z][\w-]*$")
 """A bare id or name (bill-amount), which small models often give without #."""
-CONTROLS_JS = """() => [...document.querySelectorAll(
-  'input, select, textarea, button, a[href], [role=button]'
-)].filter(e => e.offsetParent !== null || e.tagName === 'INPUT').slice(0, 20).map(e => {
-  const tag = e.tagName.toLowerCase();
-  const label = (e.labels && e.labels[0] ? e.labels[0].innerText : e.innerText || e.value || '').trim();
-  const where = e.id ? '#' + e.id : e.name ? `${tag}[name=${e.name}]` : tag;
-  return label ? `${where} "${label.slice(0, 30)}"` : where;
-})"""
+CONTROLS_JS = """() => {
+  const seen = new Set(), out = [];
+  const add = (e, label) => {
+    if (seen.has(e) || out.length >= 24) return;
+    seen.add(e);
+    const tag = e.tagName.toLowerCase();
+    const where = e.id ? '#' + e.id : e.name ? `${tag}[name=${e.name}]` : tag;
+    label = (label || '').trim().replace(/\\s+/g, ' ').slice(0, 30);
+    out.push(label ? `${where} "${label}"` : where);
+  };
+  for (const e of document.querySelectorAll(
+    'input, select, textarea, button, a[href], [role=button]'
+  )) {
+    const label = e.labels && e.labels[0] ? e.labels[0].innerText : e.innerText || e.value;
+    add(e, label);
+  }
+  // Elements with an id that show something: results like #total.
+  for (const e of document.querySelectorAll('body [id]')) {
+    if (e.children.length <= 2 && e.innerText) add(e, e.innerText);
+  }
+  return out;
+}"""
 
 
 class PageTryError(RuntimeError):
@@ -301,8 +315,9 @@ async def _do(tab: Any, number: int, step: Step, report: PageReport) -> bool:
         logger.debug("Studio: try_page step {} failed: {}", number, first)
         controls = await _controls(tab)
         report.problems.append(
-            f"Step {number} ({label}) couldn't be done: {first[:240]}. Check "
-            "the target exists and is visible (use #id, a label, or button text)."
+            f"Step {number} ({label}) couldn't be done: {first[:240]}. Fix the "
+            "step, not the page: use a target the page has (#id, a label, or "
+            "button text)."
             + (f" The page has: {', '.join(controls)}." if controls else "")
         )
         return False
