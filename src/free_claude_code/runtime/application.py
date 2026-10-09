@@ -276,7 +276,10 @@ class ApplicationRuntime:
                     )
                 )
                 if self._studio_service is not None:
-                    # The outside repos that come with FCC are ready on load.
+                    # The starter team is filled in (agents an update added
+                    # join a team made before it), and the outside repos that
+                    # come with FCC are ready on load.
+                    self._studio_service.spawn(self._studio_service.ensure_defaults())
                     self._studio_service.spawn(self._studio_service.ensure_starters())
                 self._started = True
         except asyncio.CancelledError:

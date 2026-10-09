@@ -268,3 +268,42 @@ async def test_the_hq_shows_who_is_where_and_you_can_talk_to_them(make_studio):
             f"/studio/api/hq/agents/{agents['Builder'].id}/stop"
         )
         assert stopped.json() == {"stopped": 0}
+
+
+@pytest.mark.asyncio
+async def test_a_team_made_before_an_update_gets_its_new_agents(make_studio):
+    """The Coder and the Tester came in an update: a team made before it
+    gets them in the HQ (in the mailroom), without being made again."""
+    from free_claude_code.studio.models import Agent
+
+    studio, _ = make_studio([])
+    try:
+        await studio.ensure_defaults()
+        for agent in await studio.agents():
+            if agent.name in {"Coder", "Tester"}:
+                # As on a PC set up before they existed.
+                await studio._store.delete(Agent, agent.id)
+        assert {"Coder", "Tester"}.isdisjoint(a.name for a in await studio.agents())
+
+        view = await studio.hq()
+        where = {a["name"]: a["station"] for a in view["agents"]}
+        assert where["Coder"] == "mailroom" and where["Tester"] == "mailroom"
+        names = [a.name for a in await studio.agents()]
+        assert names.count("Coder") == 1 and names.count("Tester") == 1
+    finally:
+        await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_starter_agent_the_user_deletes_stays_deleted(make_studio):
+    studio, _ = make_studio([])
+    try:
+        await studio.ensure_defaults()
+        tester = next(a for a in await studio.agents() if a.name == "Tester")
+        await studio.delete_agent(tester.id)
+        await studio.ensure_defaults()
+        view = await studio.hq()
+        assert "Tester" not in {a["name"] for a in view["agents"]}
+        assert "Coder" in {a["name"] for a in view["agents"]}
+    finally:
+        await studio.shutdown()

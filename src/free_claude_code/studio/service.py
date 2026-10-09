@@ -298,6 +298,12 @@ _DEFAULT_ROLES = {
     LAB_AGENT_NAME: "lab",
     FARM_AGENT_NAME: "farm",
 }
+DEFAULT_AGENT_NAMES = frozenset(
+    {*_DEFAULT_ROLES, GUIDE_AGENT_NAME, TEACHER_AGENT_NAME, STUDENT_AGENT_NAME}
+)
+"""The starter team Studio fills in (the main AI is found by its role)."""
+REMOVED_DEFAULT_FLAG = "removed_default:"
+"""A starter agent the user deleted (by name), so it isn't made again."""
 SHARED_MEMORY_NAME = "Team memory"
 TEAM_LAYOUT_FLAG = "team_layout_v1"
 AGENT_RESCAN_FLAG = "extension_agents_v2"
@@ -1852,6 +1858,8 @@ class StudioService:
         for name, role, model, prompt, tools in wanted:
             if name in by_name:
                 continue
+            if await self._store.get(StudioFlag, f"{REMOVED_DEFAULT_FLAG}{name}"):
+                continue
             agent = Agent.model_validate(
                 {
                     "name": name,
@@ -3006,6 +3014,12 @@ class StudioService:
                 )
             )
         await self.stop_agent_work(agent_id)
+        if agent.name in DEFAULT_AGENT_NAMES:
+            # A starter agent the user deleted stays deleted: it isn't made
+            # again when Studio fills in the starter team.
+            await self._store.put(
+                StudioFlag(id=f"{REMOVED_DEFAULT_FLAG}{agent.name}", value="1")
+            )
         # Rooms are shared: the agent leaves them, and only an empty room goes.
         chats = [
             chat
@@ -6168,6 +6182,9 @@ class StudioService:
     async def hq(self) -> JsonObject:
         """The whole team as the pixel HQ shows it: who is at which station
         doing what, what each station has waiting, and the newest steps."""
+        # Starter agents added by an update (the Coder and the Tester came in
+        # 6.53) join a team made before it.
+        await self.ensure_defaults()
         agents = [agent for agent in await self.agents() if not agent.archived]
         busy = await self._busy_agents(await self._active_runs())
         latest_run: dict[str, AgentRun] = {}
