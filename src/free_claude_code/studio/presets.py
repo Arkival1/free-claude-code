@@ -476,6 +476,7 @@ TESTER_TOOLS: tuple[str, ...] = (
     "finish",
 )
 HELPER_TOOLS: tuple[str, ...] = (
+    "ideas",
     "knowledge",
     "skill",
     "mcp",
@@ -546,6 +547,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "save_image",
             "list_photos",
             "use_photo",
+            "ideas",
         ),
     ),
     (
@@ -630,6 +632,7 @@ CODER_TOOLS: tuple[str, ...] = (
     "try_page",
     "ask_researcher",
     "ask_helper",
+    "ideas",
     "knowledge",
     "conversation",
     "skill",
@@ -648,7 +651,14 @@ LAB_AGENT_PROMPT = (
     "the colours, gas, heat, and pH, and anything that failed. The Lab "
     "refuses dangerous requests; say so plainly when it does."
 )
-LAB_AGENT_TOOLS: tuple[str, ...] = ("lab", "knowledge", "skill", *_WEB, *_MEMORY)
+LAB_AGENT_TOOLS: tuple[str, ...] = (
+    "lab",
+    "ideas",
+    "knowledge",
+    "skill",
+    *_WEB,
+    *_MEMORY,
+)
 FARM_AGENT_PROMPT = (
     "Run the Content Farm for the team: faceless short videos for Reels, "
     "TikTok, and YouTube Shorts, made on this PC. When Jarvis hands you a "
@@ -678,6 +688,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "try_page",
             "ask_researcher",
             "ask_helper",
+            "ideas",
             *_MEMORY,
         ),
     ),

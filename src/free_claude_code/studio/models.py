@@ -525,6 +525,29 @@ class Photo(Record):
     updated_at: int = Field(default_factory=now_ms)
 
 
+class Idea(Record):
+    """One reference on the user's ideas board: a note, a photo, a video, or a
+    link to what they want (a UI, a layout, a look), for the agents."""
+
+    id: str = Field(default_factory=lambda: new_id("ida"))
+    kind: Literal["note", "photo", "video", "link"] = "note"
+    title: str
+    text: str = ""
+    """What the user wrote about it: what they like, what it is for."""
+    url: str = ""
+    file: str = ""
+    """The photo's or video's file name in the ideas folder."""
+    content_type: str = ""
+    width: int = 0
+    height: int = 0
+    size: int = 0
+    tags: tuple[str, ...] = ()
+    project: str = ""
+    """The project or app it is for, when the user says."""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
 class LabProject(Record):
     """Something made in the Lab: a mix, a product, a material, or a build."""
 

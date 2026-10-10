@@ -1741,6 +1741,27 @@ slow PC writing a long page isn't cut off.
 </details>
 
 <details>
+<summary><strong>Ideas board: your references for the team</strong></summary>
+
+The **Ideas board** (in the side menu) is where you show the team what you're
+after: a website or app UI you like, a layout, colours, a logo, a competitor's
+site, a video of how something should feel, or just a note. Give each one a
+title, say what you like about it, and add tags and the project it is for;
+then **Add note or link**, or **Add photos or videos** (JPEG, PNG, WebP, or
+GIF photos up to 25 MB; MP4, MOV, or WebM videos up to 200 MB). Files stay on
+this PC.
+
+The Builder, Coder, Lab, Helper, and every repo agent get the `ideas` tool.
+When the board has anything on it, they are told so before they start, then
+search it (`ideas` with `search`), read an idea in full (`read`), and can put
+a reference photo into the project (`use`). They go in the direction your
+references point and make their own work at a business level, not a copy. A
+text-only local model can't watch a video or look at a photo, so what you
+write about each one is what it goes by: say what you like.
+
+</details>
+
+<details>
 <summary><strong>Connectors: Gmail, GitHub, Discord, and more for the team</strong></summary>
 
 The **Connectors** page gives the team outside services. Each takes a token

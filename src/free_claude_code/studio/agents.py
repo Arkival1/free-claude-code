@@ -29,7 +29,7 @@ from .llm import (
     unreadable_tool_call,
 )
 from .memory import MemoryService, server_area
-from .models import Agent, AgentRun, Chat, Message, TunePack, now_ms
+from .models import Agent, AgentRun, Chat, Idea, Message, TunePack, now_ms
 from .recall_messages import Found, recall_note, search
 from .store import StudioStore
 from .team_models import model_label
@@ -582,6 +582,20 @@ TOOLSHED_PROMPT = (
     "have, go to the toolshed: toolshed action list shows what is on the "
     "shelf, and action take picks up what you need for this job."
 )
+IDEAS_SHOWN = 6
+
+
+def ideas_prompt(titles: Sequence[str]) -> str:
+    """What an agent with the ideas tool hears when the board has ideas."""
+    return (
+        "The user keeps an ideas board of references for you (latest: "
+        + "; ".join(titles)
+        + "). Before you design or build, search it with the ideas tool for "
+        "this job and read what fits: go in the look, layout, and direction it "
+        "points, then make your own work at a business level, not a copy."
+    )
+
+
 CONTEXT_MANAGER = re.compile(r"context[- ]manager|requesting_agent", re.IGNORECASE)
 """Instructions written for a Claude Code team with a context-manager agent
 (most of awesome-claude-code-subagents)."""
@@ -833,6 +847,12 @@ class AgentRunner:
             parts.append(TEAM_PROMPT)
         if TOOLSHED_TOOL in agent.tools:
             parts.append(TOOLSHED_PROMPT)
+        if "ideas" in agent.tools:
+            board = await self._store.find(
+                Idea, order_by="created_at DESC", limit=IDEAS_SHOWN
+            )
+            if board:
+                parts.append(ideas_prompt([idea.title for idea in board]))
         if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):
             parts.append(WEB_PROMPT)
         elif self._toolbox.web_paused(agent.tools, role=agent.role):

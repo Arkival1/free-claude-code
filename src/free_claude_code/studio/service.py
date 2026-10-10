@@ -93,6 +93,7 @@ from .guide import (
     page_name,
 )
 from .hq import station_for, stations_view
+from .ideas import IdeaBoard, IdeaError
 from .image_cloud import CloudSettings, ImageCloudError, make_picture
 from .image_engine import ImageEngine, ImageEngineError, Picture
 from .lab import text as lab_text
@@ -153,6 +154,7 @@ from .models import (
     ExamQuestion,
     FarmChannel,
     FarmPost,
+    Idea,
     Lesson,
     LoraJob,
     MemoryEntry,
@@ -288,6 +290,7 @@ from .teamplan import summary as plan_summary
 from .tools import (
     ALL_TOOL_NAMES,
     DEFAULT_TOOL_NAMES,
+    IDEAS_TOOL,
     MAIN_ONLY_TOOLS,
     MAIN_ROLE,
     MAIN_TOOL_NAMES,
@@ -339,6 +342,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "save_image",
         "list_photos",
         "use_photo",
+        "ideas",
     ),
     RESEARCHER_AGENT_NAME: RESEARCHER_TOOLS,
     HELPER_AGENT_NAME: HELPER_TOOLS,
@@ -412,7 +416,9 @@ OWN_MEMORY_TOOLS = ("remember", "recall")
 """A repo agent's own memory (its own area while it thinks on a server)."""
 TOOLSHED_FLAG = "extension_agent_toolshed_v1"
 """Repo agents already on the team were given the toolshed."""
-REPO_AGENT_EXTRAS = (*OWN_MEMORY_TOOLS, TOOLSHED_TOOL)
+IDEAS_FLAG = "extension_agent_ideas_v1"
+"""Repo agents already on the team were given the ideas board."""
+REPO_AGENT_EXTRAS = (*OWN_MEMORY_TOOLS, TOOLSHED_TOOL, IDEAS_TOOL)
 """What every repo agent gets beyond the tools it asks for."""
 """Added repos had their agents read again with the front-matter rule."""
 LOCAL_TEAM_ROLES = frozenset({MAIN_ROLE, "guide", "helper", "lab", "farm"})
@@ -742,6 +748,7 @@ class StudioService:
         self._settings_provider = settings_provider
         self._sites = SiteWorkspace(sites_dir)
         self._photos = PhotoLibrary(store, sites_dir.parent / "photos")
+        self._ideas = IdeaBoard(store, sites_dir.parent / "ideas")
         # Jarvis's playbook until an Obsidian vault is set.
         self._playbook_home = sites_dir.parent / "playbook"
         # Skills, agents, and MCP servers added from GitHub.
@@ -1514,6 +1521,7 @@ class StudioService:
             all_tools=settings.studio_all_tools,
             image_transport=self._search_transport,
             photos=self._photos,
+            ideas=self._ideas,
             desk=self.desk_browser(),
             page_tryer=self._page_tryer,
             screen=self._screen_call,
@@ -2283,6 +2291,56 @@ class StudioService:
 
     async def delete_photo(self, photo_id: str) -> bool:
         return await self._photos.delete(photo_id)
+
+    # ------------------------------------------------------------ ideas board
+
+    @property
+    def ideas(self) -> IdeaBoard:
+        """The user's references for the agents: notes, photos, videos, links."""
+        return self._ideas
+
+    async def add_idea(
+        self,
+        *,
+        title: str = "",
+        text: str = "",
+        url: str = "",
+        tags: object = (),
+        project: str = "",
+        name: str = "",
+        data: bytes | None = None,
+    ) -> JsonObject:
+        """Keep one idea on the board: a note, a link, a photo, or a video."""
+        try:
+            idea = await self._ideas.add(
+                title=title,
+                text=text,
+                url=url,
+                tags=tags,
+                project=project,
+                name=name,
+                data=data,
+            )
+        except IdeaError as error:
+            raise StudioError(str(error)) from error
+        return idea_view(idea)
+
+    async def idea_list(
+        self, query: str = "", *, kind: str = "", tag: str = ""
+    ) -> JsonObject:
+        found = await self._ideas.ideas(query, kind=kind, tag=tag)
+        every = await self._ideas.ideas()
+        tags = sorted({t for idea in every for t in idea.tags})
+        return {"ideas": [idea_view(idea) for idea in found], "tags": tags}
+
+    async def update_idea(self, idea_id: str, values: JsonObject) -> JsonObject:
+        try:
+            return idea_view(await self._ideas.update(idea_id, dict(values)))
+        except IdeaError as error:
+            raise StudioError(str(error)) from error
+
+    async def delete_idea(self, idea_id: str) -> bool:
+        return await self._ideas.delete(idea_id)
 
     # ------------------------------------------------------------ the Lab
 
@@ -5241,6 +5299,7 @@ class StudioService:
             for flag, extra in (
                 (OWN_MEMORY_FLAG, OWN_MEMORY_TOOLS),
                 (TOOLSHED_FLAG, (TOOLSHED_TOOL,)),
+                (IDEAS_FLAG, (IDEAS_TOOL,)),
             ):
                 if await self._store.get(StudioFlag, flag) is None:
                     await self._give_repo_agents(extra)
@@ -8604,6 +8663,14 @@ def _size_label(size: int) -> str:
     if size >= 1_048_576:
         return f"{size / 1_048_576:.1f} MB"
     return f"{max(1, round(size / 1024))} KB"
+
+
+def idea_view(idea: Idea) -> JsonObject:
+    """One idea for the app, with its file's address when it has one."""
+    view = idea.model_dump(mode="json")
+    if idea.file:
+        view["file_url"] = f"/studio/api/ideas/{idea.id}/file"
+    return view
 
 
 def photo_view(photo: Photo) -> JsonObject:

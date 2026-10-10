@@ -1416,6 +1416,37 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Ideas board",
+        route="/studio#ideas",
+        where="Ideas board in the Command Center's side menu.",
+        terms=(
+            "ideas board",
+            "idea board",
+            "references",
+            "inspiration",
+            "mood board",
+            "moodboard",
+            "reference photos",
+            "ui i like",
+            "design i like",
+            "database of ideas",
+        ),
+        body=(
+            "The ideas board keeps your references for the team: a website or "
+            "app UI you like, a layout, colours, a logo, a video of how "
+            "something should feel, or just a note. Add a title, say what you "
+            "like about it, add tags and the project it is for, then press Add "
+            "note or link, or Add photos or videos (photos up to 25 MB, videos "
+            "up to 200 MB). The Builder, Coder, Lab, Helper, and every repo "
+            "agent search it with the ideas tool before they design or build, "
+            "read your notes, can put a reference photo into the project, and "
+            "go in that direction with their own business-level work, not a "
+            "copy. Search and tags narrow the board; notes save as you edit "
+            "them."
+        ),
+        asks=("How do I show the team a design I like?",),
+    ),
+    GuideTopic(
         title="Using LCC from other AI tools",
         route="/studio#connectors",
         where="Connectors page (More, Open connectors), the last card.",
@@ -2243,6 +2274,7 @@ def page_name(route: str) -> str:
         "tune": "Tuning & LoRA",
         "more": "Knowledge & Memory",
         "connectors": "Connectors",
+        "ideas": "Ideas board",
         "hq": "HQ",
         "settings": "Settings",
     }.get(route.rsplit("#", 1)[-1], route)

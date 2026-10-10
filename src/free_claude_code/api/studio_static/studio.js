@@ -4013,6 +4013,135 @@
     ]);
   }
 
+  /* ------------------------------------------------------------ ideas board */
+
+  // The user's references for the team: notes, photos, videos, and links of
+  // what they want. Agents search it before they design or build.
+  async function renderIdeas(search = "", tag = "") {
+    const generation = renderGeneration;
+    const query = new URLSearchParams({ q: search, tag });
+    const data = await api(`/studio/api/ideas?${query}`);
+    if (generation !== renderGeneration) return;
+    const title = el("input", { type: "text", maxlength: "120", placeholder: "Title, e.g. Clean bakery homepage", "aria-label": "Idea title" });
+    const notes = el("textarea", { rows: 3, maxlength: "4000", placeholder: "What you like about it, or what you want: colours, layout, feel, features…", "aria-label": "Idea notes" });
+    const link = el("input", { type: "url", placeholder: "Link (optional): a site, an app, a video", "aria-label": "Idea link" });
+    const tags = el("input", { type: "text", placeholder: "Tags, e.g. ui, website, colours", "aria-label": "Idea tags" });
+    const project = el("input", { type: "text", maxlength: "80", placeholder: "For which project (optional)", "aria-label": "Idea project" });
+    const status = el("p", { class: "muted small", role: "status" });
+    const files = el("input", { type: "file", accept: "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime", multiple: true, hidden: true, "aria-label": "Photos or videos for the ideas board" });
+    const clear = () => {
+      for (const field of [title, notes, link, tags]) field.value = "";
+    };
+    const addText = async () => {
+      if (!notes.value.trim() && !link.value.trim()) return notify("Write the idea or add a link.");
+      try {
+        await post("/studio/api/ideas", { title: title.value, text: notes.value, url: link.value, tags: tags.value, project: project.value });
+        clear();
+        notify("Added to the ideas board.");
+        renderIdeas(search, tag);
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+    files.addEventListener("change", async () => {
+      let added = 0;
+      for (const file of files.files) {
+        status.textContent = `Adding ${file.name}…`;
+        try {
+          const body = file.type.startsWith("image/") ? await shrinkPhoto(file) : file;
+          const params = new URLSearchParams({ name: file.name, title: title.value, text: notes.value, tags: tags.value, project: project.value });
+          await sendFile(`/studio/api/ideas/upload?${params}`, body, (sent, total) => {
+            status.textContent = `Adding ${file.name}… ${Math.round((sent / Math.max(total, 1)) * 100)}%`;
+          });
+          added += 1;
+        } catch (error) {
+          notify(error.message);
+        }
+      }
+      files.value = "";
+      status.textContent = added ? `Added ${added} to the ideas board.` : "";
+      if (added) {
+        clear();
+        renderIdeas(search, tag);
+      }
+    });
+    const finder = el("input", { type: "search", value: search, placeholder: "Search ideas", "aria-label": "Search ideas" });
+    finder.addEventListener("change", () => renderIdeas(finder.value, tag));
+    view.replaceChildren(
+      card("Ideas board", [
+        el("p", {
+          class: "muted",
+          text: "Your references for the team: a website or app UI you like, a layout, colours, a logo, a video of how something should feel. Say what you like about each. The agents search this board before they design or build, go in that direction, and make their own business-level work, not a copy.",
+        }),
+        title,
+        notes,
+        link,
+        el("div", { class: "row" }, [tags, project]),
+        el("div", { class: "row" }, [
+          el("button", { class: "primary", type: "button", text: "Add note or link", onclick: addText }),
+          el("button", { type: "button", text: "Add photos or videos", onclick: () => files.click() }),
+          files,
+        ]),
+        status,
+      ]),
+      card(`On the board (${data.ideas.length})`, [
+        el("div", { class: "row" }, [
+          finder,
+          ...(data.tags.length
+            ? [
+                el("div", { class: "chips" }, [
+                  el("button", { class: `chip${tag ? "" : " active"}`, type: "button", text: "all", onclick: () => renderIdeas(finder.value, "") }),
+                  ...data.tags.map((name) => el("button", { class: `chip${name === tag ? " active" : ""}`, type: "button", text: name, onclick: () => renderIdeas(finder.value, name) })),
+                ]),
+              ]
+            : []),
+        ]),
+        data.ideas.length
+          ? el("div", { class: "photo-grid idea-grid" }, data.ideas.map((idea) => ideaTile(idea, () => renderIdeas(search, tag))))
+          : empty(search || tag ? "No ideas match." : "Nothing on the board yet. Add what you'd like the team to aim for."),
+      ])
+    );
+  }
+
+  function ideaTile(idea, refresh) {
+    const text = el("textarea", { rows: 3, "aria-label": `Notes for ${idea.title}`, placeholder: "What you like about it" });
+    text.value = idea.text || "";
+    text.addEventListener("change", async () => {
+      try {
+        await patch(`/studio/api/ideas/${idea.id}`, { text: text.value });
+        notify("Saved.");
+      } catch (error) {
+        notify(error.message);
+      }
+    });
+    const media =
+      idea.kind === "photo"
+        ? el("img", { src: idea.file_url, alt: idea.text || idea.title, loading: "lazy", width: String(idea.width), height: String(idea.height) })
+        : idea.kind === "video"
+          ? el("video", { src: idea.file_url, controls: true, preload: "metadata", "aria-label": idea.title })
+          : el("div", { class: "idea-note", text: idea.kind === "link" ? "🔗" : "✎" });
+    return el("figure", { class: `photo-tile idea-tile ${idea.kind}`, "data-idea": idea.id }, [
+      media,
+      el("figcaption", {}, [
+        el("strong", { text: idea.title }),
+        el("small", { class: "muted", text: [idea.kind, idea.project, ...(idea.tags || [])].filter(Boolean).join(" · ") }),
+        idea.url ? el("a", { href: idea.url, target: "_blank", rel: "noopener noreferrer", text: idea.url }) : null,
+        text,
+        el("button", {
+          class: "danger small",
+          type: "button",
+          text: "Delete",
+          "aria-label": `Delete ${idea.title}`,
+          onclick: async () => {
+            if (!confirm(`Delete ${idea.title} from the ideas board?`)) return;
+            await remove(`/studio/api/ideas/${idea.id}`);
+            refresh();
+          },
+        }),
+      ]),
+    ]);
+  }
+
   /* ------------------------------------------------------------- connectors */
 
   // Outside services the team can use, email drafts waiting for a yes, and how
@@ -5885,6 +6014,7 @@
     ["Command Center", "home", "◈"],
     ["HQ (team at work)", "hq", "▦"],
     ["Agents", "agents", "◎"],
+    ["Ideas board", "ideas", "✧"],
     ["Chats", "chats", "◌"],
     ["Lab", "lab", "⚗"],
     ["Content Farm", "farm", "🌾"],
@@ -7072,6 +7202,7 @@
         case "farm": return await renderFarm(generation);
         case "hq": return await renderHQ(generation);
         case "connectors": return await renderConnectors();
+        case "ideas": return await renderIdeas();
         case "more": return await renderMore();
         case "settings": return await renderSettings();
         default: return go("home");
@@ -7351,6 +7482,7 @@
         farm: "Content Farm",
         hq: "HQ",
         connectors: "Connectors",
+        ideas: "Ideas board",
         more: "More",
         settings: "Settings",
       }[name] || "Studio"

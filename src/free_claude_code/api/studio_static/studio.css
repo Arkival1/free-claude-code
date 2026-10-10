@@ -2933,3 +2933,25 @@ h3.subhead {
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
+
+/* Ideas board */
+.idea-tile video {
+  width: 100%;
+  max-height: 220px;
+  border-radius: 10px;
+  background: #000;
+}
+
+.idea-tile .idea-note {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  font-size: 2.2rem;
+  border-radius: 10px;
+  background: var(--panel-2, rgba(255, 255, 255, 0.04));
+}
+
+.idea-tile a {
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}

@@ -43,6 +43,7 @@ from free_claude_code.studio.farm.library import (
     kind_of,
 )
 from free_claude_code.studio.file_text import MAX_UPLOAD, read_file_text
+from free_claude_code.studio.ideas import MAX_IDEA_VIDEO_BYTES, IdeaError
 from free_claude_code.studio.lab.sim import LabError
 from free_claude_code.studio.llm import ChatMessage
 from free_claude_code.studio.local_voice import LocalVoiceError
@@ -1862,6 +1863,114 @@ async def delete_photo(
     photo_id: str, studio: StudioService = Depends(get_studio), _: None = Access
 ) -> JsonObject:
     return {"deleted": await studio.delete_photo(photo_id)}
+
+
+class IdeaPayload(BaseModel):
+    title: str = Field(default="", max_length=200)
+    text: str = Field(default="", max_length=8000)
+    url: str = Field(default="", max_length=2000)
+    tags: list[str] | str = Field(default_factory=list)
+    project: str = Field(default="", max_length=200)
+
+
+class IdeaChanges(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    text: str | None = Field(default=None, max_length=8000)
+    url: str | None = Field(default=None, max_length=2000)
+    tags: list[str] | str | None = None
+    project: str | None = Field(default=None, max_length=200)
+
+
+@router.get("/studio/api/ideas")
+async def list_ideas(
+    q: str = "",
+    kind: str = "",
+    tag: str = "",
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The ideas board: every idea, or those matching words, a kind, a tag."""
+    return await studio.idea_list(q, kind=kind, tag=tag)
+
+
+@router.post("/studio/api/ideas")
+async def add_idea(
+    payload: IdeaPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Add a note or a link to the ideas board."""
+    return await studio.add_idea(
+        title=payload.title,
+        text=payload.text,
+        url=payload.url,
+        tags=payload.tags,
+        project=payload.project,
+    )
+
+
+@router.post("/studio/api/ideas/upload")
+async def upload_idea(
+    request: Request,
+    name: str = "",
+    title: str = "",
+    text: str = "",
+    tags: str = "",
+    project: str = "",
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Add a photo or a video to the ideas board, with what the user says."""
+    data = bytearray()
+    async for chunk in request.stream():
+        data.extend(chunk)
+        if len(data) > MAX_IDEA_VIDEO_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Add photos up to 25 MB and videos up to 200 MB.",
+            )
+    return await studio.add_idea(
+        title=title[:200],
+        text=text[:8000],
+        tags=tags,
+        project=project[:200],
+        name=name,
+        data=bytes(data),
+    )
+
+
+@router.get("/studio/api/ideas/{idea_id}/file")
+async def idea_file(
+    idea_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> FileResponse:
+    try:
+        idea = await studio.ideas.find(idea_id)
+    except IdeaError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if not idea.file:
+        raise HTTPException(status_code=404, detail="That idea has no file.")
+    return FileResponse(
+        studio.ideas.path(idea),
+        media_type=idea.content_type,
+        headers={"cache-control": "private, max-age=3600"},
+    )
+
+
+@router.patch("/studio/api/ideas/{idea_id}")
+async def update_idea(
+    idea_id: str,
+    payload: IdeaChanges,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    return await studio.update_idea(idea_id, payload.model_dump(exclude_none=True))
+
+
+@router.delete("/studio/api/ideas/{idea_id}")
+async def delete_idea(
+    idea_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"deleted": await studio.delete_idea(idea_id)}
 
 
 @router.get("/studio/api/engine/logs")

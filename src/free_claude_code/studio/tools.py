@@ -28,6 +28,8 @@ from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .desk import DeskBrowser, DeskError
 from .desk import render as render_desk
+from .ideas import IdeaBoard, IdeaError
+from .ideas import describe as describe_idea
 from .images import FoundImage, ImageError, download_image, find_images
 from .llm import ToolCall, ToolSpec
 from .memory import SHARED_MEMORY_ID, MemoryService
@@ -91,6 +93,8 @@ TRY_PAGE_TOOL = "try_page"
 RESTORE_FILE_TOOL = "restore_file"
 VIDEO_NOTES_TOOL = "video_notes"
 FIND_IMAGES_TOOL = "find_images"
+IDEAS_TOOL = "ideas"
+MAX_LISTED_IDEAS = 12
 LIST_PHOTOS_TOOL = "list_photos"
 USE_PHOTO_TOOL = "use_photo"
 SAVE_IMAGE_TOOL = "save_image"
@@ -862,6 +866,32 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=IDEAS_TOOL,
+        description=(
+            "The user's ideas board: notes, photos, videos, and links of what "
+            "they want (a UI, a layout, a look, an app or site they like), with "
+            "what they say about each. Search it before you design or build, "
+            "go in the direction it points, and make your own business-level "
+            "work, not a copy. action: search (query and tag narrow it), read "
+            "(one idea in full), or use (put one of its photos into the "
+            "project, at path)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["search", "read", "use"]},
+                "query": {"type": "string"},
+                "tag": {"type": "string"},
+                "idea": {"type": "string", "description": "Its id or title."},
+                "path": {
+                    "type": "string",
+                    "description": "Where use puts a photo, e.g. images/look.jpg.",
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
         name=LIST_PHOTOS_TOOL,
         description=(
             "The user's own photos of their business (the shop, team, food, "
@@ -1627,6 +1657,7 @@ class AgentToolbox:
         all_tools: bool = False,
         image_transport: httpx.AsyncBaseTransport | None = None,
         photos: PhotoLibrary | None = None,
+        ideas: IdeaBoard | None = None,
         desk: DeskBrowser | None = None,
         page_tryer: Callable[..., Awaitable[PageReport]] = try_page,
         screen: Callable[[ToolCall, ToolContext], Awaitable[ToolOutcome | None]]
@@ -1639,6 +1670,7 @@ class AgentToolbox:
         self._try_page_with = page_tryer
         self._web = web_tools
         self._photos = photos
+        self._ideas = ideas
         self._sites = sites
         self._memory = memory
         self._egress = egress
@@ -1808,6 +1840,8 @@ class AgentToolbox:
                     return await self._find_images(call)
                 case "save_image":
                     return await self._save_image(call, context)
+                case "ideas":
+                    return await self._ideas_tool(call, context)
                 case "list_photos":
                     return await self._list_photos(call)
                 case "use_photo":
@@ -2140,6 +2174,93 @@ class AgentToolbox:
                 "template": template,
                 "written": written,
                 "kept": kept,
+            },
+        )
+
+    async def _ideas_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        if self._ideas is None:
+            raise ValueError("The ideas board isn't available here.")
+        action = str(call.arguments.get("action") or "search").strip().lower()
+        try:
+            if action == "read":
+                idea = await self._ideas.find(str(call.arguments.get("idea") or ""))
+                text = describe_idea(idea, full=True)
+                if idea.kind == "photo":
+                    text += " Put it in the project with action use."
+                elif idea.kind == "video":
+                    text += (
+                        " It's a video: go by what the user says about it (and "
+                        "its link)."
+                    )
+                return ToolOutcome(
+                    text=text, data={"tool": IDEAS_TOOL, "idea": idea.id}
+                )
+            if action == "use":
+                return await self._use_idea(call, context)
+        except IdeaError as error:
+            raise ValueError(str(error)) from error
+        query = str(call.arguments.get("query") or "").strip()
+        tag = str(call.arguments.get("tag") or "").strip()
+        found = await self._ideas.ideas(query, tag=tag)
+        data: JsonObject = {
+            "tool": IDEAS_TOOL,
+            "ideas": [idea.id for idea in found[:MAX_LISTED_IDEAS]],
+        }
+        if not found:
+            every = await self._ideas.ideas()
+            text = (
+                "The user hasn't added anything to the ideas board yet; use your "
+                "own judgment, at a business level."
+                if not every
+                else f"Nothing on the ideas board matches {query or tag!r}; "
+                f"{len(every)} idea(s) are there (search with no query to see them)."
+            )
+            return ToolOutcome(text=text, data=data)
+        lines = [
+            f"{n}. {describe_idea(idea)}"
+            for n, idea in enumerate(found[:MAX_LISTED_IDEAS], start=1)
+        ]
+        if len(found) > MAX_LISTED_IDEAS:
+            lines.append(
+                f"…and {len(found) - MAX_LISTED_IDEAS} more; narrow with query."
+            )
+        lines.append(
+            "Go in the direction these point, with your own business-level work."
+        )
+        return ToolOutcome(text="\n".join(lines), data=data)
+
+    async def _use_idea(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        assert self._ideas is not None
+        site_id = self._require_site(context)
+        idea = await self._ideas.find(str(call.arguments.get("idea") or ""))
+        if idea.kind != "photo":
+            raise ValueError(
+                f"{idea.title} is a {idea.kind}, not a photo; only photos go "
+                "into a project."
+            )
+        suffix = Path(idea.file).suffix
+        wanted = str(call.arguments.get("path") or "").strip().lstrip("/")
+        name = re.sub(r"[^a-z0-9]+", "-", idea.title.lower()).strip("-")[:50] or "idea"
+        path = wanted or f"images/{name}{suffix}"
+        if Path(path).suffix.lower() != suffix:
+            path = f"{Path(path).with_suffix('')!s}{suffix}"
+        saved = await self._sites.write_image(
+            site_id, path, await self._ideas.read(idea)
+        )
+        text = (
+            f"Put {idea.title} in the project as {saved.path}. It is "
+            f'{idea.width}x{idea.height}: use width="{idea.width}" '
+            f'height="{idea.height}" on the <img>.'
+        )
+        if idea.text:
+            text += f" The user says about it: {idea.text[:400]}"
+        return ToolOutcome(
+            text=text,
+            data={
+                "tool": IDEAS_TOOL,
+                "site_id": site_id,
+                "path": saved.path,
+                "idea": idea.id,
             },
         )
 
