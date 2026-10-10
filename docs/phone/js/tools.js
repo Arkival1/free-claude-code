@@ -4,7 +4,7 @@ import { uid, words } from "./ui.js";
 import { isPrivate } from "./brains.js";
 import { syncSoon, pcSearch } from "./sync.js";
 import * as projects from "./projects.js";
-import { polishNotes } from "./polish.js";
+import { PICTURE_SUFFIXES, polishNotes } from "./polish.js";
 import { lookAtSite, describeLook } from "./inspect.js";
 import { TEMPLATES, templateFiles } from "./templates.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
@@ -246,7 +246,10 @@ export async function runTool(agent, call, ctx) {
         return await findImagesText(String(args.query || ""), Number(args.count) || 5, String(args.orientation || ""));
       case "polish_check": {
         const project = await needProject(agent, ctx);
-        const notes = polishNotes(project.files);
+        const pictures = Object.keys(project.files).filter((name) =>
+          PICTURE_SUFFIXES.some((suffix) => name.toLowerCase().endsWith(suffix)),
+        );
+        const notes = polishNotes(project.files, pictures);
         feed(agent.name, `Polish check on ${project.name}: ${notes.length ? `${notes.length} suggestions` : "looks finished"}.`);
         if (!Object.keys(project.files).some((name) => /\.html?$/i.test(name))) return "There are no web pages to polish in this project.";
         return notes.length ? `${notes.length} polish suggestion(s):\n${notes.map((note) => `- ${note}`).join("\n")}` : "The pages look finished: nothing to polish.";

@@ -91,10 +91,27 @@ def test_templates_and_polish_match_the_pc(page: Page, admin_base_url: str) -> N
             "about.htm": "<style>:root{--ink:#eee;--bg:#fff}body{color:var(--ink);background:var(--bg)}</style>"
         },
         {"index.html": "<main>no styles</main>"},
+        {
+            "index.html": '<h1>Hi</h1><a class="btn btn-primary">x</a>'
+            '<div class="product-grid card"></div>',
+            "styles.css": ".card{padding:1rem}.button{color:#111}.grid{gap:1rem}",
+        },
     ]
     for files in samples:
         phone = page.evaluate("(files) => window.fccPhone.polishNotes(files)", files)
         assert phone == polish_notes(files), files
+
+    # Photos already in the project are named before a new search.
+    bare = {
+        "index.html": "<h1>Hi</h1><section></section><section></section>",
+        "styles.css": "body{color:#111}",
+    }
+    saved = ["images/hero.jpg", "images/shop.png"]
+    phone = page.evaluate(
+        "([files, saved]) => window.fccPhone.polishNotes(files, saved)", [bare, saved]
+    )
+    assert phone == polish_notes(bare, saved)
+    assert any("already has images/hero.jpg" in note for note in phone)
 
 
 def test_look_at_site_sees_what_a_visitor_would(

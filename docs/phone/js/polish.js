@@ -6,6 +6,15 @@ const FONT_PX = /font-size\s*:\s*(\d+(?:\.\d+)?)px/gi;
 const MIN_TEXT_PX = 14;
 const MAX_COLORS = 14;
 const MAX_NOTES = 24;
+export const PICTURE_SUFFIXES = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif"];
+const PICTURES_NAMED = 4;
+// Classes no stylesheet styles before the page is told; a few are JS hooks.
+const UNSTYLED_CLASSES = 3;
+const CLASS_ATTR = /\bclass\s*=\s*["']([^"']+)["']/gi;
+const CSS_CLASS = /\.(-?[A-Za-z_][\w-]*)/g;
+const FAVICON =
+  "<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' " +
+  "viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍞</text></svg>\">";
 
 function rgb(hex) {
   let value = hex.replace("#", "");
@@ -39,7 +48,9 @@ function colorOf(value, variables) {
 }
 
 /** Suggestions that make a working page look and feel finished. files: {path: text}. */
-export function polishNotes(files) {
+/** `pictures` are the image files already in the project, so a page with no
+ * pictures is pointed at them before a new search. */
+export function polishNotes(files, pictures = []) {
   const entries = Object.entries(files);
   const css = entries.filter(([path]) => path.endsWith(".css")).map(([, text]) => text).join("\n");
   const pages = entries.filter(([path]) => path.endsWith(".html") || path.endsWith(".htm"));
@@ -85,6 +96,7 @@ export function polishNotes(files) {
   }
   if (!styles.includes("transition") && clickable) notes.push("Add short transitions (150-250ms) to hovers and toggles so changes feel smooth.");
   const backgroundPicture = /background(-image)?\s*:[^;]*url\(/i.test(styles);
+  const styled = new Set([...styles.replace(/url\([^)]*\)/g, "").matchAll(CSS_CLASS)].map((m) => m[1]));
   for (const [path, text] of pages) {
     if (!/<(header|nav|main|footer)\b/i.test(text)) notes.push(`${path}: use header, nav, main, and footer so the layout has clear structure.`);
     if (!/<h1\b/i.test(text)) notes.push(`${path}: has no <h1> headline.`);
@@ -96,13 +108,28 @@ export function polishNotes(files) {
     const body = text.replace(/<link\b(?:"[^"]*"|'[^']*'|[^'">])*>/gi, "");
     const contentPage = (text.match(/<section\b/gi) || []).length >= 2;
     if (contentPage && !/<(img|svg|picture|video|canvas)\b/i.test(body) && !backgroundPicture) {
-      notes.push(`${path}: has no pictures; a real photo (find_images) or an SVG illustration makes it look finished.`);
+      const unused = pictures.filter((picture) => !text.includes(picture.split("/").pop()));
+      if (unused.length) {
+        notes.push(
+          `${path}: has no pictures, but the project already has ${unused.slice(0, PICTURES_NAMED).join(", ")}; put them on the page with <img> before looking for new ones.`,
+        );
+      } else {
+        notes.push(`${path}: has no pictures; a real photo (find_images) or an SVG illustration makes it look finished.`);
+      }
     }
     if (!/<meta[^>]+name=["']description/i.test(text)) {
       notes.push(`${path}: add <meta name="description" content="..."> so search engines and shared links show a summary.`);
     }
     if (!text.includes('rel="icon"') && !text.includes("rel='icon'")) {
-      notes.push(`${path}: add a favicon (an emoji SVG works: <link rel="icon" href="data:image/svg+xml,...">).`);
+      notes.push(`${path}: add a favicon; an emoji SVG works, with single quotes inside the SVG: ${FAVICON}`);
+    }
+    const used = [...new Set([...text.matchAll(CLASS_ATTR)].flatMap((m) => m[1].split(/\s+/).filter(Boolean)))];
+    const unstyled = used.filter((name) => !styled.has(name));
+    if (styled.size && unstyled.length >= UNSTYLED_CLASSES) {
+      notes.push(
+        `${path}: no stylesheet styles these classes, so those parts look plain: ${unstyled.slice(0, 8).join(", ")}. ` +
+          `Style them, or use the classes the CSS has (${[...styled].sort().slice(0, 8).join(", ")}).`,
+      );
     }
   }
   return notes.slice(0, MAX_NOTES);
