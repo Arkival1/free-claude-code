@@ -51,6 +51,7 @@ from .request_lifetime import ClientRequestLifetimeMiddleware
 from .routes import router
 from .studio_routes import router as studio_router
 from .studio_routes import studio_error_status
+from .team_mcp import router as team_mcp_router
 from .validation_log import summarize_request_validation_body
 
 
@@ -66,6 +67,7 @@ def create_app(services: ApiServices) -> FastAPI:
     app.include_router(admin_router)
     app.include_router(code_router)
     app.include_router(studio_router)
+    app.include_router(team_mcp_router)
     app.include_router(router)
 
     @app.exception_handler(CodeError)

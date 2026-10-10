@@ -1245,6 +1245,21 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_MCP_SERVER",
+        "Other AI Tools Can Use Your Team (MCP)",
+        "studio",
+        "boolean",
+        settings_attr="studio_mcp_server",
+        description=(
+            "Claude Code, Codex, Cursor, Gemini CLI, VS Code, Cline, Goose, and "
+            "any other tool that speaks MCP can connect to http://127.0.0.1:8082/mcp "
+            "and use your team: talk to Jarvis, give an agent a job, run a team "
+            "plan, and read project files. Only programs on this PC can reach it "
+            "(and they need the proxy token when you set one). What they read goes "
+            "to whatever AI that tool runs on."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LOCAL_CONTROL",
         "Local Agents Direct Server Agents",
         "studio",

@@ -36,12 +36,15 @@ WAIT_SECONDS = 5.0
 FINISHED = frozenset({"done", "failed", "skipped", "stopped"})
 
 PLANNER_SYSTEM = (
-    "You plan work for a team of AI agents. Split the job into 2 to 6 steps. "
-    "Each step is done by one agent from the team list, chosen for what it is "
-    "good at. A step that uses another step's result lists that step's id in "
+    "You plan work for a team of AI agents. Split the job into as few steps as "
+    "it needs: 2 or 3 for a small job, up to 6 for a big one. Each step is done "
+    "by one agent from the team list, chosen by its role: finding things out "
+    "goes to the researcher, writing, ideas, and planning to the helper, "
+    "websites to the builder, apps and code to the coder, checking work to the "
+    "tester. A step that uses another step's result lists that step's id in "
     '"needs"; steps that do not need each other run at the same time. Make '
-    "each step concrete: what to find, make, or check, and what to hand on. "
-    "The last step finishes the job. Reply with JSON only, like:\n"
+    "each step concrete: what to find, write, make, or check, and what to hand "
+    "on. The last step finishes the job. Reply with JSON only, like:\n"
     '{"steps": [{"id": "s1", "agent": "Researcher", "do": "Find ...", '
     '"needs": []}, {"id": "s2", "agent": "Builder", "do": "Build ... using '
     'what s1 found", "needs": ["s1"]}]}'
