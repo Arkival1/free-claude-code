@@ -1,7 +1,11 @@
 """The Builder checks its project before it may finish."""
 
+import ast
+from pathlib import Path
+
 import pytest
 
+from free_claude_code.studio import presets
 from free_claude_code.studio.models import Agent
 from free_claude_code.studio.presets import BUILDER_PROMPT, PROMPT_UPGRADES
 from free_claude_code.studio.project_check import check_project
@@ -155,6 +159,30 @@ async def test_unedited_starter_prompts_are_upgraded(make_studio):
     assert builder is not None and builder.system_prompt == BUILDER_PROMPT
     assert "check_project" in builder.tools
     assert researcher is not None and researcher.system_prompt == "My own words."
+
+
+def test_every_old_starter_prompt_has_its_own_name_and_upgrades():
+    # Two old Builder prompts once shared a name with another, so the later
+    # one hid the earlier and agents on it were never upgraded.
+    tree = ast.parse(Path(presets.__file__).read_text(encoding="utf-8"))
+    names = [
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    ]
+    assert len(names) == len(set(names))
+    old = {getattr(presets, name) for name in names if name.startswith("_OLD_")}
+    assert old <= set(PROMPT_UPGRADES)
+
+
+def test_a_one_page_request_gets_a_one_page_template():
+    # "Bakery" alone means the five-page business site; "one-page" wins.
+    assert "asks for one page" in BUILDER_PROMPT
+    assert BUILDER_PROMPT.index("asks for one page") < BUILDER_PROMPT.index(
+        "use business"
+    )
 
 
 def test_a_favicon_cut_short_by_a_double_quote_is_a_problem():
