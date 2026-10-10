@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from string import Template
 
-from .templates_business import BUSINESS, PLACEHOLDER_TEXT
+from .templates_business import BUSINESS, FORM_JS, PLACEHOLDER_TEXT
 
 _HEAD = """<!doctype html>
 <html lang="en">
@@ -83,7 +83,7 @@ _WEBSITE = {
     </section>
     <section id="contact" class="container section">
       <h2>Contact</h2>
-      <form class="card contact" id="contact-form">
+      <form class="card contact" id="contact-form" data-endpoint="" data-email="">
         <label>Name <input name="name" required autocomplete="name"></label>
         <label>Email <input name="email" type="email" required autocomplete="email"></label>
         <label>Message <textarea name="message" rows="4" required></textarea></label>
@@ -129,12 +129,8 @@ menu.addEventListener("click", (event) => {
 
 document.getElementById("year").textContent = new Date().getFullYear();
 
-document.getElementById("contact-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  document.getElementById("form-status").textContent = "Thanks! We'll be in touch.";
-  event.target.reset();
-});
-""",
+"""
+    + FORM_JS,
     "README.md": """# $title
 
 A mobile-first website. Open `index.html` in a browser, or use the Studio preview.
@@ -180,7 +176,7 @@ _LANDING = {
     </section>
     <section id="contact" class="container section">
       <h2>Get early access</h2>
-      <form class="card contact" id="contact-form">
+      <form class="card contact" id="contact-form" data-endpoint="" data-email="" data-thanks="You're on the list!">
         <label>Email <input name="email" type="email" required autocomplete="email"></label>
         <button class="button" type="submit">Join the list</button>
         <p class="muted" id="form-status" role="status"></p>
@@ -209,12 +205,8 @@ blockquote { margin: 0; font-size: 1.2rem; }
 """,
     "app.js": """document.getElementById("year").textContent = new Date().getFullYear();
 
-document.getElementById("contact-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  document.getElementById("form-status").textContent = "You're on the list!";
-  event.target.reset();
-});
-""",
+"""
+    + FORM_JS,
 }
 
 _WEBAPP = {

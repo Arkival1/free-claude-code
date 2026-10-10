@@ -346,7 +346,7 @@ _CONTACT = _page(
     _page_hero("Say hello", "Contact and booking", "hero.svg")
     + f"""    <section class="section">
       <div class="container split top">
-        <form class="card form reveal" id="contact-form" novalidate data-endpoint="">
+        <form class="card form reveal" id="contact-form" novalidate data-endpoint="" data-email="">
           <h2>Send us a message</h2>
           <div class="row2">
             <label for="name">Name <input id="name" name="name" required autocomplete="name"><span class="error" id="name-error"></span></label>
@@ -560,7 +560,65 @@ a:hover { color: var(--accent-dark); }
 }
 """
 
-_SCRIPT = """// Shared by every page: header, menu, tabs, gallery, contact form, fade-ins.
+FORM_JS = """// Contact form: clear messages for each field. A message is never lost:
+// with a form service address (for example Formspree) in data-endpoint it is
+// sent there; without one, the visitor's email app opens with the message
+// addressed to the business (data-email, or the page's first email link).
+for (const form of document.querySelectorAll("form[data-endpoint], #contact-form")) {
+  const status = form.querySelector("[role=status]");
+  const thanks = form.dataset.thanks || "Thank you! We'll reply within one working day.";
+  const say = (text) => { if (status) status.textContent = text; };
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    let first = null;
+    for (const field of form.querySelectorAll("input, textarea")) {
+      const validity = field.validity;
+      let message = "";
+      if (validity.valueMissing) message = "Please fill this in.";
+      else if (validity.typeMismatch) message = "Please check this is right.";
+      field.setAttribute("aria-invalid", String(!validity.valid));
+      const error = field.id && document.getElementById(field.id + "-error");
+      if (error) error.textContent = message;
+      if (!validity.valid && !first) first = field;
+    }
+    if (first) {
+      say("");
+      first.focus();
+      return;
+    }
+    const endpoint = form.dataset.endpoint;
+    if (endpoint) {
+      say("Sending…");
+      fetch(endpoint, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } })
+        .then((response) => {
+          if (!response.ok) throw new Error(String(response.status));
+          say(thanks);
+          form.reset();
+        })
+        .catch(() => say("Sorry, that didn't send. Please call or email us instead."));
+      return;
+    }
+    const link = document.querySelector('a[href^="mailto:"]');
+    const to = form.dataset.email || (link ? link.getAttribute("href").slice(7).split("?")[0] : "");
+    if (!to) {
+      say("Sorry, this form isn't connected yet. Please call or email us instead.");
+      return;
+    }
+    const data = new FormData(form);
+    const lines = [];
+    for (const [key, value] of data.entries()) {
+      if (String(value).trim()) lines.push(key + ": " + value);
+    }
+    const subject = "Website message from " + (data.get("name") || data.get("email") || "a visitor");
+    window.location.href = "mailto:" + to + "?subject=" + encodeURIComponent(subject) +
+      "&body=" + encodeURIComponent(lines.join("\\n"));
+    say("Your email app is opening with your message. Press send there and it reaches us.");
+  });
+}
+"""
+
+_SCRIPT = (
+    """// Shared by every page: header, menu, tabs, gallery, contact form, fade-ins.
 const header = document.querySelector(".site-header");
 const toggle = document.querySelector(".nav-toggle");
 const menu = document.getElementById("menu");
@@ -650,49 +708,9 @@ if (lightbox) {
   });
 }
 
-// Contact form: clear messages for each field. To receive messages, put a
-// form service address (for example Formspree) in data-endpoint.
-const form = document.getElementById("contact-form");
-if (form) {
-  const status = document.getElementById("form-status");
-  const thanks = "Thank you! We'll reply within one working day.";
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    let first = null;
-    for (const field of form.querySelectorAll("input, textarea")) {
-      const validity = field.validity;
-      let message = "";
-      if (validity.valueMissing) message = "Please fill this in.";
-      else if (validity.typeMismatch) message = "Please check this is right.";
-      field.setAttribute("aria-invalid", String(!validity.valid));
-      const error = document.getElementById(field.id + "-error");
-      if (error) error.textContent = message;
-      if (!validity.valid && !first) first = field;
-    }
-    if (first) {
-      status.textContent = "";
-      first.focus();
-      return;
-    }
-    const endpoint = form.dataset.endpoint;
-    if (!endpoint) {
-      status.textContent = thanks;
-      form.reset();
-      return;
-    }
-    status.textContent = "Sending…";
-    fetch(endpoint, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } })
-      .then((response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        status.textContent = thanks;
-        form.reset();
-      })
-      .catch(() => {
-        status.textContent = "Sorry, that didn't send. Please call or email us instead.";
-      });
-  });
-}
-
+"""
+    + FORM_JS
+    + """
 // Fade sections in as they scroll into view (skipped for reduced motion).
 const reveals = document.querySelectorAll(".reveal");
 if ("IntersectionObserver" in window && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -712,6 +730,7 @@ if ("IntersectionObserver" in window && !matchMedia("(prefers-reduced-motion: re
   reveals.forEach((item) => item.classList.add("in"));
 }
 """
+)
 
 _README = """# $title
 
@@ -726,8 +745,23 @@ use the Studio preview.
   and the fade-in as you scroll.
 - `images/`: replace the drawn placeholders with real photos, and
   credit them in the footer.
-- To receive messages from the form, sign up to a form service such as
+- The contact form: with the business's email in the form's `data-email`,
+  a visitor's message opens in their email app, addressed to the business.
+  To get messages without that step, sign up to a form service such as
   Formspree and put its address in the form's `data-endpoint`.
+
+## Put it online (free)
+
+It is plain files, so any static host works:
+
+- **Netlify Drop**: open app.netlify.com/drop and drag this folder onto it.
+- **Cloudflare Pages**: Create a project, choose *Direct Upload*, and upload
+  this folder.
+- **GitHub Pages**: put the files in a repository and turn on Pages in its
+  settings.
+
+Each gives a free web address; connect the business's own domain in the
+host's domain settings.
 """
 
 BUSINESS = {

@@ -155,3 +155,21 @@ async def test_unedited_starter_prompts_are_upgraded(make_studio):
     assert builder is not None and builder.system_prompt == BUILDER_PROMPT
     assert "check_project" in builder.tools
     assert researcher is not None and researcher.system_prompt == "My own words."
+
+
+def test_a_form_with_nowhere_to_send_messages_is_a_problem():
+    page = (
+        '<!doctype html><html><head><title>Cuts</title><meta name="viewport" '
+        'content="width=device-width"></head><body>{form}{mail}</body></html>'
+    )
+
+    def problems(form: str, mail: str = "") -> list[str]:
+        files = {"index.html": page.format(form=form, mail=mail)}
+        return [p for p in check_project(files) if "nowhere to send" in p]
+
+    assert problems('<form id="contact-form" data-endpoint="" data-email="">')
+    assert problems("<form>", '<a href="mailto:hello@example.com">mail</a>')
+    assert not problems('<form data-email="book@fadekings.test">')
+    assert not problems('<form data-endpoint="https://formspree.io/f/x">')
+    assert not problems('<form action="/send">')
+    assert not problems("<form>", '<a href="mailto:book@fadekings.test">mail</a>')

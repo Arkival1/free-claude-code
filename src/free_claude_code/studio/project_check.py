@@ -224,6 +224,7 @@ def _check_html(path: str, text: str, files: Mapping[str, str]) -> list[str]:
             "then save_image) and remove data-placeholder, or remove it to keep "
             "the drawn art."
         )
+    problems.extend(_unsent_forms(path, text))
     left = [phrase for phrase in STARTER_TEXT if phrase in text]
     if left:
         problems.insert(
@@ -233,3 +234,38 @@ def _check_html(path: str, text: str, files: Mapping[str, str]) -> list[str]:
             "real content for the task.",
         )
     return problems
+
+
+_FORM = re.compile(r"<form\b[^>]*>", re.I)
+_MAILTO = re.compile(r"""href\s*=\s*["']mailto:([^"'?]+)""", re.I)
+
+
+def _attribute(tag: str, name: str) -> str:
+    found = re.search(rf"""\b{name}\s*=\s*["']([^"']*)["']""", tag, re.I)
+    return found.group(1).strip() if found else ""
+
+
+def _unsent_forms(path: str, text: str) -> list[str]:
+    """A form with nowhere to send messages loses every customer who uses it."""
+    emails = [
+        address
+        for address in _MAILTO.findall(text)
+        if not address.lower().endswith(("example.com", "example.org"))
+    ]
+    if emails:
+        return []
+    lost = [
+        tag
+        for tag in _FORM.findall(text)
+        if not any(
+            _attribute(tag, name) for name in ("action", "data-endpoint", "data-email")
+        )
+    ]
+    if not lost:
+        return []
+    return [
+        f"{path}: {len(lost)} form(s) have nowhere to send messages, so "
+        "customers' messages would be lost. Put the business's email in the "
+        'form\'s data-email="..." (or a form service address such as Formspree '
+        'in data-endpoint="...").'
+    ]

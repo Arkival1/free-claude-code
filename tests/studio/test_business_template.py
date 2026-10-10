@@ -36,10 +36,13 @@ def test_it_only_needs_real_content_and_photos():
         if "placeholder text" in problem
         else "pictures"
         if "drawn placeholders" in problem
+        else "form"
+        if "nowhere to send messages" in problem
         else problem
         for problem in problems
     }
-    assert kinds == {"placeholder text", "pictures"}
+    # The form needs the business's email before it can reach anyone.
+    assert kinds == {"placeholder text", "pictures", "form"}
 
     # Filled in, it passes: no broken links, anchors, or scripts.
     finished = {}
