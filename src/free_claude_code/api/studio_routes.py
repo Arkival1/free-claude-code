@@ -1401,6 +1401,53 @@ async def hq_say(
     return await studio.hq_say(agent_id, payload.text)
 
 
+class PlanPayload(BaseModel):
+    goal: str = Field(min_length=1, max_length=4000)
+    project: str = Field(default="", max_length=200)
+
+
+@router.get("/studio/api/plans")
+async def list_plans(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Team plans, newest first, with each step's agent and status."""
+    return {"plans": [studio.plan_view(plan) for plan in await studio.plans()]}
+
+
+@router.post("/studio/api/plans", status_code=202)
+async def start_plan(
+    payload: PlanPayload, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Plan a job for the team and run it; it reports in the main chat."""
+    main_chat = await studio.main_chat()
+    plan = await studio.start_plan(
+        payload.goal, project=payload.project, chat_id=main_chat.id
+    )
+    return studio.plan_view(plan)
+
+
+@router.get("/studio/api/plans/{plan_id}")
+async def get_plan(
+    plan_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return studio.plan_view(await studio.plan(plan_id))
+
+
+@router.post("/studio/api/plans/{plan_id}/stop")
+async def stop_plan(
+    plan_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return studio.plan_view(await studio.stop_plan(plan_id))
+
+
+@router.post("/studio/api/plans/{plan_id}/resume", status_code=202)
+async def resume_plan(
+    plan_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Run a stopped plan again from where it stopped."""
+    return studio.plan_view(await studio.resume_plan(plan_id))
+
+
 @router.post("/studio/api/hq/agents/{agent_id}/stop")
 async def hq_stop(
     agent_id: str, studio: StudioService = Depends(get_studio), _: None = Access

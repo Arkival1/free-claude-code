@@ -48,6 +48,8 @@ type AssetKind = Literal["gguf", "archive", "adapter", "file"]
 type TuneBackend = Literal["local_light", "cloud"]
 type JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 type RunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+type PlanStatus = Literal["running", "done", "failed", "stopped"]
+type StepStatus = Literal["waiting", "running", "done", "failed", "skipped", "stopped"]
 type CourseStatus = Literal[
     "planning", "teaching", "examining", "passed", "failed", "cancelled"
 ]
@@ -698,4 +700,40 @@ class StudioFlag(Record):
 
     id: str
     value: str = ""
+    updated_at: int = Field(default_factory=now_ms)
+
+
+class PlanStep(BaseModel):
+    """One step of a team plan: one agent, one piece of the job."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    agent: str
+    """The agent's name."""
+    do: str
+    needs: tuple[str, ...] = ()
+    """Steps that must finish first; their results are handed to this one."""
+    status: StepStatus = "waiting"
+    result: str = ""
+    run_id: str = ""
+    started_at: int = 0
+    finished_at: int = 0
+
+
+class TeamPlan(Record):
+    """A job split into steps for the team, run in order by the coordinator."""
+
+    id: str = Field(default_factory=lambda: new_id("pln"))
+    goal: str
+    status: PlanStatus = "running"
+    steps: tuple[PlanStep, ...] = ()
+    made_by: str = ""
+    """Who asked for it: an agent's name, or 'you'."""
+    chat_id: str | None = None
+    """Where the plan reports when it finishes."""
+    site_id: str | None = None
+    """The project every step works in."""
+    summary: str = ""
+    created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)

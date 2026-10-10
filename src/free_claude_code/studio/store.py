@@ -35,6 +35,7 @@ from .models import (
     StudioFlag,
     Study,
     StudyLesson,
+    TeamPlan,
     TodoItem,
     TuneJob,
     TunePack,
@@ -99,6 +100,7 @@ TABLES: Mapping[type[Record], str] = {
     FarmAsset: "studio_farm_assets",
     FarmCharacter: "studio_farm_characters",
     StudioFlag: "studio_flags",
+    TeamPlan: "studio_plans",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (

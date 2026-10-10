@@ -1,0 +1,397 @@
+"""Team plans: one job split into steps, each owned by one agent, run in order.
+
+The planner (the main AI's model) reads the job and the team and writes the
+steps: who does what, and which steps must finish first. The coordinator then
+runs every step whose inputs are ready: steps for different agents at the same
+time, never two at once for one agent, and never a step for an agent that is
+busy with something else (it waits for them). Each agent gets the whole plan,
+its own step, and what the steps it builds on produced, and every step works
+in the same project. A failed step skips the steps that need it; the others
+still run. The plan is kept, so the HQ shows it live, and one cut off by
+closing Studio can be resumed where it stopped.
+"""
+
+import asyncio
+import json
+import re
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from typing import Protocol
+
+from loguru import logger
+
+from .models import Agent, AgentRun, Chat, PlanStep, TeamPlan, now_ms
+from .orders import pick_agent
+from .store import StudioStore
+
+MAX_STEPS = 8
+MAX_STEP_WORDS = 600
+HANDOFF_CHARS = 1500
+"""How much of a finished step's result the next agent is handed."""
+RESULT_CHARS = 4000
+PARALLEL_STEPS = 2
+"""Steps run at once; a local model answers one at a time anyway."""
+WAIT_SECONDS = 5.0
+"""How often a plan waiting for a busy agent looks again."""
+FINISHED = frozenset({"done", "failed", "skipped", "stopped"})
+
+PLANNER_SYSTEM = (
+    "You plan work for a team of AI agents. Split the job into 2 to 6 steps. "
+    "Each step is done by one agent from the team list, chosen for what it is "
+    "good at. A step that uses another step's result lists that step's id in "
+    '"needs"; steps that do not need each other run at the same time. Make '
+    "each step concrete: what to find, make, or check, and what to hand on. "
+    "The last step finishes the job. Reply with JSON only, like:\n"
+    '{"steps": [{"id": "s1", "agent": "Researcher", "do": "Find ...", '
+    '"needs": []}, {"id": "s2", "agent": "Builder", "do": "Build ... using '
+    'what s1 found", "needs": ["s1"]}]}'
+)
+
+
+class PlanError(ValueError):
+    """A plan couldn't be made from what the planner wrote."""
+
+
+@dataclass(frozen=True, slots=True)
+class Member:
+    name: str
+    role: str
+    what: str = ""
+
+
+def planner_prompt(goal: str, team: Sequence[Member], project: str = "") -> str:
+    lines = [f"The job: {goal.strip()}"]
+    if project:
+        lines.append(f"Everyone works in the project '{project}'.")
+    lines.append("The team:")
+    lines += [f"- {m.name} ({m.role}){': ' + m.what if m.what else ''}" for m in team]
+    return "\n".join(lines)
+
+
+def parse_plan(text: str, team: Sequence[str]) -> tuple[PlanStep, ...]:
+    """The steps in the planner's reply, checked: known agents only, at most
+    MAX_STEPS, and a step only needs steps before it (so nothing loops)."""
+    raw = _json_in(text)
+    items = raw.get("steps") if isinstance(raw, dict) else raw
+    if not isinstance(items, list):
+        raise PlanError("The plan had no steps.")
+    names = {name.casefold(): name for name in team}
+    renamed: dict[str, str] = {}
+    steps: list[PlanStep] = []
+    for item in items:
+        if not isinstance(item, dict) or len(steps) >= MAX_STEPS:
+            continue
+        agent = names.get(
+            re.sub(r"^the\s+", "", str(item.get("agent", "")).strip(), flags=re.I)
+            .strip()
+            .casefold()
+        )
+        do = " ".join(str(item.get("do") or item.get("task") or "").split())
+        if agent is None or not do:
+            continue
+        step_id = f"s{len(steps) + 1}"
+        renamed[str(item.get("id") or step_id)] = step_id
+        needs = item.get("needs") or ()
+        if isinstance(needs, str):
+            needs = [needs]
+        steps.append(
+            PlanStep(
+                id=step_id,
+                agent=agent,
+                do=" ".join(do.split()[:MAX_STEP_WORDS]),
+                needs=tuple(
+                    dict.fromkeys(
+                        renamed[str(n)]
+                        for n in needs
+                        if str(n) in renamed and renamed[str(n)] != step_id
+                    )
+                ),
+            )
+        )
+    if not steps:
+        raise PlanError("None of the plan's steps had a team member and a job.")
+    return tuple(steps)
+
+
+def _json_in(text: str) -> object:
+    text = text.strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
+    if fenced:
+        text = fenced.group(1).strip()
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start, end = text.find(opener), text.rfind(closer)
+        if start != -1 and end > start:
+            try:
+                return json.loads(text[start : end + 1])
+            except ValueError:
+                continue
+    raise PlanError("The planner didn't write a plan.")
+
+
+def one_step_plan(goal: str, team: Sequence[Member]) -> tuple[PlanStep, ...]:
+    """When there is no usable plan: the whole job to the best fit."""
+    agent = pick_agent(goal, [(m.name, m.role) for m in team])
+    if not agent:
+        raise PlanError("There is nobody on the team to do this.")
+    return (PlanStep(id="s1", agent=agent, do=goal.strip()),)
+
+
+def with_step(plan: TeamPlan, step_id: str, **changes: object) -> TeamPlan:
+    steps = tuple(
+        step.model_copy(update=changes) if step.id == step_id else step
+        for step in plan.steps
+    )
+    return plan.model_copy(update={"steps": steps, "updated_at": now_ms()})
+
+
+def ready_steps(plan: TeamPlan) -> list[PlanStep]:
+    """Waiting steps whose needed steps are all done."""
+    done = {step.id for step in plan.steps if step.status == "done"}
+    return [
+        step
+        for step in plan.steps
+        if step.status == "waiting" and all(need in done for need in step.needs)
+    ]
+
+
+def skip_blocked(plan: TeamPlan) -> TeamPlan:
+    """Steps that need a step that can no longer finish are skipped."""
+    changed = True
+    while changed:
+        changed = False
+        lost = {
+            step.id
+            for step in plan.steps
+            if step.status in {"failed", "skipped", "stopped"}
+        }
+        for step in plan.steps:
+            if step.status == "waiting" and lost.intersection(step.needs):
+                blocker = next(need for need in step.needs if need in lost)
+                plan = with_step(
+                    plan,
+                    step.id,
+                    status="skipped",
+                    result=f"Skipped: {blocker} didn't finish.",
+                    finished_at=now_ms(),
+                )
+                changed = True
+    return plan
+
+
+def step_brief(plan: TeamPlan, step: PlanStep) -> str:
+    """What the agent doing one step is told: the job, the whole plan, its
+    own step, and what the steps it builds on produced."""
+    lines = [
+        "You are doing one step of a team plan.",
+        f"The whole job: {plan.goal}",
+        "The plan:",
+    ]
+    for other in plan.steps:
+        mark = "your step" if other.id == step.id else other.status
+        lines.append(f"  {other.id}. {other.agent}: {other.do} [{mark}]")
+    lines.append(f"Your step ({step.id}): {step.do}")
+    inputs = [s for s in plan.steps if s.id in step.needs and s.result]
+    if inputs:
+        lines.append("What the steps before yours produced:")
+        lines += [f"- {s.id} ({s.agent}): {s.result[:HANDOFF_CHARS]}" for s in inputs]
+    lines.append(
+        "Do your step only; the others do theirs. When you finish, say what you "
+        "made or found and anything the next steps need."
+    )
+    return "\n".join(lines)
+
+
+def summary(plan: TeamPlan) -> str:
+    done = sum(step.status == "done" for step in plan.steps)
+    verdict = {
+        "done": "is done",
+        "failed": "finished with problems",
+        "stopped": "was stopped",
+        "running": "is still running",
+    }[plan.status]
+    lines = [
+        f"The team plan '{plan.goal[:120]}' {verdict}: {done} of "
+        f"{len(plan.steps)} step(s) done."
+    ]
+    for step in plan.steps:
+        first = step.result.strip().splitlines()[0][:160] if step.result.strip() else ""
+        lines.append(
+            f"- {step.id} {step.agent} [{step.status}] {step.do[:80]}"
+            + (f" → {first}" if first else "")
+        )
+    last = next(
+        (s for s in reversed(plan.steps) if s.status == "done" and s.result), None
+    )
+    if last is not None:
+        lines.append(f"\nFinal result ({last.agent}):\n{last.result[:RESULT_CHARS]}")
+    return "\n".join(lines)
+
+
+def plan_started(plan: TeamPlan, project: str = "") -> str:
+    """What the main AI tells the user when a plan starts."""
+    lines = [f"Planned {len(plan.steps)} step(s); the team is on it:"]
+    for step in plan.steps:
+        after = f" (after {', '.join(step.needs)})" if step.needs else ""
+        lines.append(f"{step.id}. {step.agent}: {step.do}{after}")
+    if project:
+        lines.append(f"Project: {project}")
+    lines.append(
+        "It runs in the background (watch it in the HQ) and reports here when done."
+    )
+    return "\n".join(lines)
+
+
+class PlanHost(Protocol):
+    async def agents(self) -> tuple[Agent, ...]: ...
+
+    async def run_agent_task(
+        self,
+        agent: Agent,
+        goal: str,
+        *,
+        site_id: str | None,
+        parent_chat_id: str | None,
+    ) -> tuple[AgentRun, Chat]: ...
+
+    async def busy_agent_ids(self) -> set[str]: ...
+
+
+class PlanCoordinator:
+    """Runs one plan's steps in order, as many at once as is safe."""
+
+    def __init__(
+        self,
+        *,
+        store: StudioStore,
+        host: PlanHost,
+        parallel: int = PARALLEL_STEPS,
+        wait_seconds: float = WAIT_SECONDS,
+        finished: Callable[[TeamPlan], Awaitable[None]] | None = None,
+    ) -> None:
+        self._store = store
+        self._host = host
+        self._parallel = max(1, parallel)
+        self._wait = wait_seconds
+        self._finished = finished
+
+    async def run(self, plan_id: str) -> TeamPlan:
+        running: dict[asyncio.Future[tuple[AgentRun, Chat]], str] = {}
+        try:
+            while True:
+                plan = await self._store.require(TeamPlan, plan_id)
+                if plan.status != "running":
+                    break
+                plan = await self._start_ready(plan, running)
+                plan = skip_blocked(plan)
+                await self._store.put(plan)
+                if not running:
+                    if not any(step.status == "waiting" for step in plan.steps):
+                        break
+                    # Steps wait for an agent busy with other work.
+                    await asyncio.sleep(self._wait)
+                    continue
+                done, _ = await asyncio.wait(
+                    running, timeout=self._wait, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done:
+                    await self._record(plan_id, running.pop(task), task)
+            return await self._finish(plan_id)
+        except asyncio.CancelledError:
+            for task in running:
+                task.cancel()
+            await asyncio.gather(*running, return_exceptions=True)
+            plan = await self._store.require(TeamPlan, plan_id)
+            for step in plan.steps:
+                if step.status in {"running", "waiting"}:
+                    plan = with_step(
+                        plan, step.id, status="stopped", finished_at=now_ms()
+                    )
+            plan = plan.model_copy(update={"status": "stopped", "updated_at": now_ms()})
+            plan = plan.model_copy(update={"summary": summary(plan)})
+            await self._store.put(plan)
+            raise
+
+    async def _start_ready(
+        self,
+        plan: TeamPlan,
+        running: dict[asyncio.Future[tuple[AgentRun, Chat]], str],
+    ) -> TeamPlan:
+        team = {
+            a.name.casefold(): a for a in await self._host.agents() if not a.archived
+        }
+        busy = await self._host.busy_agent_ids()
+        mine = {
+            step.agent.casefold() for step in plan.steps if step.status == "running"
+        }
+        for step in ready_steps(plan):
+            if len(running) >= self._parallel:
+                break
+            agent = team.get(step.agent.casefold())
+            if agent is None:
+                plan = with_step(
+                    plan,
+                    step.id,
+                    status="failed",
+                    result=f"{step.agent} isn't on the team any more.",
+                    finished_at=now_ms(),
+                )
+                continue
+            if step.agent.casefold() in mine or agent.id in busy:
+                continue
+            plan = with_step(plan, step.id, status="running", started_at=now_ms())
+            await self._store.put(plan)
+            task = asyncio.ensure_future(
+                self._host.run_agent_task(
+                    agent,
+                    step_brief(plan, step),
+                    site_id=plan.site_id,
+                    parent_chat_id=plan.chat_id,
+                )
+            )
+            running[task] = step.id
+            mine.add(step.agent.casefold())
+        return plan
+
+    async def _record(
+        self, plan_id: str, step_id: str, task: asyncio.Future[tuple[AgentRun, Chat]]
+    ) -> None:
+        plan = await self._store.require(TeamPlan, plan_id)
+        try:
+            run, _ = task.result()
+        except asyncio.CancelledError:
+            plan = with_step(plan, step_id, status="stopped", finished_at=now_ms())
+        except Exception as error:  # a step's crash is that step's failure
+            logger.warning("Studio: plan step {} crashed: {}", step_id, error)
+            plan = with_step(
+                plan,
+                step_id,
+                status="failed",
+                result=f"It crashed: {error}"[:RESULT_CHARS],
+                finished_at=now_ms(),
+            )
+        else:
+            status = {"succeeded": "done", "cancelled": "stopped"}.get(
+                run.status, "failed"
+            )
+            plan = with_step(
+                plan,
+                step_id,
+                status=status,
+                result=(run.result or run.error or "").strip()[:RESULT_CHARS],
+                run_id=run.id,
+                finished_at=now_ms(),
+            )
+        await self._store.put(plan)
+
+    async def _finish(self, plan_id: str) -> TeamPlan:
+        plan = skip_blocked(await self._store.require(TeamPlan, plan_id))
+        if plan.status == "running":
+            ok = all(step.status == "done" for step in plan.steps)
+            plan = plan.model_copy(update={"status": "done" if ok else "failed"})
+        plan = plan.model_copy(
+            update={"summary": summary(plan), "updated_at": now_ms()}
+        )
+        await self._store.put(plan)
+        if self._finished is not None:
+            await self._finished(plan)
+        return plan

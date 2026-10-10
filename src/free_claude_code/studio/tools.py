@@ -97,6 +97,7 @@ SAVE_IMAGE_TOOL = "save_image"
 LAB_TOOL = "lab"
 FARM_TOOL = "farm"
 CODE_TOOL = "code_and_test"
+TEAM_PLAN_TOOL = "team_plan"
 SKILL_TOOL = "skill"
 TOOLSHED_TOOL = "toolshed"
 MCP_TOOL = "mcp"
@@ -691,6 +692,32 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "project": {
                     "type": "string",
                     "description": "Optional project name; a new one is made when none matches.",
+                },
+            },
+            "required": ["goal"],
+        },
+    ),
+    ToolSpec(
+        name=TEAM_PLAN_TOOL,
+        description=(
+            "Plan a bigger job for the whole team and run it: the job is split "
+            "into steps, each done by the agent best at it (research, then "
+            "build, then test, ...), in order, with each agent handed what the "
+            "steps before it produced. Steps that don't depend on each other run "
+            "at the same time. It runs in the background, shows in the HQ, and "
+            "reports here when done. Use it for jobs that need two or more "
+            "agents; one agent's job goes to ask_agent."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "goal": {
+                    "type": "string",
+                    "description": "The whole job, with everything it needs.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Optional project name to work in.",
                 },
             },
             "required": ["goal"],
@@ -1302,6 +1329,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         LAB_TOOL,
         FARM_TOOL,
         CODE_TOOL,
+        TEAM_PLAN_TOOL,
         TOOLSHED_TOOL,
     }
 )
@@ -1314,6 +1342,7 @@ NOT_IN_THE_SHED = frozenset(
         SYSTEM_STATUS_TOOL,
         PROJECTS_TOOL,
         CODE_TOOL,
+        TEAM_PLAN_TOOL,
         FARM_TOOL,
         LEARN_TOOL,
         "ask_helper",
@@ -1356,6 +1385,7 @@ MAIN_TOOL_NAMES: tuple[str, ...] = (
     LAB_TOOL,
     FARM_TOOL,
     CODE_TOOL,
+    TEAM_PLAN_TOOL,
     SKILL_TOOL,
     MCP_TOOL,
     FINISH_TOOL,
@@ -1779,6 +1809,7 @@ class AgentToolbox:
                     | "lab"
                     | "farm"
                     | "code_and_test"
+                    | "team_plan"
                     | "skill"
                     | "mcp"
                 ):

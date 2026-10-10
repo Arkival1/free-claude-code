@@ -139,10 +139,12 @@ from .models import (
     ModelAsset,
     PhoneLink,
     Photo,
+    PlanStep,
     SiteProject,
     StudioFlag,
     Study,
     StudyLesson,
+    TeamPlan,
     TodoItem,
     TuneJob,
     TunePack,
@@ -161,6 +163,7 @@ from .orders import (
     offered_orders,
     parse_orders,
     pick_agent,
+    plan_request,
     route_prompt,
     routed_agent,
     web_request,
@@ -211,6 +214,7 @@ from .presets import (
     PROMPT_UPGRADES,
     RESEARCHER_PROMPT,
     RESEARCHER_TOOLS,
+    ROLE_NOTES,
     TESTER_PROMPT,
     TESTER_TOOLS,
     agent_options,
@@ -231,6 +235,17 @@ from .team_models import (
     parse_model_request,
     suggest_mix,
 )
+from .teamplan import (
+    PLANNER_SYSTEM,
+    Member,
+    PlanCoordinator,
+    PlanError,
+    one_step_plan,
+    parse_plan,
+    plan_started,
+    planner_prompt,
+)
+from .teamplan import summary as plan_summary
 from .tools import (
     ALL_TOOL_NAMES,
     DEFAULT_TOOL_NAMES,
@@ -306,6 +321,11 @@ DEFAULT_AGENT_NAMES = frozenset(
 )
 """The starter team Studio fills in (the main AI is found by its role)."""
 HQ_CHATS_READ = 3
+PLAN_SHOWN_MS = 3_600_000
+"""How long a finished team plan stays in the HQ (an hour)."""
+INTERRUPTED_PLAN_NOTE = (
+    "Studio was closed while this plan ran. Resume it to pick up where it stopped."
+)
 INTERRUPTED_NOTE = (
     "Studio was closed before this task finished. Ask again to pick it up."
 )
@@ -745,6 +765,8 @@ class StudioService:
         # Tasks made before this moment and still "running" were cut off when
         # Studio last closed; nothing here runs them.
         self._started_at = now_ms()
+        # Team plans being run: plan id -> its coordinator.
+        self._plan_jobs: dict[str, asyncio.Task[object]] = {}
         # Chat turns started from the HQ, so Stop reaches them too:
         # agent id -> {turn: (chat id, what it was asked)}.
         self._hq_turns: dict[str, dict[asyncio.Task[object], tuple[str, str]]] = {}
@@ -3731,6 +3753,17 @@ class StudioService:
             lines.append(
                 f"{len(pending)} command(s) wait for the user's Run it or Deny."
             )
+        for plan in await self._store.find(TeamPlan, where={"status": "running"}):
+            done = sum(step.status == "done" for step in plan.steps)
+            doing = ", ".join(
+                f"{step.agent} on {step.id}"
+                for step in plan.steps
+                if step.status == "running"
+            )
+            lines.append(
+                f"Team plan '{plan.goal[:80]}': {done} of {len(plan.steps)} steps "
+                f"done{'; ' + doing if doing else ''}."
+            )
         return "\n".join(lines) or "The team has no agents yet."
 
     async def _prepare_main_turn(self, main: Agent, chat: Chat, text: str) -> str:
@@ -3892,6 +3925,8 @@ class StudioService:
                 return await self._farm_tool(call, context)
             case "code_and_test":
                 return await self._code_tool(call, context)
+            case "team_plan":
+                return await self._plan_tool(call, context)
             case "skill":
                 return await self._skill_tool(call)
             case "mcp":
@@ -5521,6 +5556,29 @@ class StudioService:
             "user that in a sentence; don't use the lab tool for it yourself."
         )
 
+    async def _plan_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        if not (context.agent_role == MAIN_ROLE or context.can_delegate):
+            raise ValueError("Only the main AI plans work for the whole team.")
+        goal = str(call.arguments.get("goal") or "").strip()
+        if not goal:
+            raise ValueError("Say what the plan is for.")
+        plan = await self.start_plan(
+            goal,
+            made_by=context.agent_name,
+            chat_id=context.chat_id,
+            project=str(call.arguments.get("project") or ""),
+        )
+        return ToolOutcome(
+            text=plan_started(plan, await self._site_name(plan.site_id)),
+            data={"tool": "team_plan", "plan_id": plan.id, "steps": len(plan.steps)},
+        )
+
+    async def _site_name(self, site_id: str | None) -> str:
+        if not site_id:
+            return ""
+        site = await self._store.get(SiteProject, site_id)
+        return site.name if site else ""
+
     async def _code_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         goal = str(call.arguments.get("goal") or "").strip()
         if not goal:
@@ -5631,6 +5689,27 @@ class StudioService:
             if not agent.archived and agent.role not in {MAIN_ROLE, "guide"}
         ]
         orders = parse_orders(text, [agent.name for agent in team], main.name)
+        plan_job = "" if orders else plan_request(text, main.name)
+        if plan_job:
+            try:
+                plan = await self.start_plan(
+                    plan_job, made_by=main.name, chat_id=chat.id
+                )
+            except StudioError as error:
+                return f"The team plan could not start: {error}"
+            line = plan_started(plan, await self._site_name(plan.site_id))
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="tool",
+                text=line,
+                author="team_plan",
+                data={"tool": "team_plan", "order": True, "plan_id": plan.id},
+            )
+            return (
+                f"The team plan was started already:\n{line}\nDo not hand it out "
+                "again or do the steps yourself. Tell the user in a sentence or two "
+                "who does what, in what order."
+            )
         researcher = next((agent for agent in team if agent.role == "researcher"), None)
         task = "" if orders or researcher is None else web_request(text, main.name)
         if task and researcher is not None:
@@ -6036,9 +6115,203 @@ class StudioService:
                     data={"kind": "run_finished", "run_id": run.id, "status": "failed"},
                 )
             ended += 1
+        for plan in await self._store.find(TeamPlan, where={"status": "running"}):
+            if plan.id in self._plan_jobs or plan.created_at >= self._started_at:
+                continue
+            steps = tuple(
+                step.model_copy(update={"status": "stopped"})
+                if step.status == "running"
+                else step
+                for step in plan.steps
+            )
+            stopped = plan.model_copy(
+                update={"status": "stopped", "steps": steps, "updated_at": now_ms()}
+            )
+            await self._store.put(
+                stopped.model_copy(
+                    update={
+                        "summary": f"{INTERRUPTED_PLAN_NOTE}\n{plan_summary(stopped)}"
+                    }
+                )
+            )
+            ended += 1
         if ended:
             logger.info("Studio: closed {} task(s) left unfinished last time", ended)
         return ended
+
+    # ------------------------------------------------------------ team plans
+
+    async def busy_agent_ids(self) -> set[str]:
+        """Agents doing something right now (a task, a turn, a room)."""
+        return await self._busy_agents(await self._active_runs())
+
+    async def _plan_team(self) -> list[Agent]:
+        return [
+            agent
+            for agent in await self.agents()
+            if not agent.archived and agent.role not in {MAIN_ROLE, "guide"}
+        ]
+
+    async def _plan_steps(
+        self, goal: str, team: Sequence[Agent], project: str
+    ) -> tuple[PlanStep, ...]:
+        """The steps the main AI's model writes for a job, or the whole job
+        for the best-fitting agent when it can't write a usable plan."""
+        members = [
+            Member(
+                agent.name,
+                agent.role,
+                agent.description or ROLE_NOTES.get(agent.role, ""),
+            )
+            for agent in team
+        ]
+        main = await self.main_agent()
+        try:
+            reply = await self._router.complete(
+                [ChatMessage.user(planner_prompt(goal, members, project))],
+                model=await self.effective_model(main.model or self.default_model),
+                system=PLANNER_SYSTEM,
+                temperature=0.2,
+                max_tokens=1200,
+            )
+            return parse_plan(reply.text, [agent.name for agent in team])
+        except (StudioLLMError, PlanError) as error:
+            logger.info("Studio: planning fell back to one step: {}", error)
+            return one_step_plan(goal, members)
+
+    async def start_plan(
+        self,
+        goal: str,
+        *,
+        made_by: str = "you",
+        chat_id: str | None = None,
+        project: str = "",
+        steps: Sequence[PlanStep] | None = None,
+    ) -> TeamPlan:
+        """Plan a job for the team and start running it in the background."""
+        goal = " ".join(goal.split())
+        if not goal:
+            raise StudioError("Say what the plan is for.")
+        team = await self._plan_team()
+        if not team:
+            raise StudioError("There is nobody on the team to plan for.")
+        planned = tuple(steps) if steps else await self._plan_steps(goal, team, project)
+        crew = Crew(
+            store=self._store,
+            host=self,
+            helper_pipeline=self.settings.studio_helper_pipeline,
+        )
+        site = await crew.named_project(f"{project} {goal}")
+        builders = [a for a in team if a.name in {s.agent for s in planned}]
+        builder = next((a for a in builders if "write_file" in a.tools), None)
+        if site is None and (project.strip() or builder is not None):
+            owner = builder or builders[0]
+            site = await crew.project_for(
+                ToolContext(
+                    agent_id=owner.id,
+                    chat_id=chat_id or "",
+                    agent_name=owner.name,
+                    agent_role=owner.role,
+                ),
+                project.strip() or project_name(goal),
+                task=goal,
+                owner=owner,
+            )
+        plan = TeamPlan(
+            goal=goal,
+            steps=planned,
+            made_by=made_by,
+            chat_id=chat_id,
+            site_id=site.id if site else None,
+        )
+        await self._store.put(plan)
+        self._run_plan(plan.id)
+        return plan
+
+    def _run_plan(self, plan_id: str) -> None:
+        coordinator = PlanCoordinator(
+            store=self._store, host=self, finished=self._plan_finished
+        )
+        job = self.spawn(coordinator.run(plan_id))
+        self._plan_jobs[plan_id] = job
+        job.add_done_callback(lambda _: self._plan_jobs.pop(plan_id, None))
+
+    async def _plan_finished(self, plan: TeamPlan) -> None:
+        """The plan reports where it was asked for, as the main AI."""
+        if not plan.chat_id:
+            return
+        main = await self.main_agent()
+        with contextlib.suppress(StudioNotFoundError, StudioError):
+            await self._store.append_message(
+                chat_id=plan.chat_id,
+                role="assistant",
+                text=plan.summary,
+                author=main.name,
+                data={
+                    "kind": "plan_finished",
+                    "plan_id": plan.id,
+                    "status": plan.status,
+                },
+            )
+
+    async def plans(self, *, limit: int = 20) -> tuple[TeamPlan, ...]:
+        return await self._store.find(TeamPlan, order_by="created_at DESC", limit=limit)
+
+    async def plan(self, plan_id: str) -> TeamPlan:
+        return await self._store.require(TeamPlan, plan_id)
+
+    async def stop_plan(self, plan_id: str) -> TeamPlan:
+        """Stop a plan: its running steps stop, the rest don't start."""
+        plan = await self._store.require(TeamPlan, plan_id)
+        job = self._plan_jobs.pop(plan_id, None)
+        if job is not None:
+            job.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await job
+            return await self._store.require(TeamPlan, plan_id)
+        if plan.status == "running":
+            plan = plan.model_copy(update={"status": "stopped", "updated_at": now_ms()})
+            plan = plan.model_copy(update={"summary": plan_summary(plan)})
+            await self._store.put(plan)
+        return plan
+
+    async def resume_plan(self, plan_id: str) -> TeamPlan:
+        """Run a stopped or failed plan again from where it stopped: finished
+        steps stay finished; the others run."""
+        plan = await self._store.require(TeamPlan, plan_id)
+        if plan_id in self._plan_jobs:
+            return plan
+        steps = tuple(
+            step
+            if step.status == "done"
+            else step.model_copy(
+                update={
+                    "status": "waiting",
+                    "result": "",
+                    "started_at": 0,
+                    "finished_at": 0,
+                }
+            )
+            for step in plan.steps
+        )
+        plan = plan.model_copy(
+            update={
+                "status": "running",
+                "steps": steps,
+                "summary": "",
+                "updated_at": now_ms(),
+            }
+        )
+        await self._store.put(plan)
+        self._run_plan(plan.id)
+        return plan
+
+    def plan_view(self, plan: TeamPlan) -> JsonObject:
+        return {
+            **plan.model_dump(mode="json"),
+            "running": plan.id in self._plan_jobs,
+            "done_steps": sum(step.status == "done" for step in plan.steps),
+        }
 
     async def _active_runs(self) -> tuple[AgentRun, ...]:
         """Tasks still going, without reading every task ever run."""
@@ -6095,6 +6368,9 @@ class StudioService:
             try:
                 finished = cast(AgentRun, await job)
             except asyncio.CancelledError:
+                # A stopped task is recorded as stopped, so its agent is free
+                # again (a plan or the HQ would otherwise wait on it forever).
+                await self._mark_stopped(run)
                 waiting = asyncio.current_task()
                 if not job.cancelled() or (waiting and waiting.cancelling()):
                     raise
@@ -6112,6 +6388,28 @@ class StudioService:
         await self._refresh_site_count(site_id)
         await self._after_memory_change([agent.id], wait=False)
         return finished, chat
+
+    async def _mark_stopped(self, run: AgentRun) -> None:
+        current = await self._store.get(AgentRun, run.id)
+        if current is None or current.status not in {"queued", "running"}:
+            return
+        await self._store.put(
+            current.model_copy(
+                update={
+                    "status": "cancelled",
+                    "error": "Stopped by the user.",
+                    "updated_at": now_ms(),
+                }
+            )
+        )
+        with contextlib.suppress(StudioNotFoundError, StudioError):
+            await self._store.append_message(
+                chat_id=run.chat_id,
+                role="event",
+                text="Stopped by the user.",
+                author="studio",
+                data={"kind": "run_finished", "run_id": run.id, "status": "cancelled"},
+            )
 
     async def run_team_task(
         self, agents: Sequence[Agent], goal: str, *, site_id: str | None
@@ -6297,6 +6595,20 @@ class StudioService:
         await self.ensure_defaults()
         agents = [agent for agent in await self.agents() if not agent.archived]
         busy = await self._busy_agents(await self._active_runs())
+        recent_plans = await self.plans(limit=6)
+        shown_plans = [
+            plan
+            for plan in recent_plans
+            if plan.status == "running" or now_ms() - plan.updated_at < PLAN_SHOWN_MS
+        ][:3]
+        # An agent on a plan step shows the step, not the whole brief.
+        steps_on = {
+            step.agent.casefold(): f"Plan step {step.id}: {step.do}"[:200]
+            for plan in shown_plans
+            if plan.status == "running"
+            for step in plan.steps
+            if step.status == "running"
+        }
         latest_run: dict[str, AgentRun] = {}
         for run in await self.runs(limit=60):
             latest_run.setdefault(run.agent_id, run)
@@ -6350,9 +6662,12 @@ class StudioService:
                     "tool": tool,
                     "station": station_for(agent.role, tool, working),
                     "live": live[-160:],
-                    "task": run.goal[:200]
-                    if run and run.status in {"queued", "running"}
-                    else "",
+                    "task": steps_on.get(agent.name.casefold())
+                    or (
+                        run.goal[:200]
+                        if run and run.status in {"queued", "running"}
+                        else ""
+                    ),
                     "chat_id": chat.id if chat else "",
                 }
             )
@@ -6409,6 +6724,7 @@ class StudioService:
             "stations": stations_view(counts, notes),
             "pending": [item.model_dump() for item in pending[:5]],
             "feed": feed[:14],
+            "plans": [self.plan_view(plan) for plan in shown_plans],
         }
 
     async def hq_say(self, agent_id: str, text: str) -> JsonObject:

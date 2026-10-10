@@ -131,6 +131,7 @@
   let backdrop = null;
   let panel = null;
   let feed = null;
+  let plansBox = null;
   let tip = null;
   let frame = 0;
   let poller = 0;
@@ -690,6 +691,36 @@
     g = canvas.getContext("2d");
     panel = h("aside", { class: "hq-panel card", "aria-live": "polite" });
     feed = h("ol", { class: "hq-feed", "aria-label": "Newest steps" });
+    plansBox = h("div", { class: "hq-plan-list" });
+    const planInput = h("input", {
+      type: "text",
+      name: "goal",
+      maxlength: "4000",
+      placeholder: "A job for the whole team, e.g. research and build a site for Joe's Bakery",
+      "aria-label": "Job for a team plan",
+    });
+    const planStatus = h("p", { class: "muted small", role: "status" });
+    const planForm = h(
+      "form",
+      {
+        class: "hq-plan-form",
+        onsubmit: async (event) => {
+          event.preventDefault();
+          const goal = planInput.value.trim();
+          if (!goal) return;
+          planStatus.textContent = "Planning…";
+          try {
+            await ctx.api("/studio/api/plans", { method: "POST", body: JSON.stringify({ goal }) });
+            planInput.value = "";
+            planStatus.textContent = "";
+            await refresh();
+          } catch (error) {
+            planStatus.textContent = (error && error.message) || "That plan could not start.";
+          }
+        },
+      },
+      [planInput, h("button", { class: "button", type: "submit", text: "Plan it" })]
+    );
     tip = h("div", { class: "hq-tip", hidden: true });
     const stage = h("div", { class: "hq-stage" }, [canvas, tip]);
     ctx.view.replaceChildren(
@@ -703,6 +734,12 @@
             h("div", { class: "hq-legend", "aria-hidden": "true" }, [h("span", { class: "dot busy" }), "working", h("span", { class: "dot idle" }), "free"]),
           ]),
           stage,
+          h("section", { class: "hq-plans", "aria-label": "Team plans" }, [
+            h("h3", { class: "hq-feed-title", text: "Team plans" }),
+            planForm,
+            planStatus,
+            plansBox,
+          ]),
           h("h3", { class: "hq-feed-title", text: "Newest steps" }),
           feed,
         ]),
@@ -737,6 +774,7 @@
       if (!ctx.alive()) return;
       sync(data);
       drawFeed();
+      drawPlans();
       if (state.selected && state.selected.kind === "agent") {
         state.activity = await ctx.api(`/studio/api/agents/${state.selected.id}/activity`).catch(() => null);
       }
@@ -807,6 +845,47 @@
             ])
           )
         : [ctx.el("li", { class: "muted", text: "Nobody has done anything yet. Ask Jarvis for something and watch the team go." })])
+    );
+  }
+
+  // Team plans: each step, who does it, and how far it got.
+  function drawPlans() {
+    const plans = (state.data && state.data.plans) || [];
+    const h = ctx.el;
+    plansBox.replaceChildren(
+      ...(plans.length
+        ? plans.map((plan) => {
+            const act = async (verb) => {
+              await ctx.api(`/studio/api/plans/${plan.id}/${verb}`, { method: "POST" }).catch(() => null);
+              await refresh();
+            };
+            const button =
+              plan.status === "running"
+                ? h("button", { class: "link-button", type: "button", text: "Stop", onclick: () => act("stop") })
+                : plan.status === "done"
+                  ? null
+                  : h("button", { class: "link-button", type: "button", text: "Resume", onclick: () => act("resume") });
+            return h("article", { class: `hq-plan ${plan.status}`, "data-plan": plan.id }, [
+              h("div", { class: "hq-plan-head" }, [
+                h("strong", { text: plan.goal }),
+                h("span", { class: "hq-plan-state", text: `${plan.status} · ${plan.done_steps} of ${plan.steps.length}` }),
+                button,
+              ].filter(Boolean)),
+              h(
+                "ol",
+                { class: "hq-plan-steps" },
+                plan.steps.map((step) =>
+                  h("li", { class: `step ${step.status}`, title: step.result || step.do }, [
+                    h("span", { class: "hq-tool", text: step.id }),
+                    h("span", { class: "who", text: step.agent }),
+                    h("span", { class: "muted", text: step.do }),
+                    h("span", { class: "hq-step-state", text: step.status }),
+                  ])
+                )
+              ),
+            ]);
+          })
+        : [h("p", { class: "muted small", text: "No team plans yet. Give the team a bigger job above, or tell Jarvis \"get the team to …\"." })])
     );
   }
 

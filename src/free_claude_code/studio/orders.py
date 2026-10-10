@@ -361,6 +361,32 @@ def code_request(text: str, main: str = "") -> str:
     return task if len(task.split()) >= 3 else ""
 
 
+_TEAM_JOB = re.compile(
+    r"(?:"
+    r"(?:get|have|let|use)\s+(?:the\s+)?(?:whole\s+|entire\s+)?team\s+(?:to\s+)?"
+    r"|team\s+up\s+(?:to|on|and)\s+"
+    r"|(?:make|start|run|draw\s+up|come\s+up\s+with|write)\s+a\s+team\s+plan\s+"
+    r"(?:to|for)\s+"
+    r"|(?:make|start|run)\s+a\s+plan\s+for\s+the\s+(?:whole\s+)?team\s+to\s+"
+    r"|(?:all\s+of\s+you|everyone|every\s+agent)\s*,?\s+(?:work\s+together\s+(?:to|on)\s+)?"
+    r")(?P<job>.+)",
+    re.I | re.S,
+)
+
+
+def plan_request(text: str, main: str = "") -> str:
+    """The job in 'get the team to build a bakery site', 'team up on X', or
+    'make a team plan to X': work for several agents, run as a team plan.
+    Empty for anything else ('plan my week' is the Helper's)."""
+    name = rf"(?:{re.escape(main)}\s*[,:!]?\s+)?" if main.strip() else ""
+    lead = re.match(_ASKING.format(main=name), text, re.I)
+    found = _TEAM_JOB.match(text[lead.end() if lead else 0 :].strip())
+    if not found:
+        return ""
+    job = _clean(found.group("job")).rstrip("?.!")
+    return job if len(job.split()) >= 3 else ""
+
+
 ROUTED_ROLES = {
     "researcher": "finds things out on the web: research, prices, reviews, news, comparisons",
     "builder": "builds and fixes websites, apps, games, and code",

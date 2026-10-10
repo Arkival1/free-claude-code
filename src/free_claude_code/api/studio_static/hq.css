@@ -272,3 +272,102 @@
 body[data-ui="page"] .view:has(> .hq) {
   max-width: none;
 }
+
+/* Team plans: a job split into steps, one agent each. */
+.hq-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hq-plan-form {
+  display: flex;
+  gap: 8px;
+}
+
+.hq-plan-form input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+}
+
+.hq-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hq-plan {
+  border: 1px solid var(--line, #2a3446);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.hq-plan.running {
+  border-color: var(--accent);
+}
+
+.hq-plan.failed {
+  border-color: var(--bad);
+}
+
+.hq-plan-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.hq-plan-head strong {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hq-plan-state,
+.hq-step-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hq-plan-steps {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.hq-plan-steps li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.hq-plan-steps li .muted {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hq-plan-steps .who {
+  font-weight: 600;
+}
+
+.hq-plan-steps li.running .hq-step-state {
+  color: var(--accent);
+}
+
+.hq-plan-steps li.done .hq-step-state {
+  color: var(--good, #4caf50);
+}
+
+.hq-plan-steps li.failed .hq-step-state,
+.hq-plan-steps li.skipped .hq-step-state {
+  color: var(--bad);
+}

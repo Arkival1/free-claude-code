@@ -270,12 +270,41 @@ STARTERS: tuple[Starter, ...] = (
         ("Look at a server's tools (action tools) before calling one.",),
     ),
     Starter(
-        "team_task",
-        "Several agents on one goal",
-        ("together", "as a team", "the whole team", "everyone work on", "team up"),
+        "team_plan",
+        "A bigger job planned for the whole team",
+        (
+            "the whole team",
+            "team up",
+            "team plan",
+            "get the team",
+            "have the team",
+            "plan the job",
+            "step by step",
+            "all of you",
+        ),
         (
             _x(
-                "have the team research and build a gpu comparison site",
+                "get the team to research budget gpus and build a comparison site",
+                goal=(
+                    "Research the best budget GPUs (prices, speed, power) and "
+                    "build a comparison website from what is found, then test it."
+                ),
+                project="gpu-compare",
+            ),
+        ),
+        (
+            "It splits the job into steps for the right agents and runs them in "
+            "order, each handed what the steps before it produced; it reports "
+            "here when done. One agent's job goes to ask_agent instead.",
+        ),
+    ),
+    Starter(
+        "team_task",
+        "Several agents talking it through in one room",
+        ("together", "as a team", "everyone work on", "talk it through"),
+        (
+            _x(
+                "have researcher and builder work on a gpu comparison site together",
                 agents=["Researcher", "Builder"],
                 goal="Research budget GPUs, then build a comparison website.",
                 project="gpu-compare",
@@ -863,7 +892,15 @@ def _clip(text: str, limit: int) -> str:
 
 
 HANDOFF_TOOLS = frozenset(
-    {"ask_agent", "team_task", "ask_helper", "research", "web_search", "web_fetch"}
+    {
+        "ask_agent",
+        "team_task",
+        "team_plan",
+        "ask_helper",
+        "research",
+        "web_search",
+        "web_fetch",
+    }
 )
 """Tools whose job an agent can take; any other match is the main AI's own."""
 
