@@ -1,9 +1,13 @@
 """FastAPI route handlers."""
 
-from collections.abc import Mapping
+import json
+from collections.abc import AsyncIterable, Mapping
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from loguru import logger
+from pydantic import ValidationError
+from starlette.responses import StreamingResponse
 
 from free_claude_code.application.errors import ApplicationError
 from free_claude_code.application.ports import ProviderResolver, RequestRuntimeLease
@@ -15,7 +19,10 @@ from free_claude_code.core.anthropic import (
     get_token_count,
 )
 from free_claude_code.core.anthropic.task_policy import allow_background_subagents
-from free_claude_code.core.openai_responses import OpenAIResponsesRequest
+from free_claude_code.core.openai_responses import (
+    OpenAIResponsesRequest,
+    openai_error_payload,
+)
 from free_claude_code.core.trace import trace_event
 from free_claude_code.core.version import package_version
 
@@ -32,6 +39,13 @@ from .model_catalog import (
     ModelsListResponse,
     build_models_list_response,
     build_muse_models_list_response,
+)
+from .openai_chat import (
+    completion_id,
+    error_to_openai,
+    to_chunks,
+    to_completion,
+    to_messages_request,
 )
 from .ports import ApiServices
 from .request_errors import ordinary_application_error_response
@@ -160,6 +174,109 @@ async def create_response(
 
 @router.api_route("/v1/responses", methods=["HEAD", "OPTIONS"])
 async def probe_responses(_auth=Depends(require_proxy_auth)):
+    return _probe_response("POST, HEAD, OPTIONS")
+
+
+@router.post("/v1/chat/completions")
+async def create_chat_completion(
+    request: Request,
+    services: ApiServices = Depends(get_services),
+    _auth=Depends(require_proxy_auth),
+):
+    """OpenAI Chat Completions (JSON, or chunks with stream=true) for the many
+    tools that speak it, through the same pipeline as /v1/messages."""
+    request_id = get_request_id(request)
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return JSONResponse(
+            status_code=400,
+            content=openai_error_payload(
+                message="The request body must be a JSON object.",
+                error_type="invalid_request_error",
+            ),
+        )
+    try:
+        messages = to_messages_request(body)
+    except ApplicationError as exc:
+        return ordinary_application_error_response(
+            exc, wire_api="responses", request_id=request_id
+        )
+    except ValidationError as exc:
+        return JSONResponse(
+            status_code=400,
+            content=openai_error_payload(
+                message=f"Invalid request: {exc.errors()[0].get('msg', exc)}",
+                error_type="invalid_request_error",
+            ),
+        )
+    options = body.get("stream_options")
+    response = await _create_messages_response(
+        services,
+        messages,
+        request_id=request_id,
+        request_headers=request.headers,
+    )
+    return _as_chat(
+        response,
+        model=messages.model,
+        include_usage=isinstance(options, dict) and bool(options.get("include_usage")),
+    )
+
+
+class _ChatChunks:
+    """The translated stream; closing it also closes the stream it reads, even
+    when the client left before the first chunk."""
+
+    def __init__(
+        self, source: AsyncIterable[object], *, model: str, include_usage: bool
+    ) -> None:
+        self._source = source
+        self._chunks = to_chunks(
+            source,
+            model=model,
+            cid=completion_id(),
+            include_usage=include_usage,
+        )
+
+    def __aiter__(self) -> _ChatChunks:
+        return self
+
+    async def __anext__(self) -> bytes:
+        return await self._chunks.__anext__()
+
+    async def aclose(self) -> None:
+        try:
+            await self._chunks.aclose()
+        finally:
+            close = getattr(self._source, "aclose", None)
+            if close is not None:
+                await close()
+
+
+def _as_chat(response: object, *, model: str, include_usage: bool) -> object:
+    if isinstance(response, StreamingResponse):
+        response.body_iterator = _ChatChunks(
+            response.body_iterator, model=model, include_usage=include_usage
+        )
+        return response
+    if isinstance(response, JSONResponse):
+        content = json.loads(bytes(response.body) or b"{}")
+        if response.status_code >= 400:
+            return JSONResponse(
+                status_code=response.status_code,
+                content=error_to_openai(content, response.status_code),
+            )
+        return JSONResponse(
+            content=to_completion(content, model=model, cid=completion_id())
+        )
+    return response
+
+
+@router.api_route("/v1/chat/completions", methods=["HEAD", "OPTIONS"])
+async def probe_chat_completions(_auth=Depends(require_proxy_auth)):
     return _probe_response("POST, HEAD, OPTIONS")
 
 

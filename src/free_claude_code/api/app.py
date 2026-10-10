@@ -42,6 +42,7 @@ from .phone_cors import PhoneCorsMiddleware
 from .ports import ApiServices
 from .request_errors import ordinary_application_error_response
 from .request_ids import (
+    OPENAI_WIRE_PATHS,
     RequestCorrelationMiddleware,
     attach_request_id_headers,
     get_request_id,
@@ -134,7 +135,7 @@ def create_app(services: ApiServices) -> FastAPI:
         return ordinary_application_error_response(
             exc,
             wire_api=(
-                "responses" if request.url.path == "/v1/responses" else "messages"
+                "responses" if request.url.path in OPENAI_WIRE_PATHS else "messages"
             ),
             request_id=get_request_id(request),
         )
@@ -162,7 +163,7 @@ def create_app(services: ApiServices) -> FastAPI:
                     type(exc).__name__,
                 )
             message = safe_exception_message(exc)
-            if request.url.path == "/v1/responses":
+            if request.url.path in OPENAI_WIRE_PATHS:
                 content = openai_error_payload(message=message, error_type="api_error")
             else:
                 content = anthropic_error_payload(
