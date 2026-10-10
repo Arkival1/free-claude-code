@@ -4013,6 +4013,215 @@
     ]);
   }
 
+  /* ------------------------------------------------------------- connectors */
+
+  // Outside services the team can use, email drafts waiting for a yes, and how
+  // other AI tools (Claude Code, Codex, Cursor, ...) use LCC.
+  async function renderConnectors() {
+    const generation = renderGeneration;
+    const data = await api("/studio/api/connectors");
+    if (generation !== renderGeneration) return;
+    const live = data.connectors.filter((item) => item.connected).length;
+    view.replaceChildren(
+      ...(data.drafts.length ? [draftsCard(data.drafts)] : []),
+      card("Connectors", [
+        el("p", {
+          class: "muted",
+          text: `Give the team outside services: they use them with the mcp tool, like "check my inbox" or "post in Discord when the site is done". Tokens stay in a file on this PC that only you can read, and never come back to this page. ${live} connected.`,
+        }),
+      ]),
+      ...data.connectors.map(connectorCard),
+      harnessCard()
+    );
+  }
+
+  function draftsCard(drafts) {
+    return card(
+      "Emails waiting for your yes",
+      drafts.map((draft) =>
+        el("div", { class: "stack connector-draft" }, [
+          el("strong", { text: `To ${draft.to}: ${draft.subject || "(no subject)"}` }),
+          el("pre", { class: "command-block", text: draft.body }),
+          el("div", { class: "row" }, [
+            el("button", {
+              class: "primary",
+              type: "button",
+              text: "Send",
+              onclick: async (event) => {
+                event.target.disabled = true;
+                try {
+                  const sent = await post(`/studio/api/connectors/drafts/${draft.id}/send`);
+                  notify(sent.message);
+                } catch (error) {
+                  notify(error.message);
+                }
+                render();
+              },
+            }),
+            el("button", {
+              class: "ghost-button",
+              type: "button",
+              text: "Discard",
+              onclick: async () => {
+                try {
+                  await remove(`/studio/api/connectors/drafts/${draft.id}`);
+                  notify("Draft thrown away.");
+                } catch (error) {
+                  notify(error.message);
+                }
+                render();
+              },
+            }),
+          ]),
+        ])
+      ),
+      "An agent wrote these with your email connector. Nothing is sent until you say so."
+    );
+  }
+
+  function connectorCard(item) {
+    const inputs = {};
+    const fields = item.fields.map((field) => {
+      const label = `${field.label}${field.optional ? " (optional)" : ""}`;
+      const input = field.choices.length
+        ? el(
+            "select",
+            { "aria-label": field.label },
+            field.choices.map((choice) =>
+              el("option", { value: choice, text: choice, selected: (field.value || field.choices[0]) === choice })
+            )
+          )
+        : el("input", {
+            type: field.secret ? "password" : "text",
+            autocomplete: "off",
+            spellcheck: "false",
+            placeholder: field.secret && field.value ? "set (leave as is to keep it)" : field.placeholder,
+            value: field.value,
+          });
+      inputs[field.key] = input;
+      return el("label", {}, [label, input]);
+    });
+    const result = el("p", { class: "muted small", hidden: true });
+    const say = (text) => {
+      result.textContent = text;
+      result.hidden = false;
+    };
+    const values = () =>
+      Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value]));
+    const buttons = [
+      el("button", {
+        class: "primary",
+        type: "button",
+        text: item.connected ? "Save" : item.fields.length ? "Connect" : "Switch on",
+        onclick: async () => {
+          try {
+            await put(`/studio/api/connectors/${item.id}`, { values: values() });
+            notify(`${item.name} is connected.`);
+            render();
+          } catch (error) {
+            say(error.message);
+          }
+        },
+      }),
+      item.connected
+        ? el("button", {
+            class: "secondary",
+            type: "button",
+            text: "Test",
+            onclick: async () => {
+              say("Trying it…");
+              try {
+                const tried = await post(`/studio/api/connectors/${item.id}/test`);
+                say(tried.message);
+              } catch (error) {
+                say(error.message);
+              }
+            },
+          })
+        : null,
+      item.connected
+        ? el("button", {
+            class: "ghost-button",
+            type: "button",
+            text: "Disconnect",
+            onclick: async () => {
+              try {
+                await remove(`/studio/api/connectors/${item.id}`);
+                notify(`${item.name} is disconnected and its token is gone.`);
+                render();
+              } catch (error) {
+                say(error.message);
+              }
+            },
+          })
+        : null,
+    ];
+    return el("section", { class: "card connector", "data-connector": item.id }, [
+      el("div", { class: "row-between" }, [
+        el("h2", { text: item.name }),
+        el("span", { class: `pill ${item.connected ? "good" : "warn"}`, text: item.connected ? "connected" : "not connected" }),
+      ]),
+      el("p", { text: item.what }),
+      el("p", { class: "muted small", text: item.get_it }),
+      ...fields,
+      el("div", { class: "row" }, buttons),
+      result,
+    ]);
+  }
+
+  // How other AI tools use LCC: its models through the OpenAI and Anthropic
+  // APIs, and its team as an MCP server.
+  function harnessCard() {
+    const base = location.origin;
+    const block = (label, text) =>
+      el("div", {}, [
+        el("div", { class: "row-between" }, [
+          el("strong", { text: label }),
+          el("button", {
+            class: "secondary small",
+            type: "button",
+            text: "Copy",
+            onclick: async () => {
+              try {
+                await navigator.clipboard.writeText(text);
+                notify("Copied.");
+              } catch {
+                notify("Select the text and copy it.");
+              }
+            },
+          }),
+        ]),
+        el("pre", { class: "command-block", text }),
+      ]);
+    const mcpJson = JSON.stringify({ mcpServers: { lcc: { url: `${base}/mcp` } } }, null, 2);
+    return card("Use LCC from other AI tools", [
+      el("p", {
+        class: "muted",
+        text: "Any AI app or coding agent can use LCC two ways. As a model: point it at the address below with any API key (or your proxy token, if you set one in Admin). The model name picks the model: a provider/model name like llamacpp/qwen3-4b uses that one, anything else uses your default. As a team: add LCC as an MCP server and that tool can ask your agents for work, run team plans, check on them, and read the projects they make.",
+      }),
+      el("div", { class: "kv" }, [
+        el("span", { text: "OpenAI API" }),
+        el("span", { text: `${base}/v1 (chat/completions, responses, models)` }),
+        el("span", { text: "Anthropic API" }),
+        el("span", { text: `${base} (v1/messages)` }),
+        el("span", { text: "MCP server" }),
+        el("span", { text: `${base}/mcp` }),
+      ]),
+      block("Claude Code: the team as tools", `claude mcp add --transport http lcc ${base}/mcp`),
+      block("Codex: ~/.codex/config.toml", `[mcp_servers.lcc]\nurl = "${base}/mcp"`),
+      block("Cursor: ~/.cursor/mcp.json (and other apps with an mcpServers list)", mcpJson),
+      block("Gemini CLI: ~/.gemini/settings.json", JSON.stringify({ mcpServers: { lcc: { httpUrl: `${base}/mcp` } } }, null, 2)),
+      block("VS Code: .vscode/mcp.json", JSON.stringify({ servers: { lcc: { type: "http", url: `${base}/mcp` } } }, null, 2)),
+      block("Cline, Continue, Open WebUI, LibreChat, and other OpenAI-compatible apps", `Provider: OpenAI Compatible\nBase URL: ${base}/v1\nAPI key: any (or your proxy token)\nModel: llamacpp/qwen3-4b (or any name for your default)`),
+      block("Aider", `aider --openai-api-base ${base}/v1 --openai-api-key any --model openai/llamacpp/qwen3-4b`),
+      block("Python (openai package)", `from openai import OpenAI\nclient = OpenAI(base_url="${base}/v1", api_key="any")\nreply = client.chat.completions.create(\n    model="llamacpp/qwen3-4b",\n    messages=[{"role": "user", "content": "Hello"}],\n)\nprint(reply.choices[0].message.content)`),
+      el("p", {
+        class: "muted small",
+        text: "Claude Code, Codex, Pi, OpenCode, Cline, Hermes, DeepSeek Harness, Grok Build, Muse Code and Aider also have ready-made launchers (fcc-claude, fcc-codex, ...) that use your FCC models with nothing to set up. Web pages in your browser can't use the MCP server; set a proxy token in Admin before you open FCC to other computers.",
+      }),
+    ]);
+  }
+
   function vaultCard(vault) {
     const items = vault.items || [];
     const size = (bytes) => (bytes > 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
@@ -4634,6 +4843,13 @@
           text: "Every Free Claude Code option: providers and keys, models, messaging, Studio, and voice.",
         }),
         el("button", { class: "primary", type: "button", text: "Open settings", onclick: () => go("settings") }),
+      ]),
+      card("Connectors and other AI tools", [
+        el("p", {
+          class: "muted",
+          text: "Give the team Gmail, GitHub, Discord, Zapier and more, approve emails agents wrote, and use LCC from Claude Code, Codex, Cursor, or any OpenAI-compatible app.",
+        }),
+        el("button", { class: "primary", type: "button", text: "Open connectors", onclick: () => go("connectors") }),
       ]),
       learningCard(studies.studies || []),
       ...(book ? [playbookCard(book)] : []),
@@ -5676,6 +5892,7 @@
     ["Models", "models", "▣"],
     ["Model Control", "engine", "⚡"],
     ["Tuning & LoRA", "tune", "⟁"],
+    ["Connectors", "connectors", "⇄"],
     ["Knowledge & Memory", "more", "✦"],
     ["Settings", "settings", "⚙"],
   ];
@@ -6854,6 +7071,7 @@
         case "lab": return await renderLab(generation);
         case "farm": return await renderFarm(generation);
         case "hq": return await renderHQ(generation);
+        case "connectors": return await renderConnectors();
         case "more": return await renderMore();
         case "settings": return await renderSettings();
         default: return go("home");
@@ -7132,6 +7350,7 @@
         lab: "Lab",
         farm: "Content Farm",
         hq: "HQ",
+        connectors: "Connectors",
         more: "More",
         settings: "Settings",
       }[name] || "Studio"

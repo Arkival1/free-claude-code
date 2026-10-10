@@ -2912,3 +2912,24 @@ h3.subhead {
   border-radius: 10px;
   border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
 }
+
+/* Connectors page */
+.card.connector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card.connector h2 {
+  margin: 0;
+}
+
+.card.connector p {
+  margin: 0;
+}
+
+.connector-draft + .connector-draft {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}

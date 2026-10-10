@@ -1323,6 +1323,91 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Team plans",
+        route="/studio#hq",
+        where="Say 'get the team to ...' to Jarvis, or HQ, Team plans, Plan it.",
+        terms=(
+            "team plan",
+            "plan",
+            "coordinate",
+            "work together",
+            "team up",
+            "whole team",
+            "steps",
+        ),
+        body=(
+            "A team plan splits a bigger job between the agents. Jarvis writes "
+            "two to eight steps, each for the agent whose job it is, and which "
+            "steps must finish first. Steps that don't wait on each other run "
+            "side by side, an agent never gets two at once, and each step is "
+            "handed what the steps before it produced. A failed step skips the "
+            "steps that needed it. The HQ lists each plan and its steps; Stop "
+            "ends it and Resume carries on from where it stopped. When it ends, "
+            "Jarvis posts what was done in the main chat."
+        ),
+    ),
+    GuideTopic(
+        title="Connectors",
+        route="/studio#connectors",
+        where=(
+            "More (MENU), Open connectors; or Connectors in the Command "
+            "Center's side menu."
+        ),
+        terms=(
+            "connector",
+            "connectors",
+            "gmail",
+            "email",
+            "inbox",
+            "zapier",
+            "github token",
+            "discord",
+            "slack",
+            "webhook",
+            "stripe",
+            "google sheets",
+            "calendar",
+        ),
+        body=(
+            "Connectors give the team outside services: Zapier (Gmail, Google "
+            "Sheets, Calendar, Slack, Notion, and thousands more), GitHub, "
+            "Hugging Face, Stripe, Supabase (read only), Context7, DeepWiki, "
+            "email, and a Discord or Slack webhook. Paste the service's token "
+            "and press Connect, then Test. Agents use them with the mcp tool. "
+            "Emails agents write wait as drafts on the Connectors page until "
+            "you press Send, unless you let agents send. Tokens stay in a file "
+            "only you can read and never come back to the page."
+        ),
+    ),
+    GuideTopic(
+        title="Using LCC from other AI tools",
+        route="/studio#connectors",
+        where="Connectors page (More, Open connectors), the last card.",
+        terms=(
+            "claude code",
+            "codex",
+            "cursor",
+            "openai api",
+            "chat completions",
+            "mcp server",
+            "other ai tools",
+            "harness",
+            "open webui",
+            "base url",
+        ),
+        body=(
+            "Any AI app can use LCC's models: point it at "
+            "http://127.0.0.1:8082/v1 (OpenAI Chat Completions, Responses, "
+            "and Models) with any API key, or your proxy token if you set one. "
+            "A provider/model name like llamacpp/qwen3-4b picks that model; any "
+            "other name uses your default. Tools that speak MCP (Claude Code, "
+            "Codex, Cursor, Gemini CLI, VS Code, Cline, ...) add "
+            "http://127.0.0.1:8082/mcp and can give your agents jobs, run team "
+            "plans, check on them, and read their projects. The card has the "
+            "exact lines for each tool."
+        ),
+    ),
+    GuideTopic(
         title="Repos that come with FCC",
         route="/studio#more",
         where=(
@@ -2120,6 +2205,8 @@ def page_name(route: str) -> str:
         "models": "Models",
         "tune": "Tuning & LoRA",
         "more": "Knowledge & Memory",
+        "connectors": "Connectors",
+        "hq": "HQ",
         "settings": "Settings",
     }.get(route.rsplit("#", 1)[-1], route)
 

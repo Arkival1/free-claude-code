@@ -16,7 +16,6 @@ from collections.abc import (
     AsyncIterable,
     AsyncIterator,
     Mapping,
-    Sequence,
 )
 from typing import Any
 
@@ -502,14 +501,3 @@ def _parse(raw: str) -> dict[str, Any] | None:
     except ValueError:
         return None
     return parsed if isinstance(parsed, dict) else None
-
-
-def model_ids(ids: Sequence[str]) -> dict[str, Any]:
-    """A /v1/models listing in OpenAI's shape."""
-    return {
-        "object": "list",
-        "data": [
-            {"id": model, "object": "model", "created": 0, "owned_by": "lcc"}
-            for model in ids
-        ],
-    }

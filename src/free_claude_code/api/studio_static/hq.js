@@ -997,8 +997,12 @@
     ];
     if (station.id === "approvals") {
       const pending = data.pending || [];
+      const drafts = data.drafts || 0;
       nodes.push(
-        h("h4", { text: pending.length ? "Waiting for your yes" : "Nothing waiting" }),
+        h("h4", { text: pending.length || drafts ? "Waiting for your yes" : "Nothing waiting" }),
+        drafts
+          ? h("button", { class: "primary small", type: "button", text: `${drafts} email${drafts === 1 ? "" : "s"} to approve: open Connectors`, onclick: () => ctx.go("connectors") })
+          : null,
         ...pending.map((item) =>
           h("div", { class: "hq-approval" }, [
             h("code", { text: item.command || "" }),

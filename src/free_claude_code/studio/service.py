@@ -2,9 +2,11 @@
 
 import asyncio
 import contextlib
+import imaplib
 import json
 import re
 import secrets
+import smtplib
 import socket
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -35,6 +37,23 @@ from .claw import ClawCode, ClawError
 from .code_loop import code_and_test, project_name
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
+from .connectors import (
+    CONNECTORS,
+    SECRET_SHOWN,
+    Builtin,
+    Connector,
+    ConnectorError,
+    ConnectorStore,
+    EmailService,
+    WebhookService,
+    check_values,
+    connector,
+    describe_tools,
+    make_message,
+    mcp_server,
+    send_now,
+    view,
+)
 from .convo_notes import NotesKeeper
 from .crew import Crew
 from .desk import (
@@ -321,6 +340,10 @@ DEFAULT_AGENT_NAMES = frozenset(
 )
 """The starter team Studio fills in (the main AI is found by its role)."""
 HQ_CHATS_READ = 3
+CONNECTOR_EXTENSION = Extension(
+    id="ext_connectors", name="Connectors", source="connectors"
+)
+"""Where web connectors show up among the team's MCP servers."""
 PLAN_SHOWN_MS = 3_600_000
 """How long a finished team plan stays in the HQ (an hour)."""
 INTERRUPTED_PLAN_NOTE = (
@@ -676,6 +699,9 @@ class StudioService:
             vault=self.vault,
         )
         self._mcp = McpManager()
+        # Outside services connected with a token (Connectors page).
+        self._connectors = ConnectorStore(sites_dir.parent / "connectors.json")
+        self._connector_transport = search_transport
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._models_dir = models_dir
         self._voice_setup = SetupState()
@@ -5270,12 +5296,113 @@ class StudioService:
         )
 
     async def _enabled_servers(self) -> list[tuple[Extension, McpServer]]:
-        return [
+        added = [
             (extension, server)
             for extension in await self._extensions.all()
             for server in extension.servers
             if server.enabled
         ]
+        return added + [
+            (CONNECTOR_EXTENSION, mcp_server(spec, values))
+            for spec, values in self._connected("mcp")
+        ]
+
+    # ------------------------------------------------------------ connectors
+
+    def _connected(
+        self, kind: str | None = None
+    ) -> list[tuple[Connector, dict[str, str]]]:
+        saved = self._connectors.all()
+        return [
+            (spec, saved[spec.id])
+            for spec in CONNECTORS
+            if spec.id in saved
+            and saved[spec.id].get("_on") == "yes"
+            and (kind is None or spec.kind == kind)
+        ]
+
+    def _builtin(self, spec: Connector, values: dict[str, str]) -> Builtin:
+        if spec.kind == "email":
+            return EmailService(values, self._connectors)
+        return WebhookService(values, transport=self._connector_transport)
+
+    def _builtin_services(self) -> dict[str, Builtin]:
+        return {
+            spec.id: self._builtin(spec, values)
+            for spec, values in self._connected()
+            if spec.kind != "mcp"
+        }
+
+    def connectors_view(self) -> JsonObject:
+        saved = self._connectors.all()
+        return {
+            "connectors": [view(spec, saved.get(spec.id)) for spec in CONNECTORS],
+            "drafts": self._connectors.drafts(),
+        }
+
+    async def save_connector(
+        self, connector_id: str, values: Mapping[str, str]
+    ) -> JsonObject:
+        """Connect a service (or change its settings): a secret left as shown
+        (or empty) keeps the one already saved."""
+        spec = connector(connector_id)
+        old = self._connectors.values(connector_id)
+        merged = {
+            item.key: (
+                old.get(item.key, "")
+                if item.secret and str(values.get(item.key) or "") in {"", SECRET_SHOWN}
+                else str(values.get(item.key) or "")
+            )
+            for item in spec.fields
+        }
+        clean = check_values(spec, merged)
+        await self._mcp.stop(f"{CONNECTOR_EXTENSION.id}/{spec.id}")
+        self._connectors.save(connector_id, {**clean, "_on": "yes"})
+        return view(spec, self._connectors.values(connector_id))
+
+    async def remove_connector(self, connector_id: str) -> None:
+        spec = connector(connector_id)
+        await self._mcp.stop(f"{CONNECTOR_EXTENSION.id}/{spec.id}")
+        self._connectors.remove(connector_id)
+
+    async def test_connector(self, connector_id: str) -> str:
+        """Try a connected service: sign in, or list a web server's tools."""
+        spec = connector(connector_id)
+        values = self._connectors.values(connector_id)
+        if values.get("_on") != "yes":
+            raise ConnectorError(f"{spec.name} isn't connected.")
+        try:
+            if spec.kind == "mcp":
+                tools = await self._mcp.tools(
+                    self._server_spec(CONNECTOR_EXTENSION, mcp_server(spec, values))
+                )
+                names = ", ".join(tool.name for tool in tools[:8])
+                more = f" and {len(tools) - 8} more" if len(tools) > 8 else ""
+                return f"Connected: {len(tools)} tools ({names}{more})."
+            return await self._builtin(spec, values).test()
+        except (McpError, OSError, httpx.HTTPError, ConnectorError) as error:
+            raise ConnectorError(f"{spec.name} didn't work: {error}") from error
+
+    async def send_draft(self, draft_id: str) -> str:
+        """Send an email draft an agent wrote, now that the user approved it."""
+        values = self._connectors.values("email")
+        if values.get("_on") != "yes":
+            raise ConnectorError("Connect email first.")
+        draft = self._connectors.take_draft(draft_id)
+        message = make_message(
+            values, draft["to"], draft.get("subject", ""), draft["body"]
+        )
+        try:
+            await asyncio.to_thread(send_now, values, message)
+        except (OSError, smtplib.SMTPException) as error:
+            self._connectors.add_draft(
+                {k: v for k, v in draft.items() if k not in {"id", "at"}}
+            )
+            raise ConnectorError(f"It didn't send: {error}") from error
+        return f"Sent to {draft['to']}."
+
+    def discard_draft(self, draft_id: str) -> None:
+        self._connectors.take_draft(draft_id)
 
     async def _skill_tool(self, call: ToolCall) -> ToolOutcome:
         action = str(call.arguments.get("action") or "list").lower()
@@ -5412,27 +5539,31 @@ class StudioService:
     async def _mcp_tool(self, call: ToolCall) -> ToolOutcome:
         action = str(call.arguments.get("action") or "servers").lower()
         servers = await self._enabled_servers()
+        builtins = self._builtin_services()
+        wanted = str(call.arguments.get("server") or "").strip().casefold()
+        if action != "servers" and wanted in builtins:
+            return await self._builtin_call(builtins[wanted], action, call)
+        lines = [
+            f"- {server.name} [{extension.name}]" for extension, server in servers
+        ] + [f"- {name} [Connectors, built in]" for name in builtins]
+        if not lines:
+            return ToolOutcome(
+                text="No MCP servers are switched on. The user connects services "
+                "(GitHub, Gmail through Zapier, ...) on the Connectors page, or adds "
+                "servers on the More page (Add from GitHub).",
+                data={"tool": "mcp"},
+            )
         if action == "servers" or not servers:
-            if not servers:
-                return ToolOutcome(
-                    text="No MCP servers are switched on. The user adds and turns "
-                    "them on on the More page (Add from GitHub).",
-                    data={"tool": "mcp"},
-                )
-            lines = [
-                f"- {server.name} [{extension.name}]" for extension, server in servers
-            ]
             return ToolOutcome(
                 text="MCP servers:\n" + "\n".join(lines), data={"tool": "mcp"}
             )
-        wanted = str(call.arguments.get("server") or "").strip().casefold()
         pair = next((p for p in servers if p[1].name.casefold() == wanted), None) or (
-            servers[0] if len(servers) == 1 and not wanted else None
+            servers[0] if len(servers) == 1 and not wanted and not builtins else None
         )
         if pair is None:
             raise ValueError(
                 f"No switched-on server is called '{wanted}'. Servers: "
-                + ", ".join(server.name for _, server in servers)
+                + ", ".join([server.name for _, server in servers] + list(builtins))
             )
         extension, server = pair
         spec = self._server_spec(extension, server)
@@ -5460,6 +5591,30 @@ class StudioService:
         return ToolOutcome(
             text=text,
             data={"tool": "mcp", "server": server.name, "called": tool},
+            failed=failed,
+        )
+
+    async def _builtin_call(
+        self, service: Builtin, action: str, call: ToolCall
+    ) -> ToolOutcome:
+        if action == "tools":
+            return ToolOutcome(
+                text=f"{service.name} tools:\n{describe_tools(service)}",
+                data={"tool": "mcp", "server": service.name},
+            )
+        tool = str(call.arguments.get("tool") or "").strip()
+        if not tool:
+            raise ValueError("Say which tool to call; list them with action tools.")
+        arguments = call.arguments.get("arguments")
+        try:
+            text, failed = await service.call(
+                tool, arguments if isinstance(arguments, dict) else {}
+            )
+        except (OSError, httpx.HTTPError, ConnectorError, imaplib.IMAP4.error) as error:
+            text, failed = f"{service.name} didn't work: {error}", True
+        return ToolOutcome(
+            text=text,
+            data={"tool": "mcp", "server": service.name, "called": tool},
             failed=failed,
         )
 
@@ -6686,9 +6841,18 @@ class StudioService:
         counts: dict[str, int] = {}
         notes: dict[str, str] = {}
         pending = await self.pending_commands()
-        counts["approvals"] = len(pending)
-        if pending:
-            notes["approvals"] = f"{len(pending)} command(s) waiting for your yes"
+        drafts = self._connectors.drafts()
+        counts["approvals"] = len(pending) + len(drafts)
+        waiting = [
+            part
+            for part in (
+                f"{len(pending)} command(s)" if pending else "",
+                f"{len(drafts)} email draft(s)" if drafts else "",
+            )
+            if part
+        ]
+        if waiting:
+            notes["approvals"] = f"{' and '.join(waiting)} waiting for your yes"
         studying = [
             s for s in await self.studies() if s.status in {"planning", "learning"}
         ]
@@ -6723,6 +6887,7 @@ class StudioService:
             "agents": people,
             "stations": stations_view(counts, notes),
             "pending": [item.model_dump() for item in pending[:5]],
+            "drafts": len(drafts),
             "feed": feed[:14],
             "plans": [self.plan_view(plan) for plan in shown_plans],
         }

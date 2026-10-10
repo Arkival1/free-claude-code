@@ -1641,6 +1641,134 @@ when shared memory is off).
 </details>
 
 <details>
+<summary><strong>Team plans: one job, split between the agents</strong></summary>
+
+Say "get the team to make a bakery website with a price list", "team up on
+…", or "make a team plan to …" (or type the goal into **Team plans → Plan it**
+in the HQ). The main AI writes a short plan: two to eight steps, each for the
+agent whose job it is, with which steps must finish first. Then the team works
+it:
+
+- Steps that don't wait on each other run side by side (two at a time), and
+  an agent never gets two steps at once. An agent busy with something else is
+  waited for, not interrupted.
+- Each step gets the results of the steps it waited on, so the Builder
+  builds from the Researcher's findings, not from a guess.
+- A failed step skips the steps that needed it; the rest carry on.
+- **Stop** ends the plan and the step in progress; **Resume** runs it again
+  from where it stopped. A plan cut off by a restart is marked stopped, so
+  it can be resumed too.
+- The HQ shows each plan with every step's agent and state, and the agent at
+  work shows "Plan step s2: …" as its task. When the plan ends, the main AI
+  posts what was done in the main chat.
+
+Small jobs are still one `ask_agent` call; a plan is for work that needs more
+than one agent.
+
+</details>
+
+<details>
+<summary><strong>Connectors: Gmail, GitHub, Discord, and more for the team</strong></summary>
+
+The **Connectors** page gives the team outside services. Each takes a token
+from that service; agents then use it with the `mcp` tool ("check my inbox",
+"post in Discord when the site is done", "list the open issues on my repo").
+
+| Connector | What agents can do | What you give it |
+|---|---|---|
+| Zapier | Gmail, Google Sheets, Calendar, Slack, Notion, and 8,000+ apps: the actions you pick in Zapier | A token from mcp.zapier.com |
+| GitHub | Repositories, issues, pull requests, code search | A personal access token |
+| Hugging Face | Models, datasets, papers, Spaces | A read token |
+| Stripe | Customers, payments, invoices, payment links | A restricted key (only the rights agents need) |
+| Supabase | A project's tables, logs, and docs, read only | A personal access token |
+| Context7 | Up-to-date docs for programming libraries | Nothing (a free key gives more) |
+| DeepWiki | How any public GitHub repo works | Nothing |
+| Email (built in) | Read the inbox; write emails | Your address and an app password (Gmail, iCloud, Yahoo, or any IMAP/SMTP server) |
+| Webhook (built in) | Post to a Discord or Slack channel, or any web address | The webhook address |
+
+The web connectors are MCP servers each service runs itself, so nothing is
+downloaded. **Email never goes out on its own**: an agent's email becomes a
+draft that waits on the Connectors page (and in the HQ approvals count) until
+you press **Send**, unless you set "Agents may send without asking" to yes.
+Reading mail doesn't mark it read. Outlook.com no longer allows app passwords,
+so connect Outlook through Zapier.
+
+Tokens are kept in `connectors.json` next to Studio's data, readable only by
+you, and are never sent back to the page: a saved token shows as dots, and
+leaving the dots in place keeps it. **Test** tries a connection (signs in, or
+lists the service's tools); **Disconnect** forgets the token.
+
+</details>
+
+<details>
+<summary><strong>Use LCC from any AI tool: OpenAI API and MCP server</strong></summary>
+
+Other AI apps and coding agents can use LCC two ways. The **Connectors** page
+shows the snippets with your address filled in.
+
+**As a model.** FCC speaks the OpenAI Chat Completions API at
+`http://127.0.0.1:8082/v1/chat/completions` (with streaming, tool calls,
+images, and JSON mode), beside the Anthropic Messages and OpenAI Responses
+APIs it already had. Point any OpenAI-compatible app at
+`http://127.0.0.1:8082/v1` with any API key (or your proxy token, if you set
+one). The model name picks the model: a provider/model name like
+`llamacpp/qwen3-4b` uses that one, and any other name uses your default model.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8082/v1", api_key="any")
+reply = client.chat.completions.create(
+    model="llamacpp/qwen3-4b",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(reply.choices[0].message.content)
+```
+
+That covers Open WebUI, LibreChat, Continue, Cline's "OpenAI Compatible"
+provider, Aider (`--openai-api-base http://127.0.0.1:8082/v1 --model
+openai/llamacpp/qwen3-4b`), LangChain, and anything else built on the OpenAI
+API.
+
+**As a team.** `http://127.0.0.1:8082/mcp` is an MCP server (Streamable HTTP)
+whose tools are your Studio team:
+
+| Tool | What it does |
+|---|---|
+| `lcc_team` | The agents, what each is for, and what they are doing |
+| `lcc_chat` | Talk to the main AI, which can hand work out itself |
+| `lcc_ask` | Give one agent a job; wait for the result or get a task id |
+| `lcc_plan` | Start a team plan for a bigger job |
+| `lcc_status` | How a task or plan is going, or what everyone is doing |
+| `lcc_stop` | Stop a plan, or everything one agent is doing |
+| `lcc_projects`, `lcc_files`, `lcc_read` | The projects the team made and their files |
+
+Add it to your tool:
+
+```bash
+# Claude Code
+claude mcp add --transport http lcc http://127.0.0.1:8082/mcp
+```
+
+```toml
+# Codex: ~/.codex/config.toml
+[mcp_servers.lcc]
+url = "http://127.0.0.1:8082/mcp"
+```
+
+```json
+// Cursor: ~/.cursor/mcp.json (Gemini CLI uses "httpUrl" in ~/.gemini/settings.json;
+// VS Code uses {"servers": {"lcc": {"type": "http", "url": ...}}} in .vscode/mcp.json)
+{ "mcpServers": { "lcc": { "url": "http://127.0.0.1:8082/mcp" } } }
+```
+
+Web pages in a browser can't use it (requests from other sites are refused),
+the proxy token is needed when one is set, and **Settings → Other AI Tools Can
+Use Your Team (MCP)** turns it off.
+
+</details>
+
+<details>
 <summary><strong>Local models you download and own</strong></summary>
 
 The **Models** tab lists curated small models (0.36B to 7B GGUF builds) and
@@ -1979,6 +2107,11 @@ starts; reload or restart the client when FCC reports updated settings. Use
 
 Run FCC on the same computer and in the same user environment as the client you
 are configuring.
+
+Any other app that speaks the OpenAI API can use `http://127.0.0.1:8082/v1`
+(Chat Completions, Responses, and Models), and any tool that speaks MCP can
+add `http://127.0.0.1:8082/mcp` to use the Studio team. See
+[Use LCC from any AI tool](#studio).
 
 <a id="optional-integrations"></a>
 

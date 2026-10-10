@@ -578,6 +578,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ask_agent",
             "code_and_test",
             "team_task",
+            "team_plan",
             "team_status",
             "stop_agent",
             "agent_model",
@@ -588,7 +589,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Memory",
         ("remember", "recall", "video_notes", "conversation", "knowledge", "learn"),
     ),
-    ("Added from GitHub", ("skill", "mcp", "toolshed")),
+    ("Connectors and GitHub add-ons", ("mcp", "skill", "toolshed")),
     (
         "Everyday",
         (

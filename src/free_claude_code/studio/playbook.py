@@ -256,9 +256,21 @@ STARTERS: tuple[Starter, ...] = (
             "my files",
             "database",
             "browser",
+            "connector",
+            "zapier",
+            "email",
+            "inbox",
+            "discord",
         ),
         (
             _x("what mcp servers are on", action="servers"),
+            _x(
+                "check my inbox",
+                action="call",
+                server="email",
+                tool="read_inbox",
+                arguments={"count": 5},
+            ),
             _x(
                 "list the files in my documents with the files server",
                 action="call",
@@ -267,7 +279,11 @@ STARTERS: tuple[Starter, ...] = (
                 arguments={"path": "C:/Users/me/Documents"},
             ),
         ),
-        ("Look at a server's tools (action tools) before calling one.",),
+        (
+            "Look at a server's tools (action tools) before calling one.",
+            "Connected services (Connectors page) are servers too: email, "
+            "webhook, zapier, github, and the rest.",
+        ),
     ),
     Starter(
         "team_plan",

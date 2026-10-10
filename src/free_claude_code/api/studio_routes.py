@@ -29,6 +29,7 @@ from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
 from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
+from free_claude_code.studio.connectors import ConnectorError
 from free_claude_code.studio.downloads import DownloadError
 from free_claude_code.studio.extensions import MAX_ZIP_BYTES as MAX_REPO_ZIP_BYTES
 from free_claude_code.studio.extensions import Extension
@@ -1446,6 +1447,86 @@ async def resume_plan(
 ) -> JsonObject:
     """Run a stopped plan again from where it stopped."""
     return studio.plan_view(await studio.resume_plan(plan_id))
+
+
+# ------------------------------------------------------------ connectors
+
+
+class ConnectorPayload(BaseModel):
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+def _connector_failed(error: ConnectorError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(error))
+
+
+@router.get("/studio/api/connectors")
+async def list_connectors(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Outside services agents can use, and email drafts waiting for a yes.
+    Tokens are never sent back: a set secret shows as dots."""
+    return studio.connectors_view()
+
+
+@router.put("/studio/api/connectors/{connector_id}")
+async def save_connector(
+    connector_id: str,
+    payload: ConnectorPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Connect a service, or change its settings."""
+    try:
+        return await studio.save_connector(connector_id, payload.values)
+    except ConnectorError as error:
+        raise _connector_failed(error) from error
+
+
+@router.delete("/studio/api/connectors/{connector_id}")
+async def remove_connector(
+    connector_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Disconnect a service and forget its token."""
+    try:
+        await studio.remove_connector(connector_id)
+    except ConnectorError as error:
+        raise _connector_failed(error) from error
+    return studio.connectors_view()
+
+
+@router.post("/studio/api/connectors/{connector_id}/test")
+async def test_connector(
+    connector_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Try a connected service and say what happened."""
+    try:
+        return {"ok": True, "message": await studio.test_connector(connector_id)}
+    except ConnectorError as error:
+        return {"ok": False, "message": str(error)}
+
+
+@router.post("/studio/api/connectors/drafts/{draft_id}/send")
+async def send_draft(
+    draft_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Send an email an agent wrote, now that the user said yes."""
+    try:
+        message = await studio.send_draft(draft_id)
+    except ConnectorError as error:
+        raise _connector_failed(error) from error
+    return {"message": message, **studio.connectors_view()}
+
+
+@router.delete("/studio/api/connectors/drafts/{draft_id}")
+async def discard_draft(
+    draft_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        studio.discard_draft(draft_id)
+    except ConnectorError as error:
+        raise _connector_failed(error) from error
+    return studio.connectors_view()
 
 
 @router.post("/studio/api/hq/agents/{agent_id}/stop")

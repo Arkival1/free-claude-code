@@ -654,7 +654,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         name=MCP_TOOL,
         description=(
             "MCP tool servers the user switched on (files, browsers, databases, "
-            "GitHub, and more). action servers lists them; tools with a server "
+            "and the services on the Connectors page: GitHub, Zapier for Gmail, "
+            "Sheets, Calendar and Slack, email, a Discord or Slack webhook, and "
+            "more). action servers lists them; tools with a server "
             "lists its tools and their arguments; call runs one tool with "
             "arguments. Look at a server's tools before calling one."
         ),
