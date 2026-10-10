@@ -413,6 +413,13 @@ body[data-ui="page"] .view:has(> .hq) {
   max-width: 220px;
 }
 
+.hq-relay-picks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
 .hq-relay-stage.off {
   opacity: 0.55;
 }

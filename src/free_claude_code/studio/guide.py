@@ -1373,9 +1373,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "for a website. While it is on, new websites, apps and games go "
             "through it. Start one with 'relay: ...' or Run the relay in the HQ. "
             "The HQ's Relay card turns it off, reorders repos, sets each to "
-            "every job, when it fits, or off, and pins an agent. Each stage "
-            "shows which project files it really changed. A failed stage "
-            "doesn't stop the rest; the result comes to the main chat."
+            "every job, when it fits, or off, and pins an agent; + agent adds "
+            "more agents from one repo, each taking its own turn. For a "
+            "website, app, or game, LCC's agent checks the finished work last "
+            "(switch it off in the card). Each stage shows which project files "
+            "it really changed. A failed stage doesn't stop the rest; the "
+            "result comes to the main chat."
         ),
     ),
     GuideTopic(

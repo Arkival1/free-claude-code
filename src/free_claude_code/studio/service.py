@@ -245,6 +245,7 @@ from .presets import (
 from .recall_messages import Found, search
 from .recall_messages import line as message_line
 from .relay import (
+    CHECKED_KINDS,
     RELAY_SKILL_KINDS,
     Leg,
     Mode,
@@ -252,10 +253,12 @@ from .relay import (
     RelayStage,
     RelayStore,
     arranged,
+    check_task,
     job_kinds,
     leg_task,
     plan_legs,
     repo_key,
+    used,
 )
 from .research import DeepResearch, ResearchMix, ResearchReport, relevance
 from .rooms import RoomError, RoomOutcome, RoomService
@@ -6704,12 +6707,14 @@ class StudioService:
         return {
             "on": settings.on,
             "first": settings.first,
+            "check": settings.check,
             "team": own,
             "stages": [
                 {
                     "repo": stage.repo,
                     "mode": stage.mode,
-                    "agent": stage.agent,
+                    "use": stage.use,
+                    "agent": stage.use[0] if stage.use else "",
                     "about": repos[repo_key(stage.repo)].description,
                     "agents": [a.name for a in repos[repo_key(stage.repo)].agents],
                     "skills": [
@@ -6723,8 +6728,8 @@ class StudioService:
         }
 
     async def save_relay(self, values: Mapping[str, object]) -> JsonObject:
-        """Change the relay: on or off, LCC's first agent, and each repo's
-        place, mode (always, when it fits, off), and agent."""
+        """Change the relay: on or off, LCC's first agent, the final check,
+        and each repo's place, mode (always, when it fits, off), and agents."""
         current = await self.relay_settings()
         repos = {repo_key(e.name): e for e in await self._relay_repos()}
         modes: dict[str, Mode] = {"always": "always", "fits": "fits", "off": "off"}
@@ -6741,18 +6746,24 @@ class StudioService:
                 mode = modes.get(str(row.get("mode") or "fits"))
                 if mode is None:
                     raise StudioError("A repo's mode is always, fits, or off.")
-                agent = str(row.get("agent") or "").strip()
+                picked = used(row)
                 names = {a.name for a in repo.agents} | {s.name for s in repo.skills}
-                if agent and agent not in names:
-                    raise StudioError(f"{repo.name} has no agent or skill {agent!r}.")
-                stages.append(RelayStage(repo.name, mode, agent))
+                for agent in picked:
+                    if agent not in names:
+                        raise StudioError(
+                            f"{repo.name} has no agent or skill {agent!r}."
+                        )
+                stages.append(RelayStage(repo.name, mode, picked))
         first = str(values.get("first", current.first) or "").strip()
         own = {a.name for a in await self._plan_team() if a.role != "agent"}
         if first and first not in own:
             raise StudioError(f"No LCC agent called {first!r} can start the relay.")
         self._relay.save(
             RelaySettings(
-                on=bool(values.get("on", current.on)), first=first, stages=stages
+                on=bool(values.get("on", current.on)),
+                first=first,
+                stages=stages,
+                check=bool(values.get("check", current.check)),
             )
         )
         return await self.relay_view()
@@ -6795,6 +6806,17 @@ class StudioService:
                     do=leg_task(leg, goal),
                     needs=(f"s{number - 1}",),
                     source=leg.repo,
+                )
+            )
+        if settings.check and kinds & CHECKED_KINDS:
+            # The stages' changes can break each other's: LCC's agent looks
+            # the finished project over last.
+            steps.append(
+                PlanStep(
+                    id=f"s{len(steps) + 1}",
+                    agent=lead.name,
+                    do=check_task(goal),
+                    needs=(steps[-1].id,),
                 )
             )
         return await self.start_plan(

@@ -83,6 +83,15 @@ def test_new_repos_join_the_relay_in_their_place(tmp_path):
     assert "gone/repo" not in [s.repo for s in saved.stages]
     assert saved.stages[-1] == RelayStage("someone/new-repo", "fits")
 
+    # Relays saved with one agent per repo keep it.
+    (tmp_path / "relay.json").write_text(
+        '{"stages": [{"repo": "crewAIInc/crewAI", "agent": "crewAI Content Editor"}]}'
+    )
+    assert store.load().stages == [
+        RelayStage("crewAIInc/crewAI", "fits", ["crewAI Content Editor"])
+    ]
+    assert store.load().check is True
+
 
 def test_a_failed_stage_hands_on_and_nothing_is_skipped():
     steps = (
@@ -120,18 +129,20 @@ async def test_a_website_goes_through_lcc_then_each_repo_in_turn(make_studio):
         ("Financial Analyst", "AI4Finance-Foundation/FinRobot"),
         ("crewAI Content Writer", "crewAIInc/crewAI"),
         ("Builder", "leonxlnx/taste-skill"),
+        ("Builder", ""),
     ]
-    assert [s.needs for s in plan.steps[1:]] == [(f"s{n}",) for n in range(1, 7)]
-    assert "design-taste-frontend" in plan.steps[-1].do
+    assert [s.needs for s in plan.steps[1:]] == [(f"s{n}",) for n in range(1, 8)]
+    assert "design-taste-frontend" in plan.steps[-2].do
+    assert plan.steps[-1].do.startswith("Final check of"), "LCC checks it last"
     assert plan.site_id, "every stage works in one project"
 
     await asyncio.wait_for(studio.wait_for_background(), timeout=60)
     done = await studio.plan(plan.id)
     assert done.status == "done"
-    assert [s.status for s in done.steps] == ["done"] * 7
+    assert [s.status for s in done.steps] == ["done"] * 8
     # One at a time, in order, each told what the stage before it did.
     assert [p.split("You are stage ")[1].split(" ")[0] for p in seen] == [
-        str(n) for n in range(1, 8)
+        str(n) for n in range(1, 9)
     ]
     assert (
         "- frontend-developer (VoltAgent/awesome-claude-code-subagents) [done]: Stage 2 improved it."
@@ -139,11 +150,11 @@ async def test_a_website_goes_through_lcc_then_each_repo_in_turn(make_studio):
     )
     starts = [s.started_at for s in done.steps]
     finishes = [s.finished_at for s in done.steps]
-    assert all(starts[n + 1] >= finishes[n] for n in range(6))
+    assert all(starts[n + 1] >= finishes[n] for n in range(7))
     runs = await studio.store.find(AgentRun)
     assert {run.site_id for run in runs} == {plan.site_id}
     assert (
-        "The relay 'make a website for my bakery' is done: 7 of 7 stage(s) done."
+        "The relay 'make a website for my bakery' is done: 8 of 8 stage(s) done."
         in done.summary
     )
 
@@ -218,7 +229,15 @@ async def test_a_stage_that_fails_doesnt_stop_the_relay(make_studio):
     assert statuses["OpenHands Engineer"] == "failed"
     assert statuses["MetaGPT QA Engineer"] == "done"
     assert done.steps[-1].status == "done"
-    assert done.steps[0].agent == "Coder"
+    assert done.steps[0].agent == "Coder" and done.steps[-1].agent == "Coder"
+
+
+@pytest.mark.asyncio
+async def test_only_websites_apps_and_games_get_the_final_check(make_studio):
+    studio, _ = await with_repos(make_studio, finish_every_stage())
+    plan = await studio.start_relay("write a blog post about sourdough")
+    assert not any(s.do.startswith("Final check") for s in plan.steps)
+    await studio.stop_plan(plan.id)
 
 
 @pytest.mark.asyncio
@@ -256,6 +275,26 @@ async def test_the_relay_order_and_switches_are_kept(make_studio):
         "Helper",
         "crewAI Content Editor",
         "ui-designer",
+        "Helper",
+    ]
+    await studio.stop_plan(plan.id)
+
+    # A repo can give several of its agents, each taking its own turn, and
+    # the final check can be switched off.
+    volt = "VoltAgent/awesome-claude-code-subagents"
+    several = [
+        {"repo": volt, "mode": "always", "use": ["ui-designer", "seo-specialist"]},
+        *[{**row, "mode": "off"} for row in front if row["repo"] != volt],
+        *rest,
+    ]
+    saved = await studio.save_relay({"stages": several, "check": False})
+    assert saved["check"] is False
+    assert saved["stages"][0]["use"] == ["ui-designer", "seo-specialist"]
+    plan = await studio.start_relay(BAKERY)
+    assert [(s.agent, s.source) for s in plan.steps] == [
+        ("Helper", ""),
+        ("ui-designer", volt),
+        ("seo-specialist", volt),
     ]
     await studio.stop_plan(plan.id)
 
@@ -335,7 +374,7 @@ async def test_the_relay_routes(make_studio):
         assert bad.status_code == 400
         started = await client.post("/studio/api/relay", json={"goal": BAKERY})
         assert started.status_code == 202
-        assert started.json()["kind"] == "relay" and len(started.json()["steps"]) == 7
+        assert started.json()["kind"] == "relay" and len(started.json()["steps"]) == 8
         await studio.stop_plan(started.json()["id"])
 
         # Other AI tools start one through LCC's MCP server.

@@ -876,7 +876,8 @@
           body: JSON.stringify({
             on: onBox.checked,
             first: firstPick.value,
-            stages: stages.map(({ repo, mode, agent }) => ({ repo, mode, agent })),
+            check: checkBox.checked,
+            stages: stages.map(({ repo, mode, use }) => ({ repo, mode, use })),
             ...changes,
           }),
         });
@@ -887,6 +888,7 @@
       }
     };
     const onBox = h("input", { type: "checkbox", checked: view.on, onchange: () => save({}) });
+    const checkBox = h("input", { type: "checkbox", checked: view.check, onchange: () => save({}) });
     const firstPick = h(
       "select",
       { "aria-label": "LCC agent that starts the relay", onchange: () => save({}) },
@@ -935,14 +937,43 @@
         ].map(([value, text]) => h("option", { value, text, selected: stage.mode === value }))
       );
       const choices = [...stage.agents.map((name) => ["agent", name]), ...stage.skills.map((name) => ["skill", name])];
-      const agent = h(
-        "select",
-        { "aria-label": `Agent from ${stage.repo}`, onchange: (event) => { stage.agent = event.target.value; save({}); } },
-        [
-          h("option", { value: "", text: stage.agents.length ? "the agent that fits the job" : "the skill that fits the job" }),
-          ...choices.map(([kind, name]) => h("option", { value: name, text: `${kind === "skill" ? "skill: " : ""}${name}`, selected: stage.agent === name })),
-        ]
-      );
+      // Each picked agent takes its own turn, in this order; with none picked,
+      // the one that fits the job goes.
+      const pick = (slot) =>
+        h(
+          "select",
+          {
+            "aria-label": slot === 0 ? `Agent from ${stage.repo}` : `Agent ${slot + 1} from ${stage.repo}`,
+            onchange: (event) => {
+              const use = [...stage.use];
+              if (event.target.value) use[slot] = event.target.value;
+              else use.splice(slot, 1);
+              stage.use = [...new Set(use.filter(Boolean))];
+              save({});
+            },
+          },
+          [
+            h("option", { value: "", text: slot ? "(remove)" : stage.agents.length ? "the agent that fits the job" : "the skill that fits the job" }),
+            ...choices.map(([kind, name]) => h("option", { value: name, text: `${kind === "skill" ? "skill: " : ""}${name}`, selected: stage.use[slot] === name })),
+          ]
+        );
+      const unused = choices.map(([, name]) => name).filter((name) => !stage.use.includes(name));
+      const agent = h("div", { class: "hq-relay-picks" }, [
+        pick(0),
+        ...stage.use.slice(1).map((_, slot) => pick(slot + 1)),
+        stage.use.length && unused.length
+          ? h("button", {
+              class: "link-button",
+              type: "button",
+              text: "+ agent",
+              "aria-label": `Use another of ${stage.repo}'s agents`,
+              onclick: () => {
+                stage.use = [...stage.use, unused[0]];
+                save({});
+              },
+            })
+          : null,
+      ].filter(Boolean));
       return h("li", { class: `hq-relay-stage ${stage.mode}`, "data-repo": stage.repo }, [
         h("span", { class: "hq-tool", text: String(index + 2) }),
         h("div", { class: "grow" }, [
@@ -958,12 +989,16 @@
     relayBox.replaceChildren(
       h("p", { class: "muted small", text: "A job goes to LCC's own agent first, then to each repo below in order, one at a time: each one's agent takes the work as the last one left it and improves it. Repos set to \"when it fits\" join only when they have something for that kind of job." }),
       h("label", { class: "check" }, [onBox, "On: new websites, apps, and games go through the relay"]),
+      h("label", { class: "check" }, [checkBox, "Last, LCC's agent checks a finished website, app, or game and fixes what broke"]),
       h("label", {}, ["Starts with", firstPick]),
       jobForm,
       status,
       h("ol", { class: "hq-relay-stages" }, [
         h("li", { class: "hq-relay-stage always" }, [h("span", { class: "hq-tool", text: "1" }), h("div", { class: "grow" }, [h("strong", { text: "LCC" }), h("small", { class: "muted", text: firstPick.value || "the agent for the job" })])]),
         ...rows,
+        ...(checkBox.checked
+          ? [h("li", { class: "hq-relay-stage always" }, [h("span", { class: "hq-tool", text: "✓" }), h("div", { class: "grow" }, [h("strong", { text: "LCC: final check" }), h("small", { class: "muted", text: "websites, apps, and games" })])])]
+          : []),
       ])
     );
   }

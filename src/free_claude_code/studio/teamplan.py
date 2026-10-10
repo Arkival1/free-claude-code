@@ -243,7 +243,9 @@ def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
         lines.append(
             "Work on what is there: read the project first, keep what works, make "
             "it better your way, and fix anything broken. Don't start over or "
-            "throw away the earlier stages' work."
+            "throw away the earlier stages' work: change files with edit_file "
+            "rather than rewriting whole pages, and keep the page structure and "
+            "the class names the stylesheet styles, so the design stays intact."
         )
     lines.append(
         "When you finish, say what you changed in your stage and anything the next "

@@ -1686,6 +1686,9 @@ bakery":
 6. crewAI: the Content Writer improves the words.
 7. Every other repo with something for that kind of job: here taste-skill's
    `design-taste-frontend` rules, applied by the Builder.
+8. Last, for a website, app, or game, LCC's agent checks the finished
+   project (`check_project`, `polish_check`) and fixes what the stages broke:
+   links that go nowhere, stray text, parts the stylesheet doesn't style.
 
 Each stage works in the same project, reads what the stage before left,
 keeps what works, and says what it changed; the next stage is told. Studio
@@ -1703,8 +1706,15 @@ not a bakery site), so a relay stays a sensible length. In each repo, the
 agent or skill whose name fits the job is used (`game-developer` for a game,
 `fullstack-developer` for an app). Change any of it in the HQ's **Relay**
 card: turn it off, reorder repos, set a repo to every job, when it fits, or
-off, pin one of its agents, or pick which LCC agent starts. Repos you add
-from GitHub join the end of the relay.
+off, pin one of its agents, or pick which LCC agent starts. **+ agent** adds
+more agents from the same repo, each taking its own turn in order (say
+awesome-claude-code-subagents' `ui-designer`, `frontend-developer`,
+`seo-specialist`, and `accessibility-tester`). The final check can be
+switched off there too. Repos you add from GitHub join the end of the relay.
+
+Later stages are told to change files with `edit_file` rather than rewrite
+whole pages, and to keep the class names the stylesheet styles, so one
+stage's rewrite doesn't undo the design.
 
 Start one any time with "relay: make a landing page for my gym", "run it
 through all the repos: …", "… through the relay", the **Run the relay** box

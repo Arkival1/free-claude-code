@@ -6,11 +6,13 @@ that fits the job best takes the project as the last agent left it, improves
 it its own way, and hands it on, until the last one finishes. Nothing runs at
 the same time; each stage waits for the one before.
 
-Repos with agents give one of their agents. Repos with only skills (taste-skill's
-design rules, say) give a stage too: LCC's agent for the job reads that skill
-and applies it. The repos the user put first run on every job; the others run
-when they have something for that kind of job (a security repo for a website
-does not), so a relay stays a sensible length.
+Repos with agents give one of their agents, or several the user picked (each
+takes its own turn). Repos with only skills (taste-skill's design rules, say)
+give a stage too: LCC's agent for the job reads that skill and applies it. The
+repos the user put first run on every job; the others run when they have
+something for that kind of job (a security repo for a website does not), so a
+relay stays a sensible length. For a website, app, or game, LCC's agent checks
+the finished work last and fixes what the stages broke.
 """
 
 import json
@@ -26,8 +28,10 @@ from .extensions import AgentDef, Extension, Skill
 RELAY_SKILL_KINDS = frozenset({"skill", "readme"})
 """What a stage can apply from a repo: its skills, or for a guide or a list,
 its README."""
-MAX_LEGS = 12
-"""Repo stages in one relay at most (LCC's own first stage not counted)."""
+MAX_LEGS = 24
+"""Repo stages in one relay at most (LCC's own first and last not counted)."""
+CHECKED_KINDS = frozenset({"site", "app", "game"})
+"""Jobs whose finished project LCC's agent checks at the end of a relay."""
 Mode = Literal["always", "fits", "off"]
 
 # ------------------------------------------------------------------ job kinds
@@ -317,8 +321,9 @@ class RelayStage:
     repo: str
     """The repo's owner/name, as Studio lists it."""
     mode: Mode = "fits"
-    agent: str = ""
-    """An agent (or skill) of the repo always used; '' picks one for the job."""
+    use: list[str] = field(default_factory=list)
+    """The repo's agents (or skills) always used, each taking its own turn in
+    this order; empty picks the one that fits the job."""
 
 
 @dataclass(slots=True)
@@ -328,6 +333,8 @@ class RelaySettings:
     first: str = ""
     """LCC's agent that starts every relay; '' picks the one for the job."""
     stages: list[RelayStage] = field(default_factory=list)
+    check: bool = True
+    """LCC's first agent checks a finished website, app, or game last."""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -343,7 +350,7 @@ def arranged(saved: RelaySettings, installed: Sequence[str]) -> RelaySettings:
     the first repos in their order, then the rest as they were added."""
     present = {repo_key(name): name for name in installed}
     stages = [
-        RelayStage(present[repo_key(s.repo)], s.mode, s.agent)
+        RelayStage(present[repo_key(s.repo)], s.mode, list(s.use))
         for s in saved.stages
         if repo_key(s.repo) in present
     ]
@@ -353,7 +360,23 @@ def arranged(saved: RelaySettings, installed: Sequence[str]) -> RelaySettings:
         if repo_key(name) not in known:
             known.add(repo_key(name))
             stages.append(RelayStage(name, default_mode(name)))
-    return RelaySettings(on=saved.on, first=saved.first, stages=stages)
+    return RelaySettings(
+        on=saved.on, first=saved.first, stages=stages, check=saved.check
+    )
+
+
+def used(row: Mapping[str, object]) -> list[str]:
+    """The agents a saved or sent stage names: a list in "use", or one name in
+    "agent" (as relays saved before several were allowed)."""
+    names = row.get("use")
+    if not isinstance(names, list):
+        names = [row.get("agent")]
+    picked: list[str] = []
+    for name in names:
+        text = str(name or "").strip()
+        if text and text not in picked:
+            picked.append(text)
+    return picked
 
 
 class RelayStore:
@@ -377,13 +400,14 @@ class RelayStore:
                     RelayStage(
                         str(row["repo"]),
                         mode if mode in {"always", "fits", "off"} else "fits",
-                        str(row.get("agent") or ""),
+                        used(row),
                     )
                 )
         return RelaySettings(
             on=bool(data.get("on", True)),
             first=str(data.get("first") or ""),
             stages=stages,
+            check=bool(data.get("check", True)),
         )
 
     def save(self, settings: RelaySettings) -> None:
@@ -458,14 +482,6 @@ def choose(
     for it."""
     agents = list(extension.agents)
     skills = [s for s in extension.skills if s.kind in RELAY_SKILL_KINDS]
-    if stage.agent:
-        wanted = stage.agent.casefold()
-        for agent in agents:
-            if agent.name.casefold() == wanted:
-                return Leg(extension.name, agent=agent)
-        for skill in skills:
-            if skill.name.casefold() == wanted:
-                return Leg(extension.name, skill=skill)
     role = KNOWN.get(repo_key(extension.name))
     fits_job = role is not None and ("*" in role.kinds or bool(role.kinds & kinds))
     if stage.mode == "fits" and role is not None and not fits_job:
@@ -507,6 +523,30 @@ def choose(
     return None
 
 
+def named_leg(extension: Extension, name: str) -> Leg | None:
+    """The repo's agent, or else its skill, with this name."""
+    wanted = name.casefold()
+    for agent in extension.agents:
+        if agent.name.casefold() == wanted:
+            return Leg(extension.name, agent=agent)
+    for skill in extension.skills:
+        if skill.kind in RELAY_SKILL_KINDS and skill.name.casefold() == wanted:
+            return Leg(extension.name, skill=skill)
+    return None
+
+
+def stage_legs(
+    extension: Extension, stage: RelayStage, goal: str, kinds: set[str]
+) -> list[Leg]:
+    """A repo's turns in this relay: each agent the user picked, in order, or
+    the one that fits the job."""
+    picked = [leg for name in stage.use if (leg := named_leg(extension, name))]
+    if picked:
+        return picked
+    leg = choose(extension, stage, goal, kinds)
+    return [] if leg is None else [leg]
+
+
 def plan_legs(
     goal: str,
     settings: RelaySettings,
@@ -522,12 +562,21 @@ def plan_legs(
         extension = by_name.get(repo_key(stage.repo))
         if stage.mode == "off" or extension is None:
             continue
-        leg = choose(extension, stage, goal, kinds)
-        if leg is not None:
-            legs.append(leg)
+        legs += stage_legs(extension, stage, goal, kinds)
         if len(legs) >= MAX_LEGS:
             break
-    return legs
+    return legs[:MAX_LEGS]
+
+
+def check_task(goal: str) -> str:
+    """What LCC's agent is asked to do last: check the finished work."""
+    return (
+        f"Final check of '{goal}' after every stage: run check_project, and "
+        "polish_check for web pages, then fix everything they report and "
+        "anything broken or unfinished (links that go nowhere, stray text, parts "
+        "the stylesheet doesn't style, pictures that aren't shown). Keep the "
+        "content and the stages' work; don't start over."
+    )
 
 
 def leg_task(leg: Leg, goal: str) -> str:

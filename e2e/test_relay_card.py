@@ -38,6 +38,15 @@ def test_the_relay_lists_every_repo_and_keeps_changes(
     # Pin an agent, switch one repo off, and move it up: it all sticks.
     relay.get_by_label(f"Agent from {VOLT}").select_option("ui-designer")
     expect(page.locator(".toast")).to_contain_text("Relay saved")
+    # A second agent from the same repo takes its own turn after the first.
+    relay.get_by_label(f"Use another of {VOLT}'s agents").click()
+    relay.get_by_label(f"Agent 2 from {VOLT}").select_option("seo-specialist")
+    expect(relay.get_by_label(f"Agent 2 from {VOLT}")).to_have_value("seo-specialist")
+    expect(relay.get_by_text("LCC: final check")).to_be_visible()
+    relay.get_by_label(
+        "Last, LCC's agent checks a finished website, app, or game and fixes what broke"
+    ).uncheck()
+    expect(relay.get_by_text("LCC: final check")).to_have_count(0)
     relay.get_by_label("When crewAIInc/crewAI runs").select_option("off")
     expect(relay.locator("[data-repo='crewAIInc/crewAI']")).to_have_class(
         "hq-relay-stage off"
@@ -51,6 +60,12 @@ def test_the_relay_lists_every_repo_and_keeps_changes(
     page.reload()
     relay = page.locator(".hq-relay")
     expect(relay.get_by_label(f"Agent from {VOLT}")).to_have_value("ui-designer")
+    expect(relay.get_by_label(f"Agent 2 from {VOLT}")).to_have_value("seo-specialist")
+    expect(
+        relay.get_by_label(
+            "Last, LCC's agent checks a finished website, app, or game and fixes what broke"
+        )
+    ).not_to_be_checked()
     expect(relay.get_by_label("When crewAIInc/crewAI runs")).to_have_value("off")
     expect(relay.locator(".hq-relay-stage[data-repo]").nth(3)).to_have_attribute(
         "data-repo", "crewAIInc/crewAI"
