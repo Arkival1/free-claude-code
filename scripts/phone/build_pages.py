@@ -21,6 +21,8 @@ WEB_TEMPLATES = ("business", "website", "landing", "webapp", "game")
 """The starters that run in a browser, so the phone can preview them."""
 TITLE_MARK = "FCCTITLE0"
 """ Stands in for the title; its lower case stands in for the slug."""
+INITIAL_MARK = "FCCINITIAL0"
+"""Stands in for the first letter of the title (the business site's icon)."""
 INDEX = """<!doctype html>
 <meta charset="utf-8" />
 <meta http-equiv="refresh" content="0; url=phone/" />
@@ -41,7 +43,7 @@ def templates_js() -> str:
     table = {
         name: {
             "about": TEMPLATES[name][0],
-            "files": template_files(name, TITLE_MARK),
+            "files": template_files(name, TITLE_MARK, initial=INITIAL_MARK),
         }
         for name in WEB_TEMPLATES
     }
@@ -59,9 +61,10 @@ export function templateFiles(name, title) {{
   if (!template) throw new Error(`No template called ${{name}}. Pick one of: ${{Object.keys(TEMPLATES).join(", ")}}.`);
   const clean = String(title).replace(/[<>]/g, "");
   const slug = String(title).toLowerCase().split(/\\s+/).filter(Boolean).join("-") || "project";
+  const initial = (String(title).match(/[\\p{{L}}\\p{{N}}]/u) || ["★"])[0].toUpperCase();
   const files = {{}};
   for (const [path, text] of Object.entries(template.files)) {{
-    files[path] = text.replaceAll("{TITLE_MARK}", clean).replaceAll("{TITLE_MARK.lower()}", slug);
+    files[path] = text.replaceAll("{TITLE_MARK}", clean).replaceAll("{TITLE_MARK.lower()}", slug).replaceAll("{INITIAL_MARK}", initial);
   }}
   return files;
 }}

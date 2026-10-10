@@ -732,14 +732,26 @@ TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
 }
 
 
-def template_files(name: str, title: str) -> dict[str, str]:
+def initial_of(title: str) -> str:
+    """The first letter of a name, for a site's tab icon (any business, not
+    a coffee cup on a barbershop)."""
+    return next((c for c in title if c.isalnum()), "★").upper()
+
+
+def template_files(
+    name: str, title: str, *, initial: str | None = None
+) -> dict[str, str]:
     """The files of one starter project, filled in with the project's title."""
     if name not in TEMPLATES:
         raise ValueError(
             f"No template called {name!r}. Pick one of: {', '.join(TEMPLATES)}."
         )
     slug = "-".join(title.lower().split()) or "project"
-    values = {"title": title.replace("<", "").replace(">", ""), "slug": slug}
+    values = {
+        "title": title.replace("<", "").replace(">", ""),
+        "slug": slug,
+        "initial": initial_of(title) if initial is None else initial,
+    }
     return {
         path: Template(text).safe_substitute(values)
         for path, text in TEMPLATES[name][1].items()

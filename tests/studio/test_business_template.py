@@ -96,3 +96,14 @@ async def test_start_project_writes_every_page_and_picture(make_studio):
     assert {"images/hero.svg", "styles.css", "app.js"} <= paths
     hero = await studio.workspace.read(site.id, "images/hero.svg")
     assert hero.startswith("<svg")
+
+
+def test_the_tab_icon_is_the_business_initial_not_a_coffee_cup():
+    for title, letter in (("Fade Kings Barbershop", "F"), ("123 Auto", "1")):
+        files = template_files("business", title)
+        assert all(
+            f">{letter}</text></svg>" in text
+            for path, text in files.items()
+            if path.endswith(".html")
+        )
+        assert "☕" not in "".join(files.values())

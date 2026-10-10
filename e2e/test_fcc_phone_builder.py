@@ -376,7 +376,9 @@ def test_a_multi_page_site_works_in_the_preview(
     preview.get_by_label("Email").fill("sam@example.org")
     preview.get_by_label("Message").fill("A table for two, please.")
     preview.get_by_role("button", name="Send message").press("Enter")
-    expect(preview.locator("#form-status")).to_contain_text("Thank you!")
+    # No form service yet: the message goes to the visitor's email app,
+    # never a "thank you" for a message that went nowhere.
+    expect(preview.locator("#form-status")).to_contain_text("email app is opening")
 
     page.get_by_role("button", name="Open full screen").click()
     full = page.frame_locator("iframe.preview-full")
