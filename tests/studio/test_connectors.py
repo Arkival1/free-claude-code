@@ -23,6 +23,8 @@ from free_claude_code.studio.mcp import McpManager
 from free_claude_code.studio.tools import ToolContext
 from tests.api.support import create_test_app
 
+from .conftest import tool_reply
+
 CONTEXT = ToolContext(agent_id="a", chat_id="c")
 DISCORD = "https://discord.com/api/webhooks/1/abc"
 
@@ -91,12 +93,31 @@ async def test_tokens_stay_private_and_are_kept_when_left_as_shown(make_studio):
         await studio.test_connector("github")
 
 
-@pytest.mark.asyncio
-async def test_agents_use_a_web_connector_with_its_token(make_studio):
-    seen: list[httpx.Request] = []
+GITHUB_TOOLS = [
+    {
+        "name": "get_me",
+        "description": "Details about the signed-in user.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_issues",
+        "description": "Issues in a repository.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"repo": {"type": "string"}},
+            "required": ["repo"],
+        },
+    },
+]
+
+
+def fake_github(seen: list[httpx.Request]):
+    """A web MCP server like GitHub's: a token in a header, two tools."""
 
     def server(request: httpx.Request) -> httpx.Response:
         seen.append(request)
+        if request.headers["authorization"] == "Bearer expired":
+            return httpx.Response(401, text="unauthorized: token authentication failed")
         message = json.loads(request.content)
         if "id" not in message:
             return httpx.Response(202)
@@ -104,19 +125,7 @@ async def test_agents_use_a_web_connector_with_its_token(make_studio):
         if message["method"] == "initialize":
             result = {"protocolVersion": "2025-03-26", "capabilities": {}}
         elif message["method"] == "tools/list":
-            result = {
-                "tools": [
-                    {
-                        "name": "list_issues",
-                        "description": "Issues in a repository.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {"repo": {"type": "string"}},
-                            "required": ["repo"],
-                        },
-                    }
-                ]
-            }
+            result = {"tools": GITHUB_TOOLS}
         elif message["method"] == "tools/call":
             repo = message["params"]["arguments"]["repo"]
             result = {"content": [{"type": "text", "text": f"#1 Fix login in {repo}"}]}
@@ -124,8 +133,14 @@ async def test_agents_use_a_web_connector_with_its_token(make_studio):
             200, json={"jsonrpc": "2.0", "id": message["id"], "result": result}
         )
 
+    return server
+
+
+@pytest.mark.asyncio
+async def test_agents_use_a_web_connector_with_its_token(make_studio):
+    seen: list[httpx.Request] = []
     studio, _ = make_studio([])
-    studio._mcp = McpManager(transport=httpx.MockTransport(server))
+    studio._mcp = McpManager(transport=httpx.MockTransport(fake_github(seen)))
     await studio.save_connector("github", {"token": "ghp_x"})
 
     listed = await use_mcp(studio, action="servers")
@@ -140,10 +155,128 @@ async def test_agents_use_a_web_connector_with_its_token(make_studio):
         arguments={"repo": "me/site"},
     )
     assert called.text == "#1 Fix login in me/site" and not called.failed
-    assert {request.headers["authorization"] for request in seen} == {"Bearer ghp_x"}
+    # A guessed tool name gets the real ones back, so the next turn can fix it.
+    guessed = await use_mcp(
+        studio, action="call", server="github", tool="search", arguments={}
+    )
+    assert guessed.failed and "github has no tool 'search'" in guessed.text
+    assert "- list_issues: Issues in a repository." in guessed.text
+    same = await use_mcp(
+        studio,
+        action="call",
+        server="github",
+        tool="List_Issues",
+        arguments={"repo": "me/app"},
+    )
+    assert same.text == "#1 Fix login in me/app"
+    assert {r.headers["authorization"] for r in seen} == {"Bearer ghp_x"}
 
     tried = await studio.test_connector("github")
-    assert tried == "Connected: 1 tools (list_issues)."
+    assert tried == "Connected: 2 tools (get_me, list_issues)."
+
+    await studio.save_connector("github", {"token": "expired"})
+    with pytest.raises(ConnectorError, match="GitHub refused the token"):
+        await studio.test_connector("github")
+
+
+@pytest.mark.asyncio
+async def test_naming_a_connected_service_shows_the_main_ai_its_tools(make_studio):
+    studio, model = make_studio(["On it."])
+    await studio.ensure_defaults()
+    studio._mcp = McpManager(transport=httpx.MockTransport(fake_github([])))
+    await studio.save_connector("github", {"token": "ghp_x"})
+    await studio.save_connector("webhook", {"url": DISCORD})
+
+    def last_note() -> str:
+        return next(
+            str(call["studio_note"])
+            for call in reversed(model.calls)
+            if call["studio_note"]
+        )
+
+    await studio.main_say(
+        "which issues are open on GitHub for me/site?", background=False
+    )
+    note = last_note()
+    assert "the MCP server you were asked about is on" in note
+    # The tool that fits the message comes first.
+    assert note.index("- list_issues: Issues") < note.index("- get_me:")
+    assert "repo (required)" in note and "post_message" not in note
+
+    # Research words don't send it to the Researcher: GitHub is the way.
+    await studio.main_say(
+        "look up on github which issues are open on me/site", background=False
+    )
+    assert "list_issues" in last_note()
+    main_chat = await studio.main_chat()
+    handed = [
+        message
+        for message in await studio._store.transcript(main_chat.id)
+        if message.role == "tool" and message.data.get("tool") == "ask_agent"
+    ]
+    assert handed == []
+
+    # 'Ask GitHub ...' reads like a job for an agent; the playbook shows the
+    # mcp note instead, so the model isn't pushed to hand it out.
+    await studio.main_say(
+        "Ask the GitHub connector to find out which issues are open on me/site",
+        background=False,
+    )
+    note = last_note()
+    assert "MCP tool servers (mcp)" in note and "Give one agent a job" not in note
+
+    await studio.main_say("tell my discord the site is live", background=False)
+    note = last_note()
+    assert "webhook:\n- post_message" in note and "list_issues" not in note
+
+    model.calls.clear()
+    await studio.main_say("what's the weather like?", background=False)
+    assert all(
+        "MCP server you were asked about" not in str(call["studio_note"])
+        for call in model.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_hand_off_goes_back_to_the_service_the_user_named(make_studio):
+    studio, _ = make_studio(
+        [
+            tool_reply(
+                "ask_agent",
+                {"agent": "Researcher", "task": "Ask GitHub about me/site issues"},
+            ),
+            tool_reply(
+                "mcp",
+                {
+                    "action": "call",
+                    "server": "github",
+                    "tool": "list_issues",
+                    "arguments": {"repo": "me/site"},
+                },
+                call_id="call_2",
+            ),
+            "One issue is open: Fix login.",
+        ]
+    )
+    await studio.ensure_defaults()
+    studio._mcp = McpManager(transport=httpx.MockTransport(fake_github([])))
+    await studio.save_connector("github", {"token": "ghp_x"})
+
+    await studio.main_say(
+        "Ask GitHub which issues are open on me/site", background=False
+    )
+    main_chat = await studio.main_chat()
+    tools = [
+        message
+        for message in await studio._store.transcript(main_chat.id)
+        if message.role == "tool"
+    ]
+    assert tools[0].data.get("redirected") == "mcp"
+    assert "use github yourself" in tools[0].text
+    assert tools[1].text == "#1 Fix login in me/site"
+    assert not await studio.runs()
+    # Only once: a later hand-off in another turn goes through as usual.
+    assert main_chat.id not in studio._service_turns
 
 
 @pytest.mark.asyncio
@@ -177,6 +310,10 @@ async def test_agents_post_to_a_discord_channel(make_studio):
         {"content": "The bakery site is live."}
     ]
     assert await studio.test_connector("webhook") == "Posted a test message."
+    wrong = await use_mcp(
+        studio, action="call", server="webhook", tool="send", arguments={}
+    )
+    assert wrong.failed and "- post_message:" in wrong.text
 
     status["code"] = 404
     broken = await use_mcp(

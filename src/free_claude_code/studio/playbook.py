@@ -861,16 +861,22 @@ def _short(text: str) -> str:
 
 
 def guide_text(
-    notes: list[PlaybookNote], text: str, *, rules_only: bool = False
+    notes: list[PlaybookNote],
+    text: str,
+    *,
+    rules_only: bool = False,
+    tool: str = "",
 ) -> str:
     """The Rules, then the notes that fit this message best (none when
-    Studio already did the job, so the model isn't pushed to do it again)."""
+    Studio already did the job, so the model isn't pushed to do it again).
+    With ``tool``, that tool's note is the one shown: Studio already knows
+    which tool the message is for."""
     rules = next((note for note in notes if note.tool == RULES), None)
     ranked = sorted(
         (
-            (score(note, text), index, note)
+            (1 if note.tool == tool else score(note, text), index, note)
             for index, note in enumerate(notes)
-            if note.tool != RULES
+            if note.tool != RULES and (not tool or note.tool == tool)
         ),
         key=lambda item: (-item[0], item[1]),
     )
@@ -1026,8 +1032,10 @@ class Playbook:
                 found.append(note)
         return found
 
-    async def guide(self, text: str, *, rules_only: bool = False) -> str:
-        return guide_text(await self.notes(), text, rules_only=rules_only)
+    async def guide(
+        self, text: str, *, rules_only: bool = False, tool: str = ""
+    ) -> str:
+        return guide_text(await self.notes(), text, rules_only=rules_only, tool=tool)
 
     async def learn(
         self, tool: str, said: str, arguments: Mapping[str, object]

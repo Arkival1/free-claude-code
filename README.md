@@ -1686,8 +1686,12 @@ from that service; agents then use it with the `mcp` tool ("check my inbox",
 | Email (built in) | Read the inbox; write emails | Your address and an app password (Gmail, iCloud, Yahoo, or any IMAP/SMTP server) |
 | Webhook (built in) | Post to a Discord or Slack channel, or any web address | The webhook address |
 
-The web connectors are MCP servers each service runs itself, so nothing is
-downloaded. **Email never goes out on its own**: an agent's email becomes a
+Name the service in your message ("ask DeepWiki how this repo works", "list
+my GitHub issues", "tell my Discord the site is live") and Studio shows the
+main AI that service's real tools first, so even a small local model calls
+the right one instead of guessing, and the job isn't handed to the
+Researcher. The web connectors are MCP servers each service runs itself, so
+nothing is downloaded. **Email never goes out on its own**: an agent's email becomes a
 draft that waits on the Connectors page (and in the HQ approvals count) until
 you press **Send**, unless you set "Agents may send without asking" to yes.
 Reading mail doesn't mark it read. Outlook.com no longer allows app passwords,

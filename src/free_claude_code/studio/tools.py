@@ -1623,7 +1623,12 @@ class AgentToolbox:
         photos: PhotoLibrary | None = None,
         desk: DeskBrowser | None = None,
         page_tryer: Callable[..., Awaitable[PageReport]] = try_page,
+        screen: Callable[[ToolCall, ToolContext], Awaitable[ToolOutcome | None]]
+        | None = None,
     ) -> None:
+        # Sees each call first and may answer it instead (Studio turns a
+        # hand-off back to the mcp tool when the user named a connected service).
+        self._screen = screen
         self._desk = desk
         self._try_page_with = page_tryer
         self._web = web_tools
@@ -1734,6 +1739,9 @@ class AgentToolbox:
 
     async def run(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         """Execute one tool call, converting every failure into tool output."""
+        screened = await self._screen(call, context) if self._screen else None
+        if screened is not None:
+            return screened
         if call.name in NETWORK_TOOLS and not self.web_enabled:
             return ToolOutcome(
                 text="Web access is off in Studio settings.",

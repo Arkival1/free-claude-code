@@ -18,6 +18,7 @@ import email.policy
 import imaplib
 import json
 import os
+import re
 import smtplib
 import ssl
 import time
@@ -68,6 +69,8 @@ class Connector:
     """Where to get the token, in a sentence."""
     query: Mapping[str, str] = field(default_factory=dict)
     """Settings added to the address, e.g. Supabase's read_only."""
+    words: tuple[str, ...] = ()
+    """Other words a user calls it by ('discord' for the webhook)."""
 
 
 _TOKEN = Field("token", "Token")
@@ -83,6 +86,7 @@ CONNECTORS: tuple[Connector, ...] = (
         fields=(_TOKEN,),
         get_it="mcp.zapier.com → Add MCP server → choose Other → Connect tab → "
         "Generate token (it is shown once). Pick the apps and actions there.",
+        words=("gmail", "google sheets", "google calendar", "notion"),
     ),
     Connector(
         "github",
@@ -102,6 +106,7 @@ CONNECTORS: tuple[Connector, ...] = (
         url="https://huggingface.co/mcp",
         fields=(_TOKEN,),
         get_it="huggingface.co → Settings → Access Tokens (a read token is enough).",
+        words=("hugging face",),
     ),
     Connector(
         "stripe",
@@ -179,6 +184,7 @@ CONNECTORS: tuple[Connector, ...] = (
                 choices=("no", "yes"),
             ),
         ),
+        words=("inbox", "mail", "emails"),
         get_it="Use an app password, not your normal one: Gmail → Google Account "
         "→ Security → App passwords (needs 2-Step Verification); iCloud and Yahoo "
         "have the same in their security settings. Outlook.com no longer allows "
@@ -199,6 +205,7 @@ CONNECTORS: tuple[Connector, ...] = (
         ),
         get_it="Discord: channel → Edit → Integrations → Webhooks → New → Copy "
         "URL. Slack: api.slack.com/apps → Incoming Webhooks.",
+        words=("discord",),
     ),
 )
 BY_ID = {connector.id: connector for connector in CONNECTORS}
@@ -547,6 +554,16 @@ class WebhookService:
     async def test(self) -> str:
         await self._post("LCC Studio is connected to this channel.")
         return "Posted a test message."
+
+
+def names_it(spec: Connector | None, name: str, text: str) -> bool:
+    """Whether a message names a server: its name, or a word for the service."""
+    lowered = " ".join(text.casefold().split())
+    names = (name, *(spec.words if spec else ()))
+    return any(
+        re.search(rf"(?<!\w){re.escape(word.casefold())}(?!\w)", lowered)
+        for word in names
+    )
 
 
 def describe_tools(service: Builtin) -> str:

@@ -38,6 +38,7 @@ from .code_loop import code_and_test, project_name
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .connectors import (
+    BY_ID,
     CONNECTORS,
     SECRET_SHOWN,
     Builtin,
@@ -51,6 +52,7 @@ from .connectors import (
     describe_tools,
     make_message,
     mcp_server,
+    names_it,
     send_now,
     view,
 )
@@ -271,6 +273,7 @@ from .tools import (
     MAIN_ONLY_TOOLS,
     MAIN_ROLE,
     MAIN_TOOL_NAMES,
+    MCP_TOOL,
     TOOL_SPEC_BY_NAME,
     TOOLSHED_TOOL,
     AgentToolbox,
@@ -340,6 +343,15 @@ DEFAULT_AGENT_NAMES = frozenset(
 )
 """The starter team Studio fills in (the main AI is found by its role)."""
 HQ_CHATS_READ = 3
+MCP_NOTE_SERVERS = 2
+MCP_NOTE_TOOLS = 8
+MCP_NOTE_SECONDS = 20.0
+"""A message naming a switched-on server gets up to 8 of its tools (from at
+most 2 servers), if the server lists them within 20 seconds."""
+SERVICE_HANDOFFS = frozenset(
+    {"ask_agent", "team_task", "research", "web_search", "web_fetch", "ask_helper"}
+)
+"""Tools a small model reaches for instead of the service the user named."""
 CONNECTOR_EXTENSION = Extension(
     id="ext_connectors", name="Connectors", source="connectors"
 )
@@ -395,6 +407,11 @@ _CLAUDE_TOOLS = {
     "websearch": ("web_search",),
     "todowrite": ("update_plan",),
 }
+
+
+def _key_words(text: str) -> set[str]:
+    """The longer words in a text, for matching a message to tools."""
+    return set(re.findall(r"[a-z0-9]{4,}", text.casefold().replace("_", " ")))
 
 
 def _studio_tools(claude_tools: Sequence[str]) -> tuple[str, ...]:
@@ -702,6 +719,8 @@ class StudioService:
         # Outside services connected with a token (Connectors page).
         self._connectors = ConnectorStore(sites_dir.parent / "connectors.json")
         self._connector_transport = search_transport
+        # Chats whose newest message named connected services (see _screen_call).
+        self._service_turns: dict[str, tuple[str, ...]] = {}
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._models_dir = models_dir
         self._voice_setup = SetupState()
@@ -1453,6 +1472,25 @@ class StudioService:
             photos=self._photos,
             desk=self.desk_browser(),
             page_tryer=self._page_tryer,
+            screen=self._screen_call,
+        )
+
+    async def _screen_call(
+        self, call: ToolCall, context: ToolContext
+    ) -> ToolOutcome | None:
+        """The first tool call of a turn where the user named a connected
+        service: a hand-off ('ask the Researcher') goes back to the mcp tool,
+        once, so a small model uses the service the user asked for."""
+        named = self._service_turns.pop(context.chat_id, ())
+        if not named or call.name not in SERVICE_HANDOFFS:
+            return None
+        return ToolOutcome(
+            text=f"The user asked you to use {' and '.join(named)} yourself: don't "
+            "hand it out. Call the mcp tool now, e.g. "
+            f'{{"action": "call", "server": "{named[0]}", "tool": "<one of its '
+            'tools from the Studio note>", "arguments": {...}}.',
+            data={"tool": call.name, "redirected": MCP_TOOL},
+            failed=True,
         )
 
     def _runner(self) -> AgentRunner:
@@ -3800,13 +3838,26 @@ class StudioService:
         lab = await self._carry_out_lab(main, chat, text)
         if not lab:
             lab = await self._carry_out_farm(main, chat, text)
-        orders = "" if lab else await self._carry_out_orders(main, chat, text)
+        # 'Ask DeepWiki how ...' is for a connected service, not the Researcher.
+        servers, named = ("", ()) if lab else await self._named_servers_note(text)
+        orders = (
+            ""
+            if lab
+            else await self._carry_out_orders(main, chat, text, guess=not servers)
+        )
         learning = await self._carry_out_learning(chat, text, started_by=main.name)
         weather = await self._carry_out_weather(chat, text)
         # Studio did the job already: the playbook's tool examples would only
         # push a small model to do it a second time.
         done = any((lab, orders, learning, weather))
-        playbook = await self._playbook_guide(text, rules_only=done)
+        servers = "" if done else servers
+        if servers:
+            self._service_turns[chat.id] = named
+        else:
+            self._service_turns.pop(chat.id, None)
+        playbook = await self._playbook_guide(
+            text, rules_only=done, tool=MCP_TOOL if servers else ""
+        )
         return "\n".join(
             part
             for part in (
@@ -3815,16 +3866,71 @@ class StudioService:
                 orders,
                 learning,
                 weather,
+                servers,
                 playbook,
             )
             if part
         )
 
-    async def _playbook_guide(self, text: str, *, rules_only: bool) -> str:
+    async def _named_servers_note(self, text: str) -> tuple[str, tuple[str, ...]]:
+        """When the user names a switched-on MCP server or connector, its real
+        tools, so a small model calls one instead of guessing a tool name; and
+        the names of those servers."""
+        named = [
+            name
+            for name in self._builtin_services()
+            if names_it(BY_ID.get(name), name, text)
+        ]
+        builtins = self._builtin_services()
+        blocks = [f"{name}:\n{describe_tools(builtins[name])}" for name in named]
+        asked = _key_words(text)
+        for extension, server in await self._enabled_servers():
+            spec = BY_ID.get(server.name) if extension is CONNECTOR_EXTENSION else None
+            if len(blocks) >= MCP_NOTE_SERVERS or not names_it(spec, server.name, text):
+                continue
+            try:
+                tools = await asyncio.wait_for(
+                    self._mcp.tools(self._server_spec(extension, server)),
+                    MCP_NOTE_SECONDS,
+                )
+            except (McpError, TimeoutError) as error:
+                blocks.append(
+                    f"{server.name}: switched on but not answering ({error})."
+                )
+                continue
+            named.append(server.name)
+            # The tools sharing the most words with the message first: GitHub
+            # alone has dozens.
+            ranked = sorted(
+                tools,
+                key=lambda tool: (
+                    -len(asked & _key_words(f"{tool.name} {tool.description}"))
+                ),
+            )
+            blocks.append(
+                f"{server.name}:\n"
+                + "\n".join(
+                    f"- {tool.name}: {tool.description[:160]}"
+                    f"{short_arguments(tool.schema)}"
+                    for tool in ranked[:MCP_NOTE_TOOLS]
+                )
+            )
+        if not blocks:
+            return "", ()
+        return (
+            "Studio note: the MCP server you were asked about is on. Use it with "
+            'the mcp tool, e.g. {"tool": "mcp", "arguments": {"action": "call", '
+            '"server": "<server>", "tool": "<one of its tools>", "arguments": '
+            "{...}}}. Its tools:\n" + "\n\n".join(blocks[:MCP_NOTE_SERVERS])
+        ), tuple(named[:MCP_NOTE_SERVERS])
+
+    async def _playbook_guide(
+        self, text: str, *, rules_only: bool, tool: str = ""
+    ) -> str:
         if not self.settings.studio_jarvis_playbook:
             return ""
         try:
-            return await self._playbook().guide(text, rules_only=rules_only)
+            return await self._playbook().guide(text, rules_only=rules_only, tool=tool)
         except OSError as error:
             logger.warning("Jarvis's playbook could not be read: {}", error)
             return ""
@@ -5381,6 +5487,10 @@ class StudioService:
                 return f"Connected: {len(tools)} tools ({names}{more})."
             return await self._builtin(spec, values).test()
         except (McpError, OSError, httpx.HTTPError, ConnectorError) as error:
+            if re.search(r"answered 40[13]\b", str(error)):
+                raise ConnectorError(
+                    f"{spec.name} refused the token. Make a new one: {spec.get_it}"
+                ) from error
             raise ConnectorError(f"{spec.name} didn't work: {error}") from error
 
     async def send_draft(self, draft_id: str) -> str:
@@ -5568,13 +5678,12 @@ class StudioService:
         extension, server = pair
         spec = self._server_spec(extension, server)
         try:
+            tools = await self._mcp.tools(spec)
+            lines = [
+                f"- {tool.name}: {tool.description[:200]}{short_arguments(tool.schema)}"
+                for tool in tools
+            ]
             if action == "tools":
-                tools = await self._mcp.tools(spec)
-                lines = [
-                    f"- {tool.name}: {tool.description[:200]}"
-                    f"{short_arguments(tool.schema)}"
-                    for tool in tools
-                ]
                 return ToolOutcome(
                     text=f"{server.name} tools:\n" + "\n".join(lines),
                     data={"tool": "mcp", "server": server.name},
@@ -5582,6 +5691,18 @@ class StudioService:
             tool = str(call.arguments.get("tool") or "").strip()
             if not tool:
                 raise ValueError("Say which tool to call; list them with action tools.")
+            names = {known.name.casefold(): known.name for known in tools}
+            if tools and tool.casefold() not in names:
+                # Small models guess tool names; show the real ones so the
+                # next turn calls one of them.
+                return ToolOutcome(
+                    text=f"{server.name} has no tool '{tool}'. Its tools:\n"
+                    + "\n".join(lines)
+                    + "\nCall one of these, with its arguments.",
+                    data={"tool": "mcp", "server": server.name, "called": tool},
+                    failed=True,
+                )
+            tool = names.get(tool.casefold(), tool)
             arguments = call.arguments.get("arguments")
             text, failed = await self._mcp.call(
                 spec, tool, arguments if isinstance(arguments, dict) else {}
@@ -5605,6 +5726,13 @@ class StudioService:
         tool = str(call.arguments.get("tool") or "").strip()
         if not tool:
             raise ValueError("Say which tool to call; list them with action tools.")
+        if tool not in {name for name, _, _ in service.tools()}:
+            return ToolOutcome(
+                text=f"{service.name} has no tool '{tool}'. Its tools:\n"
+                f"{describe_tools(service)}\nCall one of these, with its arguments.",
+                data={"tool": "mcp", "server": service.name, "called": tool},
+                failed=True,
+            )
         arguments = call.arguments.get("arguments")
         try:
             text, failed = await service.call(
@@ -5830,13 +5958,17 @@ class StudioService:
         finally:
             self._code_loops.discard(key)
 
-    async def _carry_out_orders(self, main: Agent, chat: Chat, text: str) -> str:
+    async def _carry_out_orders(
+        self, main: Agent, chat: Chat, text: str, *, guess: bool = True
+    ) -> str:
         """Hand out the jobs the user told the main AI to give, before it answers.
 
         'Have Builder make a page', '@Researcher look into X', 'get an agent to
         ...', and 'stop Builder' are carried out right away, so an order never
         depends on a small model choosing to call a tool. So are 'research X'
-        and 'go on the web and find X': the Researcher takes those.
+        and 'go on the web and find X': the Researcher takes those. Without
+        ``guess`` (the message names a connected service to use), only clear
+        orders are handed out: no research catch-all and no model routing.
         """
         team = [
             agent
@@ -5866,7 +5998,11 @@ class StudioService:
                 "who does what, in what order."
             )
         researcher = next((agent for agent in team if agent.role == "researcher"), None)
-        task = "" if orders or researcher is None else web_request(text, main.name)
+        task = (
+            ""
+            if orders or researcher is None or not guess
+            else web_request(text, main.name)
+        )
         if task and researcher is not None:
             orders = [Order(agent=researcher.name, task=task)]
         code = (
@@ -5901,6 +6037,7 @@ class StudioService:
             orders = await self._job_for_called_agent(main, chat, team, text)
         if (
             not orders
+            and guess
             and not chat.settings.get(LAB_CHAT_SETTING)
             and not chat.settings.get(FARM_CHAT_SETTING)
             and not await self._own_job(text)
