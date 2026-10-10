@@ -115,6 +115,24 @@ async def test_a_call_that_worked_is_learned_and_matches_next_time(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_call_naming_what_the_user_never_said_is_not_learned(tmp_path):
+    book = Playbook(tmp_path / "Playbook")
+    said = "Ask DeepWiki how the pallets/flask repo handles routing"
+    asked = {"server": "deepwiki", "tool": "ask_wiki_question"}
+    # A small model copied the repo from an old example: not a lesson.
+    assert not await book.learn(
+        "mcp", said, {**asked, "arguments": {"repoName": "psf/requests"}}
+    )
+    assert not await book.learn(
+        "mcp", "email Ann the menu", {**asked, "arguments": {"to": "bo@example.com"}}
+    )
+    assert await book.learn(
+        "mcp", said, {**asked, "arguments": {"repoName": "pallets/flask"}}
+    )
+    assert [user for user, _ in (await book.read("mcp")).learned] == [said]
+
+
+@pytest.mark.asyncio
 async def test_long_arguments_are_shortened_in_examples(tmp_path):
     book = Playbook(tmp_path / "Playbook")
     await book.learn(

@@ -220,6 +220,7 @@ from .playbook import (
     PlaybookError,
     PlaybookNote,
     own_tool,
+    slash_names,
     starter_notes,
 )
 from .presets import (
@@ -721,6 +722,8 @@ class StudioService:
         self._connector_transport = search_transport
         # Chats whose newest message named connected services (see _screen_call).
         self._service_turns: dict[str, tuple[str, ...]] = {}
+        # The newest user message of each main AI chat, for _screen_call.
+        self._turn_said: dict[str, str] = {}
         self._library = ModelLibrary(store=store, models_dir=models_dir)
         self._models_dir = models_dir
         self._voice_setup = SetupState()
@@ -1481,6 +1484,20 @@ class StudioService:
         """The first tool call of a turn where the user named a connected
         service: a hand-off ('ask the Researcher') goes back to the mcp tool,
         once, so a small model uses the service the user asked for."""
+        said = self._turn_said.get(context.chat_id, "")
+        asked = slash_names(said)
+        used = slash_names(json.dumps(call.arguments, ensure_ascii=False))
+        if asked and used and not used & asked:
+            # 'Ask DeepWiki about pallets/flask' answered with the repo from an
+            # old example: say so once, so the model uses the user's words.
+            self._turn_said.pop(context.chat_id, None)
+            return ToolOutcome(
+                text=f"The user asked about {', '.join(sorted(asked))}, not "
+                f"{', '.join(sorted(used))}. Use the user's words in the "
+                "arguments and call it again.",
+                data={"tool": call.name, "corrected": sorted(asked)},
+                failed=True,
+            )
         named = self._service_turns.pop(context.chat_id, ())
         if not named or call.name not in SERVICE_HANDOFFS:
             return None
@@ -3855,6 +3872,7 @@ class StudioService:
             self._service_turns[chat.id] = named
         else:
             self._service_turns.pop(chat.id, None)
+        self._turn_said[chat.id] = text
         playbook = await self._playbook_guide(
             text, rules_only=done, tool=MCP_TOOL if servers else ""
         )

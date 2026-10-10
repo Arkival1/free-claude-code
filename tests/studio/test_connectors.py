@@ -280,6 +280,45 @@ async def test_a_hand_off_goes_back_to_the_service_the_user_named(make_studio):
 
 
 @pytest.mark.asyncio
+async def test_a_repo_copied_from_an_old_example_is_sent_back(make_studio):
+    seen: list[httpx.Request] = []
+    call = {"action": "call", "server": "github", "tool": "list_issues"}
+    studio, _ = make_studio(
+        [
+            tool_reply("mcp", {**call, "arguments": {"repo": "psf/requests"}}),
+            tool_reply(
+                "mcp", {**call, "arguments": {"repo": "me/site"}}, call_id="call_2"
+            ),
+            "One issue is open: Fix login.",
+        ]
+    )
+    await studio.ensure_defaults()
+    studio._mcp = McpManager(transport=httpx.MockTransport(fake_github(seen)))
+    await studio.save_connector("github", {"token": "ghp_x"})
+
+    await studio.main_say(
+        "which issues are open on me/site on GitHub?", background=False
+    )
+    main_chat = await studio.main_chat()
+    tools = [
+        message
+        for message in await studio._store.transcript(main_chat.id)
+        if message.role == "tool"
+    ]
+    assert tools[0].data.get("corrected") == ["me/site"]
+    assert "The user asked about me/site, not psf/requests" in tools[0].text
+    assert tools[1].text == "#1 Fix login in me/site"
+    called = [json.loads(r.content) for r in seen if b"tools/call" in r.content]
+    assert [c["params"]["arguments"]["repo"] for c in called] == ["me/site"]
+    # The corrected call is what the playbook keeps.
+    learned = (await studio._playbook().read("mcp")).learned
+    assert [user for user, _ in learned] == [
+        "which issues are open on me/site on GitHub?"
+    ]
+    assert "psf/requests" not in learned[0][1]
+
+
+@pytest.mark.asyncio
 async def test_agents_post_to_a_discord_channel(make_studio):
     posts: list[dict] = []
     status = {"code": 204}

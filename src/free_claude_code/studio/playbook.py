@@ -43,6 +43,12 @@ GUIDE_HEADER = (
 )
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,40}$")
 _WORD = re.compile(r"[a-z0-9']+")
+_SLASH_NAME = re.compile(
+    r"(?<![\w./:@-])([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*)(?![\w/])"
+)
+"""'owner/repo' and the like, not the parts of a link or a longer path."""
+_LINK = re.compile(r"https?://[^\s\"'<>]+")
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _STOP = frozenset(
     [
         "a",
@@ -814,6 +820,24 @@ def _words(text: str) -> set[str]:
     }
 
 
+def slash_names(text: str) -> set[str]:
+    """The 'owner/repo' style names in a text, lowercased."""
+    return {name.rstrip(".").casefold() for name in _SLASH_NAME.findall(text)}
+
+
+def foreign_names(said: str, arguments: Mapping[str, object]) -> set[str]:
+    """Names in a call's arguments (owner/repo, links, emails) that the user's
+    message never said: a small model copying an old example's values."""
+    text = json.dumps(arguments, ensure_ascii=False)
+    names = (
+        slash_names(text)
+        | {link.casefold() for link in _LINK.findall(text)}
+        | {address.casefold() for address in _EMAIL.findall(text)}
+    )
+    lowered = said.casefold()
+    return {name for name in names if name not in lowered}
+
+
 def _said(text: str) -> str:
     return " ".join(text.split())[:LEARNED_USER_CHARS]
 
@@ -1042,9 +1066,11 @@ class Playbook:
     ) -> bool:
         """Add a call that worked to its tool's note; False when there is no
         note for it (the user deleted it, or it is not a playbook tool)."""
-        said = _said(said)
-        if tool in NEVER_LEARNED or not said:
+        # A call naming things the user never said worked by luck, or copied
+        # an old example; learning it would teach the copying.
+        if tool in NEVER_LEARNED or not _said(said) or foreign_names(said, arguments):
             return False
+        said = _said(said)
         call = _call(tool, {key: _trimmed(value) for key, value in arguments.items()})
 
         def work() -> bool:
