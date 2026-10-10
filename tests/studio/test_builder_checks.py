@@ -157,6 +157,29 @@ async def test_unedited_starter_prompts_are_upgraded(make_studio):
     assert researcher is not None and researcher.system_prompt == "My own words."
 
 
+def test_a_favicon_cut_short_by_a_double_quote_is_a_problem():
+    cut = GOOD_PAGE.replace(
+        "</head>",
+        '<link rel="icon" href="data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg">'
+        '<text>x</text></svg>"></head>',
+    )
+    files = {"index.html": cut, "style.css": "", "logo.png": "", "app.js": ""}
+    assert any("cut short by a double quote" in p for p in check_project(files))
+
+    whole = GOOD_PAGE.replace(
+        "</head>",
+        '<link rel="icon" href="data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\'>'
+        '<text>x</text></svg>"></head>',
+    )
+    encoded = GOOD_PAGE.replace(
+        "</head>",
+        '<link rel="icon" href="data:image/svg+xml,%3Csvg%3E%3C/svg%3E"></head>',
+    )
+    for page in (whole, encoded):
+        files = {"index.html": page, "style.css": "", "logo.png": "", "app.js": ""}
+        assert not any("cut short" in p for p in check_project(files))
+
+
 def test_a_form_with_nowhere_to_send_messages_is_a_problem():
     page = (
         '<!doctype html><html><head><title>Cuts</title><meta name="viewport" '

@@ -27,6 +27,7 @@ class _Links(HTMLParser):
         self.ids: set[str] = set()
         self.tags: set[str] = set()
         self.images_without_alt = 0
+        self.cut_svg_urls = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.tags.add(tag)
@@ -36,6 +37,15 @@ class _Links(HTMLParser):
         for name in ("href", "src"):
             if values.get(name):
                 self.refs.append((tag, values[name]))
+            # A double quote inside href="data:image/svg+xml,<svg ...>" ends
+            # the attribute early and the rest shows as text on the page.
+            url = values.get(name, "").lower()
+            if (
+                url.startswith("data:image/svg+xml,")
+                and "</svg>" not in url
+                and "%3c/svg%3e" not in url
+            ):
+                self.cut_svg_urls += 1
         if tag == "img" and "alt" not in values:
             self.images_without_alt += 1
 
@@ -215,6 +225,12 @@ def _check_html(path: str, text: str, files: Mapping[str, str]) -> list[str]:
     if parser.images_without_alt:
         problems.append(
             f"{path}: {parser.images_without_alt} image(s) without alt text."
+        )
+    if parser.cut_svg_urls:
+        problems.append(
+            f"{path}: an SVG data URL (like the favicon) is cut short by a double "
+            "quote inside it, so stray text shows on the page. Use single quotes "
+            "inside the SVG: href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'>...</svg>\"."
         )
     drawn = len(re.findall(r"<img\b[^>]*\bdata-placeholder\b", text, re.I))
     if drawn:

@@ -52,6 +52,36 @@ def test_every_web_template_already_looks_finished():
     assert set(TEMPLATES) >= {"website", "game"}
 
 
+def test_classes_no_stylesheet_styles_are_named():
+    # A later relay stage rewrote the page with its own class names; the CSS
+    # still styled the old ones, so the page looked plain.
+    page = (
+        '<h1>Hi</h1><a class="btn btn-primary">Order</a>'
+        '<div class="product-grid"><div class="card">x</div></div>'
+    )
+    css = ".card{padding:1rem}.button{color:#111}.grid{display:grid}"
+    notes = polish_notes({"index.html": page, "styles.css": css})
+    assert any(
+        "no stylesheet styles these classes" in note
+        and "btn, btn-primary, product-grid" in note
+        and "button, card, grid" in note
+        for note in notes
+    )
+    styled = page.replace("btn btn-primary", "button").replace("product-grid", "grid")
+    assert not any(
+        "no stylesheet styles" in note
+        for note in polish_notes({"index.html": styled, "styles.css": css})
+    )
+
+
+def test_the_favicon_example_keeps_single_quotes_inside_the_svg():
+    notes = polish_notes({"index.html": "<h1>Hi</h1>", "styles.css": "a{}"})
+    favicon = next(note for note in notes if "favicon" in note)
+    assert (
+        "href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'" in favicon
+    )
+
+
 def test_projects_without_pages_have_nothing_to_polish():
     assert polish_notes({"main.py": "print(1)"}) == []
 

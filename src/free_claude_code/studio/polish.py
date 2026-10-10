@@ -10,6 +10,14 @@ MIN_TEXT_PX = 14
 MAX_COLORS = 14
 PICTURE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif")
 PICTURES_NAMED = 4
+UNSTYLED_CLASSES = 3
+"""Classes no stylesheet styles before the page is told; a few are JS hooks."""
+_CLASS_ATTR = re.compile(r"""\bclass\s*=\s*["']([^"']+)["']""", re.I)
+_CSS_CLASS = re.compile(r"\.(-?[A-Za-z_][\w-]*)")
+FAVICON = (
+    '<link rel="icon" href="data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' '
+    "viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍞</text></svg>\">"
+)
 
 
 def _rgb(hex_color: str) -> tuple[float, float, float]:
@@ -150,6 +158,7 @@ def polish_notes(files: Mapping[str, str], pictures: Sequence[str] = ()) -> list
             "Add short transitions (150-250ms) to hovers and toggles so changes feel smooth."
         )
     background_picture = re.search(r"background(-image)?\s*:[^;]*url\(", styles, re.I)
+    styled = set(_CSS_CLASS.findall(re.sub(r"url\([^)]*\)", "", styles)))
     for path, text in pages.items():
         if not re.search(r"<(header|nav|main|footer)\b", text, re.I):
             notes.append(
@@ -192,6 +201,17 @@ def polish_notes(files: Mapping[str, str], pictures: Sequence[str] = ()) -> list
             )
         if 'rel="icon"' not in text and "rel='icon'" not in text:
             notes.append(
-                f'{path}: add a favicon (an emoji SVG works: <link rel="icon" href="data:image/svg+xml,...">).'
+                f"{path}: add a favicon; an emoji SVG works, with single quotes "
+                f"inside the SVG: {FAVICON}"
+            )
+        used = dict.fromkeys(
+            name for value in _CLASS_ATTR.findall(text) for name in value.split()
+        )
+        unstyled = [name for name in used if name not in styled]
+        if styled and len(unstyled) >= UNSTYLED_CLASSES:
+            notes.append(
+                f"{path}: no stylesheet styles these classes, so those parts look "
+                f"plain: {', '.join(unstyled[:8])}. Style them, or use the "
+                f"classes the CSS has ({', '.join(sorted(styled)[:8])})."
             )
     return notes[:24]
