@@ -33,6 +33,8 @@ MAX_UNPACKED_BYTES = 300 * 1024 * 1024
 MAX_SKILL_CHARS = 16_000
 README_SKILL_CHARS = 8_000
 MAX_FOUND = 300
+MAX_AGENTS = 400
+"""Agent collections list a few hundred (one per specialty)."""
 MAX_SKILLS = 2_000
 """Skill repos can hold hundreds of skills (one per technique or tool)."""
 TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt", ".rst"})
@@ -307,6 +309,24 @@ def _servers_from(data: object, plugin_dir: Path) -> list[McpServer]:
     return found
 
 
+def listed_agents(listed: object, plugin_dir: Path, root: Path) -> list[Path]:
+    """The agent files a plugin.json lists ("agents": a file, a folder, or a
+    list of them), kept inside the repo."""
+    entries = [listed] if isinstance(listed, str) else listed
+    found: list[Path] = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, str):
+            continue
+        path = plugin_dir / entry
+        if not path.resolve().is_relative_to(root.resolve()):
+            continue
+        if path.is_dir():
+            found += sorted(path.glob("*.md"))
+        elif path.suffix == ".md" and path.is_file():
+            found.append(path)
+    return found[:MAX_AGENTS]
+
+
 def _read_json(path: Path) -> object:
     try:
         return json.loads(path.read_text(encoding="utf-8", errors="replace"))
@@ -327,6 +347,7 @@ def scan(root: Path, *, base: Path, name: str) -> Extension:
         ]
         return found[:MAX_FOUND]
 
+    plugin_agents: list[Path] = []
     for manifest in walk("plugin.json"):
         if manifest.parent.name != ".claude-plugin":
             continue
@@ -340,6 +361,7 @@ def scan(root: Path, *, base: Path, name: str) -> Extension:
             if isinstance(servers, str):
                 servers = _read_json(plugin_dir / servers)
             extension.servers += _servers_from(servers, plugin_dir)
+            plugin_agents += listed_agents(data.get("agents"), plugin_dir, root)
     for listing in walk(".mcp.json"):
         extension.servers += _servers_from(_read_json(listing), listing.parent)
     # Repos often copy one skill into .claude/, .codex/, .cursor/ and skills/:
@@ -371,8 +393,9 @@ def scan(root: Path, *, base: Path, name: str) -> Extension:
                 path=_relative(path, base),
             )
         )
-    for path in [*walk("agents/*.md"), *walk("commands/*.md")]:
-        folder = path.parent.name
+    agent_files = [*plugin_agents, *walk("agents/*.md")]
+    for path in [*dict.fromkeys(agent_files), *walk("commands/*.md")]:
+        folder = "agents" if path in agent_files else path.parent.name
         if path.name.lower() in {"readme.md", "skill.md"}:
             continue
         values, body = front_matter(path.read_text(encoding="utf-8", errors="replace"))

@@ -379,17 +379,23 @@ async def test_repo_agents_on_the_team_never_see_memory_and_get_only_their_tools
     await studio.ensure_defaults()
     await studio.ensure_starters()
     await studio.remember(SHARED_MEMORY_ID, SECRET)
-    found = [
-        (extension, agent)
-        for extension in await studio.extensions()
-        for agent in extension.agents
-    ]
+    extensions = {extension.name: extension for extension in await studio.extensions()}
+    paperclip = extensions["paperclipai/paperclip"]
+    found = [(paperclip, agent) for agent in paperclip.agents]
     # Only real Claude Code agents (named and described up top) are offered:
     # docs and templates that sit in an agents folder are not.
     assert sorted(agent.name for _, agent in found) == [
         "codemod-runner",
         "token-auditor",
     ]
+    # Agents listed in plugin.json files, and FCC's cards for repos that keep
+    # their agents in code, are offered too.
+    counts = {name: len(e.agents) for name, e in extensions.items() if e.agents}
+    assert counts["VoltAgent/awesome-claude-code-subagents"] >= 150
+    assert counts["FoundationAgents/MetaGPT"] == 5
+    assert counts["AI4Finance-Foundation/FinRobot"] == 11
+    assert counts["crewAIInc/crewAI"] == 5
+    assert counts["OpenHands/software-agent-sdk"] == 1
     for extension, definition in found:
         agent = await studio.add_extension_agent(extension.id, definition.name)
         assert agent.all_tools is False
@@ -460,7 +466,9 @@ async def test_a_repo_agent_teams_up_with_jarvis_and_keeps_its_own_memory(
     await studio.ensure_defaults()
     await studio.ensure_starters()
     await studio.remember(SHARED_MEMORY_ID, SECRET)
-    extension = next(e for e in await studio.extensions() if e.agents)
+    extension = next(
+        e for e in await studio.extensions() if e.name == "paperclipai/paperclip"
+    )
     auditor = await studio.add_extension_agent(extension.id, "token-auditor")
     assert {"remember", "recall"} <= set(await studio.tools_in_use(auditor))
 
@@ -489,7 +497,9 @@ async def test_repo_agents_added_before_get_their_memory_tools(make_studio):
     studio, _ = make_studio([])
     studio._starter_folder = BUNDLE
     await studio.ensure_starters()
-    extension = next(e for e in await studio.extensions() if e.agents)
+    extension = next(
+        e for e in await studio.extensions() if e.name == "paperclipai/paperclip"
+    )
     auditor = await studio.add_extension_agent(extension.id, "token-auditor")
     # As 6.61.1 added it: only the tools it asked for.
     await studio.update_agent(

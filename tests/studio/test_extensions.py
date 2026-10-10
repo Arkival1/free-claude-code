@@ -13,6 +13,7 @@ from free_claude_code.studio.extensions import (
     ExtensionError,
     ExtensionLibrary,
     front_matter,
+    listed_agents,
     parse_link,
 )
 from free_claude_code.studio.llm import LLMReply, ToolCall
@@ -144,6 +145,50 @@ async def test_a_plugin_repo_brings_everything(tmp_path):
     assert servers["web"].transport == "http"
     assert not (tmp_path / "ext" / added.id / "evil.txt").exists()
     assert [item.id for item in await library.all()] == [added.id]
+
+
+@pytest.mark.asyncio
+async def test_agents_listed_in_a_plugin_json_are_read(tmp_path):
+    agent = '---\nname: {0}\ndescription: "Builds {0} things."\ntools: Read, Write\n---\nYou are {0}.\n'
+    files = {
+        "categories/01-web/.claude-plugin/plugin.json": json.dumps(
+            {"name": "web", "agents": ["./frontend-developer.md", "./ui-designer.md"]}
+        ),
+        "categories/01-web/frontend-developer.md": agent.format("frontend-developer"),
+        "categories/01-web/ui-designer.md": agent.format("ui-designer"),
+        "categories/01-web/README.md": "# Web agents",
+        "categories/02-data/.claude-plugin/plugin.json": json.dumps(
+            {"name": "data", "agents": "./team", "description": "Data people."}
+        ),
+        "categories/02-data/team/data-analyst.md": agent.format("data-analyst"),
+    }
+    library = ExtensionLibrary(tmp_path / "ext", transport=github(files))
+
+    added = await library.add_github("owner/subagents")
+
+    assert sorted(a.name for a in added.agents) == [
+        "data-analyst",
+        "frontend-developer",
+        "ui-designer",
+    ]
+    designer = next(a for a in added.agents if a.name == "ui-designer")
+    assert designer.description == "Builds ui-designer things."
+    assert (
+        designer.tools == ["Read", "Write"]
+        and designer.prompt == "You are ui-designer."
+    )
+
+
+def test_a_plugin_json_cannot_list_agents_outside_its_repo(tmp_path):
+    repo = tmp_path / "repo"
+    plugin = repo / "web"
+    plugin.mkdir(parents=True)
+    (plugin / "inside.md").write_text("---\nname: a\ndescription: b\n---\nx")
+    (tmp_path / "outside.md").write_text("---\nname: c\ndescription: d\n---\ny")
+
+    listed = listed_agents(["./inside.md", "../../outside.md", 7], plugin, repo)
+
+    assert listed == [plugin / "inside.md"]
 
 
 @pytest.mark.asyncio

@@ -296,6 +296,56 @@
       "file": "rudra496__devroadmaps.zip",
       "sha256": "775d717bb16202b09a3cf21eb5f6d63ed0dc11e6af9eb922e99c62e3a6f37674",
       "size": 17883
+    },
+    {
+      "owner": "VoltAgent",
+      "repo": "awesome-claude-code-subagents",
+      "commit": "721e9734670bfaf7283194e234ebb88e94c82dcd",
+      "licence": "MIT",
+      "about": "158 Claude Code subagents in 10 categories: web, apps, languages, infra, QA, data, business.",
+      "file": "VoltAgent__awesome-claude-code-subagents.zip",
+      "sha256": "ddd24a9ea6e5b12c8f2bba3f560a4a9461229378b716cf42d6317ec73276c97a",
+      "size": 525536
+    },
+    {
+      "owner": "FoundationAgents",
+      "repo": "MetaGPT",
+      "commit": "11cdf466d042aece04fc6cfd13b28e1a70341b1f",
+      "licence": "MIT",
+      "about": "MetaGPT: a software company of agents (product manager, architect, engineer, QA).",
+      "file": "FoundationAgents__MetaGPT.zip",
+      "sha256": "8df4dccd39fa8d375234e3b5cf3c742078a5675bbf34238bcb6c74f9e2e037f3",
+      "size": 47598
+    },
+    {
+      "owner": "AI4Finance-Foundation",
+      "repo": "FinRobot",
+      "commit": "2717499b8e30f242640af08c4ad9afd1113c2d45",
+      "licence": "Apache-2.0",
+      "about": "FinRobot: finance agents (analysts, investment committee, reports) and 60 finance skills.",
+      "file": "AI4Finance-Foundation__FinRobot.zip",
+      "sha256": "dc15c7bca94efab62619466f06858e833473a01c1593fe438a997d9e2731bf37",
+      "size": 284051
+    },
+    {
+      "owner": "crewAIInc",
+      "repo": "crewAI",
+      "commit": "6b93fa0e25a926215ca7bb52a95d4db7d9d7262d",
+      "licence": "MIT",
+      "about": "crewAI: role-playing agent crews (researcher, analyst, planner, writer, editor) and its docs.",
+      "file": "crewAIInc__crewAI.zip",
+      "sha256": "9be53053c8101661e3b0aac96aa93ca676b02a91946b9c7f3028616023b5f8cf",
+      "size": 691091
+    },
+    {
+      "owner": "OpenHands",
+      "repo": "software-agent-sdk",
+      "commit": "1cfba2117e92730b0fe1c32520a39aad8611bb8c",
+      "licence": "MIT",
+      "about": "OpenHands agent: the SDK where the OpenHands engineer's own prompt lives now.",
+      "file": "OpenHands__software-agent-sdk.zip",
+      "sha256": "90e540401dfe078b204c8612515dbef32d4559da2bc8fd05c24e71247215ffd5",
+      "size": 37332
     }
   ]
 }

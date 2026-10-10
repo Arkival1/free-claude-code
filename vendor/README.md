@@ -19,4 +19,4 @@ installed from there when GitHub no longer has it.
 | [`claw-code/`](claw-code/README.md) | https://github.com/ultraworkers/claw-code | MIT | Claw Code built on this PC and run through FCC (Knowledge & Memory → Claw Code, `fcc-claw`) |
 | [`cua/`](cua/README.md) | https://github.com/trycua/cua | MIT | Kept for a planned PC-control feature (not used yet) |
 | [`stable-diffusion-cpp/`](stable-diffusion-cpp/README.md) | https://github.com/leejet/stable-diffusion.cpp | MIT | The Image engine: painted cartoon places and characters (Settings → Image engine) |
-| [`repos/`](repos/README.md) | 30 repos (OpenHands, hindsight, paperclip, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, active on first load |
+| [`repos/`](repos/README.md) | 35 repos (OpenHands, MetaGPT, crewAI, FinRobot, awesome-claude-code-subagents, hindsight, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, active on first load |

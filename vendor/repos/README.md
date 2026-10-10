@@ -18,6 +18,9 @@ Images, videos, binaries, `node_modules`, translations and app source code
 are left out. `SHA256SUMS` lists every zip's checksum. Studio checks it
 before installing and won't install a damaged copy.
 
+Five repos keep their agents in code or YAML rather than agent files, so FCC
+added cards for them (see **Agent cards FCC wrote** below).
+
 It is all read-only data. Studio unpacks a repo into its own folder and
 reads it, and nothing in it runs. MCP servers from these repos (hindsight,
 paperclip, openviking, agentmemory) start **switched off**; the user turns
@@ -58,6 +61,11 @@ adds it back.
 | [Anil-matcha/AI-Youtube-Shorts-Generator](https://github.com/Anil-matcha/AI-Youtube-Shorts-Generator) | `a57bb938ba` | MIT | `Anil-matcha__AI-Youtube-Shorts-Generator.zip` (0.01 MB) | Auto-clip: turn long videos into Shorts (from the auto-clip topic). |
 | [milanm/DevOps-Roadmap](https://github.com/milanm/DevOps-Roadmap) | `d7499e6dab` | Apache-2.0 | `milanm__DevOps-Roadmap.zip` (0.02 MB) | DevOps roadmap (from the developer-roadmap topic). |
 | [rudra496/devroadmaps](https://github.com/rudra496/devroadmaps) | `104d7bc31f` | MIT | `rudra496__devroadmaps.zip` (0.02 MB) | Developer roadmaps in Markdown (from the developer-roadmap topic). |
+| [VoltAgent/awesome-claude-code-subagents](https://github.com/VoltAgent/awesome-claude-code-subagents) | `721e973467` | MIT | `VoltAgent__awesome-claude-code-subagents.zip` (0.53 MB) | 158 Claude Code subagents in 10 categories: web, apps, languages, infra, QA, data, business. |
+| [FoundationAgents/MetaGPT](https://github.com/FoundationAgents/MetaGPT) | `11cdf466d0` | MIT | `FoundationAgents__MetaGPT.zip` (0.05 MB) | MetaGPT: a software company of agents (product manager, architect, engineer, QA). |
+| [AI4Finance-Foundation/FinRobot](https://github.com/AI4Finance-Foundation/FinRobot) | `2717499b8e` | Apache-2.0 | `AI4Finance-Foundation__FinRobot.zip` (0.28 MB) | FinRobot: finance agents (analysts, investment committee, reports) and 60 finance skills. |
+| [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | `6b93fa0e25` | MIT | `crewAIInc__crewAI.zip` (0.69 MB) | crewAI: role-playing agent crews (researcher, analyst, planner, writer, editor) and its docs. |
+| [OpenHands/software-agent-sdk](https://github.com/OpenHands/software-agent-sdk) | `1cfba2117e` | MIT | `OpenHands__software-agent-sdk.zip` (0.04 MB) | OpenHands agent: the SDK where the OpenHands engineer's own prompt lives now. |
 
 ## Left out, and why
 
@@ -85,3 +93,35 @@ Clone the repo into its own folder (don't run anything in it), keep the
 same parts, zip them under one top folder named `<repo>-<commit7>/`, and
 update `manifest.json` (commit, sha256, size) and `SHA256SUMS`.
 `tests/studio/test_starters.py` checks every row.
+
+## Agent cards FCC wrote
+
+Studio reads agents the Claude Code way: an agent file with a name and a
+description up top and its instructions below (in an `agents/` folder or
+listed in a plugin's `plugin.json`). awesome-claude-code-subagents ships 160
+such files. MetaGPT, FinRobot, crewAI and the OpenHands SDK define their agents
+in Python or YAML, so FCC wrote one card per agent in
+`fcc-agents/agents/`, with a `fcc-agents/README.md` in each zip saying which
+files it quotes:
+
+- **MetaGPT**: Product Manager, Architect, Project Manager, Engineer and QA
+  Engineer, quoting each role's profile, goal and constraints and its
+  action's instructions (`metagpt/roles/`, `metagpt/actions/`, kept in the
+  zip).
+- **FinRobot**: its eight desktop agents' instruction files unchanged, and
+  the `Software_Developer`, `Data_Analyst` and `Financial_Analyst` profiles
+  from `agent_library.py`. FinRobot is Apache-2.0; its `LICENSE`, `NOTICE` and
+  `TRADEMARK_POLICY.md` are in the zip, and the cards say they are a
+  derivative built on FinRobot, named by role rather than with the FinRobot
+  name.
+- **crewAI**: the five agents of its two starter crews (research and
+  content), with their role, goal and backstory quoted from `agents.yaml`.
+- **OpenHands**: the OpenHands agent's prompt moved from OpenHands/OpenHands
+  to OpenHands/software-agent-sdk, which is shipped for it. Its card quotes
+  six of the agent's prompt sections unchanged from `static.py` (kept in the
+  zip). OpenHands/OpenHands itself is already shipped above for its skills.
+
+The rest of each card (how to work in LCC Studio, and as one step of a relay)
+is FCC's. App source code, tests, images and translations of these repos are
+left out, like the others.
+
