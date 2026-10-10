@@ -42,7 +42,7 @@ from .page_try import (
 from .photos import PhotoError, PhotoLibrary
 from .photos import describe as describe_photo
 from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
-from .polish import polish_notes
+from .polish import PICTURE_SUFFIXES, polish_notes
 from .project_check import CHECKED_FILES, check_project
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
@@ -2638,7 +2638,13 @@ class AgentToolbox:
     async def _polish_check(self, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)
         contents = await self._project_texts(site_id, (".html", ".htm", ".css"))
-        notes = polish_notes(contents)
+        pictures = [
+            item.path
+            for item in await self._sites.files(site_id)
+            if item.path.lower().endswith(PICTURE_SUFFIXES)
+            and not item.path.startswith("lab/")
+        ]
+        notes = polish_notes(contents, pictures)
         if not contents:
             text = "There are no web pages to polish in this project."
         elif notes:

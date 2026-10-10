@@ -1,13 +1,15 @@
 """A designer's once-over for a web project: what would make it look finished."""
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 _HEX = re.compile(r"#(?:[0-9a-fA-F]{3}){1,2}\b")
 _RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
 _FONT_PX = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)px", re.I)
 MIN_TEXT_PX = 14
 MAX_COLORS = 14
+PICTURE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif")
+PICTURES_NAMED = 4
 
 
 def _rgb(hex_color: str) -> tuple[float, float, float]:
@@ -50,8 +52,11 @@ def _color_of(value: str | None, variables: Mapping[str, str]) -> str | None:
     return found.group(0) if found else None
 
 
-def polish_notes(files: Mapping[str, str]) -> list[str]:
-    """Suggestions that make a working page look and feel finished."""
+def polish_notes(files: Mapping[str, str], pictures: Sequence[str] = ()) -> list[str]:
+    """Suggestions that make a working page look and feel finished.
+
+    ``pictures`` are the image files already in the project, so a page with
+    no pictures is pointed at them before a new search."""
     css = "\n".join(text for path, text in files.items() if path.endswith(".css"))
     pages = {
         path: text for path, text in files.items() if path.endswith((".html", ".htm"))
@@ -168,10 +173,18 @@ def polish_notes(files: Mapping[str, str]) -> list[str]:
             and not re.search(r"<(img|svg|picture|video|canvas)\b", body, re.I)
             and not background_picture
         ):
-            notes.append(
-                f"{path}: has no pictures; a real photo (find_images) or an "
-                "SVG illustration makes it look finished."
-            )
+            unused = [p for p in pictures if p.rsplit("/", 1)[-1] not in text]
+            if unused:
+                notes.append(
+                    f"{path}: has no pictures, but the project already has "
+                    + ", ".join(unused[:PICTURES_NAMED])
+                    + "; put them on the page with <img> before looking for new ones."
+                )
+            else:
+                notes.append(
+                    f"{path}: has no pictures; a real photo (find_images) or an "
+                    "SVG illustration makes it look finished."
+                )
         if not re.search(r"<meta[^>]+name=[\"']description", text, re.I):
             notes.append(
                 f'{path}: add <meta name="description" content="..."> so search '

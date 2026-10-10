@@ -329,6 +329,20 @@ def test_polish_suggests_fonts_alt_text_pictures_and_a_description():
     )
     assert any("has no pictures" in note for note in favicon)
 
+    # Photos already saved in the project come first, before a new search.
+    saved = polish_notes(
+        {
+            "index.html": "<h1>Hi</h1><section></section><section></section>",
+            "styles.css": "body{color:#111}",
+        },
+        ["images/hero.jpg", "images/product.jpg"],
+    )
+    assert any(
+        "already has images/hero.jpg, images/product.jpg" in note
+        and "find_images" not in note
+        for note in saved
+    )
+
     finished = polish_notes(
         {
             "index.html": page.replace("<img ", '<img alt="A cafe" ')
