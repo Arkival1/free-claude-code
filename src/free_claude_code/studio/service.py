@@ -373,6 +373,11 @@ RELAY_LEADS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 """Which of LCC's own agents starts a relay for each kind of job."""
 RELAY_SKILLS_SHOWN = 40
+TURN_WAIT_SECONDS = 900.0
+TURN_POLL_SECONDS = 0.5
+"""A plan or relay the main AI starts waits for its reply first (15 minutes
+at most): on a model that answers one request at a time, the first stage
+would otherwise keep the reply waiting."""
 SERVICE_HANDOFFS = frozenset(
     {"ask_agent", "team_task", "research", "web_search", "web_fetch", "ask_helper"}
 )
@@ -746,6 +751,7 @@ class StudioService:
         self._connector_transport = search_transport
         # The relay's order and switches (HQ, Relay card).
         self._relay = RelayStore(sites_dir.parent / "relay.json")
+        self._relay_starters_tried = False
         # Chats whose newest message named connected services (see _screen_call).
         self._service_turns: dict[str, tuple[str, ...]] = {}
         # The newest user message of each main AI chat, for _screen_call.
@@ -5921,7 +5927,9 @@ class StudioService:
         """Start a relay the user asked for; '' when a website or app can't go
         through one (no repo has anything for it) and goes the usual way."""
         try:
-            plan = await self.start_relay(job, made_by=main.name, chat_id=chat.id)
+            plan = await self.start_relay(
+                job, made_by=main.name, chat_id=chat.id, after_turn_of=main.id
+            )
         except StudioError as error:
             return f"The relay could not start: {error}" if explicit else ""
         line = plan_started(plan, await self._site_name(plan.site_id))
@@ -6068,7 +6076,7 @@ class StudioService:
         if plan_job:
             try:
                 plan = await self.start_plan(
-                    plan_job, made_by=main.name, chat_id=chat.id
+                    plan_job, made_by=main.name, chat_id=chat.id, after_turn_of=main.id
                 )
             except StudioError as error:
                 return f"The team plan could not start: {error}"
@@ -6582,8 +6590,11 @@ class StudioService:
         project: str = "",
         steps: Sequence[PlanStep] | None = None,
         kind: Literal["plan", "relay"] = "plan",
+        after_turn_of: str = "",
     ) -> TeamPlan:
-        """Plan a job for the team and start running it in the background."""
+        """Plan a job for the team and start running it in the background
+        (once the turn of the agent ``after_turn_of`` names is over, so a
+        model that answers one request at a time answers that turn first)."""
         goal = " ".join(goal.split())
         if not goal:
             raise StudioError("Say what the plan is for.")
@@ -6625,14 +6636,20 @@ class StudioService:
             site_id=site.id if site else None,
         )
         await self._store.put(plan)
-        self._run_plan(plan.id)
+        self._run_plan(plan.id, after_turn_of=after_turn_of)
         return plan
 
-    def _run_plan(self, plan_id: str) -> None:
+    def _run_plan(self, plan_id: str, *, after_turn_of: str = "") -> None:
         coordinator = PlanCoordinator(
             store=self._store, host=self, finished=self._plan_finished
         )
-        job = self.spawn(coordinator.run(plan_id))
+
+        async def run() -> TeamPlan:
+            if after_turn_of:
+                await self._turn_over(after_turn_of)
+            return await coordinator.run(plan_id)
+
+        job = self.spawn(run())
         self._plan_jobs[plan_id] = job
         job.add_done_callback(lambda _: self._plan_jobs.pop(plan_id, None))
 
@@ -6659,7 +6676,11 @@ class StudioService:
     async def _relay_repos(self) -> list[Extension]:
         """Added repos with an agent, or a skill, a relay stage can use (the
         repos that come with FCC are added first, if this is the first load)."""
-        await self.ensure_starters()
+        if not self._relay_starters_tried:
+            # Once: a repo that must come from GitHub is tried again on the
+            # next load, not on every relay.
+            self._relay_starters_tried = True
+            await self.ensure_starters()
         return [
             extension
             for extension in await self._extensions.all()
@@ -6740,6 +6761,7 @@ class StudioService:
         chat_id: str | None = None,
         project: str = "",
         first: str = "",
+        after_turn_of: str = "",
     ) -> TeamPlan:
         """Pass a job through LCC's agent for it and then each repo in the
         relay, one after another, in the background."""
@@ -6778,6 +6800,7 @@ class StudioService:
             project=project,
             steps=steps,
             kind="relay",
+            after_turn_of=after_turn_of,
         )
 
     @staticmethod
@@ -7142,6 +7165,12 @@ class StudioService:
             chat = await self._store.get(Chat, chat_id)
             if chat is not None:
                 await self._store.put(chat.model_copy(update={"updated_at": now_ms()}))
+
+    async def _turn_over(self, agent_id: str) -> None:
+        """Wait for an agent's turn in progress to end (a while at most)."""
+        deadline = time.monotonic() + TURN_WAIT_SECONDS
+        while agent_id in self._agent_busy and time.monotonic() < deadline:
+            await asyncio.sleep(TURN_POLL_SECONDS)
 
     @contextlib.asynccontextmanager
     async def _working(self, agent_id: str) -> AsyncIterator[None]:

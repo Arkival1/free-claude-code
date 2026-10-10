@@ -236,6 +236,29 @@ async def test_jarvis_sends_new_websites_through_the_relay_while_it_is_on(make_s
 
 
 @pytest.mark.asyncio
+async def test_the_main_ai_answers_before_the_first_stage_starts(make_studio):
+    # On a model that answers one request at a time, the first stage must not
+    # keep Jarvis's reply waiting: it starts when the reply is done.
+    first_stage_while_replying: list[str] = []
+
+    async def respond(system: str, prompt: str):
+        if "You are stage" in prompt:
+            return tool_reply("finish", {"summary": "Done."})
+        if "the user's main AI" in system:
+            relays = await studio.plans()
+            if relays:
+                first_stage_while_replying.append(relays[0].steps[0].status)
+            return "The relay is on it."
+        return "ok"
+
+    studio, _ = await with_repos(make_studio, respond)
+    await studio.main_say(BAKERY, background=False)
+    assert first_stage_while_replying == ["waiting"]
+    await asyncio.wait_for(studio.wait_for_background(), timeout=60)
+    assert (await studio.plans())[0].status == "done"
+
+
+@pytest.mark.asyncio
 async def test_without_repos_a_website_goes_the_usual_way(make_studio):
     studio, _ = make_studio(finish_every_stage())
     await studio.ensure_defaults()
