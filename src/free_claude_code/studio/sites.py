@@ -1,5 +1,6 @@
 """Sandboxed website workspaces that agents build and users preview."""
 
+import hashlib
 import io
 import os
 import re
@@ -638,6 +639,23 @@ class SiteWorkspace:
                 if path.is_file() and not _skipped(path.relative_to(directory))
             ]
             return tuple(found)
+
+        return await anyio.to_thread.run_sync(work)
+
+    async def fingerprints(self, site_id: str) -> dict[str, str]:
+        """Every file in the site and a hash of its bytes, to tell what changed."""
+        directory = self.directory(site_id)
+
+        def work() -> dict[str, str]:
+            if not directory.is_dir():
+                return {}
+            return {
+                self._relative(site_id, path): hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+                for path in sorted(directory.rglob("*"))
+                if path.is_file() and not _skipped(path.relative_to(directory))
+            }
 
         return await anyio.to_thread.run_sync(work)
 

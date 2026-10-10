@@ -15,7 +15,12 @@ from free_claude_code.studio.relay import (
     job_kinds,
 )
 from free_claude_code.studio.starter import BUNDLE
-from free_claude_code.studio.teamplan import ready_steps, skip_blocked, step_brief
+from free_claude_code.studio.teamplan import (
+    file_changes,
+    ready_steps,
+    skip_blocked,
+    step_brief,
+)
 from tests.api.support import create_test_app
 from tests.studio.conftest import tool_reply
 
@@ -149,6 +154,53 @@ async def test_a_website_goes_through_lcc_then_each_repo_in_turn(make_studio):
     await asyncio.wait_for(studio.wait_for_background(), timeout=60)
     assert [a.name for a in await studio.agents()].count("frontend-developer") == 1
     assert (await studio.plan(again.id)).status == "done"
+
+
+def test_a_stage_says_which_files_it_changed():
+    before = {"index.html": "a", "old.css": "b", "app.js": "c"}
+    after = {"index.html": "a2", "app.js": "c", "menu.html": "d"}
+    assert file_changes(before, after) == (
+        "Files changed: index.html (edited), menu.html (new), old.css (removed)."
+    )
+    assert file_changes(after, after) == "No project files changed."
+    many = {f"page{n}.html": "x" for n in range(15)}
+    assert file_changes({}, many).endswith("page11.html (new), and 3 more.")
+
+
+@pytest.mark.asyncio
+async def test_the_files_show_what_each_stage_really_did(make_studio):
+    # Stage 3 does nothing and copies stage 2's report; the files tell the
+    # next stages, the HQ, and the user that it changed nothing.
+    seen: list[str] = []
+
+    def respond(system: str, prompt: str):
+        if "You are stage" in prompt:
+            seen.append(prompt)
+            stage = prompt.split("You are stage ")[1].split(" ")[0]
+            if stage == "1":
+                page = {"path": "menu.html", "content": "<h1>Menu</h1>"}
+                return tool_reply("write_file", page)
+            if stage == "2":
+                page = {"path": "index.html", "content": "<h1>Rosie's</h1>"}
+                return tool_reply("write_file", page)
+        # The file is written: the stage is done.
+        return tool_reply("finish", {"summary": "Added a price list."})
+
+    studio, _ = await with_repos(make_studio, respond)
+    plan = await studio.start_relay(BAKERY)
+    await asyncio.wait_for(studio.wait_for_background(), timeout=60)
+    done = await studio.plan(plan.id)
+
+    changes = [s.changes for s in done.steps]
+    assert changes[:3] == [
+        "Files changed: menu.html (new).",
+        "Files changed: index.html (edited).",
+        "No project files changed.",
+    ]
+    assert "  Files changed: index.html (edited)." in seen[2]
+    assert "  No project files changed." in seen[3]
+    assert "don't copy the reports above" in seen[3]
+    assert "(No project files changed.)" in done.summary
 
 
 @pytest.mark.asyncio

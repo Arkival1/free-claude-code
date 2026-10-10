@@ -1688,10 +1688,14 @@ bakery":
    `design-taste-frontend` rules, applied by the Builder.
 
 Each stage works in the same project, reads what the stage before left,
-keeps what works, and says what it changed; the next stage is told. Only one
-runs at a time, and the final result (every stage's note and the project)
-comes back to the main chat. A stage that fails doesn't stop the rest: the
-next one carries on from the work so far.
+keeps what works, and says what it changed; the next stage is told. Studio
+also compares the project's files before and after each stage and adds a
+line such as "Files changed: index.html (edited)" or "No project files
+changed", so a stage that only repeats the last report shows up as doing
+nothing, in the HQ and in the final result. Only one runs at a time, and the
+final result (every stage's note and the project) comes back to the main
+chat. A stage that fails doesn't stop the rest: the next one carries on from
+the work so far.
 
 Every repo has a place in the order. The five above run on **every job**; the
 others run **when they fit the job** (a security repo joins a security job,

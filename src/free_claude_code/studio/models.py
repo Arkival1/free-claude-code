@@ -722,6 +722,9 @@ class PlanStep(BaseModel):
     source: str = ""
     """In a relay, the repo this step's agent or skill comes from ('' for
     LCC's own agents)."""
+    changes: str = ""
+    """In a relay, which project files the step added, edited, or removed,
+    worked out by Studio from the files themselves, not from the agent's report."""
 
 
 class TeamPlan(Record):

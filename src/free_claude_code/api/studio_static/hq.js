@@ -995,10 +995,11 @@
                 "ol",
                 { class: "hq-plan-steps" },
                 plan.steps.map((step, index) =>
-                  h("li", { class: `step ${step.status}`, title: step.result || step.do }, [
+                  h("li", { class: `step ${step.status}`, title: [step.do, step.result].filter(Boolean).join("\n\n") }, [
                     h("span", { class: "hq-tool", text: plan.kind === "relay" ? String(index + 1) : step.id }),
                     h("span", { class: "who", text: step.source ? `${step.agent} · ${step.source}` : step.agent }),
-                    h("span", { class: "muted", text: step.do }),
+                    // A finished relay stage shows which files it really changed.
+                    h("span", { class: step.changes ? "muted hq-step-files" : "muted", text: step.changes || step.do }),
                     h("span", { class: "hq-step-state", text: step.status }),
                   ])
                 )

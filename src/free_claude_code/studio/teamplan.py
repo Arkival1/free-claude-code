@@ -14,7 +14,7 @@ closing Studio can be resumed where it stopped.
 import asyncio
 import json
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -34,6 +34,8 @@ PARALLEL_STEPS = 2
 WAIT_SECONDS = 5.0
 """How often a plan waiting for a busy agent looks again."""
 FINISHED = frozenset({"done", "failed", "skipped", "stopped"})
+CHANGES_SHOWN = 12
+"""Files named in a relay stage's changes line; the rest are counted."""
 
 PLANNER_SYSTEM = (
     "You plan work for a team of AI agents. Split the job into as few steps as "
@@ -186,6 +188,25 @@ def skip_blocked(plan: TeamPlan) -> TeamPlan:
     return plan
 
 
+def file_changes(before: Mapping[str, str], after: Mapping[str, str]) -> str:
+    """One line saying which project files a stage added, edited, or removed."""
+    parts = [
+        f"{path} (edited)"
+        for path in after
+        if path in before and before[path] != after[path]
+    ]
+    parts += [f"{path} (new)" for path in after if path not in before]
+    parts += [f"{path} (removed)" for path in before if path not in after]
+    if not parts:
+        return "No project files changed."
+    more = len(parts) - CHANGES_SHOWN
+    return (
+        "Files changed: "
+        + ", ".join(parts[:CHANGES_SHOWN])
+        + (f", and {more} more." if more > 0 else ".")
+    )
+
+
 def stage_name(step: PlanStep) -> str:
     return f"{step.agent} ({step.source})" if step.source else step.agent
 
@@ -210,10 +231,10 @@ def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
     ][-2:]
     if before:
         lines.append("What the stages before you reported:")
-        lines += [
-            f"- {stage_name(s)} [{s.status}]: {s.result[:HANDOFF_CHARS]}"
-            for s in before
-        ]
+        for s in before:
+            lines.append(f"- {stage_name(s)} [{s.status}]: {s.result[:HANDOFF_CHARS]}")
+            if s.changes:
+                lines.append(f"  {s.changes}")
     if index == 0:
         lines.append(
             "You go first: do the whole job. The stages after you will improve it."
@@ -225,7 +246,9 @@ def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
             "throw away the earlier stages' work."
         )
     lines.append(
-        "When you finish, say what you changed and anything the next stage should know."
+        "When you finish, say what you changed in your stage and anything the next "
+        "stage should know. Report only your own work: don't copy the reports "
+        "above, and if you changed nothing, say so."
     )
     return "\n".join(lines)
 
@@ -279,6 +302,7 @@ def summary(plan: TeamPlan) -> str:
         lines.append(
             f"- {label} [{step.status}] {step.do[:80]}"
             + (f" → {first}" if first else "")
+            + (f" ({step.changes})" if step.changes else "")
         )
     last = next(
         (s for s in reversed(plan.steps) if s.status == "done" and s.result), None
@@ -331,6 +355,10 @@ class PlanHost(Protocol):
 
     async def busy_agent_ids(self) -> set[str]: ...
 
+    async def project_files(self, site_id: str) -> dict[str, str]:
+        """Each file in the project and a hash of its bytes."""
+        ...
+
 
 class PlanCoordinator:
     """Runs one plan's steps in order, as many at once as is safe."""
@@ -349,6 +377,8 @@ class PlanCoordinator:
         self._parallel = max(1, parallel)
         self._wait = wait_seconds
         self._finished = finished
+        self._files_before: dict[str, dict[str, str]] = {}
+        """Relay stage id -> the project's files when that stage started."""
 
     async def run(self, plan_id: str) -> TeamPlan:
         running: dict[asyncio.Future[tuple[AgentRun, Chat]], str] = {}
@@ -416,6 +446,10 @@ class PlanCoordinator:
                 continue
             plan = with_step(plan, step.id, status="running", started_at=now_ms())
             await self._store.put(plan)
+            if plan.kind == "relay" and plan.site_id:
+                files = await self._project_files(plan.site_id)
+                if files is not None:
+                    self._files_before[step.id] = files
             task = asyncio.ensure_future(
                 self._host.run_agent_task(
                     agent,
@@ -431,7 +465,10 @@ class PlanCoordinator:
     async def _record(
         self, plan_id: str, step_id: str, task: asyncio.Future[tuple[AgentRun, Chat]]
     ) -> None:
+        changes = await self._changes(plan_id, step_id)
         plan = await self._store.require(TeamPlan, plan_id)
+        if changes:
+            plan = with_step(plan, step_id, changes=changes)
         try:
             run, _ = task.result()
         except asyncio.CancelledError:
@@ -458,6 +495,23 @@ class PlanCoordinator:
                 finished_at=now_ms(),
             )
         await self._store.put(plan)
+
+    async def _project_files(self, site_id: str) -> dict[str, str] | None:
+        try:
+            return await self._host.project_files(site_id)
+        except Exception as error:  # the relay goes on without the changes line
+            logger.warning("Studio: couldn't list project {}: {}", site_id, error)
+            return None
+
+    async def _changes(self, plan_id: str, step_id: str) -> str:
+        """What a relay stage changed in the project, from the files themselves,
+        so a stage that only repeats the last report shows that it did nothing."""
+        before = self._files_before.pop(step_id, None)
+        if before is None:
+            return ""
+        plan = await self._store.require(TeamPlan, plan_id)
+        after = await self._project_files(plan.site_id or "")
+        return "" if after is None else file_changes(before, after)
 
     async def _finish(self, plan_id: str) -> TeamPlan:
         plan = skip_blocked(await self._store.require(TeamPlan, plan_id))

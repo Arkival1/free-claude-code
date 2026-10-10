@@ -6547,6 +6547,10 @@ class StudioService:
         """Agents doing something right now (a task, a turn, a room)."""
         return await self._busy_agents(await self._active_runs())
 
+    async def project_files(self, site_id: str) -> dict[str, str]:
+        """Each file in a project and a hash of its bytes (for relay stages)."""
+        return await self.workspace.fingerprints(site_id)
+
     async def _plan_team(self) -> list[Agent]:
         return [
             agent
