@@ -8,6 +8,7 @@ over, the context filling up, and ending in plain words before the check.
 import pytest
 
 from free_claude_code.studio.agents import (
+    CUT_CALL_NOTE,
     CUT_OFF_NOTE,
     IDLE_NOTE,
     SEEN_NOTE,
@@ -153,6 +154,36 @@ async def test_a_garbled_tool_call_is_sent_back_instead_of_ending_the_job(make_s
     assert UNREADABLE_NOTE in sent(model.calls[1])
     assert "Sunrise Bakery" in await studio.workspace.read(site.id, "index.html")
     assert await last_reply(studio, chat.id) == "Built it."
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_cut_off_at_the_limit_never_runs(make_studio):
+    # A long plan first, then an edit_file whose arguments were cut short:
+    # running it would only fail on the missing path.
+    cut = LLMReply(
+        text="I'll now enhance the visual design. " * 40,
+        tool_calls=(ToolCall(id="c0", name="edit_file", arguments={}),),
+        stop_reason="max_tokens",
+    )
+    studio, model = make_studio(
+        [
+            cut,
+            tool_reply("write_file", {"path": "index.html", "content": PAGE}),
+            tool_reply("finish", {"summary": "Done."}, call_id="c2"),
+        ]
+    )
+    _, site, chat = await builder_chat(studio)
+
+    await studio.send(chat.id, "make the bakery page")
+
+    assert CUT_CALL_NOTE in sent(model.calls[1])
+    failed = [
+        m for m in tools_used(await studio.transcript(chat.id)) if "edit_file" in m.text
+    ]
+    assert failed == [], "the cut-off call never ran"
+    assert (await studio.workspace.read(site.id, "index.html")).startswith(
+        "<!doctype html>"
+    )
 
 
 @pytest.mark.asyncio

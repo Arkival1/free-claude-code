@@ -190,6 +190,12 @@ UNREADABLE_NOTE = (
     "one valid JSON tool call. For write_file, leave content out of the JSON "
     "and put the whole file in a fenced code block right after it."
 )
+CUT_CALL_NOTE = (
+    "(Studio) Your reply hit the length limit before your tool call was "
+    "complete, so nothing ran. Skip the explanation and send just the tool "
+    "call. Change a big file with edit_file in small parts, or write it with "
+    "write_file in parts (append true for each next part)."
+)
 CUT_OFF_NOTE = (
     "(Studio) Your reply hit the length limit and was cut off, so nothing was "
     "written. Write big files in parts: write_file with the first part, then "
@@ -1380,6 +1386,19 @@ class AgentRunner:
                     data={"kind": "model_swapped", "model": model, "used": swapped},
                 )
                 model = swapped
+            if (
+                reply.tool_calls
+                and reply.stop_reason in {"length", "max_tokens"}
+                and retries < RETRY_UNREADABLE
+                and step < max_steps
+            ):
+                # The reply ran out of room inside a tool call: its arguments
+                # are cut short (a file path or content missing), so running
+                # it would only fail or write half a file. Say so instead.
+                retries += 1
+                history.append(ChatMessage.assistant(reply.text[:1_500]))
+                history.append(ChatMessage.user(CUT_CALL_NOTE))
+                continue
             if (
                 not reply.tool_calls
                 and names
