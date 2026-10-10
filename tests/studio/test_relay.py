@@ -67,7 +67,8 @@ def test_new_repos_join_the_relay_in_their_place(tmp_path):
     installed = ["leonxlnx/taste-skill", *reversed(FIRST_FIVE), "usestrix/strix"]
     fresh = arranged(RelaySettings(), installed)
     assert [s.repo for s in fresh.stages][:5] == FIRST_FIVE
-    assert [s.mode for s in fresh.stages][:6] == ["always"] * 5 + ["fits"]
+    # Each repo joins only the jobs it has agents trained for.
+    assert {s.mode for s in fresh.stages} == {"fits"}
 
     store = RelayStore(tmp_path / "relay.json")
     store.save(
@@ -112,59 +113,103 @@ def test_a_failed_stage_hands_on_and_nothing_is_skipped():
     assert skip_blocked(plan).steps[2].status == "skipped"
 
 
+VOLT = "VoltAgent/awesome-claude-code-subagents"
+WEBSITE_STAGES = [
+    ("Builder", ""),
+    ("ui-designer", VOLT),
+    ("frontend-developer", VOLT),
+    ("seo-specialist", VOLT),
+    ("accessibility-tester", VOLT),
+    ("OpenHands Engineer", "OpenHands/software-agent-sdk"),
+    ("MetaGPT QA Engineer", "FoundationAgents/MetaGPT"),
+    ("crewAI Content Writer", "crewAIInc/crewAI"),
+    ("Builder", "leonxlnx/taste-skill"),
+    ("Builder", "OpenHands/openhands"),
+    ("Builder", "paperclipai/paperclip"),
+    ("Builder", ""),
+]
+
+
+def active(agents) -> list[str]:
+    return [a.name for a in agents if not a.archived]
+
+
 @pytest.mark.asyncio
-async def test_a_website_goes_through_lcc_then_each_repo_in_turn(make_studio):
+async def test_a_website_goes_through_lcc_then_each_trained_agent_in_turn(make_studio):
     seen: list[str] = []
-    studio, _ = await with_repos(make_studio, finish_every_stage(seen))
+    team_at_start: list[str] = []
+
+    async def respond(system: str, prompt: str):
+        if "You are stage 1 " in prompt:
+            team_at_start.extend(active(await studio.agents()))
+        return finish_every_stage(seen)(system, prompt)
+
+    studio, _ = await with_repos(make_studio, respond)
 
     plan = await studio.start_relay(BAKERY, chat_id=(await studio.main_chat()).id)
 
     assert plan.kind == "relay"
-    stages = [(s.agent, s.source) for s in plan.steps]
-    assert stages == [
-        ("Builder", ""),
-        ("frontend-developer", "VoltAgent/awesome-claude-code-subagents"),
-        ("OpenHands Engineer", "OpenHands/software-agent-sdk"),
-        ("MetaGPT Product Manager", "FoundationAgents/MetaGPT"),
-        ("Financial Analyst", "AI4Finance-Foundation/FinRobot"),
-        ("crewAI Content Writer", "crewAIInc/crewAI"),
-        ("Builder", "leonxlnx/taste-skill"),
-        ("Builder", ""),
-    ]
-    assert [s.needs for s in plan.steps[1:]] == [(f"s{n}",) for n in range(1, 8)]
-    assert "design-taste-frontend" in plan.steps[-2].do
+    # Only agents trained for websites: no finance or security agent.
+    assert [(s.agent, s.source) for s in plan.steps] == WEBSITE_STAGES
+    assert [s.needs for s in plan.steps[1:]] == [(f"s{n}",) for n in range(1, 12)]
+    assert "high-end-visual-design" in plan.steps[8].do
     assert plan.steps[-1].do.startswith("Final check of"), "LCC checks it last"
     assert plan.site_id, "every stage works in one project"
 
     await asyncio.wait_for(studio.wait_for_background(), timeout=60)
     done = await studio.plan(plan.id)
     assert done.status == "done"
-    assert [s.status for s in done.steps] == ["done"] * 8
+    assert [s.status for s in done.steps] == ["done"] * 12
     # One at a time, in order, each told what the stage before it did.
     assert [p.split("You are stage ")[1].split(" ")[0] for p in seen] == [
-        str(n) for n in range(1, 9)
+        str(n) for n in range(1, 13)
     ]
-    assert (
-        "- frontend-developer (VoltAgent/awesome-claude-code-subagents) [done]: Stage 2 improved it."
-        in seen[2]
-    )
+    assert f"- ui-designer ({VOLT}) [done]: Stage 2 improved it." in seen[2]
+    assert "business level" in seen[0]
     starts = [s.started_at for s in done.steps]
     finishes = [s.finished_at for s in done.steps]
-    assert all(starts[n + 1] >= finishes[n] for n in range(7))
+    assert all(starts[n + 1] >= finishes[n] for n in range(11))
     runs = await studio.store.find(AgentRun)
     assert {run.site_id for run in runs} == {plan.site_id}
     assert (
-        "The relay 'make a website for my bakery' is done: 8 of 8 stage(s) done."
+        "The relay 'make a website for my bakery' is done: 12 of 12 stage(s) done."
         in done.summary
     )
 
-    # The repo agents joined the team once and are used again next time.
-    team = [a.name for a in await studio.agents()]
-    assert team.count("frontend-developer") == 1
+    # The repo agents joined only when their stage started, after LCC's
+    # Builder had the job, and went back on the shelf when it ended.
+    assert "ui-designer" not in team_at_start
+    assert len(done.loaded) == 7
+    assert "ui-designer" not in active(await studio.agents())
+    shelved = next(a for a in await studio.agents() if a.name == "ui-designer")
     again = await studio.start_relay("make a website for my gym")
     await asyncio.wait_for(studio.wait_for_background(), timeout=60)
-    assert [a.name for a in await studio.agents()].count("frontend-developer") == 1
+    same = [a for a in await studio.agents() if a.name == "ui-designer"]
+    assert [a.id for a in same] == [shelved.id], "the same agent, off the shelf"
     assert (await studio.plan(again.id)).status == "done"
+
+
+@pytest.mark.asyncio
+async def test_each_kind_of_job_gets_only_the_agents_trained_for_it(make_studio):
+    studio, _ = await with_repos(make_studio, finish_every_stage())
+    lab = await studio.start_relay("make shampoo in the lab")
+    assert [(s.agent, s.source) for s in lab.steps] == [
+        ("Lab", ""),
+        ("scientific-literature-researcher", VOLT),
+        ("data-scientist", VOLT),
+        ("Lab", "k-dense-ai/scientific-agent-skills"),
+    ]
+    await studio.stop_plan(lab.id)
+    blog = await studio.start_relay("write a blog post about sourdough")
+    assert [s.agent for s in blog.steps] == [
+        "Helper",
+        "content-marketer",
+        "content-quality-editor",
+        "crewAI Content Planner",
+        "crewAI Content Writer",
+        "crewAI Content Editor",
+    ]
+    await studio.stop_plan(blog.id)
 
 
 def test_a_stage_says_which_files_it_changed():
@@ -247,7 +292,7 @@ async def test_the_relay_order_and_switches_are_kept(make_studio):
     assert view["on"] is True and "Builder" in view["team"]
     assert [s["repo"] for s in view["stages"]][:5] == FIRST_FIVE
     volt = view["stages"][0]
-    assert len(volt["agents"]) >= 150 and volt["mode"] == "always"
+    assert len(volt["agents"]) >= 150 and volt["mode"] == "fits"
 
     # The page sends the whole list: two repos first, the rest switched off.
     front = [
@@ -374,7 +419,7 @@ async def test_the_relay_routes(make_studio):
         assert bad.status_code == 400
         started = await client.post("/studio/api/relay", json={"goal": BAKERY})
         assert started.status_code == 202
-        assert started.json()["kind"] == "relay" and len(started.json()["steps"]) == 8
+        assert started.json()["kind"] == "relay" and len(started.json()["steps"]) == 12
         await studio.stop_plan(started.json()["id"])
 
         # Other AI tools start one through LCC's MCP server.

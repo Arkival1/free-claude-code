@@ -66,6 +66,7 @@ _JSON_FIELDS = frozenset(
         "plan",
         "quiz",
         "cast",
+        "loaded",
     }
 )
 

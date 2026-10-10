@@ -370,6 +370,7 @@ RELAY_LEADS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("site", ("builder",)),
     ("game", ("coder", "builder")),
     ("app", ("coder", "builder")),
+    ("lab", ("lab",)),
     ("research", ("researcher",)),
     ("finance", ("researcher",)),
     ("writing", ("helper",)),
@@ -6803,14 +6804,16 @@ class StudioService:
             raise StudioError("There is nobody on the team to start the relay.")
         steps = [PlanStep(id="s1", agent=lead.name, do=goal)]
         for number, leg in enumerate(legs, 2):
-            agent = lead if leg.agent is None else await self._relay_member(leg)
+            # A repo's agent joins the team when its stage starts, after
+            # LCC's agent has had the job; a skill is applied by LCC's agent.
             steps.append(
                 PlanStep(
                     id=f"s{number}",
-                    agent=agent.name,
+                    agent=lead.name if leg.agent is None else leg.agent.name,
                     do=leg_task(leg, goal),
                     needs=(f"s{number - 1}",),
                     source=leg.repo,
+                    joins=leg.agent is not None,
                 )
             )
         if settings.check and kinds & CHECKED_KINDS:
@@ -6858,35 +6861,70 @@ class StudioService:
         name = pick_agent(goal, [(agent.name, agent.role) for agent in own])
         return next((a for a in own if a.name == name), own[0] if own else None)
 
-    async def _relay_member(self, leg: Leg) -> Agent:
-        """The team member for a repo's agent in a relay, added to the team the
-        first time a relay needs it."""
+    async def load_member(self, repo: str, name: str) -> tuple[Agent, bool] | None:
+        """A repo's agent on the team for a relay stage that is starting, and
+        whether it was just brought on (from the repo, or off the shelf)."""
+        extension = next(
+            (
+                e
+                for e in await self._relay_repos()
+                if repo_key(e.name) == repo_key(repo)
+            ),
+            None,
+        )
+        definition = (
+            next(
+                (a for a in extension.agents if a.name.casefold() == name.casefold()),
+                None,
+            )
+            if extension is not None
+            else None
+        )
+        if extension is None or definition is None:
+            return None
+        return await self._relay_member(Leg(extension.name, agent=definition))
+
+    async def unload_members(self, agent_ids: Sequence[str]) -> None:
+        """Put the repo agents a relay brought on back on the shelf (archived,
+        with their memory), unless one is busy with other work."""
+        busy = await self.busy_agent_ids()
+        for agent_id in agent_ids:
+            agent = await self._store.get(Agent, agent_id)
+            if agent is None or agent.archived or agent.role != "agent":
+                continue
+            if agent_id not in busy:
+                await self.update_agent(agent_id, {"archived": True})
+
+    async def _relay_member(self, leg: Leg) -> tuple[Agent, bool]:
+        """The team member for a repo's agent in a relay: the one on the team,
+        or brought back off the shelf, or added the first time (True when it
+        wasn't on the team)."""
         definition = leg.agent
         if definition is None:
             raise StudioError("This stage has no agent.")
-        same = [
-            agent
-            for agent in await self.agents()
-            if not agent.archived
-            and agent.name.casefold() == definition.name.casefold()
-        ]
+        owner = leg.repo.split("/", 1)[0]
+        names = {definition.name.casefold(), f"{definition.name} ({owner})".casefold()}
+        same = [a for a in await self.agents() if a.name.casefold() in names]
         mine = next(
             (a for a in same if a.system_prompt.strip() == definition.prompt.strip()),
             None,
         )
+        if mine is not None and not mine.archived:
+            return mine, False
         if mine is not None:
-            return mine
+            return await self.update_agent(mine.id, {"archived": False}), True
         extension = next(
             e
             for e in await self._relay_repos()
             if repo_key(e.name) == repo_key(leg.repo)
         )
-        owner = leg.repo.split("/", 1)[0]
-        return await self.add_extension_agent(
+        taken = any(a.name.casefold() == definition.name.casefold() for a in same)
+        added = await self.add_extension_agent(
             extension.id,
             definition.name,
-            as_name=f"{definition.name} ({owner})" if same else "",
+            as_name=f"{definition.name} ({owner})" if taken else "",
         )
+        return added, True
 
     async def plans(self, *, limit: int = 20) -> tuple[TeamPlan, ...]:
         return await self._store.find(TeamPlan, order_by="created_at DESC", limit=limit)

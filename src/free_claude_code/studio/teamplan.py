@@ -226,6 +226,10 @@ def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
         mark = "your stage" if other.id == step.id else other.status
         lines.append(f"  {number}. {stage_name(other)} [{mark}]")
     lines.append(f"Your part: {step.do}")
+    lines.append(
+        "The bar is business level: polished, consistent, and ready for a real "
+        "business to use, not a draft."
+    )
     before = [
         s for s in plan.steps[:index] if s.status in {"done", "failed"} and s.result
     ][-2:]
@@ -361,6 +365,14 @@ class PlanHost(Protocol):
         """Each file in the project and a hash of its bytes."""
         ...
 
+    async def load_member(self, repo: str, name: str) -> tuple[Agent, bool] | None:
+        """A repo's agent on the team, and whether it was just brought on."""
+        ...
+
+    async def unload_members(self, agent_ids: Sequence[str]) -> None:
+        """Put repo agents a relay brought on back on the shelf."""
+        ...
+
 
 class PlanCoordinator:
     """Runs one plan's steps in order, as many at once as is safe."""
@@ -417,6 +429,7 @@ class PlanCoordinator:
             plan = plan.model_copy(update={"status": "stopped", "updated_at": now_ms()})
             plan = plan.model_copy(update={"summary": summary(plan)})
             await self._store.put(plan)
+            await self._unload(plan)
             raise
 
     async def _start_ready(
@@ -435,12 +448,30 @@ class PlanCoordinator:
             if len(running) >= self._parallel:
                 break
             agent = team.get(step.agent.casefold())
+            if step.joins and step.source:
+                # The repo's agent joins now, after LCC's agent had the job.
+                agent = None
+                joined = await self._host.load_member(step.source, step.agent)
+                if joined is not None:
+                    agent, fresh = joined
+                    if fresh and agent.id not in plan.loaded:
+                        plan = plan.model_copy(
+                            update={"loaded": (*plan.loaded, agent.id)}
+                        )
+                    if agent.name != step.agent:
+                        plan = with_step(plan, step.id, agent=agent.name)
+                        step = step.model_copy(update={"agent": agent.name})
             if agent is None:
+                missing = (
+                    f"{step.agent} couldn't join from {step.source}."
+                    if step.joins
+                    else f"{step.agent} isn't on the team any more."
+                )
                 plan = with_step(
                     plan,
                     step.id,
                     status="failed",
-                    result=f"{step.agent} isn't on the team any more.",
+                    result=missing,
                     finished_at=now_ms(),
                 )
                 continue
@@ -524,6 +555,15 @@ class PlanCoordinator:
             update={"summary": summary(plan), "updated_at": now_ms()}
         )
         await self._store.put(plan)
+        await self._unload(plan)
         if self._finished is not None:
             await self._finished(plan)
         return plan
+
+    async def _unload(self, plan: TeamPlan) -> None:
+        if not plan.loaded:
+            return
+        try:
+            await self._host.unload_members(plan.loaded)
+        except Exception as error:  # the plan is over either way
+            logger.warning("Studio: couldn't shelve relay agents: {}", error)

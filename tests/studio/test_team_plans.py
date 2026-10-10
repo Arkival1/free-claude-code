@@ -179,6 +179,12 @@ class _Host:
     async def project_files(self, site_id: str) -> dict[str, str]:
         return {}
 
+    async def load_member(self, repo: str, name: str):
+        return None
+
+    async def unload_members(self, agent_ids) -> None:
+        return None
+
     async def run_agent_task(self, agent, goal, *, site_id, parent_chat_id):
         self.started.append(agent.name)
         run = AgentRun(agent_id=agent.id, chat_id="c", goal=goal, status="succeeded")

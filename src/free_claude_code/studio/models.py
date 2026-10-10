@@ -725,6 +725,9 @@ class PlanStep(BaseModel):
     changes: str = ""
     """In a relay, which project files the step added, edited, or removed,
     worked out by Studio from the files themselves, not from the agent's report."""
+    joins: bool = False
+    """The step's agent comes from its repo (source) and joins the team when
+    the step starts, not before."""
 
 
 class TeamPlan(Record):
@@ -744,5 +747,8 @@ class TeamPlan(Record):
     site_id: str | None = None
     """The project every step works in."""
     summary: str = ""
+    loaded: tuple[str, ...] = ()
+    """Repo agents this relay brought onto the team (their ids); they go back
+    on the shelf when it ends."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)

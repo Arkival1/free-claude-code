@@ -1671,59 +1671,72 @@ than one agent.
 </details>
 
 <details>
-<summary><strong>The relay: one job through every repo, one after another</strong></summary>
+<summary><strong>The relay: one job through the repos' trained agents, one after another</strong></summary>
 
 With the relay on (it is by default), a new website, app, or game goes
-through LCC and then the repos, one at a time. For "make a website for my
+through LCC first and then through the repos' agents trained for that kind of
+job, one at a time. Only repos with agents (or skills) trained for the job
+take part, and each gives every one of them, so a website gets web designers
+and developers, never a finance or security agent. For "make a website for my
 bakery":
 
 1. LCC's own agent for the job builds it (the Builder; the Coder for apps and
-   games, the Researcher for research).
-2. awesome-claude-code-subagents: `frontend-developer` improves it.
+   games, the Lab agent for lab work, the Researcher for research).
+2. awesome-claude-code-subagents: `ui-designer`, `frontend-developer`,
+   `seo-specialist`, and `accessibility-tester`, one turn each.
 3. OpenHands: the OpenHands engineer checks and fixes it.
-4. MetaGPT: the Product Manager writes the requirements and fills the gaps.
-5. FinRobot: the Financial Analyst checks the prices and numbers.
-6. crewAI: the Content Writer improves the words.
-7. Every other repo with something for that kind of job: here taste-skill's
-   `design-taste-frontend` rules, applied by the Builder.
-8. Last, for a website, app, or game, LCC's agent checks the finished
-   project (`check_project`, `polish_check`) and fixes what the stages broke:
-   links that go nowhere, stray text, parts the stylesheet doesn't style.
+4. MetaGPT: the QA Engineer tests it.
+5. crewAI: the Content Writer improves the words.
+6. taste-skill's `high-end-visual-design` rules, OpenHands'
+   `frontend-development` skill, and paperclip's `design-critique`, each
+   applied by the Builder.
+7. Last, LCC's agent checks the finished project (`check_project`,
+   `polish_check`) and fixes what the stages broke: links that go nowhere,
+   stray text, parts the stylesheet doesn't style.
+
+An app gets `ui-designer`, `fullstack-developer`, `qa-expert`, and
+`accessibility-tester`, then MetaGPT's Architect, Engineer, and QA Engineer; a
+game gets `game-developer`; lab work ("relay: make shampoo in the lab") starts
+with LCC's Lab agent and gets `scientific-literature-researcher`,
+`data-scientist`, and the scientific skills' `experimental-design`; a blog post
+gets the content agents and crewAI's planner, writer, and editor. A repo's
+agent joins the team only when its stage starts, after LCC's own agent has had
+the job, and goes back on the shelf (archived, with its memory) when the relay
+ends.
 
 Each stage works in the same project, reads what the stage before left,
-keeps what works, and says what it changed; the next stage is told. Studio
-also compares the project's files before and after each stage and adds a
-line such as "Files changed: index.html (edited)" or "No project files
-changed", so a stage that only repeats the last report shows up as doing
-nothing, in the HQ and in the final result. Only one runs at a time, and the
-final result (every stage's note and the project) comes back to the main
-chat. A stage that fails doesn't stop the rest: the next one carries on from
-the work so far.
+keeps what works, and says what it changed; the next stage is told. Every
+stage is held to a business-level bar: polished, consistent, ready for a real
+business. Studio also compares the project's files before and after each
+stage and adds a line such as "Files changed: index.html (edited)" or "No
+project files changed", so a stage that only repeats the last report shows up
+as doing nothing, in the HQ and in the final result. Only one runs at a time,
+and the final result (every stage's note and the project) comes back to the
+main chat. A stage that fails doesn't stop the rest: the next one carries on
+from the work so far.
 
-Every repo has a place in the order. The five above run on **every job**; the
-others run **when they fit the job** (a security repo joins a security job,
-not a bakery site), so a relay stays a sensible length. In each repo, the
-agent or skill whose name fits the job is used (`game-developer` for a game,
-`fullstack-developer` for an app). Change any of it in the HQ's **Relay**
-card: turn it off, reorder repos, set a repo to every job, when it fits, or
-off, pin one of its agents, or pick which LCC agent starts. **+ agent** adds
-more agents from the same repo, each taking its own turn in order (say
-awesome-claude-code-subagents' `ui-designer`, `frontend-developer`,
-`seo-specialist`, and `accessibility-tester`). The final check can be
-switched off there too. Repos you add from GitHub join the end of the relay.
+Every repo has a place in the order (the five you put first lead). Change any
+of it in the HQ's **Relay** card: turn it off, reorder repos, set a repo to
+every job, when it fits (the default), or off, pin one of its agents, or pick
+which LCC agent starts. **+ agent** adds more agents from the same repo, each
+taking its own turn in order. The final check can be switched off there too.
+Repos you add from GitHub join the end of the relay and take part when the
+names of their agents fit the job.
 
 Later stages are told to change files with `edit_file` rather than rewrite
 whole pages, and to keep the class names the stylesheet styles, so one
-stage's rewrite doesn't undo the design.
+stage's rewrite doesn't undo the design. Agents written for a Claude Code team
+with a "context-manager" (most of awesome-claude-code-subagents) are told LCC
+has none, so they read the project's files instead of asking it.
 
 Start one any time with "relay: make a landing page for my gym", "run it
 through all the repos: …", "… through the relay", the **Run the relay** box
 in the HQ, Jarvis's `team_plan` tool with `relay: true`, or `lcc_relay` from
-another AI tool. A repo's agent joins the team the first time a relay needs
-it. Stop and Resume work as for team plans.
+another AI tool. Stop and Resume work as for team plans.
 
-On a PC running a small local model, each stage takes minutes, so a relay
-of seven stages can take an hour or more.
+On a PC running a small local model, each stage takes minutes, so a relay of
+a dozen stages can take hours; models on this PC stream their replies, so a
+slow PC writing a long page isn't cut off.
 
 </details>
 

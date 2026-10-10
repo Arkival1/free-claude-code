@@ -32,7 +32,8 @@ def test_the_relay_lists_every_repo_and_keeps_changes(
     expect(stages.first).to_have_attribute("data-repo", VOLT)
     expect(stages.nth(4)).to_have_attribute("data-repo", "crewAIInc/crewAI")
     assert stages.count() >= 30, "every repo in LCC has a place"
-    expect(relay.get_by_label(f"When {VOLT} runs")).to_have_value("always")
+    # Every repo joins only the jobs it has agents trained for.
+    expect(relay.get_by_label(f"When {VOLT} runs")).to_have_value("fits")
     expect(relay.get_by_label("When leonxlnx/taste-skill runs")).to_have_value("fits")
 
     # Pin an agent, switch one repo off, and move it up: it all sticks.

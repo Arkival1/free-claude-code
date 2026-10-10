@@ -6,13 +6,15 @@ that fits the job best takes the project as the last agent left it, improves
 it its own way, and hands it on, until the last one finishes. Nothing runs at
 the same time; each stage waits for the one before.
 
-Repos with agents give one of their agents, or several the user picked (each
-takes its own turn). Repos with only skills (taste-skill's design rules, say)
-give a stage too: LCC's agent for the job reads that skill and applies it. The
-repos the user put first run on every job; the others run when they have
-something for that kind of job (a security repo for a website does not), so a
-relay stays a sensible length. For a website, app, or game, LCC's agent checks
-the finished work last and fixes what the stages broke.
+Only repos with agents trained for that kind of job take part, and each gives
+every one of its agents trained for it, one turn each: a website gets
+awesome-claude-code-subagents' ui-designer, frontend-developer, seo-specialist,
+and accessibility-tester, but no finance or security agent. Repos with only
+skills (taste-skill's design rules, say) give a stage too: LCC's agent for the
+job reads that skill and applies it. A repo's agent joins the team when its
+stage starts, after LCC's own agent has had the job, and goes back on the
+shelf when the relay ends. For a website, app, or game, LCC's agent checks the
+finished work last and fixes what the stages broke.
 """
 
 import json
@@ -63,6 +65,18 @@ JOB_WORDS: dict[str, tuple[str, ...]] = {
         "software",
     ),
     "game": ("game",),
+    "lab": (
+        "lab",
+        "laboratory",
+        "experiment",
+        "formulate",
+        "formulation",
+        "chemical",
+        "chemicals",
+        "compound",
+        "reaction",
+        "circuit",
+    ),
     "research": ("research", "look up", "find out", "compare", "investigate"),
     "writing": ("blog", "article", "newsletter", "copy", "essay", "story", "post"),
     "finance": (
@@ -127,6 +141,7 @@ PICK_WORDS: dict[str, tuple[str, ...]] = {
         "backend",
     ),
     "game": ("game-developer", "game", "javascript"),
+    "lab": ("experimental-design", "scientific", "chemistry", "experiment", "lab"),
     "research": ("research-analyst", "researcher", "research", "market", "search"),
     "writing": ("content-writer", "writer", "content", "copywriter", "editor"),
     "finance": ("financial-analyst", "financial", "finance", "investment", "equity"),
@@ -209,70 +224,115 @@ def job_kinds(text: str) -> set[str]:
 @dataclass(frozen=True, slots=True)
 class RepoRole:
     kinds: frozenset[str]
-    """The kinds of job it has something for; '*' is every job."""
-    always: bool = False
-    """Runs on every relay (the repos the user put first)."""
-    picks: Mapping[str, str] = field(default_factory=dict)
-    """Which of its agents to use for a kind of job; 'default' otherwise."""
+    """The kinds of job it has agents or skills trained for."""
+    picks: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    """Its agents (or skills) trained for each kind of job, in the order they
+    take their turns; 'default' for the other kinds it fits."""
 
 
-ANY = frozenset({"*"})
 AI = frozenset({"ai"})
+BUILDS = frozenset({"site", "app", "game", "design"})
 KNOWN: dict[str, RepoRole] = {
     "voltagent/awesome-claude-code-subagents": RepoRole(
-        ANY,
-        always=True,
+        frozenset(
+            {
+                *BUILDS,
+                "lab",
+                "science",
+                "research",
+                "writing",
+                "finance",
+                "data",
+                "security",
+                "ai",
+                "api",
+            }
+        ),
         picks={
-            "site": "frontend-developer",
-            "app": "fullstack-developer",
-            "game": "game-developer",
-            "research": "research-analyst",
-            "writing": "content-marketer",
-            "finance": "quant-analyst",
-            "default": "code-reviewer",
+            "site": (
+                "ui-designer",
+                "frontend-developer",
+                "seo-specialist",
+                "accessibility-tester",
+            ),
+            "app": (
+                "ui-designer",
+                "fullstack-developer",
+                "qa-expert",
+                "accessibility-tester",
+            ),
+            "game": ("game-developer", "ui-designer", "qa-expert"),
+            "design": ("ui-designer", "ux-researcher"),
+            "lab": ("scientific-literature-researcher", "data-scientist"),
+            "science": ("scientific-literature-researcher", "data-scientist"),
+            "research": ("research-analyst", "market-researcher"),
+            "writing": ("content-marketer", "content-quality-editor"),
+            "finance": ("quant-analyst", "risk-manager"),
+            "data": ("data-analyst", "data-scientist"),
+            "security": ("security-auditor", "penetration-tester"),
+            "ai": ("ai-engineer", "llm-architect"),
+            "api": ("api-designer", "backend-developer"),
         },
     ),
-    "openhands/software-agent-sdk": RepoRole(ANY, always=True),
+    "openhands/software-agent-sdk": RepoRole(
+        frozenset({"site", "app", "game", "api"}),
+        picks={"default": ("OpenHands Engineer",)},
+    ),
     "foundationagents/metagpt": RepoRole(
-        ANY,
-        always=True,
+        frozenset({"site", "app", "game", "api"}),
         picks={
-            "site": "MetaGPT Product Manager",
-            "app": "MetaGPT QA Engineer",
-            "game": "MetaGPT QA Engineer",
-            "default": "MetaGPT Product Manager",
+            "site": ("MetaGPT QA Engineer",),
+            "app": ("MetaGPT Architect", "MetaGPT Engineer", "MetaGPT QA Engineer"),
+            "game": ("MetaGPT Engineer", "MetaGPT QA Engineer"),
+            "default": ("MetaGPT Architect", "MetaGPT Engineer"),
         },
     ),
     "ai4finance-foundation/finrobot": RepoRole(
-        ANY,
-        always=True,
+        frozenset({"finance", "data"}),
         picks={
-            "finance": "Financial Analyst",
-            "data": "Finance Data Analyst",
-            "default": "Financial Analyst",
+            "finance": ("Financial Analyst",),
+            "data": ("Finance Data Analyst",),
         },
     ),
     "crewaiinc/crewai": RepoRole(
-        ANY,
-        always=True,
+        frozenset({"site", "writing", "research"}),
         picks={
-            "site": "crewAI Content Writer",
-            "research": "crewAI Reporting Analyst",
-            "writing": "crewAI Content Editor",
-            "default": "crewAI Content Editor",
+            "site": ("crewAI Content Writer",),
+            "research": ("crewAI Senior Data Researcher", "crewAI Reporting Analyst"),
+            "writing": (
+                "crewAI Content Planner",
+                "crewAI Content Writer",
+                "crewAI Content Editor",
+            ),
         },
     ),
     "leonxlnx/taste-skill": RepoRole(
-        frozenset({"site", "app", "game", "design"}),
-        picks={"default": "design-taste-frontend"},
+        BUILDS,
+        picks={
+            "site": ("high-end-visual-design",),
+            "default": ("design-taste-frontend",),
+        },
     ),
-    "openhands/openhands": RepoRole(AI),
+    "openhands/openhands": RepoRole(
+        frozenset({"site", "app", "ai"}),
+        picks={
+            "site": ("frontend-development",),
+            "app": ("frontend-development", "e2e-testing"),
+        },
+    ),
+    "paperclipai/paperclip": RepoRole(
+        frozenset({"site", "app", "design", "ai"}),
+        picks={
+            "site": ("design-critique",),
+            "app": ("design-critique",),
+            "design": ("wireframe", "design-critique"),
+        },
+    ),
     "florinpop17/app-ideas": RepoRole(frozenset({"ideas"})),
     "nilbuild/developer-roadmap": RepoRole(frozenset({"learning"})),
     "ossu/computer-science": RepoRole(frozenset({"learning"})),
     "vectorize-io/hindsight": RepoRole(AI),
     "google/ax": RepoRole(AI),
-    "paperclipai/paperclip": RepoRole(AI),
     "stablyai/orca": RepoRole(AI),
     "agent-substrate/substrate": RepoRole(AI),
     "calesthio/openmontage": RepoRole(frozenset({"video"})),
@@ -281,7 +341,10 @@ KNOWN: dict[str, RepoRole] = {
     "ai-boost/awesome-harness-engineering": RepoRole(AI),
     "mukul975/anthropic-cybersecurity-skills": RepoRole(frozenset({"security"})),
     "cathrynlavery/diagram-design": RepoRole(frozenset({"diagram"})),
-    "k-dense-ai/scientific-agent-skills": RepoRole(frozenset({"science"})),
+    "k-dense-ai/scientific-agent-skills": RepoRole(
+        frozenset({"science", "lab"}),
+        picks={"lab": ("experimental-design",)},
+    ),
     "rohitg00/agentmemory": RepoRole(AI),
     "steven2358/awesome-generative-ai": RepoRole(AI),
     "usestrix/strix": RepoRole(frozenset({"security"})),
@@ -296,8 +359,9 @@ KNOWN: dict[str, RepoRole] = {
     "milanm/devops-roadmap": RepoRole(frozenset({"learning", "hosting"})),
     "rudra496/devroadmaps": RepoRole(frozenset({"learning"})),
 }
-"""What each repo that comes with FCC is for. A repo the user adds is matched
-by the names of its agents and skills instead."""
+"""What each repo that comes with FCC is trained for, and which of its agents
+take turns for each kind of job. A repo the user adds is matched by the names
+of its agents and skills instead."""
 
 FIRST_REPOS = (
     "VoltAgent/awesome-claude-code-subagents",
@@ -306,7 +370,8 @@ FIRST_REPOS = (
     "AI4Finance-Foundation/FinRobot",
     "crewAIInc/crewAI",
 )
-"""The relay's first repos, in the order the user asked for."""
+"""The relay's first repos, in the order the user asked for (each still joins
+only a job it has agents trained for)."""
 
 
 def repo_key(name: str) -> str:
@@ -341,8 +406,9 @@ class RelaySettings:
 
 
 def default_mode(repo: str) -> Mode:
-    role = KNOWN.get(repo_key(repo))
-    return "always" if role is not None and role.always else "fits"
+    """Every repo joins only the jobs it has agents trained for, until the
+    user sets it to every job or off."""
+    return "fits"
 
 
 def arranged(saved: RelaySettings, installed: Sequence[str]) -> RelaySettings:
@@ -483,21 +549,9 @@ def choose(
     agents = list(extension.agents)
     skills = [s for s in extension.skills if s.kind in RELAY_SKILL_KINDS]
     role = KNOWN.get(repo_key(extension.name))
-    fits_job = role is not None and ("*" in role.kinds or bool(role.kinds & kinds))
+    fits_job = role is not None and bool(role.kinds & kinds)
     if stage.mode == "fits" and role is not None and not fits_job:
         return None
-    # A named pick for this kind of job, then the best-fitting name.
-    if role is not None and fits_job:
-        for kind in [*sorted(kinds, key=KIND_ORDER.index), "default"]:
-            named = role.picks.get(kind)
-            if named is None:
-                continue
-            found = next((a for a in agents if a.name == named), None)
-            if found is not None:
-                return Leg(extension.name, agent=found)
-            skill = next((s for s in skills if s.name == named), None)
-            if skill is not None:
-                return Leg(extension.name, skill=skill)
     scored_agents = sorted(
         ((fit(a.name, goal, kinds), i, a) for i, a in enumerate(agents)),
         key=lambda item: (-item[0], item[1]),
@@ -538,11 +592,25 @@ def named_leg(extension: Extension, name: str) -> Leg | None:
 def stage_legs(
     extension: Extension, stage: RelayStage, goal: str, kinds: set[str]
 ) -> list[Leg]:
-    """A repo's turns in this relay: each agent the user picked, in order, or
-    the one that fits the job."""
+    """A repo's turns in this relay: each agent the user picked, in order;
+    else each of its agents trained for this kind of job; else the one whose
+    name fits the job best."""
     picked = [leg for name in stage.use if (leg := named_leg(extension, name))]
     if picked:
         return picked
+    role = KNOWN.get(repo_key(extension.name))
+    if role is not None:
+        fits = role.kinds & kinds
+        if not fits and stage.mode != "always":
+            return []
+        for kind in [*sorted(fits, key=KIND_ORDER.index), "default"]:
+            trained = [
+                leg
+                for name in role.picks.get(kind, ())
+                if (leg := named_leg(extension, name))
+            ]
+            if trained:
+                return trained
     leg = choose(extension, stage, goal, kinds)
     return [] if leg is None else [leg]
 
