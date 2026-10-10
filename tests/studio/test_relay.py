@@ -165,7 +165,7 @@ async def test_a_website_goes_through_lcc_then_each_trained_agent_in_turn(make_s
         str(n) for n in range(1, 13)
     ]
     assert f"- ui-designer ({VOLT}) [done]: Stage 2 improved it." in seen[2]
-    assert "business level" in seen[0]
+    assert "business level" in seen[0] and "a sentence or two" in seen[0]
     starts = [s.started_at for s in done.steps]
     finishes = [s.finished_at for s in done.steps]
     assert all(starts[n + 1] >= finishes[n] for n in range(11))

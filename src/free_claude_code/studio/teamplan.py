@@ -228,7 +228,8 @@ def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
     lines.append(f"Your part: {step.do}")
     lines.append(
         "The bar is business level: polished, consistent, and ready for a real "
-        "business to use, not a draft."
+        "business to use, not a draft. Work with the tools: keep what you write "
+        "before a tool call to a sentence or two, so your changes fit in the reply."
     )
     before = [
         s for s in plan.steps[:index] if s.status in {"done", "failed"} and s.result
