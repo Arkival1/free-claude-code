@@ -69,6 +69,7 @@ async def test_an_mcp_client_connects_and_sees_the_team_tools(make_studio):
             "lcc_chat",
             "lcc_ask",
             "lcc_plan",
+            "lcc_relay",
             "lcc_status",
             "lcc_stop",
             "lcc_projects",

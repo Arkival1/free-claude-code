@@ -1347,6 +1347,37 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Relay",
+        route="/studio#hq",
+        where="HQ, the Relay card; or say 'relay: make ...' to Jarvis.",
+        terms=(
+            "relay",
+            "repos in order",
+            "one after another",
+            "sequential",
+            "through all the repos",
+            "every repo",
+            "subagents",
+            "metagpt",
+            "crewai",
+            "finrobot",
+            "openhands",
+        ),
+        body=(
+            "The relay passes one job through LCC's agent for it (the Builder "
+            "for a website) and then each repo, one at a time: the agent from "
+            "that repo that fits the job takes the work as the last one left "
+            "it and improves it. The first five (awesome-claude-code-subagents, "
+            "OpenHands, MetaGPT, FinRobot, crewAI) run on every job; the other "
+            "repos run when they fit the job, like taste-skill's design rules "
+            "for a website. While it is on, new websites, apps and games go "
+            "through it. Start one with 'relay: ...' or Run the relay in the HQ. "
+            "The HQ's Relay card turns it off, reorders repos, sets each to "
+            "every job, when it fits, or off, and pins an agent. A failed stage "
+            "doesn't stop the rest; the result comes to the main chat."
+        ),
+    ),
+    GuideTopic(
         title="Connectors",
         route="/studio#connectors",
         where=(
@@ -1427,8 +1458,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "scientific skills",
         ),
         body=(
-            "FCC ships 28 outside repos ready to use, with a checked copy of each "
-            "(OpenHands, hindsight, paperclip, OpenMontage, taste-skill, the "
+            "FCC ships 33 outside repos ready to use, with a checked copy of each "
+            "(awesome-claude-code-subagents, MetaGPT, FinRobot, crewAI, the "
+            "OpenHands SDK, OpenHands, hindsight, paperclip, OpenMontage, taste-skill, the "
             "cybersecurity and scientific skill packs, public-apis, app-ideas, "
             "OSSU, Langflow, Letta, and more). Two whose licences don't allow "
             "sharing (roadmap.sh, free-for-dev) come from GitHub on first load "
@@ -1515,7 +1547,7 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "and so are the engine (llama.cpp) and voice files Studio downloads. "
             "If the original is deleted from GitHub, Studio installs from the "
             "kept copy automatically, and the Repo vault card can restore or "
-            "download any copy. The 28 starter repos and Claw Code come inside "
+            "download any copy. The 33 starter repos and Claw Code come inside "
             "FCC itself."
         ),
     ),

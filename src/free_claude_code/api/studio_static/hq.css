@@ -371,3 +371,48 @@ body[data-ui="page"] .view:has(> .hq) {
 .hq-plan-steps li.skipped .hq-step-state {
   color: var(--bad);
 }
+
+/* Relay: LCC's agent, then each repo in order */
+.hq-relay {
+  margin-top: 18px;
+}
+
+.hq-relay-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hq-relay-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hq-relay-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.hq-relay-stage .grow {
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  flex: 1;
+}
+
+.hq-relay-stage select {
+  max-width: 220px;
+}
+
+.hq-relay-stage.off {
+  opacity: 0.55;
+}

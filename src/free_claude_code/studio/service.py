@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import anyio.to_thread
 import httpx
@@ -185,6 +185,7 @@ from .orders import (
     parse_orders,
     pick_agent,
     plan_request,
+    relay_request,
     route_prompt,
     routed_agent,
     web_request,
@@ -243,6 +244,19 @@ from .presets import (
 )
 from .recall_messages import Found, search
 from .recall_messages import line as message_line
+from .relay import (
+    RELAY_SKILL_KINDS,
+    Leg,
+    Mode,
+    RelaySettings,
+    RelayStage,
+    RelayStore,
+    arranged,
+    job_kinds,
+    leg_task,
+    plan_legs,
+    repo_key,
+)
 from .research import DeepResearch, ResearchMix, ResearchReport, relevance
 from .rooms import RoomError, RoomOutcome, RoomService
 from .school import School
@@ -349,6 +363,16 @@ MCP_NOTE_TOOLS = 8
 MCP_NOTE_SECONDS = 20.0
 """A message naming a switched-on server gets up to 8 of its tools (from at
 most 2 servers), if the server lists them within 20 seconds."""
+RELAY_LEADS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("site", ("builder",)),
+    ("game", ("coder", "builder")),
+    ("app", ("coder", "builder")),
+    ("research", ("researcher",)),
+    ("finance", ("researcher",)),
+    ("writing", ("helper",)),
+)
+"""Which of LCC's own agents starts a relay for each kind of job."""
+RELAY_SKILLS_SHOWN = 40
 SERVICE_HANDOFFS = frozenset(
     {"ask_agent", "team_task", "research", "web_search", "web_fetch", "ask_helper"}
 )
@@ -720,6 +744,8 @@ class StudioService:
         # Outside services connected with a token (Connectors page).
         self._connectors = ConnectorStore(sites_dir.parent / "connectors.json")
         self._connector_transport = search_transport
+        # The relay's order and switches (HQ, Relay card).
+        self._relay = RelayStore(sites_dir.parent / "relay.json")
         # Chats whose newest message named connected services (see _screen_call).
         self._service_turns: dict[str, tuple[str, ...]] = {}
         # The newest user message of each main AI chat, for _screen_call.
@@ -5398,8 +5424,11 @@ class StudioService:
             cwd=str(files) if files.is_dir() else None,
         )
 
-    async def add_extension_agent(self, ext_id: str, name: str) -> Agent:
-        """Make one of a plugin's agents a member of the team."""
+    async def add_extension_agent(
+        self, ext_id: str, name: str, *, as_name: str = ""
+    ) -> Agent:
+        """Make one of a plugin's agents a member of the team (as another name
+        when the team has an agent with its name already)."""
         extension = await self._extension(ext_id)
         found = next((a for a in extension.agents if a.name == name), None)
         if found is None:
@@ -5410,7 +5439,7 @@ class StudioService:
         # pick up more for a job.
         tools = tuple(dict.fromkeys((*_studio_tools(found.tools), *REPO_AGENT_EXTRAS)))
         return await self.create_agent(
-            name=found.name,
+            name=as_name or found.name,
             role="agent",
             model=self.server_model,
             system_prompt=found.prompt,
@@ -5863,15 +5892,56 @@ class StudioService:
         goal = str(call.arguments.get("goal") or "").strip()
         if not goal:
             raise ValueError("Say what the plan is for.")
-        plan = await self.start_plan(
-            goal,
-            made_by=context.agent_name,
-            chat_id=context.chat_id,
-            project=str(call.arguments.get("project") or ""),
-        )
+        project = str(call.arguments.get("project") or "")
+        if str(call.arguments.get("relay", "")).lower() in {"true", "1", "yes"}:
+            try:
+                plan = await self.start_relay(
+                    goal,
+                    made_by=context.agent_name,
+                    chat_id=context.chat_id,
+                    project=project,
+                )
+            except StudioError as error:
+                raise ValueError(str(error)) from error
+        else:
+            plan = await self.start_plan(
+                goal,
+                made_by=context.agent_name,
+                chat_id=context.chat_id,
+                project=project,
+            )
         return ToolOutcome(
             text=plan_started(plan, await self._site_name(plan.site_id)),
             data={"tool": "team_plan", "plan_id": plan.id, "steps": len(plan.steps)},
+        )
+
+    async def _relay_order(
+        self, main: Agent, chat: Chat, job: str, *, explicit: bool
+    ) -> str:
+        """Start a relay the user asked for; '' when a website or app can't go
+        through one (no repo has anything for it) and goes the usual way."""
+        try:
+            plan = await self.start_relay(job, made_by=main.name, chat_id=chat.id)
+        except StudioError as error:
+            return f"The relay could not start: {error}" if explicit else ""
+        line = plan_started(plan, await self._site_name(plan.site_id))
+        await self._store.append_message(
+            chat_id=chat.id,
+            role="tool",
+            text=line,
+            author="relay",
+            data={
+                "tool": "team_plan",
+                "order": True,
+                "plan_id": plan.id,
+                "relay": True,
+            },
+        )
+        return (
+            f"The relay was started already:\n{line}\nDo not hand it out again or "
+            "do the job yourself. Tell the user in a sentence or two that the job "
+            "goes through these stages one after another and the result comes "
+            "here when the last one is done."
         )
 
     async def _site_name(self, site_id: str | None) -> str:
@@ -6015,6 +6085,20 @@ class StudioService:
                 "again or do the steps yourself. Tell the user in a sentence or two "
                 "who does what, in what order."
             )
+        # 'relay: make a bakery site' goes through the repos one by one, and so
+        # does a new website, app, or game while the relay is on.
+        explicit = "" if orders else relay_request(text, main.name)
+        automatic = (
+            ""
+            if orders or explicit or not self._relay.load().on
+            else build_request(text, main.name) or code_request(text, main.name)
+        )
+        if explicit or automatic:
+            started = await self._relay_order(
+                main, chat, explicit or automatic, explicit=bool(explicit)
+            )
+            if started:
+                return started
         researcher = next((agent for agent in team if agent.role == "researcher"), None)
         task = (
             ""
@@ -6497,6 +6581,7 @@ class StudioService:
         chat_id: str | None = None,
         project: str = "",
         steps: Sequence[PlanStep] | None = None,
+        kind: Literal["plan", "relay"] = "plan",
     ) -> TeamPlan:
         """Plan a job for the team and start running it in the background."""
         goal = " ".join(goal.split())
@@ -6512,7 +6597,11 @@ class StudioService:
             helper_pipeline=self.settings.studio_helper_pipeline,
         )
         site = await crew.named_project(f"{project} {goal}")
-        builders = [a for a in team if a.name in {s.agent for s in planned}]
+        # The project belongs to the first step's agent that can write files.
+        order = [step.agent for step in planned]
+        builders = sorted(
+            (a for a in team if a.name in order), key=lambda a: order.index(a.name)
+        )
         builder = next((a for a in builders if "write_file" in a.tools), None)
         if site is None and (project.strip() or builder is not None):
             owner = builder or builders[0]
@@ -6529,6 +6618,7 @@ class StudioService:
             )
         plan = TeamPlan(
             goal=goal,
+            kind=kind,
             steps=planned,
             made_by=made_by,
             chat_id=chat_id,
@@ -6563,6 +6653,186 @@ class StudioService:
                     "status": plan.status,
                 },
             )
+
+    # ------------------------------------------------------------ relay
+
+    async def _relay_repos(self) -> list[Extension]:
+        """Added repos with an agent, or a skill, a relay stage can use (the
+        repos that come with FCC are added first, if this is the first load)."""
+        await self.ensure_starters()
+        return [
+            extension
+            for extension in await self._extensions.all()
+            if extension.agents
+            or any(s.kind in RELAY_SKILL_KINDS for s in extension.skills)
+        ]
+
+    async def relay_settings(self) -> RelaySettings:
+        """The saved relay, with repos added since put in their place."""
+        installed = [extension.name for extension in await self._relay_repos()]
+        return arranged(self._relay.load(), installed)
+
+    async def relay_view(self) -> JsonObject:
+        settings = await self.relay_settings()
+        repos = {repo_key(e.name): e for e in await self._relay_repos()}
+        own = [agent.name for agent in await self._plan_team() if agent.role != "agent"]
+        return {
+            "on": settings.on,
+            "first": settings.first,
+            "team": own,
+            "stages": [
+                {
+                    "repo": stage.repo,
+                    "mode": stage.mode,
+                    "agent": stage.agent,
+                    "about": repos[repo_key(stage.repo)].description,
+                    "agents": [a.name for a in repos[repo_key(stage.repo)].agents],
+                    "skills": [
+                        skill.name
+                        for skill in repos[repo_key(stage.repo)].skills
+                        if skill.kind in RELAY_SKILL_KINDS
+                    ][:RELAY_SKILLS_SHOWN],
+                }
+                for stage in settings.stages
+            ],
+        }
+
+    async def save_relay(self, values: Mapping[str, object]) -> JsonObject:
+        """Change the relay: on or off, LCC's first agent, and each repo's
+        place, mode (always, when it fits, off), and agent."""
+        current = await self.relay_settings()
+        repos = {repo_key(e.name): e for e in await self._relay_repos()}
+        modes: dict[str, Mode] = {"always": "always", "fits": "fits", "off": "off"}
+        stages = current.stages
+        rows = values.get("stages")
+        if isinstance(rows, list):
+            stages = []
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                repo = repos.get(repo_key(str(row.get("repo") or "")))
+                if repo is None:
+                    raise StudioError(f"No repo called {row.get('repo')!r} is added.")
+                mode = modes.get(str(row.get("mode") or "fits"))
+                if mode is None:
+                    raise StudioError("A repo's mode is always, fits, or off.")
+                agent = str(row.get("agent") or "").strip()
+                names = {a.name for a in repo.agents} | {s.name for s in repo.skills}
+                if agent and agent not in names:
+                    raise StudioError(f"{repo.name} has no agent or skill {agent!r}.")
+                stages.append(RelayStage(repo.name, mode, agent))
+        first = str(values.get("first", current.first) or "").strip()
+        own = {a.name for a in await self._plan_team() if a.role != "agent"}
+        if first and first not in own:
+            raise StudioError(f"No LCC agent called {first!r} can start the relay.")
+        self._relay.save(
+            RelaySettings(
+                on=bool(values.get("on", current.on)), first=first, stages=stages
+            )
+        )
+        return await self.relay_view()
+
+    async def start_relay(
+        self,
+        goal: str,
+        *,
+        made_by: str = "you",
+        chat_id: str | None = None,
+        project: str = "",
+        first: str = "",
+    ) -> TeamPlan:
+        """Pass a job through LCC's agent for it and then each repo in the
+        relay, one after another, in the background."""
+        goal = " ".join(goal.split())
+        if not goal:
+            raise StudioError("Say what the relay is for.")
+        settings = await self.relay_settings()
+        kinds = job_kinds(goal)
+        legs = plan_legs(goal, settings, await self._relay_repos(), kinds=kinds)
+        if not legs:
+            raise StudioError(
+                "No repo in the relay has anything for this job. Switch repos on "
+                "in the HQ's Relay card."
+            )
+        lead = self._relay_lead(
+            await self._plan_team(), goal, kinds, first or settings.first
+        )
+        if lead is None:
+            raise StudioError("There is nobody on the team to start the relay.")
+        steps = [PlanStep(id="s1", agent=lead.name, do=goal)]
+        for number, leg in enumerate(legs, 2):
+            agent = lead if leg.agent is None else await self._relay_member(leg)
+            steps.append(
+                PlanStep(
+                    id=f"s{number}",
+                    agent=agent.name,
+                    do=leg_task(leg, goal),
+                    needs=(f"s{number - 1}",),
+                    source=leg.repo,
+                )
+            )
+        return await self.start_plan(
+            goal,
+            made_by=made_by,
+            chat_id=chat_id,
+            project=project,
+            steps=steps,
+            kind="relay",
+        )
+
+    @staticmethod
+    def _relay_lead(
+        team: Sequence[Agent], goal: str, kinds: set[str], pinned: str
+    ) -> Agent | None:
+        """LCC's own agent that starts a relay: the one the user picked, or the
+        one for the job (the Builder for a website, the Coder for an app)."""
+        own = [agent for agent in team if agent.role != "agent"]
+        if pinned:
+            found = next(
+                (a for a in own if a.name.casefold() == pinned.casefold()), None
+            )
+            if found is not None:
+                return found
+        roles: dict[str, Agent] = {}
+        for agent in own:
+            roles.setdefault(agent.role, agent)
+        for kind, wanted in RELAY_LEADS:
+            if kind in kinds:
+                found = next((roles[r] for r in wanted if r in roles), None)
+                if found is not None:
+                    return found
+        name = pick_agent(goal, [(agent.name, agent.role) for agent in own])
+        return next((a for a in own if a.name == name), own[0] if own else None)
+
+    async def _relay_member(self, leg: Leg) -> Agent:
+        """The team member for a repo's agent in a relay, added to the team the
+        first time a relay needs it."""
+        definition = leg.agent
+        if definition is None:
+            raise StudioError("This stage has no agent.")
+        same = [
+            agent
+            for agent in await self.agents()
+            if not agent.archived
+            and agent.name.casefold() == definition.name.casefold()
+        ]
+        mine = next(
+            (a for a in same if a.system_prompt.strip() == definition.prompt.strip()),
+            None,
+        )
+        if mine is not None:
+            return mine
+        extension = next(
+            e
+            for e in await self._relay_repos()
+            if repo_key(e.name) == repo_key(leg.repo)
+        )
+        owner = leg.repo.split("/", 1)[0]
+        return await self.add_extension_agent(
+            extension.id,
+            definition.name,
+            as_name=f"{definition.name} ({owner})" if same else "",
+        )
 
     async def plans(self, *, limit: int = 20) -> tuple[TeamPlan, ...]:
         return await self._store.find(TeamPlan, order_by="created_at DESC", limit=limit)

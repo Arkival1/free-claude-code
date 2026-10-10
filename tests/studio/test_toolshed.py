@@ -35,7 +35,9 @@ async def auditor_chat(make_studio, *steps: LLMReply, **settings):
     studio._starter_folder = BUNDLE
     await studio.ensure_defaults()
     await studio.ensure_starters()
-    extension = next(e for e in await studio.extensions() if e.agents)
+    extension = next(
+        e for e in await studio.extensions() if e.name == "paperclipai/paperclip"
+    )
     auditor = await studio.add_extension_agent(extension.id, "token-auditor")
     chat = await studio.create_chat(agent_id=auditor.id)
     return studio, model, auditor, chat

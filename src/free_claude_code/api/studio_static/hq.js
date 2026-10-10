@@ -132,6 +132,7 @@
   let panel = null;
   let feed = null;
   let plansBox = null;
+  let relayBox = null;
   let tip = null;
   let frame = 0;
   let poller = 0;
@@ -721,6 +722,7 @@
       },
       [planInput, h("button", { class: "button", type: "submit", text: "Plan it" })]
     );
+    relayBox = h("div", { class: "hq-relay-body" }, [h("p", { class: "muted small", text: "Loading the relay…" })]);
     tip = h("div", { class: "hq-tip", hidden: true });
     const stage = h("div", { class: "hq-stage" }, [canvas, tip]);
     ctx.view.replaceChildren(
@@ -740,6 +742,10 @@
             planStatus,
             plansBox,
           ]),
+          h("section", { class: "hq-relay", "aria-label": "Relay" }, [
+            h("h3", { class: "hq-feed-title", text: "Relay: one repo after another" }),
+            relayBox,
+          ]),
           h("h3", { class: "hq-feed-title", text: "Newest steps" }),
           feed,
         ]),
@@ -755,6 +761,7 @@
     });
     await refresh();
     drawPanel();
+    loadRelay();
     cancelAnimationFrame(frame);
     last = 0;
     frame = requestAnimationFrame(draw);
@@ -848,6 +855,119 @@
     );
   }
 
+  // The relay: LCC's agent first, then each repo in this order, one at a time.
+  async function loadRelay() {
+    try {
+      drawRelay(await ctx.api("/studio/api/relay"));
+    } catch (error) {
+      relayBox.replaceChildren(ctx.el("p", { class: "muted small", text: (error && error.message) || "The relay didn't load." }));
+    }
+  }
+
+  function drawRelay(view) {
+    const h = ctx.el;
+    const stages = view.stages.map((stage) => ({ ...stage }));
+    const status = h("p", { class: "muted small", role: "status" });
+    const save = async (changes) => {
+      status.textContent = "Saving…";
+      try {
+        const saved = await ctx.api("/studio/api/relay", {
+          method: "PUT",
+          body: JSON.stringify({
+            on: onBox.checked,
+            first: firstPick.value,
+            stages: stages.map(({ repo, mode, agent }) => ({ repo, mode, agent })),
+            ...changes,
+          }),
+        });
+        drawRelay(saved);
+        ctx.notify("Relay saved.");
+      } catch (error) {
+        status.textContent = (error && error.message) || "That didn't save.";
+      }
+    };
+    const onBox = h("input", { type: "checkbox", checked: view.on, onchange: () => save({}) });
+    const firstPick = h(
+      "select",
+      { "aria-label": "LCC agent that starts the relay", onchange: () => save({}) },
+      [h("option", { value: "", text: "the one for the job (Builder for websites)" }), ...view.team.map((name) => h("option", { value: name, text: name, selected: name === view.first }))]
+    );
+    const jobInput = h("input", {
+      type: "text",
+      maxlength: "4000",
+      placeholder: "A job for the relay, e.g. make a website for my bakery",
+      "aria-label": "Job for the relay",
+    });
+    const jobForm = h(
+      "form",
+      {
+        class: "hq-plan-form",
+        onsubmit: async (event) => {
+          event.preventDefault();
+          const goal = jobInput.value.trim();
+          if (!goal) return;
+          status.textContent = "Starting the relay…";
+          try {
+            await ctx.api("/studio/api/relay", { method: "POST", body: JSON.stringify({ goal }) });
+            jobInput.value = "";
+            status.textContent = "Started: it shows under Team plans.";
+            await refresh();
+          } catch (error) {
+            status.textContent = (error && error.message) || "The relay could not start.";
+          }
+        },
+      },
+      [jobInput, h("button", { class: "button", type: "submit", text: "Run the relay" })]
+    );
+    const move = (index, by) => {
+      const [stage] = stages.splice(index, 1);
+      stages.splice(index + by, 0, stage);
+      save({});
+    };
+    const rows = stages.map((stage, index) => {
+      const mode = h(
+        "select",
+        { "aria-label": `When ${stage.repo} runs`, onchange: (event) => { stage.mode = event.target.value; save({}); } },
+        [
+          ["always", "every job"],
+          ["fits", "when it fits the job"],
+          ["off", "off"],
+        ].map(([value, text]) => h("option", { value, text, selected: stage.mode === value }))
+      );
+      const choices = [...stage.agents.map((name) => ["agent", name]), ...stage.skills.map((name) => ["skill", name])];
+      const agent = h(
+        "select",
+        { "aria-label": `Agent from ${stage.repo}`, onchange: (event) => { stage.agent = event.target.value; save({}); } },
+        [
+          h("option", { value: "", text: stage.agents.length ? "the agent that fits the job" : "the skill that fits the job" }),
+          ...choices.map(([kind, name]) => h("option", { value: name, text: `${kind === "skill" ? "skill: " : ""}${name}`, selected: stage.agent === name })),
+        ]
+      );
+      return h("li", { class: `hq-relay-stage ${stage.mode}`, "data-repo": stage.repo }, [
+        h("span", { class: "hq-tool", text: String(index + 2) }),
+        h("div", { class: "grow" }, [
+          h("strong", { text: stage.repo }),
+          h("small", { class: "muted", text: `${stage.agents.length} agent(s), ${stage.skills.length}${stage.skills.length >= 40 ? "+" : ""} skill(s)` }),
+        ]),
+        mode,
+        agent,
+        h("button", { class: "link-button", type: "button", text: "↑", "aria-label": `Move ${stage.repo} up`, disabled: index === 0, onclick: () => move(index, -1) }),
+        h("button", { class: "link-button", type: "button", text: "↓", "aria-label": `Move ${stage.repo} down`, disabled: index === stages.length - 1, onclick: () => move(index, 1) }),
+      ]);
+    });
+    relayBox.replaceChildren(
+      h("p", { class: "muted small", text: "A job goes to LCC's own agent first, then to each repo below in order, one at a time: each one's agent takes the work as the last one left it and improves it. Repos set to \"when it fits\" join only when they have something for that kind of job." }),
+      h("label", { class: "check" }, [onBox, "On: new websites, apps, and games go through the relay"]),
+      h("label", {}, ["Starts with", firstPick]),
+      jobForm,
+      status,
+      h("ol", { class: "hq-relay-stages" }, [
+        h("li", { class: "hq-relay-stage always" }, [h("span", { class: "hq-tool", text: "1" }), h("div", { class: "grow" }, [h("strong", { text: "LCC" }), h("small", { class: "muted", text: firstPick.value || "the agent for the job" })])]),
+        ...rows,
+      ])
+    );
+  }
+
   // Team plans: each step, who does it, and how far it got.
   function drawPlans() {
     const plans = (state.data && state.data.plans) || [];
@@ -868,16 +988,16 @@
             return h("article", { class: `hq-plan ${plan.status}`, "data-plan": plan.id }, [
               h("div", { class: "hq-plan-head" }, [
                 h("strong", { text: plan.goal }),
-                h("span", { class: "hq-plan-state", text: `${plan.status} · ${plan.done_steps} of ${plan.steps.length}` }),
+                h("span", { class: "hq-plan-state", text: `${plan.kind === "relay" ? "relay · " : ""}${plan.status} · ${plan.done_steps} of ${plan.steps.length}` }),
                 button,
               ].filter(Boolean)),
               h(
                 "ol",
                 { class: "hq-plan-steps" },
-                plan.steps.map((step) =>
+                plan.steps.map((step, index) =>
                   h("li", { class: `step ${step.status}`, title: step.result || step.do }, [
-                    h("span", { class: "hq-tool", text: step.id }),
-                    h("span", { class: "who", text: step.agent }),
+                    h("span", { class: "hq-tool", text: plan.kind === "relay" ? String(index + 1) : step.id }),
+                    h("span", { class: "who", text: step.source ? `${step.agent} · ${step.source}` : step.agent }),
                     h("span", { class: "muted", text: step.do }),
                     h("span", { class: "hq-step-state", text: step.status }),
                   ])

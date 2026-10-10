@@ -88,6 +88,16 @@ TOOLS = (
         ["goal"],
     ),
     _tool(
+        "lcc_relay",
+        "Pass a job through the relay: LCC's own agent for it does it first, "
+        "then one agent from each repo in the relay (VoltAgent subagents, "
+        "OpenHands, MetaGPT, FinRobot, crewAI, and others that fit), one after "
+        "another, each improving the last one's work. Returns the stages; check "
+        "it with lcc_status.",
+        {"goal": _TEXT, "project": {"type": "string"}},
+        ["goal"],
+    ),
+    _tool(
         "lcc_status",
         "How work is going: a plan (plan_id), one task (task_id), or, with "
         "neither, the whole team.",
@@ -216,6 +226,22 @@ async def _plan(studio: StudioService, args: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+async def _relay(studio: StudioService, args: Mapping[str, Any]) -> str:
+    goal = _text(args.get("goal"))
+    if not goal:
+        raise ToolFailure("Say what the relay is for.")
+    plan = await studio.start_relay(
+        goal, made_by="an MCP client", project=_text(args.get("project"))
+    )
+    lines = [f"Relay {plan.id} started with {len(plan.steps)} stage(s), in order:"]
+    lines += [
+        f"{number}. {s.agent}" + (f" ({s.source})" if s.source else "")
+        for number, s in enumerate(plan.steps, 1)
+    ]
+    lines.append("Check it with lcc_status and plan_id.")
+    return "\n".join(lines)
+
+
 async def _status(studio: StudioService, args: Mapping[str, Any]) -> str:
     plan_id, task_id = _text(args.get("plan_id")), _text(args.get("task_id"))
     if plan_id:
@@ -282,6 +308,7 @@ HANDLERS: dict[str, Callable[[StudioService, Mapping[str, Any]], Awaitable[str]]
     "lcc_chat": _chat,
     "lcc_ask": _ask,
     "lcc_plan": _plan,
+    "lcc_relay": _relay,
     "lcc_status": _status,
     "lcc_stop": _stop,
     "lcc_projects": _projects,

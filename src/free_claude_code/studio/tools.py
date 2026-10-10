@@ -721,6 +721,12 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                     "type": "string",
                     "description": "Optional project name to work in.",
                 },
+                "relay": {
+                    "type": "boolean",
+                    "description": "true: pass the job through the relay instead: "
+                    "LCC's agent for it first, then each repo's agent, one after "
+                    "another, each building on the last.",
+                },
             },
             "required": ["goal"],
         },

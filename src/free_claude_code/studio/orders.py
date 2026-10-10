@@ -387,6 +387,39 @@ def plan_request(text: str, main: str = "") -> str:
     return job if len(job.split()) >= 3 else ""
 
 
+_ALL_REPOS = (
+    r"(?:the\s+relay|all\s+(?:of\s+)?(?:the\s+|my\s+)?repos|every\s+repo|each\s+repo)"
+)
+_RELAY_LEAD = re.compile(
+    r"(?:relay\s*[:,-]?\s+"
+    r"|(?:use|start)\s+the\s+relay\s+(?:to|for|on)\s+"
+    rf"|(?:run|send|pass|put)\s+(?:it|this|that|the\s+job)\s+through\s+{_ALL_REPOS}"
+    r"\s*[:,-]?\s*(?:to\s+)?"
+    rf"|(?:have|get|let)\s+{_ALL_REPOS}\s+(?:to\s+)?(?:work\s+on\s+)?"
+    r")(?P<job>.+)",
+    re.I | re.S,
+)
+_RELAY_TAIL = re.compile(
+    rf"(?P<job>.+?)[,\s]+(?:(?:through|via|using|with)\s+{_ALL_REPOS}"
+    r"|one\s+repo\s+(?:at\s+a\s+time|after\s+(?:the\s+)?other))\s*[.!]*$",
+    re.I | re.S,
+)
+
+
+def relay_request(text: str, main: str = "") -> str:
+    """The job in 'relay: make a bakery site', 'run it through all the repos:
+    ...', or '... through the relay': a job passed through the repos one after
+    another. Empty for anything else."""
+    name = rf"(?:{re.escape(main)}\s*[,:!]?\s+)?" if main.strip() else ""
+    lead = re.match(_ASKING.format(main=name), text, re.I)
+    rest = text[lead.end() if lead else 0 :].strip()
+    found = _RELAY_LEAD.match(rest) or _RELAY_TAIL.match(rest)
+    if not found:
+        return ""
+    job = _clean(found.group("job")).rstrip("?.!")
+    return job if len(job.split()) >= 2 else ""
+
+
 ROUTED_ROLES = {
     "researcher": "finds things out on the web: research, prices, reviews, news, comparisons",
     "builder": "builds and fixes websites, apps, games, and code",

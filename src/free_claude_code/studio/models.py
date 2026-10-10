@@ -719,6 +719,9 @@ class PlanStep(BaseModel):
     run_id: str = ""
     started_at: int = 0
     finished_at: int = 0
+    source: str = ""
+    """In a relay, the repo this step's agent or skill comes from ('' for
+    LCC's own agents)."""
 
 
 class TeamPlan(Record):
@@ -726,6 +729,9 @@ class TeamPlan(Record):
 
     id: str = Field(default_factory=lambda: new_id("pln"))
     goal: str
+    kind: Literal["plan", "relay"] = "plan"
+    """A plan's steps run as they are ready; a relay's run one after another,
+    each building on the last, and one that fails doesn't stop the rest."""
     status: PlanStatus = "running"
     steps: tuple[PlanStep, ...] = ()
     made_by: str = ""

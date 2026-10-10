@@ -148,8 +148,10 @@ def with_step(plan: TeamPlan, step_id: str, **changes: object) -> TeamPlan:
 
 
 def ready_steps(plan: TeamPlan) -> list[PlanStep]:
-    """Waiting steps whose needed steps are all done."""
-    done = {step.id for step in plan.steps if step.status == "done"}
+    """Waiting steps whose needed steps are all done; in a relay, all over
+    (a stage that failed hands on what the stage before it made)."""
+    over = {"done", "failed", "skipped"} if plan.kind == "relay" else {"done"}
+    done = {step.id for step in plan.steps if step.status in over}
     return [
         step
         for step in plan.steps
@@ -158,7 +160,10 @@ def ready_steps(plan: TeamPlan) -> list[PlanStep]:
 
 
 def skip_blocked(plan: TeamPlan) -> TeamPlan:
-    """Steps that need a step that can no longer finish are skipped."""
+    """Steps that need a step that can no longer finish are skipped (never in
+    a relay: the next stage carries on from the work so far)."""
+    if plan.kind == "relay":
+        return plan
     changed = True
     while changed:
         changed = False
@@ -181,9 +186,55 @@ def skip_blocked(plan: TeamPlan) -> TeamPlan:
     return plan
 
 
+def stage_name(step: PlanStep) -> str:
+    return f"{step.agent} ({step.source})" if step.source else step.agent
+
+
+def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
+    """What one stage of a relay is told: the job, the order, its own part,
+    and what the stages before it reported."""
+    index = next(i for i, s in enumerate(plan.steps) if s.id == step.id)
+    lines = [
+        f"You are stage {index + 1} of {len(plan.steps)} of a relay: the job "
+        "passes from agent to agent, one at a time, and each builds on the work "
+        "before it.",
+        f"The job: {plan.goal}",
+        "The relay:",
+    ]
+    for number, other in enumerate(plan.steps, 1):
+        mark = "your stage" if other.id == step.id else other.status
+        lines.append(f"  {number}. {stage_name(other)} [{mark}]")
+    lines.append(f"Your part: {step.do}")
+    before = [
+        s for s in plan.steps[:index] if s.status in {"done", "failed"} and s.result
+    ][-2:]
+    if before:
+        lines.append("What the stages before you reported:")
+        lines += [
+            f"- {stage_name(s)} [{s.status}]: {s.result[:HANDOFF_CHARS]}"
+            for s in before
+        ]
+    if index == 0:
+        lines.append(
+            "You go first: do the whole job. The stages after you will improve it."
+        )
+    else:
+        lines.append(
+            "Work on what is there: read the project first, keep what works, make "
+            "it better your way, and fix anything broken. Don't start over or "
+            "throw away the earlier stages' work."
+        )
+    lines.append(
+        "When you finish, say what you changed and anything the next stage should know."
+    )
+    return "\n".join(lines)
+
+
 def step_brief(plan: TeamPlan, step: PlanStep) -> str:
     """What the agent doing one step is told: the job, the whole plan, its
     own step, and what the steps it builds on produced."""
+    if plan.kind == "relay":
+        return relay_brief(plan, step)
     lines = [
         "You are doing one step of a team plan.",
         f"The whole job: {plan.goal}",
@@ -212,14 +263,21 @@ def summary(plan: TeamPlan) -> str:
         "stopped": "was stopped",
         "running": "is still running",
     }[plan.status]
+    what = "relay" if plan.kind == "relay" else "team plan"
+    unit = "stage(s)" if plan.kind == "relay" else "step(s)"
     lines = [
-        f"The team plan '{plan.goal[:120]}' {verdict}: {done} of "
-        f"{len(plan.steps)} step(s) done."
+        f"The {what} '{plan.goal[:120]}' {verdict}: {done} of "
+        f"{len(plan.steps)} {unit} done."
     ]
-    for step in plan.steps:
+    for number, step in enumerate(plan.steps, 1):
         first = step.result.strip().splitlines()[0][:160] if step.result.strip() else ""
+        label = (
+            f"{number}. {stage_name(step)}"
+            if plan.kind == "relay"
+            else f"{step.id} {step.agent}"
+        )
         lines.append(
-            f"- {step.id} {step.agent} [{step.status}] {step.do[:80]}"
+            f"- {label} [{step.status}] {step.do[:80]}"
             + (f" → {first}" if first else "")
         )
     last = next(
@@ -232,6 +290,21 @@ def summary(plan: TeamPlan) -> str:
 
 def plan_started(plan: TeamPlan, project: str = "") -> str:
     """What the main AI tells the user when a plan starts."""
+    if plan.kind == "relay":
+        lines = [
+            f"Relay started: the job goes through {len(plan.steps)} stages, one "
+            "after another:"
+        ]
+        lines += [
+            f"{number}. {stage_name(step)}" for number, step in enumerate(plan.steps, 1)
+        ]
+        if project:
+            lines.append(f"Project: {project}")
+        lines.append(
+            "Each stage builds on the last. Watch it in the HQ; the final result "
+            "comes here when the last stage is done."
+        )
+        return "\n".join(lines)
     lines = [f"Planned {len(plan.steps)} step(s); the team is on it:"]
     for step in plan.steps:
         after = f" (after {', '.join(step.needs)})" if step.needs else ""

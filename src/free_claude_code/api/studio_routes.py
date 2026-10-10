@@ -1529,6 +1529,48 @@ async def discard_draft(
     return studio.connectors_view()
 
 
+# ------------------------------------------------------------ relay
+
+
+class RelayPayload(BaseModel):
+    goal: str = Field(min_length=1, max_length=4000)
+    project: str = Field(default="", max_length=200)
+
+
+@router.get("/studio/api/relay")
+async def relay_settings(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The relay: on or off, LCC's first agent, and the repos in their order."""
+    return await studio.relay_view()
+
+
+@router.put("/studio/api/relay")
+async def save_relay(
+    request: Request, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Change the relay's switch, first agent, order, modes, or agents."""
+    try:
+        values = await request.json()
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Send JSON.") from error
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail="Send a JSON object.")
+    return await studio.save_relay(values)
+
+
+@router.post("/studio/api/relay", status_code=202)
+async def start_relay(
+    payload: RelayPayload, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Pass a job through the relay; it reports in the main chat when done."""
+    main_chat = await studio.main_chat()
+    plan = await studio.start_relay(
+        payload.goal, project=payload.project, chat_id=main_chat.id
+    )
+    return studio.plan_view(plan)
+
+
 @router.post("/studio/api/hq/agents/{agent_id}/stop")
 async def hq_stop(
     agent_id: str, studio: StudioService = Depends(get_studio), _: None = Access

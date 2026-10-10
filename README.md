@@ -898,9 +898,12 @@ GitHub release is gone. Outside repos built into FCC itself are kept under
 (`vendor/claw-code` holds Claw Code's source; `vendor/cua` holds trycua/cua's
 MIT-licensed Cua Driver and agent source).
 
-**Repos that come with FCC.** FCC ships 30 outside repos ready to use the
+**Repos that come with FCC.** FCC ships 35 outside repos ready to use the
 moment Studio starts. Among them:
 
+- agent teams: awesome-claude-code-subagents (160 Claude Code subagents),
+  MetaGPT's software company, FinRobot's finance agents, crewAI's crews, and
+  the OpenHands engineer (from its SDK), all on the **Relay**,
 - OpenHands, hindsight, paperclip, orca, substrate, OpenMontage,
   taste-skill, OpenViking, diagram-design, agentmemory, strix, Langflow,
   supermemory, Letta and Letta Code, and claw-code,
@@ -913,7 +916,7 @@ moment Studio starts. Among them:
 
 Each is added like a GitHub link, so every agent can search and read it with
 the `skill` tool (`search` finds the right skill and the matching lines in
-every repo's text). `vendor/repos` keeps a checked copy (SHA-256) of the 28
+every repo's text). `vendor/repos` keeps a checked copy (SHA-256) of the 33
 whose licences allow it, so they install with no download and survive the
 original being deleted. roadmap.sh and free-for-dev don't allow sharing, so
 they come from GitHub on first load and are kept in the Repo vault from then
@@ -1668,6 +1671,49 @@ than one agent.
 </details>
 
 <details>
+<summary><strong>The relay: one job through every repo, one after another</strong></summary>
+
+With the relay on (it is by default), a new website, app, or game goes
+through LCC and then the repos, one at a time. For "make a website for my
+bakery":
+
+1. LCC's own agent for the job builds it (the Builder; the Coder for apps and
+   games, the Researcher for research).
+2. awesome-claude-code-subagents: `frontend-developer` improves it.
+3. OpenHands: the OpenHands engineer checks and fixes it.
+4. MetaGPT: the Product Manager writes the requirements and fills the gaps.
+5. FinRobot: the Financial Analyst checks the prices and numbers.
+6. crewAI: the Content Writer improves the words.
+7. Every other repo with something for that kind of job: here taste-skill's
+   `design-taste-frontend` rules, applied by the Builder.
+
+Each stage works in the same project, reads what the stage before left,
+keeps what works, and says what it changed; the next stage is told. Only one
+runs at a time, and the final result (every stage's note and the project)
+comes back to the main chat. A stage that fails doesn't stop the rest: the
+next one carries on from the work so far.
+
+Every repo has a place in the order. The five above run on **every job**; the
+others run **when they fit the job** (a security repo joins a security job,
+not a bakery site), so a relay stays a sensible length. In each repo, the
+agent or skill whose name fits the job is used (`game-developer` for a game,
+`fullstack-developer` for an app). Change any of it in the HQ's **Relay**
+card: turn it off, reorder repos, set a repo to every job, when it fits, or
+off, pin one of its agents, or pick which LCC agent starts. Repos you add
+from GitHub join the end of the relay.
+
+Start one any time with "relay: make a landing page for my gym", "run it
+through all the repos: …", "… through the relay", the **Run the relay** box
+in the HQ, Jarvis's `team_plan` tool with `relay: true`, or `lcc_relay` from
+another AI tool. A repo's agent joins the team the first time a relay needs
+it. Stop and Resume work as for team plans.
+
+On a PC running a small local model, each stage takes minutes, so a relay
+of seven stages can take an hour or more.
+
+</details>
+
+<details>
 <summary><strong>Connectors: Gmail, GitHub, Discord, and more for the team</strong></summary>
 
 The **Connectors** page gives the team outside services. Each takes a token
@@ -1743,6 +1789,7 @@ whose tools are your Studio team:
 | `lcc_chat` | Talk to the main AI, which can hand work out itself |
 | `lcc_ask` | Give one agent a job; wait for the result or get a task id |
 | `lcc_plan` | Start a team plan for a bigger job |
+| `lcc_relay` | Pass a job through LCC's agent and then each repo, one after another |
 | `lcc_status` | How a task or plan is going, or what everyone is doing |
 | `lcc_stop` | Stop a plan, or everything one agent is doing |
 | `lcc_projects`, `lcc_files`, `lcc_read` | The projects the team made and their files |

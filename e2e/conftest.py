@@ -156,12 +156,20 @@ def admin_client_files():
 
 
 @pytest.fixture
+def studio_starter_repos() -> Path | None:
+    """The starter repo pack Studio installs; a test module that needs the
+    repos returns the real bundle, the rest stay fast without them."""
+    return None
+
+
+@pytest.fixture
 def admin_base_url(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     code_control: CodeControl,
     admin_client_files,
+    studio_starter_repos: Path | None,
 ) -> Iterator[str]:
     """Serve one fully isolated Admin application on an OS-assigned port."""
 
@@ -273,6 +281,7 @@ def admin_base_url(
         models_dir=tmp_path / "studio" / "models",
         sites_dir=tmp_path / "studio" / "sites",
         router=StudioModelRouter(proxy=_StudioEchoModel(), local=_StudioEchoModel()),
+        starter_repos=studio_starter_repos,
         # Browser tests never download the voice models or search the web.
         voice_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
         search_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
