@@ -1944,6 +1944,12 @@ class AgentToolbox:
                 "File content must be text. Put the file in a fenced code block "
                 "right after the JSON."
             )
+        if '"requesting_agent"' in content and '"request_type"' in content:
+            raise ValueError(
+                "That is a message for a context-manager, not file content, and "
+                "LCC has no context-manager: nothing was written. Read the "
+                "project's files with list_files and read_file to get the context."
+            )
         appending = call.arguments.get("append") is True
         if appending:
             try:

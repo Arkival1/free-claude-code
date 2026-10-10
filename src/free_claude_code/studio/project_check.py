@@ -50,6 +50,16 @@ class _Links(HTMLParser):
             self.images_without_alt += 1
 
 
+def _is_json_object(text: str) -> bool:
+    """A script file that is only a JSON object (a message written into it)."""
+    if not text.lstrip().startswith("{"):
+        return False
+    try:
+        return isinstance(json.loads(text), dict)
+    except ValueError:
+        return False
+
+
 def _local(ref: str) -> str | None:
     """The project path a reference points to, or None for outside links."""
     parts = urlsplit(ref.strip())
@@ -163,7 +173,13 @@ def check_project(files: Mapping[str, str], *, others: Iterable[str] = ()) -> li
                 f"{path}: imports {target}, which is missing."
                 for target in _missing(path, _JS_IMPORT.findall(text), present)
             )
-            if (issue := _balanced(text)) is not None:
+            if _is_json_object(text):
+                problems.append(
+                    f"{path}: holds a JSON object, not JavaScript, so the page's "
+                    "script is gone. Bring the earlier version back with "
+                    "restore_file, or write the script again."
+                )
+            elif (issue := _balanced(text)) is not None:
                 problems.append(f"{path}: {issue}.")
         elif path.endswith(".py"):
             try:

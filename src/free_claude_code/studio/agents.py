@@ -582,6 +582,16 @@ TOOLSHED_PROMPT = (
     "have, go to the toolshed: toolshed action list shows what is on the "
     "shelf, and action take picks up what you need for this job."
 )
+CONTEXT_MANAGER = re.compile(r"context[- ]manager|requesting_agent", re.IGNORECASE)
+"""Instructions written for a Claude Code team with a context-manager agent
+(most of awesome-claude-code-subagents)."""
+NO_CONTEXT_MANAGER_PROMPT = (
+    "In LCC there is no context-manager to ask or to notify. Where your "
+    "instructions say to request context from it, read the project's files "
+    "instead (list_files, read_file); where they say to report to it, say "
+    "what you did in your final answer. Never write those JSON messages into "
+    "a project file."
+)
 
 
 @dataclass(slots=True)
@@ -799,6 +809,8 @@ class AgentRunner:
                 MAIN_PROMPT.format(name=agent.name, roster=await self.roster(agent))
             )
         parts.append(agent.system_prompt.strip())
+        if CONTEXT_MANAGER.search(agent.system_prompt):
+            parts.append(NO_CONTEXT_MANAGER_PROMPT)
         if agent.tune_pack_id:
             pack = await self._store.get(TunePack, agent.tune_pack_id)
             if pack is not None and pack.active:
