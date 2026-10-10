@@ -49,7 +49,7 @@ def require_provider_credential(
     raise ApplicationUnavailableError(message)
 
 
-LOCAL_READ_TIMEOUT = 900.0
+LOCAL_READ_TIMEOUT = 1800.0
 """How long a model on this PC may go quiet: it reads the whole prompt before
 its first word, and a long agent prompt on a CPU or a small graphics card
 takes minutes."""

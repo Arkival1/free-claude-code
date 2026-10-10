@@ -45,7 +45,7 @@ async def test_a_timeout_says_so_instead_of_nothing():
         transport=httpx.MockTransport(slow),
         timeout_for=_proxy_timeout,
     )
-    with pytest.raises(StudioLLMError, match=r"took longer than 1200 s.*ReadTimeout"):
+    with pytest.raises(StudioLLMError, match=r"took longer than 1800 s.*ReadTimeout"):
         await client.complete([ChatMessage(role="user", content="hi")])
 
 
@@ -181,7 +181,7 @@ async def test_a_streamed_call_reports_silence_errors_and_plain_answers():
         )
 
     hello = [ChatMessage(role="user", content="hi")]
-    with pytest.raises(StudioLLMError, match=r"sent nothing for 1200 s.*ReadTimeout"):
+    with pytest.raises(StudioLLMError, match=r"sent nothing for 1800 s.*ReadTimeout"):
         await client_for(silent).complete(hello)
     with pytest.raises(StudioLLMError, match="failed mid-reply: busy"):
         await client_for(broken).complete(hello)

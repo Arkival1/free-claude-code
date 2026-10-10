@@ -668,7 +668,7 @@ def _todo_lines(items: Sequence[TodoItem], *, now: datetime) -> str:
     return "\n".join(lines)
 
 
-LOCAL_MODEL_SECONDS = 1200.0
+LOCAL_MODEL_SECONDS = 1800.0
 """How long an agent waits for a model on this PC through the proxy (llama.cpp,
 LM Studio, Ollama): a big agent prompt on a CPU takes minutes to read."""
 SERVER_MODEL_SECONDS = 180.0
