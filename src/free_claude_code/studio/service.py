@@ -668,10 +668,14 @@ SERVER_MODEL_SECONDS = 180.0
 
 
 def _proxy_timeout(model: str) -> float:
+    return LOCAL_MODEL_SECONDS if _on_this_pc(model) else SERVER_MODEL_SECONDS
+
+
+def _on_this_pc(model: str) -> bool:
+    """A model served on this PC (llama.cpp, LM Studio, Ollama): its replies
+    stream, so a slow PC writing a long page isn't cut off mid-reply."""
     descriptor = PROVIDER_CATALOG.get(parse_provider_type(model))
-    if descriptor is not None and descriptor.local:
-        return LOCAL_MODEL_SECONDS
-    return SERVER_MODEL_SECONDS
+    return descriptor is not None and descriptor.local
 
 
 def _default_tools() -> tuple[str, ...]:
@@ -894,6 +898,7 @@ class StudioService:
             token=settings.proxy_auth_token if settings.proxy_auth_enabled else "",
             default_model=self.default_model,
             timeout_for=_proxy_timeout,
+            stream_for=_on_this_pc,
         )
         local = LocalOpenAILLM(
             base_url=self._local_url,

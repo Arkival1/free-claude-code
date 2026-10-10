@@ -4,7 +4,7 @@ import contextlib
 import json
 import re
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
@@ -380,6 +380,7 @@ class ProxyLLM:
         timeout: float = 180.0,
         transport: httpx.AsyncBaseTransport | None = None,
         timeout_for: Callable[[str], float] | None = None,
+        stream_for: Callable[[str], bool] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
@@ -388,6 +389,10 @@ class ProxyLLM:
         self._transport = transport
         self._timeout_for = timeout_for
         """A model's own limit (a model on this PC may take minutes)."""
+        self._stream_for = stream_for
+        """Models whose replies stream, so the limit is the longest silence
+        rather than the whole reply: a slow PC writing a long page for many
+        minutes isn't cut off while words are still coming."""
 
     async def complete(
         self,
@@ -427,13 +432,24 @@ class ProxyLLM:
         if self._token:
             headers["x-api-key"] = self._token
         chosen = str(payload["model"])
-        body = await _post_json(
-            f"{self._base_url}/v1/messages",
-            payload,
-            headers=headers,
-            timeout=self._timeout_for(chosen) if self._timeout_for else self._timeout,
-            transport=self._transport,
-        )
+        timeout = self._timeout_for(chosen) if self._timeout_for else self._timeout
+        if self._stream_for is not None and self._stream_for(chosen):
+            payload["stream"] = True
+            body = await _post_stream(
+                f"{self._base_url}/v1/messages",
+                payload,
+                headers=headers,
+                timeout=timeout,
+                transport=self._transport,
+            )
+        else:
+            body = await _post_json(
+                f"{self._base_url}/v1/messages",
+                payload,
+                headers=headers,
+                timeout=timeout,
+                transport=self._transport,
+            )
         return _anthropic_reply(body)
 
 
@@ -1010,14 +1026,122 @@ class StudioModelRouter:
             )
 
 
-def _unreachable(error: httpx.HTTPError, timeout: float) -> str:
+def _unreachable(
+    error: httpx.HTTPError, timeout: float, *, streaming: bool = False
+) -> str:
     """Why a model call failed, never blank (a timeout's own text is empty)."""
     if isinstance(error, httpx.TimeoutException):
+        if streaming:
+            return (
+                f"Model endpoint unreachable: the model sent nothing for "
+                f"{timeout:.0f} s ({type(error).__name__})."
+            )
         return (
             f"Model endpoint unreachable: the model took longer than "
             f"{timeout:.0f} s to answer ({type(error).__name__})."
         )
     return f"Model endpoint unreachable: {error or type(error).__name__}"
+
+
+async def _post_stream(
+    url: str,
+    payload: JsonObject,
+    *,
+    headers: Mapping[str, str],
+    timeout: float,
+    transport: httpx.AsyncBaseTransport | None,
+) -> JsonObject:
+    """Send a streamed Anthropic call and put the reply back together. The
+    timeout is the longest wait for the next piece, not for the whole reply."""
+    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+        try:
+            async with client.stream(
+                "POST", url, json=payload, headers=dict(headers)
+            ) as response:
+                if response.status_code >= 400:
+                    text = (await response.aread()).decode("utf-8", "replace")
+                    raise StudioLLMError(
+                        f"Model endpoint returned {response.status_code}: {text[:400]}"
+                    )
+                if "text/event-stream" in response.headers.get("content-type", ""):
+                    return await _streamed_reply(response.aiter_lines())
+                # A server that answered all at once instead.
+                raw = await response.aread()
+        except httpx.HTTPError as error:
+            raise StudioLLMError(
+                _unreachable(error, timeout, streaming=True)
+            ) from error
+    try:
+        body = json.loads(raw)
+    except ValueError as error:
+        raise StudioLLMError("Model endpoint returned malformed JSON.") from error
+    if not isinstance(body, dict):
+        raise StudioLLMError("Model endpoint returned an unexpected payload.")
+    return body
+
+
+async def _streamed_reply(lines: AsyncIterator[str]) -> JsonObject:
+    """The Anthropic reply a stream of server-sent events adds up to: its text
+    and tool calls, why it stopped, and what it used."""
+    blocks: dict[int, JsonObject] = {}
+    pieces: dict[int, list[str]] = {}
+    texts: dict[int, list[str]] = {}
+    model = ""
+    stop_reason = ""
+    usage: JsonObject = {}
+    async for line in lines:
+        if not line.startswith("data:"):
+            continue
+        try:
+            event = json.loads(line[5:].strip())
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        index = event.get("index")
+        at = index if isinstance(index, int) else len(blocks)
+        if kind == "message_start":
+            message = event.get("message")
+            if isinstance(message, dict):
+                model = str(message.get("model") or "")
+                if isinstance(message.get("usage"), dict):
+                    usage.update(message["usage"])
+        elif kind == "content_block_start":
+            block = event.get("content_block")
+            blocks[at] = dict(block) if isinstance(block, dict) else {}
+        elif kind == "content_block_delta":
+            delta = event.get("delta")
+            if not isinstance(delta, dict):
+                continue
+            if delta.get("type") == "text_delta":
+                texts.setdefault(at, []).append(str(delta.get("text") or ""))
+            elif delta.get("type") == "input_json_delta":
+                pieces.setdefault(at, []).append(str(delta.get("partial_json") or ""))
+        elif kind == "message_delta":
+            delta = event.get("delta")
+            if isinstance(delta, dict) and delta.get("stop_reason"):
+                stop_reason = str(delta["stop_reason"])
+            if isinstance(event.get("usage"), dict):
+                usage.update(event["usage"])
+        elif kind == "error":
+            error = event.get("error")
+            message = error.get("message") if isinstance(error, dict) else error
+            raise StudioLLMError(f"Model endpoint failed mid-reply: {message}")
+    content: list[JsonObject] = []
+    for at in sorted(blocks):
+        block = blocks[at]
+        if block.get("type") == "text":
+            block["text"] = str(block.get("text") or "") + "".join(texts.get(at, []))
+        elif block.get("type") == "tool_use" and "".join(pieces.get(at, [])).strip():
+            block["input"] = "".join(pieces[at])
+        content.append(block)
+    return {
+        "model": model,
+        "content": content,
+        "stop_reason": stop_reason,
+        "usage": usage,
+    }
 
 
 async def _post_json(
