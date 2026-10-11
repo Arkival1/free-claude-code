@@ -16,6 +16,7 @@ from free_claude_code.studio.relay import (
 )
 from free_claude_code.studio.starter import BUNDLE
 from free_claude_code.studio.teamplan import (
+    READ_ONLY_STAGE,
     file_changes,
     ready_steps,
     skip_blocked,
@@ -111,6 +112,11 @@ def test_a_failed_stage_hands_on_and_nothing_is_skipped():
 
     plan = relay.model_copy(update={"kind": "plan"})
     assert skip_blocked(plan).steps[2].status == "skipped"
+
+    # An agent whose repo gave it only reading and research tools (VoltAgent's
+    # seo-specialist) hands exact changes on instead of being told to edit.
+    advice = step_brief(relay, steps[2], writes=False)
+    assert READ_ONLY_STAGE in advice and "edit_file" not in advice
 
 
 def test_a_relay_runs_one_stage_at_a_time_in_order():

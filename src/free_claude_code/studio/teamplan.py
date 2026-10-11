@@ -218,9 +218,19 @@ def stage_name(step: PlanStep) -> str:
     return f"{step.agent} ({step.source})" if step.source else step.agent
 
 
-def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
+FILE_WRITES = frozenset({"write_file", "edit_file"})
+READ_ONLY_STAGE = (
+    "Your tools read and research but can't change files, so the stage after "
+    "you makes the changes: look over the project for your area, then in your "
+    "report give the exact changes to make (the text or markup, and where it "
+    "goes), most important first."
+)
+
+
+def relay_brief(plan: TeamPlan, step: PlanStep, *, writes: bool = True) -> str:
     """What one stage of a relay is told: the job, the order, its own part,
-    and what the stages before it reported."""
+    and what the stages before it reported. ``writes``: the stage's agent can
+    change files; one that only reads and researches hands exact changes on."""
     index = next(i for i, s in enumerate(plan.steps) if s.id == step.id)
     lines = [
         f"You are stage {index + 1} of {len(plan.steps)} of a relay: the job "
@@ -251,10 +261,13 @@ def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
         lines.append(
             "You go first: do the whole job. The stages after you will improve it."
         )
+    elif not writes:
+        lines.append(READ_ONLY_STAGE)
     else:
         lines.append(
             "Work on what is there: read the project first, keep what works, make "
-            "it better your way, and fix anything broken. Don't start over or "
+            "it better your way, fix anything broken, and make the changes a stage "
+            "before you handed on. Don't start over or "
             "throw away the earlier stages' work: change files with edit_file "
             "rather than rewriting whole pages, and keep the page structure and "
             "the class names the stylesheet styles, so the design stays intact."
@@ -267,11 +280,11 @@ def relay_brief(plan: TeamPlan, step: PlanStep) -> str:
     return "\n".join(lines)
 
 
-def step_brief(plan: TeamPlan, step: PlanStep) -> str:
+def step_brief(plan: TeamPlan, step: PlanStep, *, writes: bool = True) -> str:
     """What the agent doing one step is told: the job, the whole plan, its
     own step, and what the steps it builds on produced."""
     if plan.kind == "relay":
-        return relay_brief(plan, step)
+        return relay_brief(plan, step, writes=writes)
     lines = [
         "You are doing one step of a team plan.",
         f"The whole job: {plan.goal}",
@@ -494,7 +507,7 @@ class PlanCoordinator:
             task = asyncio.ensure_future(
                 self._host.run_agent_task(
                     agent,
-                    step_brief(plan, step),
+                    step_brief(plan, step, writes=bool(FILE_WRITES & set(agent.tools))),
                     site_id=plan.site_id,
                     parent_chat_id=plan.chat_id,
                 )
