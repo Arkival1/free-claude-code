@@ -217,6 +217,12 @@ LAST_STEPS_NOTE = (
     "your change now with edit_file or write_file: only those and finish are "
     "open until you do, and the job ends with nothing done otherwise."
 )
+MISSED_NOTE = (
+    "These changes didn't apply when you made them: {changes}. Redo any you "
+    "haven't since (read_file shows the file as it is now), or say in your "
+    "report what wasn't done; don't report a change the files don't have."
+)
+MISSED_SHOWN = 6
 IDLE_STEPS = 4
 IDLE_NOTE = (
     "(Studio) You have looked around for {steps} steps without changing any "
@@ -704,6 +710,15 @@ def _offers_downloads[**P](
         return result
 
     return run
+
+
+def missed_change(call: ToolCall, outcome: ToolOutcome) -> str:
+    """One failed write or edit, briefly: the file and why (empty for a change
+    refused only because it changed nothing)."""
+    reason = outcome.text.split(": ", 1)[-1].split(". ")[0].strip()
+    if "nothing changed" in outcome.text or "exactly as it was" in outcome.text:
+        return ""
+    return f"{call.arguments.get('path') or 'a file'} ({reason[:120]})"
 
 
 def writes_like_builder(agent: Agent) -> bool:
@@ -1340,6 +1355,7 @@ class AgentRunner:
         emptied = False
         wrote_any = False
         cornered = False
+        missed: list[str] = []
         # A repo agent's extra room is for writing: it reads and searches for
         # the usual number of steps, then has to change something.
         write_by = (
@@ -1511,20 +1527,17 @@ class AgentRunner:
                 not reply.tool_calls
                 and not checked
                 and step < max_steps
-                and CHECK_PROJECT_TOOL in names
+                and (CHECK_PROJECT_TOOL in names or CONTENT_WRITES & set(names))
                 and context.site_id
                 and WRITE_TOOLS & set(used)
             ):
                 # Ending in plain words skips the finish tool, not the check.
                 checked = True
-                problems = await self._check_before_finish(chat, agent, context)
-                if problems:
+                review = await self._finish_review(chat, agent, context, missed)
+                if review:
                     history.append(ChatMessage.assistant(reply.text[:1_500]))
                     history.append(
-                        ChatMessage.user(
-                            "(Studio) Not finished yet. check_project found "
-                            f"problems; fix them, then finish:\n{problems}"
-                        )
+                        ChatMessage.user(f"(Studio) Not finished yet. {review}")
                     )
                     continue
             if (
@@ -1640,13 +1653,15 @@ class AgentRunner:
                 finish is not None
                 and not checked
                 and step < max_steps
-                and CHECK_PROJECT_TOOL in names
+                and (CHECK_PROJECT_TOOL in names or CONTENT_WRITES & set(names))
                 and context.site_id
                 and WRITE_TOOLS & set(used)
             ):
+                # Any agent that changed the project's files, a repo agent in
+                # a relay too, has it checked before it may finish.
                 checked = True
-                problems = await self._check_before_finish(chat, agent, context)
-                if problems:
+                review = await self._finish_review(chat, agent, context, missed)
+                if review:
                     history.append(
                         ChatMessage(
                             role="assistant",
@@ -1659,8 +1674,7 @@ class AgentRunner:
                             role="tool",
                             tool_call_id=call.id,
                             content=(
-                                "Not finished yet. check_project found problems; "
-                                f"fix them, then finish:\n{problems}"
+                                f"Not finished yet. {review}"
                                 if call is finish
                                 else "Skipped: fix the project problems first."
                             ),
@@ -1700,6 +1714,11 @@ class AgentRunner:
             wrote = any(
                 call.name in WRITE_TOOLS and not outcome.failed
                 for call, outcome in zip(reply.tool_calls, outcomes, strict=True)
+            )
+            missed.extend(
+                missed_change(call, outcome)
+                for call, outcome in zip(reply.tool_calls, outcomes, strict=True)
+                if call.name in CONTENT_WRITES and outcome.failed
             )
             if wrote:
                 wrote_any = True
@@ -1854,6 +1873,24 @@ class AgentRunner:
             author=agent.name,
             data={"model": reply.model or agent.model, "usage": dict(reply.usage)},
         )
+
+    async def _finish_review(
+        self, chat: Chat, agent: Agent, context: ToolContext, missed: list[str]
+    ) -> str:
+        """What stands between a project job and its finish: problems in the
+        files and changes that didn't apply; empty when there are none."""
+        notes: list[str] = []
+        problems = await self._check_before_finish(chat, agent, context)
+        if problems:
+            notes.append(
+                f"check_project found problems; fix them, then finish:\n{problems}"
+            )
+        changes = [change for change in dict.fromkeys(missed) if change]
+        if changes:
+            notes.append(
+                MISSED_NOTE.format(changes="; ".join(changes[:MISSED_SHOWN]))
+            )
+        return "\n\n".join(notes)
 
     async def _check_before_finish(
         self, chat: Chat, agent: Agent, context: ToolContext

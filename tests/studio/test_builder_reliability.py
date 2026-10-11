@@ -548,3 +548,52 @@ async def test_a_repo_agent_that_only_researches_gets_cornered_into_writing(
     run = await studio.start_task(agent_id=designer.id, goal="restyle it")
     assert run.max_steps == 6
     await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_repo_agent_hears_about_failed_changes_and_problems_first(
+    make_studio,
+):
+    # In the relay a ui-designer's colour edit failed, yet its report said
+    # the colours were changed; and nobody checked the page it left.
+    twice = (
+        "<p>Rosie's has baked sourdough in Bath every morning since 1947.</p>\n"
+        "<p>Open daily, all year round, in the middle of Bath.</p>\n"
+    )
+    repeated = PAGE.replace("<h1>", f"\n{twice}{twice}<h1>")
+    studio, model = make_studio(
+        [
+            tool_reply(
+                "edit_file",
+                {"path": "index.html", "old_text": "#0f172b", "new_text": "#fbf6ef"},
+            ),
+            tool_reply(
+                "write_file", {"path": "index.html", "content": repeated}, call_id="w"
+            ),
+            tool_reply("finish", {"summary": "Warm colours."}, call_id="f1"),
+            tool_reply(
+                "write_file", {"path": "index.html", "content": PAGE}, call_id="w2"
+            ),
+            tool_reply("finish", {"summary": "Fixed the copy."}, call_id="f2"),
+        ]
+    )
+    await studio.ensure_defaults()
+    designer = await studio.create_agent(
+        name="ui-designer",
+        role="agent",
+        tools=("read_file", "write_file", "edit_file"),
+        all_tools=False,
+    )
+    site = await studio.create_site(name="Bakery")
+    await studio.workspace.write(site.id, "index.html", PAGE)
+    chat = await studio.create_chat(agent_id=designer.id, site_id=site.id)
+
+    await studio.send(chat.id, "make it warmer")
+
+    review = sent(model.calls[3])
+    assert "Not finished yet." in review
+    assert "lines of text appear twice" in review
+    assert (
+        "These changes didn't apply when you made them: index.html (old_text" in review
+    )
+    assert await last_reply(studio, chat.id) == "Fixed the copy."
