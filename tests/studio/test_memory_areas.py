@@ -61,7 +61,10 @@ async def jarvis_does(studio, **arguments):
 async def test_a_server_agent_keeps_its_own_memory_area(make_studio):
     replies = iter(
         [
-            tool_reply("remember", {"text": "The bakery site uses a teal header."}),
+            tool_reply(
+                "remember",
+                {"text": "The bakery site uses a teal header.", "private": True},
+            ),
             LLMReply(text="Saved."),
             tool_reply("recall", {"query": "bakery header dog"}),
             LLMReply(text="Teal."),

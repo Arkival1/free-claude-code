@@ -33,7 +33,7 @@ from .ideas import ROLE_CATEGORIES, IdeaBoard, IdeaError
 from .ideas import describe as describe_idea
 from .images import FoundImage, ImageError, download_image, find_images
 from .llm import ToolCall, ToolSpec
-from .memory import SHARED_MEMORY_ID, MemoryService
+from .memory import SERVER_SHARED_ID, SHARED_MEMORY_ID, MemoryService
 from .models import MemoryEntry
 from .page_try import (
     PageReport,
@@ -1361,7 +1361,8 @@ PRIVATE_TOOLS = frozenset(
 )
 """Tools that read the user's memory bank, so agents on server AIs lose them."""
 AREA_TOOLS = frozenset({"remember", "recall"})
-"""What an agent on a server AI keeps: remember and recall, in its own area."""
+"""What an agent on a server AI keeps: remember and recall, in its own area and
+the server agents' shared memory."""
 SEALED_TOOLS = PRIVATE_TOOLS - AREA_TOOLS
 
 """Tools only the main AI has, even for agents given every tool: it runs the team."""
@@ -1677,10 +1678,13 @@ class AgentToolbox:
         page_tryer: Callable[..., Awaitable[PageReport]] = try_page,
         screen: Callable[[ToolCall, ToolContext], Awaitable[ToolOutcome | None]]
         | None = None,
+        new_project: Callable[[ToolContext, str], Awaitable[str]] | None = None,
     ) -> None:
         # Sees each call first and may answer it instead (Studio turns a
         # hand-off back to the mcp tool when the user named a connected service).
         self._screen = screen
+        self._new_project = new_project
+        """Makes a project for a chat that has none and attaches it."""
         self._desk = desk
         self._try_page_with = page_tryer
         self._web = web_tools
@@ -2183,9 +2187,13 @@ class AgentToolbox:
         return problems
 
     async def _start_project(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
-        site_id = self._require_site(context)
         template = str(call.arguments.get("template", "")).strip()
         title = str(call.arguments.get("title") or "My project").strip()[:80]
+        made = ""
+        if not context.site_id and self._new_project is not None:
+            # A chat with no project yet: this makes one and attaches it.
+            made = await self._new_project(context, title)
+        site_id = made or self._require_site(context)
         overwrite = call.arguments.get("overwrite") is True
         files = template_files(template, title)
         existing = {item.path for item in await self._sites.files(site_id)}
@@ -2209,6 +2217,8 @@ class AgentToolbox:
         lines.append(
             "Now read the files, change them to fit the task, and run check_project."
         )
+        if made:
+            lines.insert(0, f"Made the project {title} for this chat.")
         return ToolOutcome(
             text=" ".join(lines),
             data={
@@ -2217,6 +2227,7 @@ class AgentToolbox:
                 "template": template,
                 "written": written,
                 "kept": kept,
+                "attached_site": made,
             },
         )
 
@@ -2948,8 +2959,29 @@ class AgentToolbox:
         text = str(call.arguments.get("text", ""))
         raw_tags = call.arguments.get("tags")
         tags = [str(tag) for tag in raw_tags] if isinstance(raw_tags, list) else []
-        private = call.arguments.get("private") is True or bool(context.memory_owner)
-        if context.main_memory and not context.memory_owner:
+        private = call.arguments.get("private") is True
+        if context.memory_owner:
+            # An agent on a server AI: its own area, or the server team's
+            # shared memory, never the memory on this PC.
+            team = self._memory.shared_enabled and not private
+            entry = await self._memory.remember(
+                SERVER_SHARED_ID if team else context.memory_owner,
+                text,
+                tags=tags,
+                source="tool",
+                chat_id=context.chat_id,
+                author=context.agent_name,
+            )
+            if entry is None:
+                raise ValueError("Nothing to remember.")
+            where = (
+                "the server agents' shared memory" if team else "your own memory area"
+            )
+            return ToolOutcome(
+                text=f"Saved to {where}: {entry.text}",
+                data={"tool": "remember", "memory_id": entry.id, "shared": team},
+            )
+        if context.main_memory:
             private = call.arguments.get("share") is not True
         shared = self._memory.shared_enabled and not private
         if shared:
@@ -2970,13 +3002,7 @@ class AgentToolbox:
             )
         if entry is None:
             raise ValueError("Nothing to remember.")
-        where = (
-            "team memory"
-            if shared
-            else "your own memory area"
-            if context.memory_owner
-            else "your memory"
-        )
+        where = "team memory" if shared else "your memory"
         return ToolOutcome(
             text=f"Saved to {where}: {entry.text}",
             data={"tool": "remember", "memory_id": entry.id, "shared": shared},
@@ -2986,10 +3012,7 @@ class AgentToolbox:
         query = str(call.arguments.get("query", ""))
         everyone = context.main_memory and not context.memory_owner
         entries = await self._memory.recall(
-            context.memory_owner or context.agent_id,
-            query,
-            own_only=bool(context.memory_owner),
-            everyone=everyone,
+            context.memory_owner or context.agent_id, query, everyone=everyone
         )
         if not entries:
             return ToolOutcome(
@@ -3003,6 +3026,10 @@ class AgentToolbox:
                 return "(yours) " if everyone else ""
             if entry.agent_id == SHARED_MEMORY_ID:
                 return "(team) "
+            if entry.agent_id == SERVER_SHARED_ID:
+                return "(server team) "
+            if entry.agent_id == context.memory_owner:
+                return ""
             return f"({names.get(entry.agent_id, 'an agent')}) "
 
         return ToolOutcome(
@@ -3011,6 +3038,11 @@ class AgentToolbox:
         )
 
     async def _delegate_call(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        asked = str(call.arguments.get("agent") or "").strip().lstrip("@").strip()
+        if asked and asked.casefold() == context.agent_name.casefold():
+            raise ValueError(
+                f"You are {context.agent_name}: do this yourself with your own tools."
+            )
         if self._delegate is None or not (
             context.agent_role == MAIN_ROLE or context.can_delegate
         ):
@@ -3163,7 +3195,8 @@ class AgentToolbox:
     def _require_site(self, context: ToolContext) -> str:
         if not context.site_id:
             raise ValueError(
-                "This conversation has no project workspace. Attach a project first."
+                "This conversation has no project yet. Make one with "
+                "start_project (a title and a template), then work in it."
             )
         return context.site_id
 

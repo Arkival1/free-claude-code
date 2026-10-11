@@ -15,7 +15,7 @@ from free_claude_code.core.json_types import JsonValue
 from free_claude_code.studio.agents import SEALED_PROMPT, SEALED_TOOLS
 from free_claude_code.studio.extensions import AgentDef, ExtensionLibrary
 from free_claude_code.studio.llm import LLMReply, ToolCall
-from free_claude_code.studio.memory import SHARED_MEMORY_ID, server_area
+from free_claude_code.studio.memory import SERVER_SHARED_ID, SHARED_MEMORY_ID
 from free_claude_code.studio.models import Agent, AgentRun, StudioFlag
 from free_claude_code.studio.service import OWN_MEMORY_FLAG
 from free_claude_code.studio.starter import BUNDLE, bundled_bytes, load_starters
@@ -484,9 +484,10 @@ async def test_a_repo_agent_teams_up_with_jarvis_and_keeps_its_own_memory(
     [run] = await studio.store.find(AgentRun, where={"agent_id": auditor.id})
     assert "Briefing from Jarvis:\nAudit the spacing tokens" in run.goal
 
-    # What it remembered is its own: in its own area, not the team's.
-    own = await studio._memory().entries(server_area(auditor.id))
-    assert finding in {entry.text for entry in own}
+    # What it remembered goes to the server agents' shared memory, never to
+    # the team memory on this PC.
+    servers = await studio._memory().entries(SERVER_SHARED_ID)
+    assert finding in {entry.text for entry in servers}
     team = await studio._memory().entries(SHARED_MEMORY_ID)
     assert finding not in {entry.text for entry in team}
 

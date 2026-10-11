@@ -108,6 +108,13 @@ def fenced_files(text: str) -> list[tuple[str, str]]:
 
 
 REPEAT_FAILURES = 2
+STOP_FAILURES = 4
+"""Times one tool may fail with the same error before the turn stops: a small
+model told twice not to repeat a call can still loop on it."""
+STOP_NOTE = (
+    "I stopped: {tool} kept failing with the same error ({error}). Tell me "
+    "what to change, or try again with a bigger model."
+)
 REPEAT_NOTE = (
     "This same call has now failed more than once. Do not repeat it: read the "
     "file or output again, try a different approach, or use ask_researcher "
@@ -410,8 +417,9 @@ MEMORY_NOTE_HEADER = "Notes from your memory for this message (not from the user
 SEALED_PROMPT = (
     "You run on an outside server, so the user's memory, notes, Obsidian "
     "vault, and earlier conversations stay on their PC and are not shared "
-    "with you. You have your own memory area instead: remember saves to it "
-    "and recall reads it, and nothing else is in it. The task you are given "
+    "with you. The agents on server AIs share a memory of their own instead: "
+    "remember saves there for all of them (or, with private, to your own "
+    "area), and recall reads it and your area. The task you are given "
     "is your briefing: work from it, your own memory, the project files, and "
     "the web. If something you need is missing, say exactly what, and the "
     "user's main AI will fill it in."
@@ -1359,6 +1367,8 @@ class AgentRunner:
         wrote_any = False
         cornered = False
         missed: list[str] = []
+        same_errors: dict[tuple[str, str], int] = {}
+        """(tool, error) -> how often that tool failed with that error."""
         # A repo agent's extra room is for writing: it reads and searches for
         # the usual number of steps, then has to change something.
         write_by = (
@@ -1710,6 +1720,17 @@ class AgentRunner:
                 offered=frozenset(spec.name for spec in specs),
                 shed=shed,
             )
+            attached = next(
+                (
+                    str(o.data["attached_site"])
+                    for o in outcomes
+                    if o.data.get("attached_site")
+                ),
+                "",
+            )
+            if attached and not context.site_id:
+                # start_project made this chat its project: work in it now.
+                context = replace(context, site_id=attached)
             if shed is not None and set(shed.taken) - set(names):
                 # Tools taken from the toolshed are in hand from the next step.
                 names = tuple(dict.fromkeys((*names, *shed.taken)))
@@ -1729,6 +1750,7 @@ class AgentRunner:
                 idle = 0
             elif context.site_id and WRITE_TOOLS & set(names):
                 idle += 1
+            stuck = ""
             for call, outcome in zip(reply.tool_calls, outcomes, strict=True):
                 used.append(call.name)
                 if learn and self._learned is not None and not outcome.failed:
@@ -1742,6 +1764,11 @@ class AgentRunner:
                 if outcome.failed:
                     key = _call_key(call)
                     failures[key] = failures.get(key, 0) + 1
+                    error = outcome.text.split("\n", 1)[0][:160]
+                    same = (call.name, error)
+                    same_errors[same] = same_errors.get(same, 0) + 1
+                    if same_errors[same] >= STOP_FAILURES:
+                        stuck = STOP_NOTE.format(tool=call.name, error=error)
                     if failures[key] >= REPEAT_FAILURES:
                         outcome = ToolOutcome(
                             text=f"{outcome.text}\n\n{REPEAT_NOTE}",
@@ -1761,6 +1788,21 @@ class AgentRunner:
                         content=outcome.text[:8_000],
                         tool_call_id=call.id,
                     )
+                )
+            if stuck:
+                await self._store.append_message(
+                    chat_id=chat.id,
+                    role="assistant",
+                    text=stuck,
+                    author=agent.name,
+                    data={"kind": "stuck"},
+                )
+                return TurnResult(
+                    text=stuck,
+                    steps=step,
+                    tool_calls=tuple(used),
+                    failed=True,
+                    error="stuck",
                 )
             if idle >= IDLE_STEPS and history and history[-1].role == "tool":
                 idle = 0

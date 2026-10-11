@@ -107,6 +107,11 @@ def _score(entry: MemoryEntry, terms: Sequence[str], *, now: int) -> float:
 SERVER_AREA_PREFIX = "server:"
 
 
+SERVER_SHARED_ID = f"{SERVER_AREA_PREFIX}team"
+"""The memory the agents on server AIs share with each other: apart from the
+team memory on this PC, which they never see."""
+
+
 def server_area(agent_id: str) -> str:
     """The memory owner for what an agent on a server AI keeps for itself.
 
@@ -255,13 +260,16 @@ class MemoryService:
 
     def _owners(self, agent_id: str, *, own_only: bool = False) -> tuple[str, ...]:
         if (
-            self._shared
-            and not own_only
-            and agent_id != SHARED_MEMORY_ID
-            and not agent_id.startswith(SERVER_AREA_PREFIX)
+            not self._shared
+            or own_only
+            or agent_id in {SHARED_MEMORY_ID, SERVER_SHARED_ID}
         ):
-            return (agent_id, SHARED_MEMORY_ID)
-        return (agent_id,)
+            return (agent_id,)
+        if agent_id.startswith(SERVER_AREA_PREFIX):
+            # A server AI reads its own area and the server team's, never the
+            # memory kept on this PC.
+            return (agent_id, SERVER_SHARED_ID)
+        return (agent_id, SHARED_MEMORY_ID)
 
     async def recall(
         self,
@@ -334,7 +342,12 @@ class MemoryService:
                 f"- {entry.text}" + (f" (from {entry.author})" if entry.author else "")
                 for entry in team
             )
-            sections.append(f"What the team knows (shared memory):\n{lines}")
+            whose = (
+                "the agents on server AIs know"
+                if agent_id.startswith(SERVER_AREA_PREFIX)
+                else "the team knows"
+            )
+            sections.append(f"What {whose} (shared memory):\n{lines}")
         if others:
             names = await self.owner_names()
             lines = "\n".join(

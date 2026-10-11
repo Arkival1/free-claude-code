@@ -453,9 +453,14 @@ class Crew:
 
     async def _resolve(self, name: str, *, caller_id: str) -> Agent:
         wanted = name.strip().lstrip("@").strip().casefold()
+        everyone = await self._host.agents()
+        if any(a.id == caller_id and a.name.casefold() == wanted for a in everyone):
+            raise ValueError(
+                f"You are {name.strip()}: do this yourself with your own tools."
+            )
         team = [
             agent
-            for agent in await self._host.agents()
+            for agent in everyone
             if not agent.archived
             and agent.id != caller_id
             and agent.role not in _NOT_DELEGABLE_ROLES

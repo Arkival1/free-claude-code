@@ -3,9 +3,10 @@
 import pytest
 
 from free_claude_code.studio.agents import SEALED_PROMPT, SEALED_TOOLS
-from free_claude_code.studio.llm import LLMReply
-from free_claude_code.studio.memory import SHARED_MEMORY_ID
+from free_claude_code.studio.llm import LLMReply, ToolCall
+from free_claude_code.studio.memory import SHARED_MEMORY_ID, server_area
 from free_claude_code.studio.models import AgentRun
+from free_claude_code.studio.tools import ToolContext
 
 from .conftest import tool_reply
 
@@ -178,3 +179,46 @@ async def test_the_app_shows_which_agents_are_kept_out(make_studio):
     assert member["private"] is True and member["local"] is False
     roster = await studio._runner().roster(await studio.main_agent())
     assert "Builder (" in roster and "cannot see the user's memory" in roster
+
+
+@pytest.mark.asyncio
+async def test_server_agents_share_a_memory_of_their_own(make_studio):
+    # Agents on server AIs share what they learn with each other, apart from
+    # the memory on this PC, which none of them ever sees.
+    studio, _, agents = await team(make_studio)
+    toolbox = studio._toolbox()
+
+    def place(name: str, *, server: bool = True) -> ToolContext:
+        agent = agents[name]
+        return ToolContext(
+            agent_id=agent.id,
+            chat_id=f"cht_{name}",
+            agent_name=name,
+            agent_role=agent.role,
+            memory_owner=server_area(agent.id) if server else "",
+        )
+
+    async def run(context: ToolContext, tool: str, **arguments) -> str:
+        call = ToolCall(id="t", name=tool, arguments=arguments)
+        return (await toolbox.run(call, context)).text
+
+    builder, coder = place("Builder"), place("Coder")
+    saved = await run(
+        builder, "remember", text="The client wants the site live by Friday."
+    )
+    assert "server agents' shared memory" in saved
+    kept = await run(builder, "remember", text="I like flexbox here.", private=True)
+    assert "your own memory area" in kept
+
+    found = await run(coder, "recall", query="client site live Friday")
+    assert "(server team) The client wants the site live by Friday." in found
+    assert "flexbox" not in await run(coder, "recall", query="flexbox")
+    assert "I like flexbox here." in await run(builder, "recall", query="flexbox")
+    assert "Biscuit" not in await run(
+        coder, "recall", query="dog called bakery colours"
+    )
+
+    # Agents on this PC keep their own team memory, without the server one.
+    helper = place("Helper", server=False)
+    assert "Friday" not in await run(helper, "recall", query="client site live Friday")
+    assert "Biscuit" in await run(helper, "recall", query="dog called Biscuit")

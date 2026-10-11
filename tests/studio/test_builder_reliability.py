@@ -13,6 +13,7 @@ from free_claude_code.studio.agents import (
     IDLE_NOTE,
     LAST_STEPS_NOTE,
     SEEN_NOTE,
+    STOP_FAILURES,
     UNREADABLE_NOTE,
     compact_history,
 )
@@ -21,6 +22,7 @@ from free_claude_code.studio.llm import (
     LLMReply,
     StudioLLMError,
     ToolCall,
+    error_detail,
     parse_tool_directives,
     unreadable_tool_call,
 )
@@ -597,3 +599,78 @@ async def test_a_repo_agent_hears_about_failed_changes_and_problems_first(
         "These changes didn't apply when you made them: index.html (old_text" in review
     )
     assert await last_reply(studio, chat.id) == "Fixed the copy."
+
+
+@pytest.mark.asyncio
+async def test_a_plain_chat_gets_a_project_when_the_agent_starts_one(make_studio):
+    # The user opened the Builder's own chat (no project) and said hello; every
+    # file tool failed with "attach a project first", over and over.
+    studio, _ = make_studio(
+        [
+            tool_reply(
+                "start_project", {"template": "website", "title": "Rosie's Bakery"}
+            ),
+            tool_reply(
+                "write_file", {"path": "index.html", "content": PAGE}, call_id="w"
+            ),
+            "Made it.",
+        ]
+    )
+    builder, _, chat = await builder_chat(studio)
+    chat = await studio.create_chat(agent_id=builder.id)
+
+    await studio.send(chat.id, "make a bakery website")
+
+    attached = await studio.chat(chat.id)
+    assert attached.site_id
+    assert (await studio.site(attached.site_id)).name == "Rosie's Bakery"
+    started, wrote = [m for m in await studio.transcript(chat.id) if m.role == "tool"][
+        :2
+    ]
+    assert started.text.startswith("Made the project Rosie's Bakery for this chat.")
+    assert not wrote.data["failed"]
+    assert "Sunrise Bakery" in await studio.workspace.read(
+        attached.site_id, "index.html"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_same_failure_over_and_over_stops_the_turn(make_studio):
+    looping = [
+        tool_reply("read_file", {"path": "missing.js"}, call_id=f"r{n}")
+        for n in range(8)
+    ]
+    studio, model = make_studio([*looping, "never reached"])
+    _, _, chat = await builder_chat(studio)
+
+    await studio.send(chat.id, "fix it")
+
+    assert len(model.calls) == STOP_FAILURES
+    said = await last_reply(studio, chat.id)
+    assert said.startswith("I stopped: read_file kept failing with the same error")
+
+
+def test_an_html_error_page_reads_as_one_line():
+    page = (
+        "<!DOCTYPE html><html><head><title>500 Internal Server Error</title>"
+        "</head><body><h1>Internal Server Error</h1><pre>Internal Server Error"
+        "</pre></body></html>"
+    )
+    assert error_detail(page) == "500 Internal Server Error"
+    assert error_detail('{"error": "busy"}') == '{"error": "busy"}'
+
+
+@pytest.mark.asyncio
+async def test_an_agent_asking_for_itself_is_told_to_do_it(make_studio):
+    studio, _ = make_studio(
+        [
+            tool_reply("ask_agent", {"agent": "Builder", "task": "make a page"}),
+            "ok",
+        ]
+    )
+    _, _, chat = await builder_chat(studio)
+
+    await studio.send(chat.id, "make a page")
+
+    (asked,) = [m for m in await studio.transcript(chat.id) if m.role == "tool"]
+    assert "You are Builder: do this yourself" in asked.text

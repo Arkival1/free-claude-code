@@ -1,6 +1,7 @@
 """One chat surface over the FCC proxy and over local OpenAI-style servers."""
 
 import contextlib
+import html
 import json
 import re
 import time
@@ -16,6 +17,21 @@ from .model_turns import ModelTurns
 
 LOCAL_MODEL_PREFIX = "local/"
 """Model references routed to the configured on-device server."""
+
+
+def error_detail(body: str) -> str:
+    """An error body as one short line: a web server's HTML error page (an
+    "Internal Server Error" page) becomes its title and message, not markup."""
+    text = body.strip()
+    if re.search(r"<(!doctype|html|body|head)\b", text[:500], re.IGNORECASE):
+        text = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", text)
+        pieces: list[str] = []
+        for piece in re.split(r"<[^>]+>", text):
+            line = " ".join(html.unescape(piece).split())
+            if line and not any(line in seen for seen in pieces):
+                pieces.append(line)
+        text = " · ".join(pieces)
+    return text[:400]
 
 
 class StudioLLMError(RuntimeError):
@@ -712,7 +728,7 @@ class LocalOpenAILLM:
                         detail = (await response.aread()).decode("utf-8", "replace")
                         raise StudioLLMError(
                             f"Model endpoint returned {response.status_code}: "
-                            f"{detail[:400]}"
+                            f"{error_detail(detail)}"
                         )
                     if "text/event-stream" not in response.headers.get(
                         "content-type", ""
@@ -1061,7 +1077,8 @@ async def _post_stream(
                 if response.status_code >= 400:
                     text = (await response.aread()).decode("utf-8", "replace")
                     raise StudioLLMError(
-                        f"Model endpoint returned {response.status_code}: {text[:400]}"
+                        f"Model endpoint returned {response.status_code}: "
+                        f"{error_detail(text)}"
                     )
                 if "text/event-stream" in response.headers.get("content-type", ""):
                     return await _streamed_reply(response.aiter_lines())
@@ -1159,7 +1176,8 @@ async def _post_json(
             raise StudioLLMError(_unreachable(error, timeout)) from error
         if response.status_code >= 400:
             raise StudioLLMError(
-                f"Model endpoint returned {response.status_code}: {response.text[:400]}"
+                f"Model endpoint returned {response.status_code}: "
+                f"{error_detail(response.text)}"
             )
         try:
             body = response.json()

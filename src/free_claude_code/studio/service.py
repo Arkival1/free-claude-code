@@ -1528,7 +1528,19 @@ class StudioService:
             desk=self.desk_browser(),
             page_tryer=self._page_tryer,
             screen=self._screen_call,
+            new_project=self._new_chat_project,
         )
+
+    async def _new_chat_project(self, context: ToolContext, title: str) -> str:
+        """A project for a chat that has none (an agent asked to start one in
+        a plain chat), attached to the chat so the next turns work in it."""
+        site = await self.create_site(name=title or "My project")
+        chat = await self._store.get(Chat, context.chat_id)
+        if chat is not None and not chat.site_id:
+            await self._store.put(
+                chat.model_copy(update={"site_id": site.id, "updated_at": now_ms()})
+            )
+        return site.id
 
     async def _screen_call(
         self, call: ToolCall, context: ToolContext
@@ -3390,8 +3402,10 @@ class StudioService:
             result = await self._runner().reply(agent, chat, text, prepare=prepare)
         await self._after_memory_change([agent.id], wait=False)
         if chat.title in {"New chat", f"{agent.name} chat"}:
+            # Read it again: the turn may have attached a project to it.
+            fresh = await self._store.get(Chat, chat.id) or chat
             await self._store.put(
-                chat.model_copy(
+                fresh.model_copy(
                     update={"title": text.strip()[:48], "updated_at": now_ms()}
                 )
             )

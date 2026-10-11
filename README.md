@@ -755,12 +755,13 @@ on a server or cloud AI gets no memory notes, no taught skills, no recall of
 earlier conversations, and no `knowledge`, `video_notes`, `conversation`,
 `todo`, or `learn` tools; Studio refuses those calls even if the model tries.
 
-**Server agents' own memory areas.** Each server agent gets a memory area of
-its own instead. Its `remember` and `recall` work only there, the memory note
-on its messages comes only from there, and it only ever holds what that agent
-saved while on a server, what Jarvis put there for it, or what you added. It
-never includes the team's memory, Obsidian, or what the agent remembered back
-when it ran on this PC, and no other agent reads it. The agent's page shows the
+**Server agents' own memory.** The agents on server AIs share a memory of
+their own, apart from the memory on this PC: what one of them saves with
+`remember` the others can `recall`, and it shows in their memory notes. With
+`private`, an agent saves to its own memory area instead, which no other agent
+reads. Neither ever includes the team memory on this PC, Obsidian, or what the
+agent remembered back when it ran on this PC, and agents on this PC don't read
+the server agents' shared memory. The agent's page shows the
 area (**<name>'s own memory area**) where you can add notes, forget one, or
 clear it; deleting the agent deletes it too. The Obsidian vault only reaches agents through
 memory, so it stays private too. If a server agent's model has no key and it
