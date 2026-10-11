@@ -113,6 +113,42 @@ def test_a_failed_stage_hands_on_and_nothing_is_skipped():
     assert skip_blocked(plan).steps[2].status == "skipped"
 
 
+def test_a_relay_runs_one_stage_at_a_time_in_order():
+    # Resumed: stage 2 failed and runs again, stage 3 was done. Stage 4 needs
+    # only stage 3 but still waits for stage 2, so two never run at once.
+    steps = (
+        PlanStep(id="s1", agent="Builder", do="x", status="done"),
+        PlanStep(id="s2", agent="ui-designer", do="y", needs=("s1",)),
+        PlanStep(id="s3", agent="frontend-developer", do="z", status="done"),
+        PlanStep(id="s4", agent="seo-specialist", do="w", needs=("s3",)),
+    )
+    relay = TeamPlan(goal=BAKERY, kind="relay", steps=steps)
+    assert [s.id for s in ready_steps(relay)] == ["s2"]
+    running = relay.model_copy(
+        update={
+            "steps": (
+                *steps[:1],
+                steps[1].model_copy(update={"status": "running"}),
+                *steps[2:],
+            )
+        }
+    )
+    assert ready_steps(running) == []
+    over = relay.model_copy(
+        update={
+            "steps": (
+                *steps[:1],
+                steps[1].model_copy(update={"status": "failed"}),
+                *steps[2:],
+            )
+        }
+    )
+    assert [s.id for s in ready_steps(over)] == ["s4"]
+    # A team plan still starts every step whose needs are done.
+    plan = relay.model_copy(update={"kind": "plan"})
+    assert [s.id for s in ready_steps(plan)] == ["s2", "s4"]
+
+
 VOLT = "VoltAgent/awesome-claude-code-subagents"
 WEBSITE_STAGES = [
     ("Builder", ""),

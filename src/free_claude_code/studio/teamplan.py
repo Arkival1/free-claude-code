@@ -150,10 +150,17 @@ def with_step(plan: TeamPlan, step_id: str, **changes: object) -> TeamPlan:
 
 
 def ready_steps(plan: TeamPlan) -> list[PlanStep]:
-    """Waiting steps whose needed steps are all done; in a relay, all over
-    (a stage that failed hands on what the stage before it made)."""
-    over = {"done", "failed", "skipped"} if plan.kind == "relay" else {"done"}
-    done = {step.id for step in plan.steps if step.status in over}
+    """Waiting steps whose needed steps are all done.
+
+    A relay runs one stage at a time, in order: the first waiting stage, once
+    no stage is running. A stage that failed hands on what the stage before it
+    made, and a stage run again on resume goes before the later ones instead
+    of beside them."""
+    if plan.kind == "relay":
+        if any(step.status == "running" for step in plan.steps):
+            return []
+        return [step for step in plan.steps if step.status == "waiting"][:1]
+    done = {step.id for step in plan.steps if step.status == "done"}
     return [
         step
         for step in plan.steps

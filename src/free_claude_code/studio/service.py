@@ -7019,6 +7019,7 @@ class StudioService:
                 update={
                     "status": "waiting",
                     "result": "",
+                    "changes": "",
                     "started_at": 0,
                     "finished_at": 0,
                 }
