@@ -1887,9 +1887,7 @@ class AgentRunner:
             )
         changes = [change for change in dict.fromkeys(missed) if change]
         if changes:
-            notes.append(
-                MISSED_NOTE.format(changes="; ".join(changes[:MISSED_SHOWN]))
-            )
+            notes.append(MISSED_NOTE.format(changes="; ".join(changes[:MISSED_SHOWN])))
         return "\n\n".join(notes)
 
     async def _check_before_finish(
