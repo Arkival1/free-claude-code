@@ -1307,7 +1307,9 @@
           try {
             const body = await post("/studio/api/team-models/test", { model });
             const warned = body.ok && body.message !== "Works.";
-            result.textContent = body.ok ? (warned ? `⚠ ${body.message}` : "✓ Works") : `✗ ${body.message}`;
+            // Test only tries the pick; it isn't kept until Save.
+            const unsaved = body.ok && model !== row.model ? ` · press Save below to give it to ${row.name}` : "";
+            result.textContent = body.ok ? (warned ? `⚠ ${body.message}${unsaved}` : `✓ Works${unsaved}`) : `✗ ${body.message}`;
             result.className = `brain-test ${body.ok && !warned ? "good" : "bad"}`;
           } catch (error) {
             result.textContent = `✗ ${error.message}`;
