@@ -568,28 +568,37 @@ class LocalOpenAILLM:
             ) as client:
                 # LM Studio marks loaded models here; llama.cpp's router mode
                 # gives each model a status on /models instead.
-                for path in ("/api/v0/models", "/models"):
+                for path in ("/api/v0/models", "/api/v1/models", "/models"):
                     response = await client.get(f"{root}{path}", headers=headers)
                     if response.status_code < 400:
                         body = response.json()
                         break
         except httpx.HTTPError, ValueError:
             return None
-        rows = body.get("data") if isinstance(body, dict) else None
+        rows = None
+        if isinstance(body, dict):
+            # LM Studio 0.3 lists "data"; 0.4's /api/v1 lists "models".
+            rows = body.get("data", body.get("models"))
         if not isinstance(rows, list):
             return None
         loaded: list[str] = []
         known = False
         for row in rows:
-            if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+            if not isinstance(row, dict):
+                continue
+            name = row.get("id") or row.get("key")
+            if not isinstance(name, str):
                 continue
             status = row.get("status")
             state = row.get("state") or (
                 status.get("value") if isinstance(status, dict) else None
             )
+            instances = row.get("loaded_instances")
+            if state is None and isinstance(instances, list):
+                state = "loaded" if instances else "not-loaded"
             known = known or state is not None
-            if state == "loaded" and row.get("type") != "embeddings":
-                loaded.append(row["id"])
+            if state == "loaded" and row.get("type") not in {"embeddings", "embedding"}:
+                loaded.append(name)
         return tuple(loaded) if known else None
 
     def _request(
@@ -963,8 +972,24 @@ class StudioModelRouter:
         call goes to one that has answered (``swaps`` records it) unless
         ``swap`` is off.
         """
+        chosen = model
         if self._stand_in is not None:
             model = await self._stand_in(model) or model
+        if model != chosen and model.startswith(LOCAL_MODEL_PREFIX):
+            # A stand-in on this PC that fails to load (a broken or too-big
+            # download picked by mistake): try the model that was chosen.
+            try:
+                return await self._complete_with(
+                    model,
+                    messages,
+                    system=system,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    on_text=on_text,
+                )
+            except StudioLLMError:
+                model = chosen
         local = model.startswith(LOCAL_MODEL_PREFIX)
         if swap and not local and model in self.swaps:
             model = self.swaps[model]

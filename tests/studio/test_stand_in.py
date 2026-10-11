@@ -4,7 +4,12 @@ import httpx
 import pytest
 
 from free_claude_code.studio import StudioService
-from free_claude_code.studio.llm import LLMReply, LocalOpenAILLM, StudioModelRouter
+from free_claude_code.studio.llm import (
+    LLMReply,
+    LocalOpenAILLM,
+    StudioLLMError,
+    StudioModelRouter,
+)
 
 from .conftest import OFFLINE_SEARCH
 
@@ -229,3 +234,66 @@ async def test_the_hud_sees_the_reply_while_it_is_written(
     console = await studio.main_console()
     assert console["live"] == ""
     assert console["messages"][-1]["text"] == "Good evening, sir."
+
+
+@pytest.mark.asyncio
+async def test_lm_studio_0_4_says_which_model_is_loaded():
+    # LM Studio 0.4 answers on /api/v1/models with "models" and their
+    # loaded instances; without this, LCC guessed and picked a broken model.
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/api/v1/models":
+            return httpx.Response(404)
+        return httpx.Response(
+            200,
+            json={
+                "models": [
+                    {"key": "qwen3.8-4b", "type": "llm", "loaded_instances": []},
+                    {
+                        "key": "qwen3.5-4b-uncensored",
+                        "type": "llm",
+                        "loaded_instances": [{"id": "qwen3.5-4b-uncensored"}],
+                    },
+                    {
+                        "key": "nomic-embed",
+                        "type": "embedding",
+                        "loaded_instances": [{}],
+                    },
+                ]
+            },
+        )
+
+    lm_studio = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1", transport=httpx.MockTransport(answer)
+    )
+    assert await lm_studio.loaded_models() == ("qwen3.5-4b-uncensored",)
+
+
+class BrokenFirst(FakeLocal):
+    """LM Studio with a broken download first in its list."""
+
+    async def complete(self, messages, *, system="", tools=(), **kwargs) -> LLMReply:
+        self.calls.append(str(kwargs.get("model")))
+        if kwargs.get("model") == "tinyllama":
+            raise StudioLLMError(
+                'Model endpoint returned 400: Failed to load model "tinyllama"'
+            )
+        return LLMReply(text="Local here.")
+
+
+@pytest.mark.asyncio
+async def test_a_stand_in_that_will_not_load_falls_back_to_the_chosen_model(
+    tmp_path, store, web_tools, studio_settings
+):
+    studio, local, _, _ = build(
+        tmp_path,
+        store,
+        web_tools,
+        studio_settings,
+        local=BrokenFirst(loaded=None),
+        STUDIO_MAIN_AGENT_MODEL="local/qwen3-0.6b",
+    )
+
+    chat = await studio.main_say("hello", background=False)
+
+    assert local.calls == ["tinyllama", "qwen3-0.6b"]
+    assert (await studio.transcript(chat.id))[-1].text == "Local here."
