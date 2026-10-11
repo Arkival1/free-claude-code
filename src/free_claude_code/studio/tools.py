@@ -45,7 +45,12 @@ from .photos import PhotoError, PhotoLibrary
 from .photos import describe as describe_photo
 from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
 from .polish import PICTURE_SUFFIXES, polish_notes
-from .project_check import CHECKED_FILES, check_project
+from .project_check import (
+    CHECKED_FILES,
+    REPEATED_LINES,
+    check_project,
+    text_lines,
+)
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
 from .sites import (
@@ -2087,6 +2092,19 @@ class AgentToolbox:
                 raise ValueError(f"{label}give old_text: the exact text to replace.")
             if not isinstance(new, str):
                 raise ValueError(f"{label}give new_text: what to put in its place.")
+            if path.lower().endswith((".html", ".htm")):
+                # A small model "adds" a section by pasting what is already
+                # there after its heading, so the page shows it twice.
+                there = set(text_lines(content)) - set(text_lines(old))
+                copied = [line for line in text_lines(new) if line in there]
+                if len(copied) >= REPEATED_LINES:
+                    raise ValueError(
+                        f"{label}new_text repeats {len(copied)} lines already in "
+                        f"{path} (like {copied[0][:80]!r}), so that part would be "
+                        "on the page twice. To change text that is there, put it "
+                        "in old_text; to add something, add only what is new. No "
+                        "edits were saved."
+                    )
             found = content.count(old)
             replace_all = edit.get("replace_all") is True
             if found == 0:

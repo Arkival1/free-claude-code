@@ -195,6 +195,48 @@ async def test_a_write_or_edit_that_changes_nothing_says_so(make_studio):
     assert await studio.workspace.read(site.id, "app.py") == "B = 3\n"
 
 
+@pytest.mark.asyncio
+async def test_an_edit_that_pastes_a_copy_of_the_page_is_refused(make_studio):
+    about = (
+        "<p>Founded in 1947, Rosie's Bakery has baked in Bath for generations.</p>\n"
+        "<p>Every loaf of sourdough is hand-mixed and baked in our heritage oven.</p>\n"
+    )
+    page = f"<h1>Rosie's</h1>\n<h2>About</h2>\n{about}"
+    studio, _ = make_studio(
+        [
+            tool_reply(
+                "edit_file",
+                {
+                    "path": "index.html",
+                    "old_text": "<h2>About</h2>",
+                    "new_text": f"<h2>About us</h2>\n{about}",
+                },
+            ),
+            tool_reply(
+                "edit_file",
+                {
+                    "path": "index.html",
+                    "old_text": f"<h2>About</h2>\n{about}",
+                    "new_text": f"<h2>About us</h2>\n{about}<p>Open daily.</p>\n",
+                },
+                call_id="c2",
+            ),
+            "ok",
+        ]
+    )
+    _, site, chat = await builder_chat(studio)
+    await studio.workspace.write(site.id, "index.html", page)
+
+    await studio.send(chat.id, "improve the about section")
+
+    copied, changed = tools_used(await studio.transcript(chat.id))
+    assert copied.data["failed"] is True
+    assert "repeats 2 lines already in index.html" in copied.text
+    assert not changed.data["failed"], "rewriting the section itself is fine"
+    saved = await studio.workspace.read(site.id, "index.html")
+    assert saved.count("Founded in 1947") == 1 and "Open daily." in saved
+
+
 def test_loose_replace_needs_one_clear_match():
     text = "if x:\n    go()\nif y:\n    go()\n"
     assert loose_replace(text, "go()", "stop()") is None, "two places fit"

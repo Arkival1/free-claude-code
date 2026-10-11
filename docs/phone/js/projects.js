@@ -213,6 +213,32 @@ function cleanRelative(href) {
 }
 
 /** Plain checks a Tester runs, like check_project on the PC. */
+// Lines with at least this much text (tags aside) are checked for copies.
+const REPEATED_TEXT = 30;
+const REPEATED_LINES = 2;
+
+export function textLines(text) {
+  return String(text || "")
+    .split("\n")
+    .filter((line) => line.replace(/<[^>]*>/g, "").trim().length >= REPEATED_TEXT)
+    .map((line) => line.trim());
+}
+
+export function repeatedLines(text) {
+  const counts = new Map();
+  for (const line of textLines(text)) counts.set(line, (counts.get(line) || 0) + 1);
+  return [...counts].filter(([, count]) => count > 1).map(([line]) => line);
+}
+
+export function copiedLines(content, find, replace) {
+  // Lines an edit would add that are already elsewhere on the page.
+  const kept = new Set(textLines(find));
+  const there = new Set(textLines(content).filter((line) => !kept.has(line)));
+  return textLines(replace).filter((line) => there.has(line));
+}
+
+export const COPIED_LINES = REPEATED_LINES;
+
 export function checkProject(project) {
   const problems = [];
   const names = Object.keys(project.files);
@@ -245,6 +271,14 @@ export function checkProject(project) {
     for (const img of html.matchAll(/<img\b(?![^>]*\balt=)[^>]*>/gi)) {
       problems.push(`${page} has an image with no alt text: ${img[0].slice(0, 60)}`);
     }
+    const copies = repeatedLines(html);
+    if (copies.length >= REPEATED_LINES) {
+      problems.push(`${page}: ${copies.length} lines of text appear twice (like "${copies[0].slice(0, 80)}"), so part of the page is repeated, likely by an edit that added a copy. Remove the copy with edit_file.`);
+    }
+    const ids = new Map();
+    for (const match of html.matchAll(/<[a-z][^>]*\bid=["']([^"']+)["']/gi)) ids.set(match[1], (ids.get(match[1]) || 0) + 1);
+    const twice = [...ids].filter(([, count]) => count > 1).map(([id]) => id);
+    if (twice.length) problems.push(`${page}: the id ${twice.slice(0, 5).join(", ")} is on more than one element; an id must be unique, or links and scripts reach the wrong one.`);
     const opened = (html.match(/<(div|section|main|header|footer|nav|ul|ol|button|form)\b/gi) || []).length;
     const closed = (html.match(/<\/(div|section|main|header|footer|nav|ul|ol|button|form)>/gi) || []).length;
     if (opened !== closed) problems.push(`${page} opens ${opened} blocks but closes ${closed}; a tag is missing.`);

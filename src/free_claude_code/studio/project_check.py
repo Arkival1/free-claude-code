@@ -3,6 +3,7 @@
 import ast
 import json
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from html.parser import HTMLParser
 from posixpath import dirname, normpath
@@ -16,6 +17,10 @@ _CSS_URL = re.compile(r"""url\(\s*['"]?([^'")]+)['"]?\s*\)""")
 _JS_IMPORT = re.compile(r"""(?:^|\n)\s*import\s[^'"]*?['"](\.{1,2}/[^'"]+)['"]""")
 _PAIRS = {"(": ")", "[": "]", "{": "}"}
 _REGEX_BEFORE = set("(,=:[!&|?{};+-*%<>~^") | {""}
+REPEATED_TEXT = 30
+"""Characters of text (tags aside) that make a line worth checking for copies."""
+REPEATED_LINES = 2
+"""Lines of text in a page twice before the page counts as repeating a part."""
 
 
 class _Links(HTMLParser):
@@ -25,6 +30,7 @@ class _Links(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.refs: list[tuple[str, str]] = []
         self.ids: set[str] = set()
+        self.id_counts: Counter[str] = Counter()
         self.tags: set[str] = set()
         self.images_without_alt = 0
         self.cut_svg_urls = 0
@@ -34,6 +40,7 @@ class _Links(HTMLParser):
         values = {name: value or "" for name, value in attrs}
         if values.get("id"):
             self.ids.add(values["id"])
+            self.id_counts[values["id"]] += 1
         for name in ("href", "src"):
             if values.get(name):
                 self.refs.append((tag, values[name]))
@@ -48,6 +55,20 @@ class _Links(HTMLParser):
                 self.cut_svg_urls += 1
         if tag == "img" and "alt" not in values:
             self.images_without_alt += 1
+
+
+def text_lines(text: str) -> list[str]:
+    """A page's lines that carry real text, stripped, for spotting copies."""
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if len(re.sub(r"<[^>]*>", "", line).strip()) >= REPEATED_TEXT
+    ]
+
+
+def repeated_lines(text: str) -> list[str]:
+    """Lines of text that appear more than once in a page."""
+    return [line for line, count in Counter(text_lines(text)).items() if count > 1]
 
 
 def _is_json_object(text: str) -> bool:
@@ -241,6 +262,19 @@ def _check_html(path: str, text: str, files: Mapping[str, str]) -> list[str]:
     if parser.images_without_alt:
         problems.append(
             f"{path}: {parser.images_without_alt} image(s) without alt text."
+        )
+    copies = repeated_lines(text)
+    if len(copies) >= REPEATED_LINES:
+        problems.append(
+            f"{path}: {len(copies)} lines of text appear twice (like "
+            f"{copies[0][:80]!r}), so part of the page is repeated, likely by an "
+            "edit that added a copy. Remove the copy with edit_file."
+        )
+    twice = sorted(name for name, count in parser.id_counts.items() if count > 1)
+    if twice:
+        problems.append(
+            f"{path}: the id {', '.join(twice[:5])} is on more than one element; "
+            "an id must be unique, or links and scripts reach the wrong one."
         )
     if parser.cut_svg_urls:
         problems.append(

@@ -209,6 +209,13 @@ export async function runTool(agent, call, ctx) {
         if (String(args.find || "") === String(args.replace ?? "")) {
           return `These edits leave ${args.path} exactly as it was, so nothing changed. Make a real improvement, or finish if the work is done.`;
         }
+        const page = project.files[projects.cleanPath(args.path)];
+        if (/\.html?$/i.test(String(args.path || "")) && typeof page === "string") {
+          const copied = projects.copiedLines(page, String(args.find || ""), String(args.replace ?? ""));
+          if (copied.length >= projects.COPIED_LINES) {
+            return `That edit repeats ${copied.length} lines already in ${args.path} (like "${copied[0].slice(0, 80)}"), so that part would be on the page twice. To change text that is there, put it in find; to add something, add only what is new. Nothing was changed.`;
+          }
+        }
         await projects.editFile(project, args.path, String(args.find || ""), String(args.replace ?? ""), agent.name);
         return `Changed ${args.path} in ${project.name}.`;
       }

@@ -224,3 +224,25 @@ def test_a_form_with_nowhere_to_send_messages_is_a_problem():
     assert not problems('<form data-endpoint="https://formspree.io/f/x">')
     assert not problems('<form action="/send">')
     assert not problems("<form>", '<a href="mailto:book@fadekings.test">mail</a>')
+
+
+ABOUT = (
+    "<p>Founded in 1947, Rosie's Bakery has baked in Bath for three generations.</p>\n"
+    "<p>Every loaf of sourdough is hand-mixed and baked in our heritage oven.</p>\n"
+)
+
+
+def test_a_part_of_the_page_shown_twice_is_a_problem():
+    # A relay stage "added" sections by pasting copies after their headings.
+    once = GOOD_PAGE.replace(
+        "</body>", f'\n<h2>About</h2>\n{ABOUT}<p id="status"></p>\n</body>'
+    )
+    twice = once.replace("<h2>About</h2>\n", f"<h2>About</h2>\n{ABOUT}").replace(
+        "</body>", '<p id="status"></p></body>'
+    )
+    files = {"style.css": "", "logo.png": "", "app.js": ""}
+
+    assert check_project({**files, "index.html": once}) == []
+    problems = check_project({**files, "index.html": twice})
+    assert any("2 lines of text appear twice" in p for p in problems), problems
+    assert any("the id status is on more than one element" in p for p in problems)

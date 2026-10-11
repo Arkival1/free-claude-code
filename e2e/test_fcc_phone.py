@@ -239,6 +239,15 @@ def test_home_is_the_jarvis_command_center(page: Page, admin_base_url: str) -> N
         "() => window.fccPhone.checkProject({name: 'x', files: {'index.html': '<p><img src=a.png>'}})"
     )
     assert any("DOCTYPE" in p for p in problems) and any("a.png" in p for p in problems)
+    # A part pasted in twice by an edit, as on the PC.
+    line = "<p>Founded in 1947, Rosie's Bakery has baked in Bath for years.</p>"
+    repeated = page.evaluate(
+        "(html) => window.fccPhone.checkProject({name: 'x', files: {'index.html': html}})",
+        "\n".join([line, "<p>Every loaf is hand-mixed and baked in our oven.</p>"] * 2)
+        + '\n<p id="s"></p><p id="s"></p>',
+    )
+    assert any("2 lines of text appear twice" in p for p in repeated), repeated
+    assert any("the id s is on more than one element" in p for p in repeated)
     bundled = page.evaluate(
         "() => window.fccPhone.bundle({files: {'index.html': "
         '\'<link rel="stylesheet" href="s.css"><script src="a.js"></script>\', '
