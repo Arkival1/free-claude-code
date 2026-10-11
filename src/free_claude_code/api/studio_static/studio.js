@@ -4079,7 +4079,7 @@
         el("div", { class: "row" }, [tags, project]),
         el("div", { class: "row" }, [
           el("button", { class: "primary", type: "button", text: "Add note or link", onclick: addText }),
-          el("button", { type: "button", text: "Add photos or videos", onclick: () => files.click() }),
+          el("button", { class: "secondary", type: "button", text: "Add photos or videos", onclick: () => files.click() }),
           files,
         ]),
         status,
@@ -4124,7 +4124,7 @@
       media,
       el("figcaption", {}, [
         el("strong", { text: idea.title }),
-        el("small", { class: "muted", text: [idea.kind, idea.project, ...(idea.tags || [])].filter(Boolean).join(" · ") }),
+        el("small", { class: "muted", text: [...new Set([idea.kind, idea.project, ...(idea.tags || [])])].filter(Boolean).join(" · ") }),
         idea.url ? el("a", { href: idea.url, target: "_blank", rel: "noopener noreferrer", text: idea.url }) : null,
         text,
         el("button", {

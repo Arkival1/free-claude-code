@@ -172,6 +172,7 @@ button[disabled] {
 
 input[type="text"],
 input[type="url"],
+input[type="search"],
 input[type="number"],
 textarea,
 select {
@@ -2188,6 +2189,7 @@ body[data-ui="page"] .list-item {
 
 body[data-ui="page"] input[type="text"],
 body[data-ui="page"] input[type="url"],
+body[data-ui="page"] input[type="search"],
 body[data-ui="page"] input[type="number"],
 body[data-ui="page"] textarea,
 body[data-ui="page"] select,
