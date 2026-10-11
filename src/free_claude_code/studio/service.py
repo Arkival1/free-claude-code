@@ -31,7 +31,7 @@ from free_claude_code.core.json_types import JsonObject, JsonValue
 from free_claude_code.core.version import package_version
 
 from . import system_monitor
-from .agents import SEALED_TOOLS, AgentRunner, TurnResult
+from .agents import SEALED_TOOLS, AgentRunner, TurnResult, step_budget
 from .assistant_tools import describe_time, now_line, parse_when
 from .claw import ClawCode, ClawError
 from .code_loop import code_and_test, project_name
@@ -3838,15 +3838,15 @@ class StudioService:
         )
 
     def _steps_for(self, agent: Agent) -> int:
-        """Builders get room for whole apps; everyone else the usual budget."""
+        """Builders, and repo agents that change files, get room for whole
+        apps; everyone else the usual budget."""
         settings = self.settings
-        if agent.role == "coder":
-            return max(settings.studio_coder_max_steps, settings.studio_agent_max_steps)
-        if agent.role == "builder":
-            return max(
-                settings.studio_builder_max_steps, settings.studio_agent_max_steps
-            )
-        return settings.studio_agent_max_steps
+        return step_budget(
+            agent,
+            agent_steps=settings.studio_agent_max_steps,
+            builder_steps=settings.studio_builder_max_steps,
+            coder_steps=settings.studio_coder_max_steps,
+        )
 
     async def stop_agent_work(self, agent_id: str) -> list[AgentRun]:
         """Stop an agent's background tasks; returns the tasks that were stopped."""

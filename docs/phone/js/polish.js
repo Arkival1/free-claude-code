@@ -10,6 +10,8 @@ export const PICTURE_SUFFIXES = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg
 const PICTURES_NAMED = 4;
 // Classes no stylesheet styles before the page is told; a few are JS hooks.
 const UNSTYLED_CLASSES = 3;
+// The starter templates' dark slate and sky blue: left as is, every site looks the same.
+const STARTER_PALETTE = ["#0f172a", "#38bdf8"];
 const CLASS_ATTR = /\bclass\s*=\s*["']([^"']+)["']/gi;
 const CSS_CLASS = /\.(-?[A-Za-z_][\w-]*)/g;
 const FAVICON =
@@ -85,6 +87,11 @@ export function polishNotes(files, pictures = []) {
   const hasVariables = Object.keys(variables).length > 0;
   if (colors.size > MAX_COLORS && !hasVariables) {
     notes.push(`${colors.size} different colors are scattered through the CSS; put a small palette in :root variables and reuse it.`);
+  }
+  if (STARTER_PALETTE.every((color) => colors.has(color))) {
+    notes.push(
+      "The colours are still the starter's dark slate and sky blue: unless that is the brand, choose a palette that fits this project (the business, its products, its mood, any brand colours) and set it in the :root variables.",
+    );
   }
   if (!hasVariables && colors.size > 4) notes.push("Define colors and spacing once as CSS variables in :root so the design stays consistent.");
   if (!styles.includes("max-width") && !styles.includes("min(")) {

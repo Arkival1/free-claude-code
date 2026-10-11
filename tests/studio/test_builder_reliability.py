@@ -510,12 +510,15 @@ def test_a_stopped_job_says_why_in_words():
 async def test_a_repo_agent_that_only_researches_gets_cornered_into_writing(
     make_studio,
 ):
-    # A small model can spend every step reading and searching; with two
-    # steps left and nothing changed, only the write tools remain.
+    # A small model can spend every step reading and searching. A repo agent
+    # that changes files gets the Builder's room for writing, but after the
+    # usual steps with nothing changed only the write tools remain.
     studio, model = make_studio(
         [
-            *[tool_reply("list_files", {}, call_id=f"look{n}") for n in range(4)],
+            tool_reply("list_files", {}, call_id="look0"),
             tool_reply("write_file", {"path": "index.html", "content": PAGE}),
+            tool_reply("list_files", {}, call_id="look1"),
+            tool_reply("list_files", {}, call_id="look2"),
             tool_reply("finish", {"summary": "Restyled it."}, call_id="end"),
         ],
         STUDIO_AGENT_MAX_STEPS=3,
@@ -533,8 +536,15 @@ async def test_a_repo_agent_that_only_researches_gets_cornered_into_writing(
 
     await studio.send(chat.id, "make the bakery page look better")
 
-    assert len(model.calls) == 6, "a writing repo agent gets the Builder's room"
+    assert len(model.calls) == 5, "past the usual 3 steps once it writes"
     assert "list_files" in model.calls[0]["tools"]
-    assert set(model.calls[4]["tools"]) <= {"write_file", "edit_file", "finish"}
-    assert LAST_STEPS_NOTE.format(left=2) in str(model.calls[4]["messages"])
+    assert set(model.calls[1]["tools"]) <= {"write_file", "edit_file", "finish"}
+    assert LAST_STEPS_NOTE in str(model.calls[1]["messages"])
+    assert "list_files" in model.calls[2]["tools"], "everything again once written"
     assert "Sunrise Bakery" in await studio.workspace.read(site.id, "index.html")
+
+    # A relay stage runs as a task, with the same room.
+    assert studio._steps_for(designer) == 6
+    run = await studio.start_task(agent_id=designer.id, goal="restyle it")
+    assert run.max_steps == 6
+    await studio.shutdown()

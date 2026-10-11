@@ -213,9 +213,9 @@ SEEN_NOTE = (
 LAST_STEPS = 2
 """Steps left when an agent that has written nothing gets only write tools."""
 LAST_STEPS_NOTE = (
-    "(Studio) {left} step(s) left and no file changed yet. Make your change "
-    "now with edit_file or write_file: nothing else is available, and the job "
-    "ends with nothing done otherwise."
+    "(Studio) The time to read and search is up and no file has changed. Make "
+    "your change now with edit_file or write_file: only those and finish are "
+    "open until you do, and the job ends with nothing done otherwise."
 )
 IDLE_STEPS = 4
 IDLE_NOTE = (
@@ -704,6 +704,23 @@ def _offers_downloads[**P](
     return run
 
 
+def writes_like_builder(agent: Agent) -> bool:
+    """A repo agent that changes files: it reads, plans, and writes like the
+    Builder, so it gets the Builder's room to write in."""
+    return agent.role == "agent" and bool(CONTENT_WRITES & set(agent.tools))
+
+
+def step_budget(
+    agent: Agent, *, agent_steps: int, builder_steps: int, coder_steps: int
+) -> int:
+    """How many steps one turn or task of this agent may take."""
+    if agent.role == "coder":
+        return max(coder_steps, agent_steps)
+    if agent.role == "builder" or writes_like_builder(agent):
+        return max(builder_steps, agent_steps)
+    return agent_steps
+
+
 class AgentRunner:
     """Drive one agent turn or one autonomous task to completion."""
 
@@ -811,15 +828,12 @@ class AgentRunner:
         return tuple(names)
 
     def _steps_for(self, agent: Agent) -> int:
-        if agent.role == "coder":
-            return self._coder_max_steps
-        if agent.role == "builder" or (
-            agent.role == "agent" and CONTENT_WRITES & set(agent.tools)
-        ):
-            # A repo agent that changes files reads, plans, and writes like
-            # the Builder, so it gets the Builder's room.
-            return self._builder_max_steps
-        return self._max_steps
+        return step_budget(
+            agent,
+            agent_steps=self._max_steps,
+            builder_steps=self._builder_max_steps,
+            coder_steps=self._coder_max_steps,
+        )
 
     async def system_prompt(
         self,
@@ -1324,11 +1338,16 @@ class AgentRunner:
         emptied = False
         wrote_any = False
         cornered = False
+        # A repo agent's extra room is for writing: it reads and searches for
+        # the usual number of steps, then has to change something.
+        write_by = (
+            min(max_steps, self._max_steps) if writes_like_builder(agent) else max_steps
+        )
         for step in range(1, max_steps + 1):
             history = compact_history(history)
             step_specs = specs
             if (
-                max_steps - step < LAST_STEPS
+                write_by - step < LAST_STEPS
                 and context.site_id
                 and not wrote_any
                 and CONTENT_WRITES & set(names)
@@ -1340,7 +1359,7 @@ class AgentRunner:
                 )
                 if not cornered:
                     cornered = True
-                    note = LAST_STEPS_NOTE.format(left=max_steps - step + 1)
+                    note = LAST_STEPS_NOTE
                     last = history[-1] if history else None
                     if last is not None and last.role == "tool":
                         history[-1] = ChatMessage(

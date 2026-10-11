@@ -11,6 +11,14 @@ MAX_COLORS = 14
 PICTURE_SUFFIXES = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg", ".avif")
 PICTURES_NAMED = 4
 UNSTYLED_CLASSES = 3
+STARTER_PALETTE = ("#0f172a", "#38bdf8")
+"""The starter templates' dark slate and sky blue: left as is, every site
+looks the same."""
+STARTER_NOTE = (
+    "The colours are still the starter's dark slate and sky blue: unless that "
+    "is the brand, choose a palette that fits this project (the business, its "
+    "products, its mood, any brand colours) and set it in the :root variables."
+)
 """Classes no stylesheet styles before the page is told; a few are JS hooks."""
 _CLASS_ATTR = re.compile(r"""\bclass\s*=\s*["']([^"']+)["']""", re.I)
 _CSS_CLASS = re.compile(r"\.(-?[A-Za-z_][\w-]*)")
@@ -138,6 +146,8 @@ def polish_notes(files: Mapping[str, str], pictures: Sequence[str] = ()) -> list
         notes.append(
             f"{len(colors)} different colors are scattered through the CSS; put a small palette in :root variables and reuse it."
         )
+    if all(color in colors for color in STARTER_PALETTE):
+        notes.append(STARTER_NOTE)
     if not variables and len(colors) > 4:
         notes.append(
             "Define colors and spacing once as CSS variables in :root so the design stays consistent."

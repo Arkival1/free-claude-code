@@ -5,7 +5,7 @@ import pytest
 from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import Agent
 from free_claude_code.studio.orders import pick_agent
-from free_claude_code.studio.polish import contrast, polish_notes
+from free_claude_code.studio.polish import STARTER_NOTE, contrast, polish_notes
 from free_claude_code.studio.presets import PROMPT_UPGRADES, TESTER_PROMPT
 from free_claude_code.studio.templates import TEMPLATES, template_files
 
@@ -40,16 +40,25 @@ def test_a_plain_page_gets_a_designers_notes():
 
 
 def test_every_web_template_already_looks_finished():
-    # Apart from the photos, which depend on the job: the Builder adds those.
-    pictures = [
+    # Apart from the colours and the photos, which depend on the job: the
+    # Builder sets those.
+    pictures = (
         "index.html: has no pictures; a real photo (find_images) or an SVG "
         "illustration makes it look finished."
-    ]
+    )
     for name in ("website", "landing"):
-        assert polish_notes(template_files(name, "Shop")) == pictures, name
+        notes = polish_notes(template_files(name, "Shop"))
+        assert notes == [STARTER_NOTE, pictures], name
     for name in ("webapp", "game"):
-        assert polish_notes(template_files(name, "Shop")) == [], name
+        assert polish_notes(template_files(name, "Shop")) == [STARTER_NOTE], name
     assert set(TEMPLATES) >= {"website", "game"}
+
+    # A palette of its own and the note goes.
+    files = template_files("webapp", "Shop")
+    files["styles.css"] = (
+        files["styles.css"].replace("#0f172a", "#fbf6ef").replace("#38bdf8", "#8a4b2a")
+    )
+    assert STARTER_NOTE not in polish_notes(files)
 
 
 def test_classes_no_stylesheet_styles_are_named():
