@@ -11,6 +11,7 @@ from free_claude_code.studio.agents import (
     CUT_CALL_NOTE,
     CUT_OFF_NOTE,
     IDLE_NOTE,
+    LAST_STEPS_NOTE,
     SEEN_NOTE,
     UNREADABLE_NOTE,
     compact_history,
@@ -503,3 +504,37 @@ def test_a_stopped_job_says_why_in_words():
         }
     )
     assert _plain_error(run).startswith("Ran out of steps (12) before finishing.")
+
+
+@pytest.mark.asyncio
+async def test_a_repo_agent_that_only_researches_gets_cornered_into_writing(
+    make_studio,
+):
+    # A small model can spend every step reading and searching; with two
+    # steps left and nothing changed, only the write tools remain.
+    studio, model = make_studio(
+        [
+            *[tool_reply("list_files", {}, call_id=f"look{n}") for n in range(4)],
+            tool_reply("write_file", {"path": "index.html", "content": PAGE}),
+            tool_reply("finish", {"summary": "Restyled it."}, call_id="end"),
+        ],
+        STUDIO_AGENT_MAX_STEPS=3,
+        STUDIO_BUILDER_MAX_STEPS=6,
+    )
+    await studio.ensure_defaults()
+    designer = await studio.create_agent(
+        name="ui-designer",
+        role="agent",
+        tools=("read_file", "list_files", "write_file", "edit_file", "web_search"),
+        all_tools=False,
+    )
+    site = await studio.create_site(name="Bakery")
+    chat = await studio.create_chat(agent_id=designer.id, site_id=site.id)
+
+    await studio.send(chat.id, "make the bakery page look better")
+
+    assert len(model.calls) == 6, "a writing repo agent gets the Builder's room"
+    assert "list_files" in model.calls[0]["tools"]
+    assert set(model.calls[4]["tools"]) <= {"write_file", "edit_file", "finish"}
+    assert LAST_STEPS_NOTE.format(left=2) in str(model.calls[4]["messages"])
+    assert "Sunrise Bakery" in await studio.workspace.read(site.id, "index.html")

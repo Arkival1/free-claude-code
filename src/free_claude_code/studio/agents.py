@@ -210,6 +210,13 @@ SEEN_NOTE = (
     "the result is the same as before. Do not repeat it: write your changes "
     "now with write_file or edit_file."
 )
+LAST_STEPS = 2
+"""Steps left when an agent that has written nothing gets only write tools."""
+LAST_STEPS_NOTE = (
+    "(Studio) {left} step(s) left and no file changed yet. Make your change "
+    "now with edit_file or write_file: nothing else is available, and the job "
+    "ends with nothing done otherwise."
+)
 IDLE_STEPS = 4
 IDLE_NOTE = (
     "(Studio) You have looked around for {steps} steps without changing any "
@@ -806,7 +813,13 @@ class AgentRunner:
     def _steps_for(self, agent: Agent) -> int:
         if agent.role == "coder":
             return self._coder_max_steps
-        return self._builder_max_steps if agent.role == "builder" else self._max_steps
+        if agent.role == "builder" or (
+            agent.role == "agent" and CONTENT_WRITES & set(agent.tools)
+        ):
+            # A repo agent that changes files reads, plans, and writes like
+            # the Builder, so it gets the Builder's room.
+            return self._builder_max_steps
+        return self._max_steps
 
     async def system_prompt(
         self,
@@ -1309,14 +1322,40 @@ class AgentRunner:
         labbed = False
         pushed_to_write = False
         emptied = False
+        wrote_any = False
+        cornered = False
         for step in range(1, max_steps + 1):
             history = compact_history(history)
+            step_specs = specs
+            if (
+                max_steps - step < LAST_STEPS
+                and context.site_id
+                and not wrote_any
+                and CONTENT_WRITES & set(names)
+            ):
+                # Out of room with nothing changed: only writing is left, so a
+                # small model researching forever still makes its change.
+                step_specs = specs_for(
+                    tuple(n for n in names if n in CONTENT_WRITES | {"finish"})
+                )
+                if not cornered:
+                    cornered = True
+                    note = LAST_STEPS_NOTE.format(left=max_steps - step + 1)
+                    last = history[-1] if history else None
+                    if last is not None and last.role == "tool":
+                        history[-1] = ChatMessage(
+                            role="tool",
+                            content=f"{last.content}\n\n{note}",
+                            tool_call_id=last.tool_call_id,
+                        )
+                    else:
+                        history.append(ChatMessage.user(note))
             try:
                 reply = await self._router.complete(
                     history,
                     model=model,
                     system=system,
-                    tools=specs if names else (),
+                    tools=step_specs if names else (),
                     max_tokens=BUILD_REPLY_TOKENS
                     if WRITE_TOOLS & set(names)
                     else REPLY_TOKENS,
@@ -1642,6 +1681,7 @@ class AgentRunner:
                 for call, outcome in zip(reply.tool_calls, outcomes, strict=True)
             )
             if wrote:
+                wrote_any = True
                 seen.clear()
                 idle = 0
             elif context.site_id and WRITE_TOOLS & set(names):
