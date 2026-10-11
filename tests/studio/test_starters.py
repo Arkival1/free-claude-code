@@ -319,7 +319,13 @@ async def test_agents_search_every_repo_and_read_the_part_they_need(
         )
         return outcome.text
 
-    # The tool adds the starter repos itself if the app hasn't yet.
+    # The tool adds the starter repos itself if the app hasn't yet. They come
+    # switched off, so nothing of them reaches the agents until turned on.
+    off = await skill(action="search", query="kubernetes rbac")
+    assert "auditing-kubernetes-rbac" not in off and "k8s-rbac" not in off
+    for extension in await studio.extensions():
+        assert not extension.enabled
+        await studio.switch_extension(extension.id, on=True)
     found = await skill(action="search", query="kubernetes rbac")
     assert "- auditing-kubernetes-rbac: Find risky Kubernetes RBAC bindings." in found
     assert "skills/k8s-rbac/SKILL.md" in found

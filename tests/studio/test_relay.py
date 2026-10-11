@@ -48,10 +48,13 @@ def finish_every_stage(seen: list[str] | None = None):
 
 
 async def with_repos(make_studio, respond, **settings):
+    """A studio with every repo that comes with FCC added and turned on (they
+    start off until the user turns them on)."""
     studio, model = make_studio(respond, **settings)
     studio._starter_folder = BUNDLE
     await studio.ensure_defaults()
-    await studio.ensure_starters()
+    for extension in await studio.ensure_starters():
+        await studio.switch_extension(extension.id, on=True)
     return studio, model
 
 

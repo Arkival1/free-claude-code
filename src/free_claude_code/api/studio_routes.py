@@ -2729,6 +2729,7 @@ def _extension(extension: Extension) -> JsonObject:
         "plugins": list(extension.plugins),
         "vaulted": extension.vaulted,
         "origin": extension.origin,
+        "enabled": extension.enabled,
         "skills": [
             {"name": skill.name, "description": skill.description, "kind": skill.kind}
             for skill in extension.skills
@@ -2874,6 +2875,17 @@ async def remove_extension(
     """Remove an extension and stop its servers."""
     await studio.remove_extension(ext_id)
     return {"removed": True}
+
+
+@router.post("/studio/api/extensions/{ext_id}/switch")
+async def switch_extension(
+    ext_id: str,
+    payload: ServerSwitchPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Turn a repo on or off: off, nothing of it runs in any job."""
+    return _extension(await studio.switch_extension(ext_id, on=payload.on))
 
 
 @router.post("/studio/api/extensions/{ext_id}/servers/{name}")

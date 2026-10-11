@@ -7,10 +7,11 @@ keep working if the original repo is deleted. A repo whose licence doesn't
 allow FCC to share it is listed without a copy: Studio adds it from GitHub on
 first load, and the Repo vault on the PC keeps that copy from then on.
 
-On first load every starter repo is added like an "Add from GitHub" link, so
-its skills reach every agent through the skill tool. Its MCP servers stay
-switched off until the user turns each one on, and its agents join the team
-only when the user adds them. Removing a starter repo sticks: it isn't added
+On first load every starter repo is added like an "Add from GitHub" link,
+switched off: none of its skills, agents, or MCP servers run, and it stays out
+of the relay, until the user turns the repo on. Even then its MCP servers stay
+off until the user turns each one on, and its agents join the team only when
+the user adds them. Removing a starter repo sticks: it isn't added
 back on the next load.
 """
 

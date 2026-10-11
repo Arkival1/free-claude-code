@@ -3891,7 +3891,25 @@
     const rows = list.map((item) =>
       el("div", { class: "list-item extension-row" }, [
         el("div", { class: "grow" }, [
-          el("strong", { text: item.name }),
+          el("div", { class: "row" }, [
+            el("strong", { class: "grow", text: item.name }),
+            el("span", { class: item.enabled ? "pill good" : "pill", text: item.enabled ? "on" : "off" }),
+            el("button", {
+              class: item.enabled ? "secondary" : "primary",
+              type: "button",
+              text: item.enabled ? "Turn off" : "Turn on",
+              "aria-label": `${item.enabled ? "Turn off" : "Turn on"} the repo ${item.name}`,
+              onclick: async () => {
+                try {
+                  await post(`${base(item)}/switch`, { on: !item.enabled });
+                  notify(item.enabled ? `${item.name} is off: none of it runs.` : `${item.name} is on: its skills and agents can join your jobs.`);
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ]),
           el("p", {
             class: "muted",
             text: [

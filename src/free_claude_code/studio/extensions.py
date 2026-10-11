@@ -111,6 +111,9 @@ class Extension:
     """Where the copy came from when GitHub no longer had it: the vault entry."""
     origin: str = ""
     """'' (GitHub), 'bundled' (came with FCC), or 'upload' (a zip from the user)."""
+    enabled: bool = True
+    """On: its skills reach the agents and it can join the relay. The repos
+    that come with FCC start off until the user turns them on."""
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -118,6 +121,7 @@ class Extension:
     @classmethod
     def from_json(cls, data: dict[str, object]) -> Extension:
         return cls(
+            enabled=data.get("enabled") is not False,
             id=_text(data, "id"),
             name=_text(data, "name"),
             source=_text(data, "source"),
@@ -687,7 +691,7 @@ class ExtensionLibrary:
         words = re.findall(r"[a-z0-9+#][a-z0-9+#.-]+", query.lower())[:10]
         if not words:
             return []
-        extensions = await self.all()
+        extensions = [e for e in await self.all() if e.enabled]
 
         def work() -> list[dict[str, object]]:
             hits: list[tuple[float, str, str, int, str]] = []
@@ -768,6 +772,10 @@ class ExtensionLibrary:
         ) or next((e for e in extensions if wanted and wanted in e.name.lower()), None)
         if extension is None:
             raise ExtensionError(f"No added repo is called '{repo}'.")
+        if not extension.enabled:
+            raise ExtensionError(
+                f"{extension.name} is turned off; the user can turn it on in Repos."
+            )
 
         def work() -> str:
             root = (self._folder / extension.id / "files").resolve()

@@ -898,8 +898,12 @@ GitHub release is gone. Outside repos built into FCC itself are kept under
 (`vendor/claw-code` holds Claw Code's source; `vendor/cua` holds trycua/cua's
 MIT-licensed Cua Driver and agent source).
 
-**Repos that come with FCC.** FCC ships 35 outside repos ready to use the
-moment Studio starts. Among them:
+**Repos that come with FCC.** FCC ships 35 outside repos, installed when
+Studio first starts and **switched off**: none of their skills, agents, or MCP
+servers run, and none join the relay, until you turn the repo on. Turn each
+one on or off under **Repos** (the Turn on / Turn off button by its name).
+Repos you add yourself from GitHub or a zip start on. Among the ones that come
+with FCC:
 
 - agent teams: awesome-claude-code-subagents (160 Claude Code subagents),
   MetaGPT's software company, FinRobot's finance agents, crewAI's crews, and

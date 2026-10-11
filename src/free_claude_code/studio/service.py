@@ -418,6 +418,8 @@ OWN_MEMORY_TOOLS = ("remember", "recall")
 TOOLSHED_FLAG = "extension_agent_toolshed_v1"
 """Repo agents already on the team were given the toolshed."""
 IDEAS_FLAG = "extension_agent_ideas_v1"
+STARTERS_OFF_FLAG = "starter_repos_off_v1"
+"""Starter repos added before they started switched off are turned off once."""
 """Repo agents already on the team were given the ideas board."""
 REPO_AGENT_EXTRAS = (*OWN_MEMORY_TOOLS, TOOLSHED_TOOL, IDEAS_TOOL)
 """What every repo agent gets beyond the tools it asks for."""
@@ -5315,6 +5317,16 @@ class StudioService:
                 if await self._store.get(StudioFlag, flag) is None:
                     await self._give_repo_agents(extra)
                     await self._store.put(StudioFlag(id=flag, value="1"))
+            if await self._store.get(StudioFlag, STARTERS_OFF_FLAG) is None:
+                # Repos run only when the user wants them: the ones that came
+                # with FCC go off until the user turns each on.
+                starting = {
+                    s.source.lower() for s in load_starters(self._starter_folder)
+                }
+                for extension in await self._extensions.all():
+                    if extension.source.lower() in starting and extension.enabled:
+                        await self.switch_extension(extension.id, on=False)
+                await self._store.put(StudioFlag(id=STARTERS_OFF_FLAG, value="1"))
             added: list[Extension] = []
             waiting = False
             present = {e.source.lower(): e.id for e in await self._extensions.all()}
@@ -5360,10 +5372,12 @@ class StudioService:
                 await self.update_agent(agent.id, {"tools": [*agent.tools, *missing]})
 
     async def _add_starter(self, starter: StarterRepo) -> Extension:
+        """Add a repo that comes with FCC, switched off: it is there, ready,
+        and does nothing until the user turns it on."""
         folder = self._starter_folder
         if starter.bundled and folder is not None:
             data = await anyio.to_thread.run_sync(bundled_bytes, folder, starter)
-            return await self._extensions.add_archive(
+            extension = await self._extensions.add_archive(
                 owner=starter.owner,
                 repo=starter.repo,
                 data=data,
@@ -5372,7 +5386,21 @@ class StudioService:
                 source=starter.source,
                 file_name=starter.file,
             )
-        return await self._extensions.add_github(starter.source)
+        else:
+            extension = await self._extensions.add_github(starter.source)
+        extension.enabled = False
+        return await self._extensions.save(extension)
+
+    async def switch_extension(self, ext_id: str, *, on: bool) -> Extension:
+        """Turn a repo on or off. Off: its skills, MCP servers, and agents
+        are left out of every job and the relay until it is turned on."""
+        extension = await self._extension(ext_id)
+        extension.enabled = on
+        if not on:
+            for server in extension.servers:
+                if server.enabled:
+                    await self._mcp.stop(f"{ext_id}/{server.name}")
+        return await self._extensions.save(extension)
 
     async def starters(self) -> list[JsonObject]:
         """The repos that come with FCC, and whether each is added now."""
@@ -5538,7 +5566,7 @@ class StudioService:
             (extension, server)
             for extension in await self._extensions.all()
             for server in extension.servers
-            if server.enabled
+            if server.enabled and extension.enabled
         ]
         return added + [
             (CONNECTOR_EXTENSION, mcp_server(spec, values))
@@ -5654,6 +5682,7 @@ class StudioService:
         everything = [
             (extension, skill)
             for extension in await self._extensions.all()
+            if extension.enabled
             for skill in extension.skills
         ]
         if action == "search":
@@ -6767,8 +6796,11 @@ class StudioService:
         return [
             extension
             for extension in await self._extensions.all()
-            if extension.agents
-            or any(s.kind in RELAY_SKILL_KINDS for s in extension.skills)
+            if extension.enabled
+            and (
+                extension.agents
+                or any(s.kind in RELAY_SKILL_KINDS for s in extension.skills)
+            )
         ]
 
     async def relay_settings(self) -> RelaySettings:

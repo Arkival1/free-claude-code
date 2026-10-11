@@ -22,12 +22,21 @@ def test_the_relay_lists_every_repo_and_keeps_changes(
     page.set_viewport_size({"width": 1440, "height": 1000})
     page.goto(f"{admin_base_url}/studio#hq")
     relay = page.locator(".hq-relay")
-    # Starter repos install in the background on the first load.
+    # Starter repos install in the background on the first load, switched
+    # off: none of them is in the relay until the user turns it on.
+    api = f"{admin_base_url}/studio/api/extensions"
     for _ in range(30):
-        if relay.locator(f"[data-repo='{VOLT}']").count():
+        added = page.request.get(api).json()["extensions"]
+        if any(item["source"].endswith(VOLT) for item in added):
             break
         page.wait_for_timeout(1000)
-        page.reload()
+    assert added and not any(item["enabled"] for item in added)
+    page.reload()
+    expect(relay).to_be_visible()
+    assert relay.locator(f"[data-repo='{VOLT}']").count() == 0
+    for item in added:
+        page.request.post(f"{api}/{item['id']}/switch", data={"on": True})
+    page.reload()
     stages = relay.locator(".hq-relay-stage[data-repo]")
     expect(stages.first).to_have_attribute("data-repo", VOLT)
     expect(stages.nth(4)).to_have_attribute("data-repo", "crewAIInc/crewAI")
