@@ -442,7 +442,9 @@ AGENT_BASE_PROMPT = (
     "guessing. When you have finished the task, call the finish tool with a "
     "short report of what you did. If the conversation starts with Studio's "
     "notes on its earlier part, treat them as what was said: keep to the "
-    "decisions and facts in them."
+    "decisions and facts in them. Hold what you make to a business level: "
+    "polished, complete, and ready for a real business to use, never a rough "
+    "draft or a placeholder."
 )
 SITE_PROMPT = (
     "You have a project workspace. Build complete, working websites and apps: "

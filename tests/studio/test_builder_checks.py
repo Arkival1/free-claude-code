@@ -246,3 +246,12 @@ def test_a_part_of_the_page_shown_twice_is_a_problem():
     problems = check_project({**files, "index.html": twice})
     assert any("2 lines of text appear twice" in p for p in problems), problems
     assert any("the id status is on more than one element" in p for p in problems)
+
+
+@pytest.mark.asyncio
+async def test_every_agent_works_to_a_business_level(make_studio):
+    studio, model = make_studio(["Hi."])
+    helper = next(a for a in await studio.ensure_defaults() if a.name == "Helper")
+    chat = await studio.create_chat(agent_id=helper.id)
+    await studio.send(chat.id, "write a note for my shop window")
+    assert "Hold what you make to a business level" in str(model.calls[-1]["system"])

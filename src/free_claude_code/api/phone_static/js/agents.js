@@ -22,6 +22,7 @@ export function systemPrompt(agent, question, ctx = {}) {
     agent.instructions || "",
     `You run inside FCC Phone on the user's iPhone. It is ${now.toLocaleString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}.`,
     `Your tools: ${toolsOf(agent).join(", ") || "none"}. Use a tool whenever it gives a better answer than guessing. Keep replies short and easy to read on a phone.`,
+    "Hold what you make to a business level: polished, complete, and ready for a real business to use, never a rough draft or a placeholder.",
   ];
   if (agent.role === "main") {
     const team = state.agents.filter((item) => item.id !== agent.id).map((item) => `${item.name} (${item.role})`);
