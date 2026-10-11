@@ -1,6 +1,7 @@
 """The tools Studio agents can call, and the sandbox that executes them."""
 
 import asyncio
+import difflib
 import fnmatch
 import json
 import re
@@ -2110,9 +2111,16 @@ class AgentToolbox:
             if found == 0:
                 fixed = loose_replace(content, old, new)
                 if fixed is None:
+                    near = closest_text(content, old)
+                    hint = (
+                        f" The closest part of {path} is:\n{near}\nCopy old_text "
+                        "exactly from there."
+                        if near
+                        else " Read the file again and copy the text exactly."
+                    )
                     raise ValueError(
-                        f"{label}old_text was not found in {path}. Read the file "
-                        "again and copy the text exactly. No edits were saved."
+                        f"{label}old_text was not found in {path}.{hint} No edits "
+                        "were saved."
                     )
                 content = fixed
                 changed += 1
@@ -3172,6 +3180,37 @@ async def _node_check(node: str, path: Path) -> str | None:
     )
     where = f" on line {line.group(1)}" if line else ""
     return f"syntax error{where}: {message}."
+
+
+CLOSEST_LINES = 12
+"""Lines of the file shown when an edit's old_text isn't in it."""
+
+
+def closest_text(content: str, old: str) -> str:
+    """The part of the file most like old_text, as many lines long (up to
+    CLOSEST_LINES), so a model that misremembered a line can copy the real
+    one; empty when nothing is close."""
+    wanted = [line.strip() for line in old.strip("\n").splitlines() if line.strip()]
+    lines = content.splitlines()
+    bare = [line.strip() for line in lines]
+    if not wanted or not lines:
+        return ""
+    head = wanted[:3]
+    best, score = 0, 0.0
+    for start, line in enumerate(bare):
+        if not line:
+            continue
+        window = [text for text in bare[start:] if text][: len(head)]
+        ratio = sum(
+            difflib.SequenceMatcher(None, want, have).ratio()
+            for want, have in zip(head, window, strict=False)
+        ) / len(head)
+        if ratio > score:
+            best, score = start, ratio
+    if score < 0.6:
+        return ""
+    size = min(max(len(old.strip("\n").splitlines()), 1), CLOSEST_LINES)
+    return "\n".join(lines[best : best + size])
 
 
 def loose_replace(content: str, old: str, new: str) -> str | None:

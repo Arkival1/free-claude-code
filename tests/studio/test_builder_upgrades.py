@@ -7,7 +7,7 @@ import pytest
 from free_claude_code.studio.agents import REPEAT_NOTE
 from free_claude_code.studio.sites import HISTORY_DIR
 from free_claude_code.studio.templates import TEMPLATES
-from free_claude_code.studio.tools import loose_replace
+from free_claude_code.studio.tools import closest_text, loose_replace
 
 from .conftest import tool_reply
 
@@ -235,6 +235,17 @@ async def test_an_edit_that_pastes_a_copy_of_the_page_is_refused(make_studio):
     assert not changed.data["failed"], "rewriting the section itself is fine"
     saved = await studio.workspace.read(site.id, "index.html")
     assert saved.count("Founded in 1947") == 1 and "Open daily." in saved
+
+
+def test_a_missed_edit_shows_the_closest_part_of_the_file():
+    css = (
+        "body { margin: 0; }\n:root {\n  --bg: #0f172a;\n  --text: #e2e8f0;\n}\n"
+        "a { color: red; }\n"
+    )
+    # The model remembered one colour wrong, so its old_text isn't there.
+    near = closest_text(css, ":root {\n  --bg: #0f172b;\n  --text: #e2e8f0;\n}")
+    assert near == ":root {\n  --bg: #0f172a;\n  --text: #e2e8f0;\n}"
+    assert closest_text(css, "nothing like the stylesheet at all") == ""
 
 
 def test_loose_replace_needs_one_clear_match():
