@@ -165,6 +165,36 @@ async def test_several_edits_at_once_and_loose_indentation(make_studio):
     )
 
 
+@pytest.mark.asyncio
+async def test_a_write_or_edit_that_changes_nothing_says_so(make_studio):
+    # A relay stage rewrote index.html with the same text and reported work
+    # it hadn't done; now it hears that nothing changed.
+    studio, _ = make_studio(
+        [
+            tool_reply("write_file", {"path": "app.py", "content": "B = 2\n"}),
+            tool_reply(
+                "edit_file",
+                {"path": "app.py", "old_text": "B = 2", "new_text": "B = 2"},
+                call_id="c2",
+            ),
+            tool_reply(
+                "write_file", {"path": "app.py", "content": "B = 3\n"}, call_id="c3"
+            ),
+            "ok",
+        ]
+    )
+    _, site, chat = await builder_chat(studio)
+    await studio.workspace.write(site.id, "app.py", "B = 2\n")
+
+    await studio.send(chat.id, "improve it")
+
+    same, unedited, changed = tools_used(await studio.transcript(chat.id))
+    assert same.data["failed"] is True and "nothing changed" in same.text
+    assert unedited.data["failed"] is True and "exactly as it was" in unedited.text
+    assert not changed.data["failed"]
+    assert await studio.workspace.read(site.id, "app.py") == "B = 3\n"
+
+
 def test_loose_replace_needs_one_clear_match():
     text = "if x:\n    go()\nif y:\n    go()\n"
     assert loose_replace(text, "go()", "stop()") is None, "two places fit"

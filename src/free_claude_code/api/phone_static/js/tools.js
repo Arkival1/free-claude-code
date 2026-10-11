@@ -190,6 +190,10 @@ export async function runTool(agent, call, ctx) {
       }
       case "write_file": {
         const project = await needProject(agent, ctx);
+        const same = projects.cleanPath(args.path);
+        if (project.files[same] !== undefined && project.files[same] === String(args.content ?? "")) {
+          return `${same} already holds exactly that, so nothing changed. Make a real improvement (edit_file changes one part), or finish if the work is done.`;
+        }
         const name = await projects.writeFile(project, args.path, args.content, agent.name);
         return `Wrote ${name} in ${project.name} (${String(args.content || "").length.toLocaleString()} characters).`;
       }
@@ -202,6 +206,9 @@ export async function runTool(agent, call, ctx) {
       }
       case "edit_file": {
         const project = await needProject(agent, ctx);
+        if (String(args.find || "") === String(args.replace ?? "")) {
+          return `These edits leave ${args.path} exactly as it was, so nothing changed. Make a real improvement, or finish if the work is done.`;
+        }
         await projects.editFile(project, args.path, String(args.find || ""), String(args.replace ?? ""), agent.name);
         return `Changed ${args.path} in ${project.name}.`;
       }

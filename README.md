@@ -1540,9 +1540,11 @@ still looks finished.
   work: text contrast (WCAG 4.5:1), phone layouts, hover and focus states,
   font sizes, a chosen font, a consistent palette in CSS variables, content
   width, line height, page structure, transitions, image sizes and alt text,
-  pictures on content pages, a meta description, and a favicon. The Builder
-  runs it after `check_project` and makes the fixes that fit; every web
-  template passes it apart from the photos, which depend on the job.
+  pictures on content pages, a meta description, a favicon, and colours of
+  the project's own (it says when a site still has the starter's dark slate
+  and sky blue). The Builder runs it after `check_project` and makes the
+  fixes that fit; every web template passes it apart from the colours and
+  photos, which depend on the job.
 - **Knows the project.** At the start of every job the Builder sees the
   project's files and the start of its README, so it builds on what is there.
 - **Real JavaScript checks.** When Node is installed, `check_project` has Node
@@ -1732,7 +1734,14 @@ has none, so they read the project's files instead of asking it.
 Start one any time with "relay: make a landing page for my gym", "run it
 through all the repos: …", "… through the relay", the **Run the relay** box
 in the HQ, Jarvis's `team_plan` tool with `relay: true`, or `lcc_relay` from
-another AI tool. Stop and Resume work as for team plans.
+another AI tool. Stop and Resume work as for team plans; a resumed relay runs
+the stages that didn't finish one at a time, in order.
+
+A repo agent that changes files gets the Builder's room (40 steps), but that
+room is for writing: it reads and searches for the usual 12 steps, and if it
+has changed nothing by then, only `edit_file`, `write_file`, and `finish` stay
+open until it does. A write or edit that leaves a file exactly as it was is
+refused as "nothing changed", so it doesn't count as work.
 
 On a PC running a small local model, each stage takes minutes, so a relay of
 a dozen stages can take hours; models on this PC stream their replies, so a

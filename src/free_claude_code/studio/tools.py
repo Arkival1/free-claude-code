@@ -154,6 +154,10 @@ OFFLINE_NOTE = (
     "The internet looks unreachable from this computer, so web tools are paused "
     "until it is back. Carry on with recall, the project files, and what you know."
 )
+NOTHING_CHANGED = (
+    "already holds exactly that, so nothing changed. Make a real improvement "
+    "(edit_file changes one part), or finish if the work is done."
+)
 MAX_FETCH_CHARS = 6_000
 OVERVIEW_FILES = 40
 MAX_SEARCH_RESULTS = 6
@@ -1985,11 +1989,12 @@ class AgentToolbox:
                 "project's files with list_files and read_file to get the context."
             )
         appending = call.arguments.get("append") is True
+        try:
+            existing: str | None = await self._sites.read(site_id, path)
+        except SiteError:
+            existing = None
         if appending:
-            try:
-                before = await self._sites.read(site_id, path)
-            except SiteError:
-                before = ""
+            before = existing or ""
             joiner = "" if not before or before.endswith("\n") else "\n"
             content = f"{before}{joiner}{content}"
         added: list[str] = []
@@ -2011,6 +2016,8 @@ class AgentToolbox:
                 # In a cascade layer, the project's own rules always win.
                 content = f"{base}/* Project styles */\n{content}"
                 layered = True
+        if content == existing:
+            raise ValueError(f"{path} {NOTHING_CHANGED}")
         written = await self._sites.write(site_id, path, content)
         note = f" Studio added the missing {', '.join(added)}." if added else ""
         if layered:
@@ -2069,7 +2076,7 @@ class AgentToolbox:
             if isinstance(raw, list) and raw
             else [call.arguments]
         )
-        content = await self._sites.read(site_id, path)
+        content = original = await self._sites.read(site_id, path)
         changed = 0
         loose = 0
         for number, edit in enumerate(edits, start=1):
@@ -2105,6 +2112,11 @@ class AgentToolbox:
                 else content.replace(old, new, 1)
             )
             changed += found if replace_all else 1
+        if content == original:
+            raise ValueError(
+                f"These edits leave {path} exactly as it was, so nothing changed. "
+                "Make a real improvement, or finish if the work is done."
+            )
         written = await self._sites.write(site_id, path, content)
         note = f" ({loose} matched after adjusting indentation)" if loose else ""
         return ToolOutcome(
