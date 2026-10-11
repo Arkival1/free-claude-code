@@ -1441,8 +1441,10 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "agent search it with the ideas tool before they design or build, "
             "read your notes, can put a reference photo into the project, and "
             "go in that direction with their own business-level work, not a "
-            "copy. Search and tags narrow the board; notes save as you edit "
-            "them."
+            "copy. Pick a category for each idea: Websites, Apps, Lab, or "
+            "General. The Builder looks in Websites, the Coder in Apps, and the "
+            "Lab agent in Lab (and all of them in General). Categories, search, "
+            "and tags narrow the board; notes save as you edit them."
         ),
         asks=("How do I show the team a design I like?",),
     ),

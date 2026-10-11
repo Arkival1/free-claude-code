@@ -103,7 +103,7 @@ async def test_agents_search_read_and_use_the_board(make_studio):
     )
     await studio.ideas.add(title="Calm colours", text="Cream and deep brown.")
     found = await run(action="search", query="headline")
-    assert "[photo] Hero I like" in found.text
+    assert "[photo, general] Hero I like" in found.text
     assert "the user says: Big photo, short headline" in found.text
     assert "Calm colours" not in found.text
     full = await run(action="read", idea="hero i like")
@@ -131,10 +131,20 @@ async def test_the_board_through_the_app(make_studio):
     ) as client:
         note = await client.post(
             "/studio/api/ideas",
-            json={"text": "Rounded cards", "url": "https://example.com", "tags": "ui"},
+            json={
+                "text": "Rounded cards",
+                "url": "https://example.com",
+                "tags": "ui",
+                "category": "app",
+            },
         )
         assert note.status_code == 200, note.text
-        assert note.json()["kind"] == "link"
+        assert note.json()["kind"] == "link" and note.json()["category"] == "app"
+        apps = (
+            await client.get("/studio/api/ideas", params={"category": "app"})
+        ).json()
+        assert [i["id"] for i in apps["ideas"]] == [note.json()["id"]]
+        assert apps["categories"] == {"website": 0, "app": 1, "lab": 0, "general": 0}
         photo = await client.post(
             "/studio/api/ideas/upload",
             params={"name": "look.jpg", "title": "The look", "tags": "ui, hero"},
@@ -158,3 +168,54 @@ async def test_the_board_through_the_app(make_studio):
         gone = await client.delete(f"/studio/api/ideas/{added['id']}")
         assert gone.json() == {"deleted": True}
         assert (await client.get(added["file_url"])).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_each_agent_looks_in_its_own_category(make_studio):
+    # A website's references don't steer the Lab, and a lab note doesn't
+    # steer the Builder; general ideas go to everyone.
+    studio, model = make_studio(["Done."])
+    agents = {a.name: a for a in await studio.ensure_defaults()}
+    board = studio.ideas
+    site_look = await board.add(
+        title="Warm bakery look", text="Cream.", category="websites"
+    )
+    lab_note = await board.add(title="Gentle shampoo", text="pH 5.5.", category="lab")
+    both = await board.add(title="Our brand", text="Green and gold.")
+    assert (site_look.category, lab_note.category, both.category) == (
+        "website",
+        "lab",
+        "general",
+    )
+    assert [i.id for i in await board.ideas(category="lab")] == [lab_note.id]
+    edited = await board.update(both.id, {"category": "app"})
+    assert edited.category == "app"
+    await board.update(both.id, {"category": "general"})
+
+    toolbox = studio._toolbox()
+
+    async def search(agent_name: str, **arguments) -> str:
+        agent = agents[agent_name]
+        context = ToolContext(
+            agent_id=agent.id,
+            chat_id="cht_x",
+            agent_name=agent.name,
+            agent_role=agent.role,
+        )
+        call = ToolCall(
+            id="t", name="ideas", arguments={"action": "search", **arguments}
+        )
+        return (await toolbox.run(call, context)).text
+
+    builder_sees = await search("Builder")
+    assert "Warm bakery look" in builder_sees and "Our brand" in builder_sees
+    assert "Gentle shampoo" not in builder_sees
+    lab_sees = await search("Lab")
+    assert "Gentle shampoo" in lab_sees and "Warm bakery look" not in lab_sees
+    assert "Gentle shampoo" in await search("Builder", category="lab")
+
+    # Before it starts, the Lab agent hears only about lab and general ideas.
+    chat = await studio.create_chat(agent_id=agents["Lab"].id)
+    await studio.send(chat.id, "make a shampoo")
+    system = str(model.calls[-1]["system"])
+    assert "Gentle shampoo" in system and "Warm bakery look" not in system

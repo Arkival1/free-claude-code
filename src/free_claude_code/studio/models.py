@@ -531,6 +531,9 @@ class Idea(Record):
 
     id: str = Field(default_factory=lambda: new_id("ida"))
     kind: Literal["note", "photo", "video", "link"] = "note"
+    category: Literal["website", "app", "lab", "general"] = "general"
+    """What kind of work it is for: agents look in their own category (and
+    general) first."""
     title: str
     text: str = ""
     """What the user wrote about it: what they like, what it is for."""

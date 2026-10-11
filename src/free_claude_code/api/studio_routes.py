@@ -1871,6 +1871,7 @@ class IdeaPayload(BaseModel):
     url: str = Field(default="", max_length=2000)
     tags: list[str] | str = Field(default_factory=list)
     project: str = Field(default="", max_length=200)
+    category: str = Field(default="general", max_length=20)
 
 
 class IdeaChanges(BaseModel):
@@ -1879,6 +1880,7 @@ class IdeaChanges(BaseModel):
     url: str | None = Field(default=None, max_length=2000)
     tags: list[str] | str | None = None
     project: str | None = Field(default=None, max_length=200)
+    category: str | None = Field(default=None, max_length=20)
 
 
 @router.get("/studio/api/ideas")
@@ -1886,11 +1888,13 @@ async def list_ideas(
     q: str = "",
     kind: str = "",
     tag: str = "",
+    category: str = "",
     studio: StudioService = Depends(get_studio),
     _: None = Access,
 ) -> JsonObject:
-    """The ideas board: every idea, or those matching words, a kind, a tag."""
-    return await studio.idea_list(q, kind=kind, tag=tag)
+    """The ideas board: every idea, or those matching words, a kind, a tag,
+    a category (website, app, lab, general)."""
+    return await studio.idea_list(q, kind=kind, tag=tag, category=category)
 
 
 @router.post("/studio/api/ideas")
@@ -1906,6 +1910,7 @@ async def add_idea(
         url=payload.url,
         tags=payload.tags,
         project=payload.project,
+        category=payload.category,
     )
 
 
@@ -1917,6 +1922,7 @@ async def upload_idea(
     text: str = "",
     tags: str = "",
     project: str = "",
+    category: str = "general",
     studio: StudioService = Depends(get_studio),
     _: None = Access,
 ) -> JsonObject:
@@ -1934,6 +1940,7 @@ async def upload_idea(
         text=text[:8000],
         tags=tags,
         project=project[:200],
+        category=category,
         name=name,
         data=bytes(data),
     )

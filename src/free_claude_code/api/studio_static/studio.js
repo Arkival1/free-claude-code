@@ -4017,9 +4017,16 @@
 
   // The user's references for the team: notes, photos, videos, and links of
   // what they want. Agents search it before they design or build.
-  async function renderIdeas(search = "", tag = "") {
+  const IDEA_CATEGORIES = [
+    ["website", "Websites"],
+    ["app", "Apps"],
+    ["lab", "Lab"],
+    ["general", "General"],
+  ];
+
+  async function renderIdeas(search = "", tag = "", category = "") {
     const generation = renderGeneration;
-    const query = new URLSearchParams({ q: search, tag });
+    const query = new URLSearchParams({ q: search, tag, category });
     const data = await api(`/studio/api/ideas?${query}`);
     if (generation !== renderGeneration) return;
     const title = el("input", { type: "text", maxlength: "120", placeholder: "Title, e.g. Clean bakery homepage", "aria-label": "Idea title" });
@@ -4027,6 +4034,11 @@
     const link = el("input", { type: "url", placeholder: "Link (optional): a site, an app, a video", "aria-label": "Idea link" });
     const tags = el("input", { type: "text", placeholder: "Tags, e.g. ui, website, colours", "aria-label": "Idea tags" });
     const project = el("input", { type: "text", maxlength: "80", placeholder: "For which project (optional)", "aria-label": "Idea project" });
+    const kindOfWork = el(
+      "select",
+      { "aria-label": "Idea category" },
+      IDEA_CATEGORIES.map(([value, label]) => el("option", { value, text: label, selected: value === (category || "general") }))
+    );
     const status = el("p", { class: "muted small", role: "status" });
     const files = el("input", { type: "file", accept: "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime", multiple: true, hidden: true, "aria-label": "Photos or videos for the ideas board" });
     const clear = () => {
@@ -4035,10 +4047,10 @@
     const addText = async () => {
       if (!notes.value.trim() && !link.value.trim()) return notify("Write the idea or add a link.");
       try {
-        await post("/studio/api/ideas", { title: title.value, text: notes.value, url: link.value, tags: tags.value, project: project.value });
+        await post("/studio/api/ideas", { title: title.value, text: notes.value, url: link.value, tags: tags.value, project: project.value, category: kindOfWork.value });
         clear();
         notify("Added to the ideas board.");
-        renderIdeas(search, tag);
+        renderIdeas(search, tag, category);
       } catch (error) {
         status.textContent = error.message;
       }
@@ -4049,7 +4061,7 @@
         status.textContent = `Adding ${file.name}…`;
         try {
           const body = file.type.startsWith("image/") ? await shrinkPhoto(file) : file;
-          const params = new URLSearchParams({ name: file.name, title: title.value, text: notes.value, tags: tags.value, project: project.value });
+          const params = new URLSearchParams({ name: file.name, title: title.value, text: notes.value, tags: tags.value, project: project.value, category: kindOfWork.value });
           await sendFile(`/studio/api/ideas/upload?${params}`, body, (sent, total) => {
             status.textContent = `Adding ${file.name}… ${Math.round((sent / Math.max(total, 1)) * 100)}%`;
           });
@@ -4062,11 +4074,11 @@
       status.textContent = added ? `Added ${added} to the ideas board.` : "";
       if (added) {
         clear();
-        renderIdeas(search, tag);
+        renderIdeas(search, tag, category);
       }
     });
     const finder = el("input", { type: "search", value: search, placeholder: "Search ideas", "aria-label": "Search ideas" });
-    finder.addEventListener("change", () => renderIdeas(finder.value, tag));
+    finder.addEventListener("change", () => renderIdeas(finder.value, tag, category));
     view.replaceChildren(
       card("Ideas board", [
         el("p", {
@@ -4076,7 +4088,7 @@
         title,
         notes,
         link,
-        el("div", { class: "row" }, [tags, project]),
+        el("div", { class: "row" }, [kindOfWork, tags, project]),
         el("div", { class: "row" }, [
           el("button", { class: "primary", type: "button", text: "Add note or link", onclick: addText }),
           el("button", { class: "secondary", type: "button", text: "Add photos or videos", onclick: () => files.click() }),
@@ -4085,20 +4097,26 @@
         status,
       ]),
       card(`On the board (${data.ideas.length})`, [
+        el("div", { class: "chips idea-categories", role: "group", "aria-label": "Category" }, [
+          el("button", { class: `chip${category ? "" : " active"}`, type: "button", text: "Everything", onclick: () => renderIdeas(finder.value, tag, "") }),
+          ...IDEA_CATEGORIES.map(([value, label]) =>
+            el("button", { class: `chip${value === category ? " active" : ""}`, type: "button", text: `${label} (${data.categories?.[value] ?? 0})`, onclick: () => renderIdeas(finder.value, tag, value) })
+          ),
+        ]),
         el("div", { class: "row" }, [
           finder,
           ...(data.tags.length
             ? [
                 el("div", { class: "chips" }, [
-                  el("button", { class: `chip${tag ? "" : " active"}`, type: "button", text: "all", onclick: () => renderIdeas(finder.value, "") }),
-                  ...data.tags.map((name) => el("button", { class: `chip${name === tag ? " active" : ""}`, type: "button", text: name, onclick: () => renderIdeas(finder.value, name) })),
+                  el("button", { class: `chip${tag ? "" : " active"}`, type: "button", text: "all", onclick: () => renderIdeas(finder.value, "", category) }),
+                  ...data.tags.map((name) => el("button", { class: `chip${name === tag ? " active" : ""}`, type: "button", text: name, onclick: () => renderIdeas(finder.value, name, category) })),
                 ]),
               ]
             : []),
         ]),
         data.ideas.length
-          ? el("div", { class: "photo-grid idea-grid" }, data.ideas.map((idea) => ideaTile(idea, () => renderIdeas(search, tag))))
-          : empty(search || tag ? "No ideas match." : "Nothing on the board yet. Add what you'd like the team to aim for."),
+          ? el("div", { class: "photo-grid idea-grid" }, data.ideas.map((idea) => ideaTile(idea, () => renderIdeas(search, tag, category))))
+          : empty(search || tag || category ? "No ideas match." : "Nothing on the board yet. Add what you'd like the team to aim for."),
       ])
     );
   }
@@ -4124,7 +4142,7 @@
       media,
       el("figcaption", {}, [
         el("strong", { text: idea.title }),
-        el("small", { class: "muted", text: [...new Set([idea.kind, idea.project, ...(idea.tags || [])])].filter(Boolean).join(" · ") }),
+        el("small", { class: "muted", text: [...new Set([idea.kind, IDEA_CATEGORIES.find(([value]) => value === idea.category)?.[1], idea.project, ...(idea.tags || [])])].filter(Boolean).join(" · ") }),
         idea.url ? el("a", { href: idea.url, target: "_blank", rel: "noopener noreferrer", text: idea.url }) : null,
         text,
         el("button", {

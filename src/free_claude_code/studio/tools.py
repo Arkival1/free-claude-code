@@ -29,7 +29,7 @@ from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .desk import DeskBrowser, DeskError
 from .desk import render as render_desk
-from .ideas import IdeaBoard, IdeaError
+from .ideas import ROLE_CATEGORIES, IdeaBoard, IdeaError
 from .ideas import describe as describe_idea
 from .images import FoundImage, ImageError, download_image, find_images
 from .llm import ToolCall, ToolSpec
@@ -882,9 +882,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "they want (a UI, a layout, a look, an app or site they like), with "
             "what they say about each. Search it before you design or build, "
             "go in the direction it points, and make your own business-level "
-            "work, not a copy. action: search (query and tag narrow it), read "
-            "(one idea in full), or use (put one of its photos into the "
-            "project, at path)."
+            "work, not a copy. action: search (query, tag, and category narrow "
+            "it; your own category is searched by default), read (one idea in "
+            "full), or use (put one of its photos into the project, at path)."
         ),
         parameters={
             "type": "object",
@@ -892,6 +892,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "action": {"type": "string", "enum": ["search", "read", "use"]},
                 "query": {"type": "string"},
                 "tag": {"type": "string"},
+                "category": {
+                    "type": "string",
+                    "enum": ["website", "app", "lab", "general"],
+                    "description": "What the work is: ideas for that and general ones.",
+                },
                 "idea": {"type": "string", "description": "Its id or title."},
                 "path": {
                     "type": "string",
@@ -2239,7 +2244,15 @@ class AgentToolbox:
             raise ValueError(str(error)) from error
         query = str(call.arguments.get("query") or "").strip()
         tag = str(call.arguments.get("tag") or "").strip()
-        found = await self._ideas.ideas(query, tag=tag)
+        asked = str(call.arguments.get("category") or "").strip()
+        # LCC's own agents look in their own category (and general) first: a
+        # website's references don't steer the Lab.
+        category = asked or ROLE_CATEGORIES.get(context.agent_role, "")
+        found = await self._ideas.ideas(
+            query, tag=tag, category=category, with_general=True
+        )
+        if not found and category and not asked:
+            found = await self._ideas.ideas(query, tag=tag)
         data: JsonObject = {
             "tool": IDEAS_TOOL,
             "ideas": [idea.id for idea in found[:MAX_LISTED_IDEAS]],

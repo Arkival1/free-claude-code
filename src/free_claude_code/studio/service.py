@@ -93,6 +93,7 @@ from .guide import (
     page_name,
 )
 from .hq import station_for, stations_view
+from .ideas import CATEGORIES as IDEA_CATEGORIES
 from .ideas import IdeaBoard, IdeaError
 from .image_cloud import CloudSettings, ImageCloudError, make_picture
 from .image_engine import ImageEngine, ImageEngineError, Picture
@@ -2307,6 +2308,7 @@ class StudioService:
         url: str = "",
         tags: object = (),
         project: str = "",
+        category: str = "general",
         name: str = "",
         data: bytes | None = None,
     ) -> JsonObject:
@@ -2318,6 +2320,7 @@ class StudioService:
                 url=url,
                 tags=tags,
                 project=project,
+                category=category,
                 name=name,
                 data=data,
             )
@@ -2326,12 +2329,20 @@ class StudioService:
         return idea_view(idea)
 
     async def idea_list(
-        self, query: str = "", *, kind: str = "", tag: str = ""
+        self, query: str = "", *, kind: str = "", tag: str = "", category: str = ""
     ) -> JsonObject:
-        found = await self._ideas.ideas(query, kind=kind, tag=tag)
+        found = await self._ideas.ideas(query, kind=kind, tag=tag, category=category)
         every = await self._ideas.ideas()
         tags = sorted({t for idea in every for t in idea.tags})
-        return {"ideas": [idea_view(idea) for idea in found], "tags": tags}
+        counts: dict[str, JsonValue] = {
+            name: sum(idea.category == name for idea in every)
+            for name in IDEA_CATEGORIES
+        }
+        return {
+            "ideas": [idea_view(idea) for idea in found],
+            "tags": tags,
+            "categories": counts,
+        }
 
     async def update_idea(self, idea_id: str, values: JsonObject) -> JsonObject:
         try:

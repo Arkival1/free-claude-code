@@ -1760,6 +1760,13 @@ then **Add note or link**, or **Add photos or videos** (JPEG, PNG, WebP, or
 GIF photos up to 25 MB; MP4, MOV, or WebM videos up to 200 MB). Files stay on
 this PC.
 
+Each idea goes in a category: **Websites**, **Apps**, **Lab**, or **General**
+(for everything). The buttons above the board show one category at a time,
+with how many ideas each has. LCC's agents look in their own category and
+General: the Builder in Websites, the Coder and Tester in Apps, the Lab agent
+in Lab, so a website's references never steer lab work. Repo agents see every
+category and can narrow a search with `category`.
+
 The Builder, Coder, Lab, Helper, and every repo agent get the `ideas` tool.
 When the board has anything on it, they are told so before they start, then
 search it (`ideas` with `search`), read an idea in full (`read`), and can put

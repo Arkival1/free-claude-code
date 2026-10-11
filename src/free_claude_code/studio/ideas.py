@@ -19,6 +19,26 @@ from .photos import PhotoError, clean_name, image_info
 from .store import StudioStore
 
 IdeaKind = Literal["note", "photo", "video", "link"]
+IdeaCategory = Literal["website", "app", "lab", "general"]
+CATEGORIES: tuple[IdeaCategory, ...] = ("website", "app", "lab", "general")
+_CATEGORY_WORDS: dict[str, IdeaCategory] = {
+    "website": "website",
+    "websites": "website",
+    "site": "website",
+    "web": "website",
+    "app": "app",
+    "apps": "app",
+    "game": "app",
+    "lab": "lab",
+    "science": "lab",
+}
+ROLE_CATEGORIES: dict[str, IdeaCategory] = {
+    "builder": "website",
+    "coder": "app",
+    "tester": "app",
+    "lab": "lab",
+}
+"""The category each of LCC's own agents works in."""
 MAX_IDEA_PHOTO_BYTES = 25 * 1024 * 1024
 MAX_IDEA_VIDEO_BYTES = 200 * 1024 * 1024
 MAX_TITLE = 120
@@ -61,6 +81,11 @@ def clean_tags(tags: object) -> tuple[str, ...]:
     return tuple(found[:MAX_TAGS])
 
 
+def clean_category(value: object) -> IdeaCategory:
+    """website, app, lab, or general (anything else is general)."""
+    return _CATEGORY_WORDS.get(str(value or "").strip().lower(), "general")
+
+
 def clean_url(url: str) -> str:
     text = url.strip()
     if not text:
@@ -89,6 +114,7 @@ class IdeaBoard:
         url: str = "",
         tags: object = (),
         project: str = "",
+        category: object = "general",
         name: str = "",
         data: bytes | None = None,
     ) -> Idea:
@@ -123,6 +149,7 @@ class IdeaBoard:
             raise IdeaError("Write the idea, add a link, or attach a photo or video.")
         idea = Idea(
             kind=kind,
+            category=clean_category(category),
             title=heading,
             text=text.strip()[:MAX_TEXT],
             url=clean_url(url),
@@ -146,10 +173,19 @@ class IdeaBoard:
         return idea
 
     async def ideas(
-        self, query: str = "", *, kind: str = "", tag: str = "", project: str = ""
+        self,
+        query: str = "",
+        *,
+        kind: str = "",
+        tag: str = "",
+        project: str = "",
+        category: str = "",
+        with_general: bool = False,
     ) -> tuple[Idea, ...]:
         """Every idea, newest first, or those that match: words in the title,
-        notes, tags, link, or project, a kind, a tag, a project."""
+        notes, tags, link, or project, a kind, a tag, a project, a category
+        (and, ``with_general``, the general ideas beside it)."""
+        wanted_category = clean_category(category) if category else ""
         every = await self._store.find(Idea, order_by="created_at DESC")
         words = [w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) > 2]
         wanted_tag = tag.strip().lower()
@@ -157,6 +193,12 @@ class IdeaBoard:
         found = []
         for idea in every:
             if kind and idea.kind != kind:
+                continue
+            if (
+                wanted_category
+                and idea.category != wanted_category
+                and not (with_general and idea.category == "general")
+            ):
                 continue
             if wanted_tag and wanted_tag not in idea.tags:
                 continue
@@ -199,6 +241,8 @@ class IdeaBoard:
             changes["tags"] = clean_tags(values["tags"])
         if "project" in values:
             changes["project"] = " ".join(str(values["project"] or "").split())[:80]
+        if "category" in values:
+            changes["category"] = clean_category(values["category"])
         updated = idea.model_copy(update=changes)
         await self._store.put(updated)
         return updated
@@ -217,7 +261,7 @@ class IdeaBoard:
 def describe(idea: Idea, *, full: bool = False) -> str:
     """What an agent reads about one idea: its kind, title, the user's notes,
     tags, and link."""
-    parts = [f"[{idea.kind}] {idea.title} (id {idea.id})"]
+    parts = [f"[{idea.kind}, {idea.category}] {idea.title} (id {idea.id})"]
     if idea.kind == "photo" and idea.width:
         parts.append(f"{idea.width}x{idea.height} photo")
     if idea.project:

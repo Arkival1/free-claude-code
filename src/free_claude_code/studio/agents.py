@@ -15,6 +15,7 @@ from free_claude_code.core.json_types import JsonObject
 from .call_guard import guarded
 from .convo_notes import NOTES_HEADER, NotesKeeper
 from .farm.requests import farm_job
+from .ideas import ROLE_CATEGORIES
 from .lab.bench import LAB_PROMPT
 from .lab.requests import lab_job
 from .llm import (
@@ -898,11 +899,13 @@ class AgentRunner:
         if TOOLSHED_TOOL in agent.tools:
             parts.append(TOOLSHED_PROMPT)
         if "ideas" in agent.tools:
-            board = await self._store.find(
-                Idea, order_by="created_at DESC", limit=IDEAS_SHOWN
-            )
+            board = await self._store.find(Idea, order_by="created_at DESC")
+            own = ROLE_CATEGORIES.get(agent.role)
+            if own:
+                # The Lab hears about lab ideas, the Builder website ones.
+                board = [i for i in board if i.category in {own, "general"}]
             if board:
-                parts.append(ideas_prompt([idea.title for idea in board]))
+                parts.append(ideas_prompt([idea.title for idea in board[:IDEAS_SHOWN]]))
         if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):
             parts.append(WEB_PROMPT)
         elif self._toolbox.web_paused(agent.tools, role=agent.role):
