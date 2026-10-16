@@ -43,6 +43,8 @@ the user-facing description of every feature is the `## Studio` section of
 | Lab (`#lab`) | Chemistry, materials and tech sandbox with a lab chat |
 | Content Farm (`#farm`) | Video channels, scripts, cartoons, beat edits, rendering. Don't touch unless asked |
 | HQ (`#hq`) | Pixel office showing the whole agent workflow live |
+| Trading Bank (`#trade`) | Five model seats debate trades (Desk with 3D arena, Debate, Risk, Orders, Debriefs, Setup); paper / live-approve / live-auto; platforms (Alpaca, IBKR, Kraken, Coinbase, AU exchanges, webhook) |
+| Ops (`#ops`, menu) | The PC's load, background worker lanes, busy agents, model queue, desk pulse, with a 3D system pulse |
 | Connectors (`#connectors`) | Gmail, GitHub, Zapier and other outside services (tokens owner-only, never sent to the UI) |
 | More (`#more`) | Add from GitHub (skills, Claude Code plugins, MCP servers, agents), repo on/off switches, Repo vault, Learning |
 | Settings (`#settings`) | Every FCC setting, searchable (keys, models, step limits, Studio, image engine...) |
@@ -64,7 +66,10 @@ src/free_claude_code/
                   team_mcp.py (LCC as MCP server), phone_cors.py
   api/studio_static/  Studio UI: index.html, studio.js (the whole single-page app:
                   router, pages, HUD), studio.css, hq.js/css, lab.js/css,
-                  farm.js/css, sw.js, icons
+                  farm.js/css, trade.js/css (Trading Bank), ops.js/css (Ops),
+                  fcc3d.js (shared 3D engine), trade3d.js and ops3d.js (3D
+                  views, loaded only when shown), three.*.js and three-orbit.js
+                  (vendored three.js, see vendor/three), sw.js, icons
   api/phone_static/   FCC Phone source (js/agents.js, tools.js, projects.js,
                   polish.js, ...); built into docs/phone
   api/admin_static/   Admin page UI
@@ -91,7 +96,7 @@ docs/             GitHub Pages: index.html and docs/phone (built phone app)
 | `memory.py` | `MemoryService`: per-agent, team and `server:team` memory |
 | `crew.py`, `orders.py`, `teamplan.py`, `relay.py`, `rooms.py` | Jarvis hands work out; direct orders from what the user says; team plans; repo relays; chat rooms |
 | `extensions.py`, `mcp.py`, `starter.py`, `vault.py`, `connectors.py` | Add from GitHub (skills, plugin agents, MCP servers), MCP client, starter repo pack (installs switched off), Repo vault, connectors |
-| `sites.py`, `templates*.py`, `project_check.py`, `polish.py`, `page_try.py`, `commands.py`, `code_loop.py` | Project workspaces, starter templates, checks, design once-over, page tryout, approved commands, Coder/Tester loop |
+| `sites.py`, `templates*.py`, `project_check.py`, `polish.py`, `page_try.py`, `commands.py`, `code_loop.py` | Project workspaces, starter templates (`templates_3d.py`: 3d-landing, 3d-dashboard, the FCC web kit; three.js copied in with `copy_library`), checks, design once-over, page tryout, approved commands, Coder/Tester loop |
 | `ideas.py`, `photos.py`, `images.py`, `image_engine.py`, `image_cloud.py` | Ideas board, business photos, free photos (Openverse), AI images |
 | `research.py`, `search.py`, `platforms.py`, `videos.py`, `video_ears.py`, `desk.py`, `connectivity.py` | Web research, search, Reddit/YouTube, video notes, desktop browser, online check |
 | `engine*.py`, `downloads.py`, `model_*.py`, `gguf_info.py`, `team_models.py` | Built-in engine, model downloads, model files, Team brains |
@@ -99,6 +104,8 @@ docs/             GitHub Pages: index.html and docs/phone (built phone app)
 | `guide.py` | The in-app Guide's knowledge of every page and setting. Keep it in step with features |
 | `playbook.py`, `call_guard.py`, `presets.py` | Jarvis's tool notes, small-model call guard, agent presets |
 | `voice.py`, `local_voice.py`, `obsidian.py`, `phone_link.py`, `hq.py`, `lab/`, `farm/` | Voice, Obsidian mirror, phone pairing, HQ, Lab, Content Farm |
+| `trading/` | The Trading Bank: `desk.py` (`TradingDesk`: the loop, debates, risk period, routing, approvals, views), `debate.py`, `seats.py`, `briefing.py`, `assessment.py` (risk period), `risk.py` (hard limits), `precheck.py` (account check), `forecasts.py`, `debrief.py`, `ledger.py` (FIFO, AU tax CSV), `scanner.py`, `patterns.py`, `regime.py`, `indicators.py`, `sessions.py` (ASX/NY hours), `data.py` and `providers/` (Yahoo, CoinGecko, DexScreener), `brokers/` (paper, Alpaca, IBKR, Kraken, Coinbase, BTC Markets, Independent Reserve, CoinSpot, Swyftx, webhook; `registry.py`, `catalog.py`), `config.py`, `log.py` |
+| `workers.py`, `resilience.py`, `jsonish.py`, `system_monitor.py` | Background lanes (`WorkerPool`), retries/rate limits/circuit breakers/`submit_once`, forgiving JSON reading, CPU/RAM/GPU readings |
 
 ## How a request flows
 

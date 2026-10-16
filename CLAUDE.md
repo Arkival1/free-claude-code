@@ -48,7 +48,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   one session at a time for code changes so pushes don't clash. Don't open
   pull requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.71.1 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.72.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -68,6 +68,10 @@ Notes carried over from the long session that built FCC Studio (LCC).
   agent reads its own category (builder: website, coder/tester: app).
 - Agents that write files get the Builder's step budget (40); relays run
   one stage at a time.
+- The Trading Bank starts in paper mode; going live, saving broker keys and
+  verifying accounts work only from the PC; after a restart only paper
+  resumes. CoinSpot and Swyftx adapters are marked beta. DEX meme-coin
+  buying and sites with no API (CommSec, SelfWealth, Stake) are left out.
 - Ruflo-core is set up for Claude Code here as project files
   (`.claude/agents`, `.claude/skills`, `.mcp.json`); see
   `vendor/ruflo-core/README.md`. Its `.claude-flow/` runtime folder is
@@ -83,3 +87,5 @@ Build these only when the owner says yes:
   Builder steps for multi-page sites.
 - The professional-website relay test was stopped before the site was
   finished.
+- A Trading Bank card on FCC Phone (desk numbers, approve/deny orders):
+  started, then parked by the owner ("don't worry about the phone for now").

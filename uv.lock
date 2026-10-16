@@ -692,11 +692,12 @@ wheels = [
 
 [[package]]
 name = "free-claude-code"
-version = "6.71.1"
+version = "6.72.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "anyio" },
+    { name = "cryptography" },
     { name = "discord-py" },
     { name = "fastapi", extra = ["standard"] },
     { name = "github-copilot-sdk" },
@@ -772,6 +773,7 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'voice-local'", specifier = ">=1.15.0" },
     { name = "aiohttp", specifier = ">=3.14.3" },
     { name = "anyio", specifier = ">=4.15.1" },
+    { name = "cryptography", specifier = ">=46.0.0" },
     { name = "discord-py", specifier = ">=2.7.1" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.141.1" },
     { name = "faster-whisper", marker = "extra == 'studio-voice'", specifier = ">=1.1.0" },

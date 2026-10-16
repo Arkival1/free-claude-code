@@ -1662,6 +1662,114 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Trading Bank",
+        route="/studio#trade",
+        where=(
+            "Trade in the tab bar (or MENU, Trading Bank). Tabs: Desk, Debate, "
+            "Risk, Orders, Debriefs, Setup. Mode, platforms, keys, seats, and "
+            "limits are on Setup."
+        ),
+        terms=(
+            "trading",
+            "trading bank",
+            "trade",
+            "stocks",
+            "shares",
+            "crypto",
+            "meme coin",
+            "broker",
+            "alpaca",
+            "kraken",
+            "coinspot",
+            "swyftx",
+            "interactive brokers",
+            "ibkr",
+            "asx",
+            "paper trading",
+            "kill switch",
+            "approve order",
+            "tax csv",
+            "webhook",
+        ),
+        body=(
+            "Five seats debate each trade: a Technical Analyst, a Researcher, a "
+            "Macro & Sentiment seat, a Risk Guardian, and a Portfolio Manager who "
+            "decides. Each can use its own model (Setup, Seats). A debate opens "
+            "blind, cross-examines, runs a pre-mortem and rebuttals, then the PM "
+            "decides and the Guardian challenges the order; watch it on Debate "
+            "or in the 3D arena on Desk. Before any order a risk period grades it "
+            "A to F with stress tests and an event check, a cooling-off wait "
+            "re-checks the price, hard limits (Setup) are plain code, and the "
+            "live account is checked to be the one you verified. Modes: Paper "
+            "(practice money, the default), Live: I approve (each order waits "
+            "for Approve on Desk), and Live: automatic (type the phrase). Going "
+            "live, saving keys, and verifying accounts work only on the PC: "
+            "Setup, the platform, Save keys, Test, then Yes, this is my account. "
+            "The Kill switch stops everything. Orders has the AUD tax CSV. No "
+            "system can promise returns: run paper first and start live small."
+        ),
+        asks=(
+            "How do I connect my broker?",
+            "How do I approve an order?",
+            "What does the risk grade mean?",
+        ),
+    ),
+    GuideTopic(
+        title="Ops: what the PC is doing",
+        route="/studio#ops",
+        where="MENU, Ops (what the PC is doing). Low-Power Mode: Settings, Studio.",
+        terms=(
+            "ops",
+            "background lanes",
+            "background jobs",
+            "cpu load",
+            "gpu load",
+            "vram",
+            "what is the pc doing",
+            "low power",
+            "low-power mode",
+            "busy processor",
+            "system pulse",
+        ),
+        body=(
+            "Ops shows the PC's load (CPU, memory, each NVIDIA card and its "
+            "memory, disk), the background lanes (web, data, the local model, "
+            "server models, CPU jobs) with what's running and waiting, which "
+            "agents are working, the local model queue, and the trading desk, "
+            "with a 3D pulse on top. One local model turn runs at a time, and "
+            "quiet jobs wait while the processor is busier than Busy-Processor "
+            "Pause. Low-Power Mode (Settings, Studio) halves the lanes and draws "
+            "3D at fewer frames."
+        ),
+    ),
+    GuideTopic(
+        title="3D websites and dashboards",
+        route="/studio#agents",
+        where="Ask the Builder: 'make a 3D landing page' or 'make a live dashboard'.",
+        terms=(
+            "3d",
+            "three.js",
+            "3d website",
+            "3d landing",
+            "3d dashboard",
+            "live dashboard",
+            "web kit",
+            "fcc kit",
+            "animated website",
+        ),
+        body=(
+            "The Builder has two 3D starters: 3d-landing (a hero with a turning "
+            "3D constellation, scroll reveals, counting numbers, a contact form) "
+            "and 3d-dashboard (key numbers, a 3D view of services with load bars "
+            "and moving links, and an activity log, fed by JSON from your API). "
+            "Both use the FCC web kit (fcc-kit.css tokens for colours, light and "
+            "dark; fcc-kit.js for reveals, counters, tilt cards, the menu) and "
+            "bring three.js in the project's vendor folder, so they work offline "
+            "and download whole. The 3D pauses off-screen and shows a flat view "
+            "with reduced motion or without WebGL."
+        ),
+    ),
+    GuideTopic(
         title="Jarvis's playbook",
         route="/studio#more",
         where=(

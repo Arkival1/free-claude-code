@@ -1051,6 +1051,109 @@ your own narration, and the farm credits the wiki in the description.
 Posting stays with you: the platforms only allow it from their own apps or
 business APIs.
 
+**Trading Bank.** The **Trade** tab is a trading desk run by five model
+seats: a **Technical Analyst** (charts and indicators), a **Researcher** (news,
+earnings, ASX announcements, coin facts), a **Macro & Sentiment** seat (the
+market's mood, rates, the index), a **Risk Guardian** (the devil's advocate),
+and a **Portfolio Manager**, who decides. Every few minutes the desk scans
+your watchlist and the day's movers (ASX shares, US shares, crypto, and meme
+coins, each switchable), scores each setup in plain code, and debates only
+the best few. Each seat can think with its own model (Setup, *Seats and
+their models*): server models run side by side, models on this PC take
+turns on the graphics card.
+
+- **The debate.** Every seat reads the same briefing (prices on three
+  timeframes, the market's regime, how this setup did in the symbol's own
+  history, the Researcher's findings, lessons from earlier debriefs, and the
+  seat's own track record). The analysts open blind (in *Max* depth each
+  opening is asked three times and averaged), cross-examine each other, then
+  the Guardian runs a pre-mortem (*"assume this lost money: why?"*) with
+  objections marked blocking or not. Rebuttal rounds follow until the seats
+  settle (Fast 1, Balanced 2, Max 4), closing forecasts, the PM's decision
+  (it must answer every blocking objection), and the Guardian's final
+  challenge to the actual order. Every line streams live on the **Debate**
+  tab and lights up the 3D arena on the **Desk** tab; **Download the log**
+  saves a round, and a plain log of every day is kept in Studio's data
+  folder (`trading/logs`, 30 days).
+- **Forecasts are scored.** Every seat's forecast (traded or not) is checked
+  when it comes due: right or wrong, how confident, whether the target came
+  before the stop. Seats earn vote weight from their record (×0.5 to ×2 after
+  20 scored forecasts), shown with a calibration chart on the **Debriefs**
+  leaderboard.
+- **The risk period.** Before any order: a risk report (money at risk,
+  reward for risk, expected value, a quarter-Kelly cap, stop distance against
+  normal swings, share of a day's volume, correlation with what you hold,
+  currency risk), stress tests (a 1-3 ATR drop, a gap through the stop, a
+  market fall, a meme-coin crash), an event check (earnings, RBA, FOMC, CPI,
+  token unlocks), and a risk round where all five seats grade it A to F. The
+  PM may only make the order smaller or wait. Then a cooling-off wait (2
+  minutes for shares, 1 for crypto) re-checks the price, volatility, spread,
+  and headlines before going on. The **Risk** tab shows the latest one.
+- **Hard limits** (Setup) are plain code no model can talk past: risk per
+  trade, largest position, largest order, open positions, trades a day, a
+  daily loss stop, minimum confidence and agreement, a cool-down per symbol,
+  meme-coin caps (1% each, 5% in all, minimum liquidity and age), a
+  do-not-trade list, and the risk period's settings (minimum grade, reward
+  for risk, correlation, earnings blackout, cooling-off).
+- **The account check.** Right before every order the desk reads the live
+  account: it must be the exact account you verified (Test, then *Yes, this
+  is my account*), active, in the right currency, with enough buying power,
+  the market open, the price still near the decision, and no duplicate order.
+- **Three modes.** **Paper** trades practice money on real prices (AUD
+  10,000 to start; reset any time). **Live: I approve** puts each real order
+  on the Desk tab with its risk grade and account check, waiting for your
+  **Approve** (it re-checks first) or **Deny**. **Live: automatic** trades on
+  its own inside every limit and needs the phrase *I accept real-money
+  trades*. Switching to live, saving keys, and verifying accounts work only
+  on the PC. After a restart only paper trading carries on; live needs
+  **Start** again. The **Kill switch** stops the desk and cancels every
+  waiting order, and can sell everything too.
+- **Platforms** (Setup, each with where to get keys): **Alpaca** (US shares
+  and crypto, free paper account), **Interactive Brokers** (ASX and US shares
+  through IBKR's Client Portal Gateway on this PC), **Kraken**, **Coinbase**,
+  **BTC Markets**, **Independent Reserve**, **CoinSpot (beta)** and **Swyftx
+  (beta)** for crypto and meme coins, and **Any platform (webhook)**, which
+  posts each approved order as JSON (with an optional signature) to
+  TradersPost, your own bot, or an automation. Keys are kept in an
+  owner-only file on the PC, never shown back, and never need withdrawal
+  rights. A lost answer mid-order is looked up by the order's own id before
+  anything is sent again, so an order is never placed twice.
+- **Debriefs.** After each closed trade every seat says what it predicted and
+  what it missed and the PM writes the lesson into the desk's memory (the
+  next briefing recalls it); misses among scored forecasts get a one-line
+  self-critique; each market close gets a session debrief (ASX and US at 4pm
+  local, crypto daily); and a weekly review suggests changes you can
+  **Accept** (limits never change by themselves).
+- **For Australia.** Money is shown in AUD, ASX and New York hours follow
+  their own daylight-saving rules, ASX orders are whole shares with the $500
+  first parcel, and **Orders → Download the tax CSV** lists every sale
+  first-in first-out in AUD with the 12-month flag for the CGT discount (a
+  record for your accountant, not tax advice).
+- **Honestly:** no system can promise returns, and a debate can be
+  confidently wrong. Run paper for a few weeks, read the debriefs and the
+  leaderboard, and start live small. Meme coins on DEXes are research-only
+  (buying there would need a wallet key inside the app); sites without an
+  API (CommSec, SelfWealth, Stake) aren't connected, but a webhook covers
+  anything that takes a web signal.
+
+**Ops.** **Ops (what the PC is doing)** in the menu shows the PC's load (CPU,
+memory, each NVIDIA card and its memory, disk), Studio's background lanes
+(web, data, the local model, server models, CPU jobs) with what's running and
+waiting in each, which agents are working, the local model queue, and the
+trading desk, with a 3D system pulse on top. Background work runs in those
+lanes so it never swamps the PC: one local model turn at a time, quiet jobs
+wait (up to 30 seconds) while the processor is busier than **Busy-Processor
+Pause** (`STUDIO_CPU_THROTTLE`, 85% by default), and **Low-Power Mode**
+(`STUDIO_LOW_POWER`) halves the lanes and draws the 3D at 20 frames a second.
+
+**3D views.** The Trading Bank's debate arena and the Ops pulse are drawn
+with three.js (kept in `vendor/three`), loaded only when a 3D view opens. They
+stay light: at most 30 frames a second, a capped pixel ratio, nothing drawn
+while the page is hidden or the view off-screen, and everything freed when
+you leave the page. With reduced motion switched on, or without WebGL, the
+pages show their flat views instead. Pages cross-fade as you move between
+them.
+
 **Local agents direct server agents.** With **Local Agents Direct Server
 Agents** (`STUDIO_LOCAL_CONTROL`, on by default), every agent thinking on this
 PC gets `ask_agent`, `team_status`, `stop_agent`, and `manage_agent` over the
@@ -1518,10 +1621,26 @@ still looks finished.
   mobile-first starter instead of a blank page: `business` (above), `website` (sections, phone
   menu, contact form), `landing` (hero, features, testimonial, pricing,
   signup), `webapp` (single-page app with saved state), `game` (canvas game
-  loop, score, best score, touch controls), `python-tool` (command line with a
-  test), `python-web` (FastAPI API with a page), and `node-api` (Node server
-  with no dependencies). Every template passes `check_project`. It only
-  replaces a new project's placeholder files, never real work, unless told to.
+  loop, score, best score, touch controls), `3d-landing` and `3d-dashboard`
+  (below), `python-tool` (command line with a test), `python-web` (FastAPI
+  API with a page), and `node-api` (Node server with no dependencies). Every
+  template passes `check_project`. It only replaces a new project's
+  placeholder files, never real work, unless told to.
+- **3D starters and the FCC web kit.** `3d-landing` is a landing page whose
+  hero is a slowly turning constellation of linked points that leans toward
+  the pointer, with features, counting numbers, and a contact form.
+  `3d-dashboard` is a live dashboard: key numbers, a 3D view of services
+  (bars for load, light running along their links), and an activity log,
+  read every few seconds from JSON at the address in `data-source` (or sent
+  in with `window.dashboard.push()`); its sample data drifts gently until
+  you connect real data and remove `data-demo`. Both sit on the FCC web kit:
+  `fcc-kit.css` (design tokens with light and dark, type scale, grid, cards,
+  a sticky nav that folds into a phone menu, forms, page transitions) and
+  `fcc-kit.js` (scroll reveals, `data-count` numbers, `data-tilt` cards, the
+  menu, a light/dark switch), all still with reduced motion. three.js is
+  copied into the project's `vendor/three/` (with its MIT licence) so the
+  site works offline and downloads whole; the 3D pauses off-screen and falls
+  back to a glow or plain bars without WebGL.
 - **Undo.** Every write, edit, and delete keeps the file's last ten versions
   (in a hidden `.studio-history` folder that is never listed or zipped).
   `restore_file` lists them or puts one back, and the replaced version is kept
