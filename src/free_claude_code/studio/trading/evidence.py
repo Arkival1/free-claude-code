@@ -237,7 +237,7 @@ def build_pack(
         fact(
             facts,
             "price",
-            "Price now (the price the desk works from)",
+            "Price now (the most reliable fresh source)",
             preferred.last,
             _source(preferred),
             preferred.timestamp,
@@ -245,6 +245,28 @@ def build_pack(
             realtime=preferred.realtime,
             status=_status(preferred.delayed_minutes),
             note=_snapshot_note(preferred),
+        )
+    sizing = quality.sizing
+    if (
+        sizing is not None
+        and sizing.last
+        and (
+            preferred is None
+            or (sizing.provider, sizing.timestamp)
+            != (preferred.provider, preferred.timestamp)
+        )
+    ):
+        fact(
+            facts,
+            "price",
+            "Price the order would be sized and priced from",
+            sizing.last,
+            _source(sizing),
+            sizing.timestamp,
+            unit=sizing.currency,
+            realtime=sizing.realtime,
+            status=_status(sizing.delayed_minutes),
+            note=_snapshot_note(sizing),
         )
     quoted = [snap for snap in quality.snapshots if snap.spread_pct is not None]
     if quoted:

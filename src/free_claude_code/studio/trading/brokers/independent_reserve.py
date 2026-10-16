@@ -16,6 +16,7 @@ import httpx
 
 from ...resilience import ServiceError, read_json
 from ..data import MarketData, Quote
+from ..information import seconds_from_iso
 from ..instruments import Instrument
 from .base import (
     Account,
@@ -201,14 +202,16 @@ class IndependentReserveBroker:
         last = number(body.get("LastPrice"))
         if last <= 0:
             return None
+        at = seconds_from_iso(body.get("CreatedTimestampUtc"))
         return Quote(
             instrument.symbol,
             last,
             "AUD",
-            self._clock(),
+            at or self._clock(),
             "Independent Reserve",
             number(body.get("CurrentHighestBidPrice")) or None,
             number(body.get("CurrentLowestOfferPrice")) or None,
+            stamped=at is not None,
         )
 
     async def place(self, order: OrderRequest) -> OrderResult:

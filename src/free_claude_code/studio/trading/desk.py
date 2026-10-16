@@ -48,20 +48,27 @@ from .brokers.catalog import ensure_catalog
 from .brokers.paper import PaperBroker
 from .brokers.registry import BROKERS, BrokerSetupError, check_values, make_broker
 from .config import LIVE_AUTO_PHRASE, DeskConfig, DeskConfigStore
-from .data import DATA_LIMITS, MarketData, MarketDataError, Quote, quote_snapshot
+from .data import (
+    DATA_LIMITS,
+    MarketData,
+    MarketDataError,
+    Quote,
+    quote_snapshot,
+    sizing_snapshot,
+)
 from .debate import Debate, DebateResult
 from .debrief import SUGGESTIBLE, Debriefs
 from .evidence import EvidencePack, PortfolioFacts, build_pack
 from .forecasts import due_at, records, score
 from .indicators import true_ranges
-from .information import PROVIDER_DELAY_MINUTES
+from .information import PROVIDER_DELAY_MINUTES, NewsItem, QuoteSnapshot
 from .instruments import Instrument, SymbolError, parse_symbol, universe
 from .ledger import build_ledger, tax_csv
 from .log import Feed, event_view
 from .news import judge
 from .precheck import pre_trade_check
 from .providers.news import NewsFeeds
-from .quality import QualityReport, assess, profile_of
+from .quality import QualityCheck, QualityReport, assess, failed_report, profile_of
 from .records import (
     OPEN_ORDER_STATUSES,
     TradeDebrief,
@@ -568,17 +575,38 @@ class TradingDesk:
                 symbol=instrument.symbol,
             )
             return
-        quality, news_problems = await self._check_data(
+        quality, news_problems, sizing = await self._check_data(
             instrument, briefing, config, record.id
         )
-        pack = await self._evidence(briefing, quality, news_problems, config, record.id)
-        briefing = replace(briefing, evidence_text=pack.text)
-        evidence: JsonObject = {
-            "id": pack.id,
-            "digest": pack.digest,
-            "cutoff": pack.cutoff,
-            "missing": list(pack.missing),
-        }
+        if sizing is not briefing.quote:
+            briefing = replace(briefing, quote=sizing)
+        evidence: JsonObject = {}
+        try:
+            pack = await self._evidence(
+                briefing, quality, news_problems, config, record.id
+            )
+        except Exception as error:
+            # Without the pack the seats would read unchecked text: no buys.
+            logger.warning(
+                "Trading: no evidence pack for {}: {}", instrument.symbol, error
+            )
+            quality = quality.with_check(
+                QualityCheck(
+                    "evidence",
+                    "Evidence pack built",
+                    False,
+                    True,
+                    detail=f"it couldn't be built ({type(error).__name__}: {error})",
+                )
+            )
+        else:
+            briefing = replace(briefing, evidence_text=pack.text)
+            evidence = {
+                "id": pack.id,
+                "digest": pack.digest,
+                "cutoff": pack.cutoff,
+                "missing": list(pack.missing),
+            }
         # Bad data skips the debate for a scanner pick. A holding is still
         # reviewed (it may need selling), and a debate the owner asked for
         # still runs as analysis; neither can buy while the data fails.
@@ -656,7 +684,7 @@ class TradingDesk:
                 record, "blocked", f"Buy decided, but {quality.summary()}"
             )
             return
-        await self._buy(record, briefing, result, decision, config)
+        await self._buy(record, briefing, result, decision, config, quality)
 
     async def _check_data(
         self,
@@ -664,9 +692,50 @@ class TradingDesk:
         briefing: Briefing,
         config: DeskConfig,
         round_id: str,
-    ) -> tuple[QualityReport, tuple[str, ...]]:
-        """The data-quality checks for one candidate, recorded in the feed,
-        and which news feeds couldn't be read."""
+    ) -> tuple[QualityReport, tuple[str, ...], Quote]:
+        """The data-quality checks for one candidate, recorded in the feed;
+        which news feeds couldn't be read; and the quote the order would be
+        sized and priced from. If the checks themselves break, the report
+        fails (no new buys) rather than the round."""
+        broker = self._broker(config)
+        live = config.mode != "paper" and broker.live
+        news: list[NewsItem] = []
+        missing: tuple[str, ...] = ()
+        sizing = briefing.quote
+        try:
+            report, news, missing, sizing = await self._run_checks(
+                instrument, briefing, config, broker, live
+            )
+        except Exception as error:
+            logger.warning(
+                "Trading: the data checks for {} broke: {}", instrument.symbol, error
+            )
+            report = failed_report(
+                instrument.symbol,
+                now=self._clock(),
+                live=live,
+                error=f"{type(error).__name__}: {error}",
+            )
+        view = report.view()
+        view["news"] = [item.view() for item in news]
+        view["news_missing"] = list(missing)
+        await self.feed.emit(
+            "data_quality",
+            report.summary(),
+            round_id=round_id,
+            symbol=instrument.symbol,
+            data=view,
+        )
+        return report, missing, sizing
+
+    async def _run_checks(
+        self,
+        instrument: Instrument,
+        briefing: Briefing,
+        config: DeskConfig,
+        broker: Broker,
+        live: bool,
+    ) -> tuple[QualityReport, list[NewsItem], tuple[str, ...], Quote]:
         snapshots = await self._data.snapshots(instrument)
         raw, missing = await self._news.for_instrument(instrument)
         now = self._clock()
@@ -678,9 +747,9 @@ class TradingDesk:
             atr=briefing.tech.atr,
             max_age_days=config.data.news_max_age_days,
         )
-        broker = self._broker(config)
-        live = config.mode != "paper" and broker.live
         account_at: float | None = None
+        platform: QuoteSnapshot | None = None
+        sizing = briefing.quote
         if live:
             try:
                 await broker.account()
@@ -692,17 +761,21 @@ class TradingDesk:
             with contextlib.suppress(ServiceError):
                 quote = await broker.quote(instrument)
             if quote is not None:
-                # Only Alpaca sends the quote's own time; the others' is when
-                # FCC received it, and the snapshot says so.
-                snapshots = [
-                    quote_snapshot(
-                        quote,
-                        instrument,
-                        received=now,
-                        stamped=quote.source == "Alpaca",
-                    ),
-                    *snapshots,
-                ]
+                # A price flagged delayed, frozen, halted or last-close isn't
+                # real time; one without its own time is cross-checked.
+                platform = quote_snapshot(
+                    quote, instrument, received=now, realtime=not quote.note
+                )
+                snapshots = [platform, *snapshots]
+                if (
+                    quote.stamped
+                    and quote.at > 0
+                    and not quote.note
+                    and quote.currency == briefing.quote.currency
+                ):
+                    # Live orders are sized from the platform's own
+                    # real-time price, not a slower public feed.
+                    sizing = quote
         report = assess(
             instrument,
             now=now,
@@ -715,19 +788,13 @@ class TradingDesk:
             meme_facts=(briefing.dex is not None)
             if instrument.meme or instrument.market == "dex"
             else None,
+            meme_facts_note=self._data.dex_error(instrument),
             venue=await self._data.venue_status(instrument),
+            sizing=sizing_snapshot(sizing, instrument, received=now),
+            platform=platform,
+            platform_name=broker.name,
         )
-        view = report.view()
-        view["news"] = [item.view() for item in news]
-        view["news_missing"] = list(missing)
-        await self.feed.emit(
-            "data_quality",
-            report.summary(),
-            round_id=round_id,
-            symbol=instrument.symbol,
-            data=view,
-        )
-        return report, tuple(missing)
+        return report, news, tuple(missing), sizing
 
     async def _evidence(
         self,
@@ -856,6 +923,7 @@ class TradingDesk:
         result: DebateResult,
         decision: Decision,
         config: DeskConfig,
+        quality: QualityReport,
     ) -> None:
         instrument = briefing.instrument
         broker = self._broker(config)
@@ -934,6 +1002,16 @@ class TradingDesk:
             config=config,
             round_id=record.id,
         )
+        if quality.size_factor < 1:
+            # Data warnings and sources that disagree cut the final size, on
+            # top of every other limit (never a bigger size).
+            assessment.size_factor = min(1.0, assessment.size_factor) * (
+                quality.size_factor
+            )
+            assessment.cautions.append(
+                "Data warnings or disagreeing sources cut the size to "
+                f"{quality.size_factor:.0%}."
+            )
         resize(assessment, rules, fx, equity)
         cooling = (
             config.assessment.cooling_crypto_minutes

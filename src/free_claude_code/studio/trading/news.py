@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 from .indicators import Bar
 from .information import (
     SOURCE_RANK,
+    Copy,
     DataStatus,
     Judgement,
     NewsItem,
@@ -42,7 +43,7 @@ from .information import (
 MAX_AGE_DAYS = 14.0
 FUTURE_SLACK_S = 300.0
 CONFIRM_WINDOW_S = 2 * 86_400.0
-SAME_STORY = 0.5
+SAME_STORY = 0.8
 """Shared-word share (Jaccard) at which two headlines tell the same story."""
 
 OFFICIAL_HOSTS = (
@@ -247,6 +248,44 @@ _ROUTINE = (
 )
 
 
+_TURNING = frozenset(
+    {
+        *(word for word in _POSITIVE + _NEGATIVE if " " not in word),
+        "accepted",
+        "accepts",
+        "rejected",
+        "rejects",
+        "approves",
+        "denied",
+        "denies",
+        "not",
+        "no",
+        "yes",
+        "up",
+        "down",
+        "raise",
+        "raises",
+        "raised",
+        "cut",
+        "cuts",
+        "won",
+        "lost",
+        "loses",
+        "buy",
+        "sell",
+        "bullish",
+        "bearish",
+        "rise",
+        "resumes",
+        "resumed",
+        "above",
+        "below",
+    }
+)
+"""Words whose swap turns a story into its opposite: headlines that differ
+by one of these are different stories, never copies."""
+
+
 @dataclass(frozen=True, slots=True)
 class RawNews:
     """A headline as a provider gave it, before any judging."""
@@ -268,7 +307,11 @@ class RawNews:
 def source_kind(url: str, *, official: bool = False) -> SourceKind:
     if official:
         return "official"
-    host = urlsplit(url).hostname or ""
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:
+        # A malformed link (e.g. a broken IPv6 address) names no known site.
+        host = ""
     host = host.lower().removeprefix("www.")
 
     def matches(hosts: tuple[str, ...]) -> bool:
@@ -424,62 +467,71 @@ def _better(a: NewsItem, b: NewsItem) -> NewsItem:
     return a if a.published_at is not None else b
 
 
+def _same_story(a: NewsItem, b: NewsItem) -> bool:
+    """Near-identical wording, and no word that turns one into the other
+    ("accepted" vs "rejected", "beats" vs "misses")."""
+    if a.key == b.key:
+        return True
+    words_a, words_b = words_of(a.headline), words_of(b.headline)
+    if _jaccard(words_a, words_b) < SAME_STORY:
+        return False
+    return not (words_a ^ words_b) & _TURNING
+
+
 def _dedupe(items: list[NewsItem]) -> list[NewsItem]:
     kept: list[NewsItem] = []
     for item in items:
-        words = words_of(item.headline)
         for index, other in enumerate(kept):
-            same = item.key == other.key or (
-                _jaccard(words, words_of(other.headline)) >= 0.8
+            if not _same_story(item, other):
+                continue
+            best = _better(other, item)
+            folded = item if best is other else other
+            copies = {
+                *other.also_from,
+                *item.also_from,
+                Copy(
+                    folded.source,
+                    folded.source_kind,
+                    folded.published_at,
+                    folded.usable,
+                ),
+            }
+            kept[index] = replace(
+                best,
+                duplicates=other.duplicates + item.duplicates + 1,
+                also_from=tuple(
+                    sorted(
+                        (copy for copy in copies if copy.source != best.source),
+                        key=lambda copy: (copy.source, copy.published_at or 0.0),
+                    )
+                ),
             )
-            if same:
-                best = _better(other, item)
-                folded = item if best is other else other
-                sources = {
-                    *other.also_from,
-                    *item.also_from,
-                    (folded.source, folded.source_kind),
-                }
-                kept[index] = replace(
-                    best,
-                    duplicates=other.duplicates + item.duplicates + 1,
-                    also_from=tuple(
-                        sorted(pair for pair in sources if pair[0] != best.source)
-                    ),
-                )
-                break
+            break
         else:
             kept.append(item)
     return kept
 
 
 def _confirm(items: list[NewsItem]) -> list[NewsItem]:
-    """A reputable, aggregated, or searched story is confirmed when an
-    independent reputable or official source tells it too, within two days.
-    Social media is never confirmed."""
+    """A story is confirmed when an independent reputable or official
+    source told the same story (near-identical wording, folded in as a copy),
+    and that copy was itself dated, fresh, and within two days of it. Social
+    media is never confirmed, and a stale or undated copy confirms nothing."""
     found: list[NewsItem] = []
     for item in items:
         if item.confirmed or item.source_kind == "social" or not item.usable:
             found.append(item)
             continue
-        words = words_of(item.headline)
-        backed = any(
-            other is not item
-            and other.usable
-            and other.source_kind in {"official", "reputable"}
-            and other.source != item.source
-            and _jaccard(words, words_of(other.headline)) >= SAME_STORY
-            and _close_in_time(item, other)
-            for other in items
-        )
         retold = any(
-            kind in {"official", "reputable"} and source != item.source
-            for source, kind in item.also_from
+            copy.usable
+            and copy.kind in {"official", "reputable"}
+            and copy.source != item.source
+            and copy.published_at is not None
+            and item.published_at is not None
+            and abs(copy.published_at - item.published_at) <= CONFIRM_WINDOW_S
+            for copy in item.also_from
         )
-        if backed or retold:
-            found.append(replace(item, confirmed=True))
-        else:
-            found.append(item)
+        found.append(replace(item, confirmed=True) if retold else item)
     return found
 
 

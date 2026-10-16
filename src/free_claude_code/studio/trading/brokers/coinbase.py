@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from ...resilience import ServiceError, read_json
 from ..data import MarketData, Quote
+from ..information import seconds_from_iso
 from ..instruments import Instrument
 from .base import (
     Account,
@@ -240,14 +241,16 @@ class CoinbaseBroker:
         if bid <= 0 or ask <= 0:
             return None
         currency = "USD" if self._quote == "USDC" else self._quote
+        at = seconds_from_iso(books[0].get("time"))
         return Quote(
             instrument.symbol,
             (bid + ask) / 2,
             currency,
-            self._clock(),
+            at or self._clock(),
             "Coinbase",
             bid,
             ask,
+            stamped=at is not None,
         )
 
     async def place(self, order: OrderRequest) -> OrderResult:

@@ -63,6 +63,10 @@ PROVIDER_DELAY_MINUTES: dict[tuple[str, str], int] = {
 """Delays a provider publishes for its free data. Yahoo marks ASX prices as
 delayed 20 minutes; its US share and crypto prices are near real time."""
 
+FUTURE_SLACK_S = 60.0
+"""A time more than this far ahead of FCC's clock is wrong (a skewed clock
+or a bad source), never a fresh price."""
+
 SOURCE_RANK: dict[str, int] = {
     "broker": 6,
     "exchange": 5,
@@ -100,6 +104,10 @@ class QuoteSnapshot:
     volume_unit: str = ""
     """What ``volume`` counts: "coins, 24 hours", "USD, 24 hours", or
     "shares, today" (sources differ)."""
+    stamped: bool = True
+    """False when ``timestamp`` is only when FCC received the price (the
+    venue gave none); such prices are always cross-checked against
+    time-stamped sources."""
 
     @property
     def mid(self) -> float | None:
@@ -119,6 +127,9 @@ class QuoteSnapshot:
         if self.timestamp is None:
             return None
         return max(0.0, now - self.timestamp)
+
+    def in_future(self, now: float) -> bool:
+        return self.timestamp is not None and self.timestamp > now + FUTURE_SLACK_S
 
     def view(self, now: float | None = None) -> JsonObject:
         found: JsonObject = {
@@ -142,6 +153,7 @@ class QuoteSnapshot:
             else None,
             "source_kind": self.source_kind,
             "notes": list(self.notes),
+            "stamped": self.stamped,
         }
         if now is not None:
             age = self.age_s(now)
@@ -278,6 +290,24 @@ class InfoItem:
 
 
 @dataclass(frozen=True, slots=True)
+class Copy:
+    """One more copy of a story, folded into the kept one."""
+
+    source: str
+    kind: SourceKind
+    published_at: float | None
+    usable: bool
+
+    def view(self) -> JsonObject:
+        return {
+            "source": self.source,
+            "kind": self.kind,
+            "published_at": self.published_at,
+            "usable": self.usable,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class NewsItem:
     """One headline or announcement, judged in plain code (not by a model)."""
 
@@ -300,8 +330,9 @@ class NewsItem:
     note: str = ""
     duplicates: int = 0
     """How many copies of the same story were folded into this one."""
-    also_from: tuple[tuple[str, SourceKind], ...] = ()
-    """The publishers (and their kinds) of the copies folded into this one."""
+    also_from: tuple[Copy, ...] = ()
+    """The copies folded into this one: who told it, when, and whether that
+    copy was usable (dated, fresh) itself."""
     document: str = ""
     """The source's own id for it (an ASX document key), when it gives one."""
     ref: str = ""
@@ -344,9 +375,7 @@ class NewsItem:
             "status": self.status,
             "note": self.note,
             "duplicates": self.duplicates,
-            "also_from": [
-                {"source": source, "kind": kind} for source, kind in self.also_from
-            ],
+            "also_from": [copy.view() for copy in self.also_from],
             "document": self.document,
         }
 
@@ -419,9 +448,9 @@ def seconds_from_iso(value: object) -> float | None:
         return None
     try:
         found = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        return found.timestamp() if found.tzinfo is not None else None
+    except ValueError, OverflowError, OSError:
         return None
-    return found.timestamp() if found.tzinfo is not None else None
 
 
 @dataclass(slots=True)

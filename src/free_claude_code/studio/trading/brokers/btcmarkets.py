@@ -18,6 +18,7 @@ import httpx
 
 from ...resilience import ServiceError, read_json
 from ..data import MarketData, Quote
+from ..information import seconds_from_iso
 from ..instruments import Instrument
 from .base import (
     Account,
@@ -187,14 +188,16 @@ class BtcMarketsBroker:
         last = number(body.get("lastPrice"))
         if last <= 0:
             return None
+        at = seconds_from_iso(body.get("timestamp"))
         return Quote(
             instrument.symbol,
             last,
             "AUD",
-            self._clock(),
+            at or self._clock(),
             "BTC Markets",
             number(body.get("bestBid")) or None,
             number(body.get("bestAsk")) or None,
+            stamped=at is not None,
         )
 
     async def place(self, order: OrderRequest) -> OrderResult:

@@ -24,7 +24,7 @@ in.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
 from free_claude_code.core.json_types import JsonObject
@@ -99,6 +99,11 @@ class QualityReport:
     snapshots: tuple[QuoteSnapshot, ...] = ()
     conflicts: tuple[Conflict, ...] = ()
     news: tuple[NewsItem, ...] = field(default=(), repr=False)
+    sizing: QuoteSnapshot | None = None
+    """The price the order would be sized and priced from."""
+
+    def with_check(self, check: QualityCheck) -> QualityReport:
+        return replace(self, checks=(*self.checks, check))
 
     @property
     def blocking(self) -> tuple[QualityCheck, ...]:
@@ -159,6 +164,7 @@ class QualityReport:
             else None,
             "snapshots": [snapshot.view(self.at) for snapshot in self.snapshots],
             "conflicts": [conflict.view() for conflict in self.conflicts],
+            "sizing": self.sizing.view(self.at) if self.sizing is not None else None,
         }
 
 
@@ -173,13 +179,20 @@ def assess(
     news: Sequence[NewsItem] = (),
     account_at: float | None = None,
     meme_facts: bool | None = None,
+    meme_facts_note: str = "",
     venue: VenueStatus | None = None,
+    sizing: QuoteSnapshot | None = None,
+    platform: QuoteSnapshot | None = None,
+    platform_name: str = "",
 ) -> QualityReport:
     """Every check for one symbol at ``now`` (Unix seconds).
 
     ``account_at`` is when the live account was last read (paper needs none);
-    ``meme_facts`` is False when a meme coin's liquidity facts are missing;
-    ``venue`` is whether Coinbase trades the coin right now.
+    ``meme_facts`` is False when a meme coin's liquidity facts are missing
+    (``meme_facts_note`` says why, when the source failed); ``venue`` is
+    whether Coinbase trades the coin right now; ``sizing`` is the price the
+    order would be sized and priced from; ``platform`` is the live trading
+    platform's own quote (live only, named ``platform_name``).
     """
     profile = profile_of(instrument)
     checks: list[QualityCheck] = []
@@ -288,6 +301,12 @@ def assess(
             )
         )
 
+    if sizing is not None:
+        checks.extend(_sizing(sizing, preferred, now, live, limits, profile))
+
+    if live:
+        checks.append(_platform(platform, platform_name, now, limits, profile))
+
     checks.extend(_bars(instrument, daily, now, limits, profile, preferred))
 
     news_checks, news_conflicts = _news(news)
@@ -324,7 +343,9 @@ def assess(
                 "Meme-coin liquidity known",
                 False,
                 True,
-                detail="DexScreener had no liquidity, age, or trading facts for it",
+                detail=f"DexScreener couldn't be read ({meme_facts_note})"
+                if meme_facts_note
+                else "DexScreener has no trading pair with liquidity facts for it",
             )
         )
 
@@ -337,6 +358,133 @@ def assess(
         snapshots=tuple(snapshots),
         conflicts=tuple(conflicts),
         news=tuple(news),
+        sizing=sizing,
+    )
+
+
+def failed_report(symbol: str, *, now: float, live: bool, error: str) -> QualityReport:
+    """The checks themselves broke: nothing can be trusted, so new buys are
+    blocked (held positions are still reviewed)."""
+    return QualityReport(
+        symbol=symbol,
+        at=now,
+        live=live,
+        checks=(
+            QualityCheck(
+                "checks_ran",
+                "Data checks ran",
+                False,
+                True,
+                detail=f"the data checks failed ({error[:200]})",
+            ),
+        ),
+    )
+
+
+def _sizing(
+    sizing: QuoteSnapshot,
+    preferred: QuoteSnapshot | None,
+    now: float,
+    live: bool,
+    limits: DataQualityLimits,
+    profile: str,
+) -> list[QualityCheck]:
+    """The price the order is sized and priced from must pass the same
+    freshness and delay rules, and agree with the most reliable fresh price
+    (whatever their times), or the order would rest on a different price
+    than the one checked."""
+    found: list[QualityCheck] = [
+        replace(
+            _fresh(sizing, now, limits, profile),
+            name="order_price_fresh",
+            label="Order price fresh",
+        )
+    ]
+    found.extend(
+        replace(check, name="order_price_realtime", label="Order price real time")
+        for check in _realtime(sizing, live, limits)
+    )
+    if (
+        preferred is not None
+        and preferred.last
+        and sizing.last
+        and preferred.currency == sizing.currency
+        and (preferred.provider, preferred.timestamp)
+        != (sizing.provider, sizing.timestamp)
+        and preferred.delayed_minutes == sizing.delayed_minutes
+    ):
+        tolerance = limits.conflict_pct.get(profile, 1.0)
+        gap = abs(sizing.last - preferred.last) / min(sizing.last, preferred.last) * 100
+        found.append(
+            QualityCheck(
+                "order_price_agrees",
+                "Order price agrees with the best source",
+                gap <= tolerance,
+                True,
+                measured=round(gap, 3),
+                limit=tolerance,
+                unit="%",
+                detail=""
+                if gap <= tolerance
+                else f"the order would be priced at {sizing.last:g} "
+                f"({sizing.provider}) but {preferred.provider} says "
+                f"{preferred.last:g}",
+            )
+        )
+    return found
+
+
+def _platform(
+    platform: QuoteSnapshot | None,
+    name: str,
+    now: float,
+    limits: DataQualityLimits,
+    profile: str,
+) -> QualityCheck:
+    """Live: the platform that would take the order must itself give a valid
+    bid and ask, as the order check will demand. Another exchange's book
+    doesn't count."""
+    label = f"Bid and ask on {name or 'the trading platform'}"
+    if platform is None:
+        return QualityCheck(
+            "platform_book",
+            label,
+            False,
+            True,
+            detail="the trading platform gave no price",
+        )
+    if platform.spread_pct is None:
+        crossed = bool(platform.bid and platform.ask and platform.ask < platform.bid)
+        return QualityCheck(
+            "platform_book",
+            label,
+            False,
+            True,
+            detail="its bid is above its ask (a broken book)"
+            if crossed
+            else "it gave no valid bid and ask",
+        )
+    if platform.in_future(now):
+        return QualityCheck(
+            "platform_book",
+            label,
+            False,
+            True,
+            detail="its price time is in the future (a clock is wrong)",
+        )
+    spread = platform.spread_pct
+    limit = limits.spread_pct.get(profile, 1.0)
+    return QualityCheck(
+        "platform_book",
+        label,
+        spread <= limit,
+        True,
+        measured=round(spread, 4),
+        limit=limit,
+        unit="%",
+        detail=""
+        if spread <= limit
+        else f"its spread {spread:.3f}% is over {limit:g}%",
     )
 
 
@@ -418,14 +566,37 @@ def _preferred(
 
     def fresh(snap: QuoteSnapshot) -> bool:
         age = snap.age_s(now)
-        return age is not None and age <= _age_limit(snap, limits, profile)
+        return (
+            age is not None
+            and not snap.in_future(now)
+            and age <= _age_limit(snap, limits, profile)
+        )
 
     candidates = [snap for snap in priced if fresh(snap)] or list(priced)
+
+    def middle(snap: QuoteSnapshot) -> float:
+        """How far a price sits from the middle of the others in its
+        currency: among equally reliable sources, the one the rest agree
+        with wins, so a single odd price is never the one used."""
+        values = sorted(
+            other.last
+            for other in candidates
+            if other.last and other.currency == snap.currency
+        )
+        if not values or not snap.last:
+            return 0.0
+        median = values[len(values) // 2]
+        if len(values) % 2 == 0:
+            median = (values[len(values) // 2 - 1] + median) / 2
+        return abs(snap.last - median) / median if median else 0.0
+
     return max(
         candidates,
         key=lambda snap: (
             snap.realtime,
             SOURCE_RANK.get(snap.source_kind, 0),
+            snap.stamped,
+            -middle(snap),
             snap.timestamp or 0.0,
         ),
     )
@@ -436,8 +607,14 @@ def _fresh(
 ) -> QualityCheck:
     age = snap.age_s(now)
     limit = _age_limit(snap, limits, profile)
-    ok = age is not None and age <= limit
-    if age is None:
+    future = snap.in_future(now)
+    ok = age is not None and age <= limit and not future
+    if future and snap.timestamp is not None:
+        detail = (
+            f"{snap.provider}'s price is timed {_duration(snap.timestamp - now)} "
+            "in the future (a clock is wrong), so its age is unknown"
+        )
+    elif age is None:
         detail = f"{snap.provider} gave no time for its price"
     elif ok:
         detail = ""
@@ -517,6 +694,7 @@ def _bid_ask(
         snap
         for snap in priced
         if snap.spread_pct is not None
+        and not snap.in_future(now)
         and (age := snap.age_s(now)) is not None
         and age <= _age_limit(snap, limits, profile)
     ]
@@ -574,7 +752,13 @@ def _price_conflicts(
                 continue
             if first.timestamp is None or second.timestamp is None:
                 continue
-            if abs(first.timestamp - second.timestamp) > COMPARE_WINDOW_S:
+            # A price timed only by when FCC received it is always compared:
+            # its own time is unknown, so other sources are its check.
+            both_stamped = first.stamped and second.stamped
+            if (
+                both_stamped
+                and abs(first.timestamp - second.timestamp) > COMPARE_WINDOW_S
+            ):
                 continue
             a, b = first.last or 0.0, second.last or 0.0
             low = min(a, b)

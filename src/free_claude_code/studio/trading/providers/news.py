@@ -151,7 +151,8 @@ def _rfc822_seconds(value: str | None) -> float | None:
         return None
     try:
         found = parsedate_to_datetime(value.strip())
-    except TypeError, ValueError:
+    except TypeError, ValueError, OverflowError:
+        # A date that can't be read (or a year in the far future) is undated.
         return None
     if found.tzinfo is None:
         return None

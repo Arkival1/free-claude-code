@@ -180,14 +180,16 @@ class AlpacaBroker:
             return None
         # The quote's own time; 0 when Alpaca gives none (the checks treat
         # an untimed price as stale rather than guess).
+        at = seconds_from_iso(row.get("t"))
         return Quote(
             instrument.symbol,
             (bid + ask) / 2,
             "USD",
-            seconds_from_iso(row.get("t")) or 0.0,
+            at or 0.0,
             "Alpaca",
             bid,
             ask,
+            stamped=at is not None,
         )
 
     async def place(self, order: OrderRequest) -> OrderResult:

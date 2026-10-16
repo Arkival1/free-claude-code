@@ -20,6 +20,7 @@ from free_claude_code.core.json_types import JsonObject
 from ..resilience import ServiceError
 from .brokers.base import Account, Broker, OrderRequest
 from .data import Quote
+from .information import FUTURE_SLACK_S
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +268,16 @@ def _quote_quality(
                     blocking=buying and live,
                 )
             )
+        elif quote.at > now + FUTURE_SLACK_S:
+            found.append(
+                CheckItem(
+                    "Price fresh",
+                    False,
+                    f"{quote.source}'s price is timed {quote.at - now:.0f} s in the "
+                    "future (a clock is wrong), so its age is unknown.",
+                    blocking=buying,
+                )
+            )
         else:
             age = max(0.0, now - quote.at)
             found.append(
@@ -280,7 +291,16 @@ def _quote_quality(
             )
     if spread_limit_pct is not None:
         spread = quote.spread_pct
-        if spread is None:
+        if quote.crossed:
+            found.append(
+                CheckItem(
+                    "Spread acceptable",
+                    False,
+                    f"{quote.source}'s bid is above its ask (a broken book).",
+                    blocking=buying,
+                )
+            )
+        elif spread is None:
             found.append(
                 CheckItem(
                     "Spread acceptable",

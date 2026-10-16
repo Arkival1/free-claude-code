@@ -134,38 +134,57 @@ class OrderBooks:
         return bars
 
     async def kraken(self, coin: str) -> QuoteSnapshot:
+        """Kraken's last trade and 24-hour volume, with the best bid and ask
+        from its spread feed, which carries their time. If the spread feed
+        fails, the ticker's bid and ask are used with the time FCC received
+        them, and the snapshot says so."""
         name = KRAKEN_NAMES.get(coin.upper(), coin.upper())
         body = await self._web.get_json(
             f"{KRAKEN}/0/public/Ticker", params={"pair": f"{name}USD"}, what="Kraken"
         )
         received = self._wall()
-        errors = body.get("error") if isinstance(body, dict) else None
-        result = body.get("result") if isinstance(body, dict) else None
-        if errors or not isinstance(result, dict) or not result:
-            detail = "; ".join(str(error) for error in errors or []) or "no ticker"
-            raise ServiceError(f"Kraken has no {name}/USD ticker ({detail}).")
-        ticker = next(iter(result.values()))
+        ticker = _kraken_result(body, name, "ticker")
         if not isinstance(ticker, dict):
             raise ServiceError(f"Kraken sent an odd ticker for {name}/USD.")
         volume = ticker.get("v")
+        bid, ask = _first(ticker.get("b")), _first(ticker.get("a"))
+        stamp: float | None = None
+        try:
+            spread = await self._web.get_json(
+                f"{KRAKEN}/0/public/Spread",
+                params={"pair": f"{name}USD"},
+                what="Kraken",
+            )
+            rows = _kraken_result(spread, name, "spread")
+        except ServiceError as error:
+            logger.info("Trading: Kraken spread for {}: {}", name, error)
+            rows = None
+        if isinstance(rows, list) and rows and isinstance(rows[-1], list):
+            latest = rows[-1]
+            if len(latest) >= 3 and isinstance(latest[0], int | float):
+                stamp = float(latest[0])
+                bid, ask = _number(latest[1]), _number(latest[2])
         return QuoteSnapshot(
             provider="Kraken",
             symbol=coin.upper(),
             exchange="Kraken",
             asset_class="crypto",
             currency="USD",
-            timestamp=received,
+            timestamp=stamp if stamp is not None else received,
             received_at=received,
             exchange_tz="UTC",
             realtime=True,
             delayed_minutes=0,
             last=_first(ticker.get("c")),
-            bid=_first(ticker.get("b")),
-            ask=_first(ticker.get("a")),
+            bid=bid,
+            ask=ask,
             volume=_number(volume[1]) if isinstance(volume, list) and volume else None,
             source_kind="exchange",
-            notes=("Kraken gives no time; the time FCC received it is used",),
+            notes=()
+            if stamp is not None
+            else ("Kraken's spread feed failed; the time FCC received it is used",),
             volume_unit="coins, 24 hours",
+            stamped=stamp is not None,
         )
 
     async def snapshots(self, coin: str) -> list[QuoteSnapshot]:
@@ -200,3 +219,17 @@ def _number(value: object) -> float | None:
 
 def _first(value: object) -> float | None:
     return _number(value[0]) if isinstance(value, list) and value else None
+
+
+def _kraken_result(body: object, name: str, what: str) -> object:
+    """The one pair's entry in a Kraken public answer, or a ServiceError
+    naming Kraken's own error."""
+    errors = body.get("error") if isinstance(body, dict) else None
+    result = body.get("result") if isinstance(body, dict) else None
+    if errors or not isinstance(result, dict) or not result:
+        detail = "; ".join(str(error) for error in errors or []) or f"no {what}"
+        raise ServiceError(f"Kraken has no {name}/USD {what} ({detail}).")
+    entry = next((value for key, value in result.items() if key != "last"), None)
+    if entry is None:
+        raise ServiceError(f"Kraken has no {name}/USD {what}.")
+    return entry

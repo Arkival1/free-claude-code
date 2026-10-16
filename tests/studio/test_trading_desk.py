@@ -158,7 +158,7 @@ def market(request: httpx.Request) -> httpx.Response:
         )
     if host == "api.kraken.com" and path.endswith("/Ticker"):
         _, daily = bars_for("1d", 100.0)
-        price = daily[-1]
+        price = daily[-1] * KRAKEN_SHIFT["factor"]
         return httpx.Response(
             200,
             json={
@@ -183,6 +183,8 @@ def market(request: httpx.Request) -> httpx.Response:
 
 
 MARKET = httpx.MockTransport(market)
+KRAKEN_SHIFT = {"factor": 1.0}
+"""Moves Kraken's made-up price away from the others in a test."""
 
 
 # ------------------------------------------------------------ scripted seats
@@ -470,6 +472,54 @@ async def kinds(store) -> list[str]:
 
 
 # ------------------------------------------------------------ paper, end to end
+
+
+@pytest.mark.asyncio
+async def test_broken_data_checks_block_the_pick_instead_of_killing_the_round(
+    make_desk, store, monkeypatch
+):
+    desk, seats = make_desk()
+    await crypto_only(desk, running=True)
+
+    async def broken(instrument: Instrument) -> list:
+        raise RuntimeError("a feed sent nonsense")
+
+    monkeypatch.setattr(desk._data, "snapshots", broken)
+    await desk._consider(btc(), desk.config())
+    assert seats.calls == []
+    [round_] = await store.find(TradeRound)
+    assert round_.status == "blocked" and "Data checks ran" in round_.note
+    assert "a feed sent nonsense" in round_.note
+    assert not await store.find(TradeOrder)
+
+
+@pytest.mark.asyncio
+async def test_a_price_disagreement_halves_the_order(make_desk, store):
+    async def order_qty() -> float:
+        desk, _ = make_desk()
+        await crypto_only(desk)
+        desk._save(desk.config().model_copy(update={"running": True}))
+        await desk._consider(btc(), desk.config())
+        orders = await store.find(TradeOrder, order_by="created_at DESC")
+        return orders[0].qty
+
+    calm = await order_qty()
+    KRAKEN_SHIFT["factor"] = 1.01
+    try:
+        disputed = await order_qty()
+    finally:
+        KRAKEN_SHIFT["factor"] = 1.0
+    later, earlier = await store.find(TradeRound, order_by="created_at DESC")
+    calm_cut = data(earlier.data)["quality"]["size_factor"]
+    quality = data(later.data)["quality"]
+    # Kraken is 1% away from Coinbase and Yahoo (over the 0.5% tolerance,
+    # under the 1.5% that blocks): the trade goes ahead at half the size it
+    # would otherwise have had (the calm run only lost 10% for missing news).
+    assert quality["size_factor"] == 0.5 and calm_cut == 0.9
+    assert disputed == pytest.approx(calm / calm_cut * 0.5, rel=0.01)
+    assert {item["kind"] for item in quality["conflicts"]} == {"price"}
+    assessment = data(later.data)["assessment"]
+    assert any("cut the size to 50%" in note for note in assessment["cautions"])
 
 
 @pytest.mark.asyncio

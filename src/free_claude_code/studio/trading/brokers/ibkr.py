@@ -41,6 +41,16 @@ class IbkrSetupError(ValueError):
     """The gateway address isn't one FCC will use."""
 
 
+AVAILABILITY = {
+    "R": "",
+    "D": "delayed",
+    "Z": "frozen",
+    "Y": "frozen and delayed",
+    "N": "not subscribed",
+}
+"""IBKR's market-data availability (field 6509, first letter)."""
+
+
 class IbkrBroker:
     id = "ibkr"
     name = "Interactive Brokers"
@@ -192,26 +202,39 @@ class IbkrBroker:
             rows = items(
                 await self._get(
                     "/iserver/marketdata/snapshot",
-                    {"conids": conid, "fields": "31,84,86"},
+                    {"conids": conid, "fields": "31,84,86,6509"},
                 )
             )
             row = rows[0] if rows else {}
             raw = text(row.get("31"))
             # IBKR prefixes a halted symbol's price with H, and the last
-            # close (no trade yet today) with C: neither is a live price, so
-            # the quote says so and carries no time.
+            # close (no trade yet today) with C. Field 6509 says whether the
+            # data is real time (R), delayed (D), frozen (Z, Y), or not
+            # subscribed (N). Only a real-time price keeps its time; anything
+            # else says why and carries no time, so it never counts as fresh.
             halted, closed = raw.startswith("H"), raw.startswith("C")
+            availability = text(row.get("6509"))[:1]
+            updated = number(row.get("_updated")) / 1000
             last = number(raw.lstrip("CH"))
             if last > 0:
+                note = (
+                    "halted"
+                    if halted
+                    else "last close"
+                    if closed
+                    else AVAILABILITY.get(availability, "not said to be live")
+                )
+                live = note == "" and updated > 0
                 return Quote(
                     instrument.symbol,
                     last,
                     "AUD" if instrument.market == "asx" else "USD",
-                    0.0 if halted or closed else self._clock(),
+                    updated if live else 0.0,
                     "IBKR",
                     number(row.get("84")) or None,
                     number(row.get("86")) or None,
-                    note="halted" if halted else "last close" if closed else "",
+                    note=note,
+                    stamped=live,
                 )
         return None
 

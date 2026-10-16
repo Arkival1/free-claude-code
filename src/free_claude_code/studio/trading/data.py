@@ -75,12 +75,28 @@ class Quote:
     bid: float | None = None
     ask: float | None = None
     note: str = ""
-    """What the source flagged: "halted", or "last close" for a price from
-    before today's first trade."""
+    """What the source flagged: "halted", "delayed", or "last close" for a
+    price from before today's first trade."""
+    stamped: bool = False
+    """True when ``at`` is the venue's own time for the price. False when it
+    is only when FCC received it (or 0 when not known at all)."""
+
+    @property
+    def crossed(self) -> bool:
+        """A bid above the ask: a broken book, not a usable price."""
+        return self.bid is not None and self.ask is not None and self.ask < self.bid
 
     @property
     def spread_pct(self) -> float | None:
-        if self.bid is None or self.ask is None or self.price <= 0:
+        """(ask - bid) / price in percent; None without a valid book (a side
+        missing, zero, or crossed)."""
+        if (
+            self.bid is None
+            or self.ask is None
+            or self.price <= 0
+            or self.bid <= 0
+            or self.crossed
+        ):
             return None
         return (self.ask - self.bid) / self.price * 100
 
@@ -94,6 +110,7 @@ class Quote:
             "bid": self.bid,
             "ask": self.ask,
             "note": self.note,
+            "stamped": self.stamped,
         }
 
 
@@ -118,6 +135,7 @@ class MarketData:
         self._cache: dict[tuple[str, ...], tuple[float, object]] = {}
         self._snapshots: dict[str, tuple[float, tuple[QuoteSnapshot, ...]]] = {}
         self._bar_sources: dict[tuple[str, str], str] = {}
+        self._dex_errors: dict[str, str] = {}
         self._coin_ids: dict[str, str] = dict(COINGECKO_IDS)
 
     def _gecko(self) -> CoinGecko:
@@ -303,25 +321,50 @@ class MarketData:
                 price = bars[-1].c
             if isinstance(price, int | float) and price > 0:
                 currency = str(meta.get("currency") or instrument.currency).upper()
+                timed = isinstance(stamp, int | float) and stamp > 0
+                # No time from Yahoo means the price's age is unknown (0),
+                # never "now".
                 return Quote(
                     instrument.symbol,
                     float(price),
                     currency,
-                    float(stamp) if isinstance(stamp, int | float) else self._wall(),
+                    float(stamp) if timed else 0.0,
                     "Yahoo Finance",
+                    stamped=timed,
                 )
             tried.append("Yahoo: no price")
         if instrument.market == "crypto":
+            # A live exchange price, with its own time, before any candle.
+            for source in (self._books.coinbase, self._books.kraken):
+                try:
+                    snap = await source(instrument.symbol)
+                except ServiceError as error:
+                    tried.append(str(error))
+                    continue
+                if snap.last:
+                    return Quote(
+                        instrument.symbol,
+                        snap.last,
+                        snap.currency,
+                        snap.timestamp or 0.0,
+                        snap.provider,
+                        snap.bid,
+                        snap.ask,
+                        stamped=snap.timestamp is not None and snap.stamped,
+                    )
             daily = await self.bars(instrument, "1d")
             if daily:
+                # A daily candle is hours old: its own time says so, and the
+                # freshness checks treat it as stale.
                 return Quote(
                     instrument.symbol,
                     daily[-1].c,
                     "USD",
                     float(daily[-1].t),
-                    "CoinGecko",
+                    self.bars_source(instrument) or "daily candles",
+                    stamped=True,
                 )
-            tried.append("CoinGecko: no price")
+            tried.append("no coin price anywhere")
         raise MarketDataError(
             f"No price for {instrument.symbol} ({'; '.join(tried) or 'no source'})."
         )
@@ -372,18 +415,29 @@ class MarketData:
         if not (instrument.meme or instrument.market == "dex"):
             return None
 
-        async def load() -> DexFacts | None:
-            try:
-                return await self._dex.facts(
-                    instrument.symbol,
-                    chain=instrument.chain,
-                    address=instrument.address,
-                )
-            except ServiceError as error:
-                logger.info("Trading: DexScreener: {}", error)
-                return None
+        key = ("dex", instrument.symbol)
+        found = self._cache.get(key)
+        now = self._clock()
+        if found is not None and now - found[0] < FACTS_SECONDS:
+            return cast(DexFacts | None, found[1])
+        try:
+            facts = await self._dex.facts(
+                instrument.symbol,
+                chain=instrument.chain,
+                address=instrument.address,
+            )
+        except ServiceError as error:
+            # A failure isn't an answer: say so, and ask again next time.
+            logger.info("Trading: DexScreener: {}", error)
+            self._dex_errors[instrument.symbol] = str(error)
+            return None
+        self._dex_errors.pop(instrument.symbol, None)
+        self._cache[key] = (now, facts)
+        return facts
 
-        return await self._cached(("dex", instrument.symbol), FACTS_SECONDS, load)
+    def dex_error(self, instrument: Instrument) -> str:
+        """Why DexScreener couldn't be read for this symbol last time, or ""."""
+        return self._dex_errors.get(instrument.symbol, "")
 
     async def trending_coins(self) -> list[str]:
         """Coins people are searching for and meme coins with heavy trading."""
@@ -462,10 +516,12 @@ def quote_snapshot(
     received: float,
     realtime: bool = True,
     source_kind: SourceKind = "broker",
-    stamped: bool = True,
+    delayed_minutes: int = 0,
 ) -> QuoteSnapshot:
-    """A broker's quote as a snapshot. ``stamped`` is False when the broker
-    gave no time and ``quote.at`` is only when FCC received it."""
+    """A quote as a snapshot. When the quote's time is only when FCC
+    received it (``quote.stamped`` is False), the snapshot says so; the
+    checks then compare it with time-stamped sources whatever its time."""
+    stamped = quote.stamped
     return QuoteSnapshot(
         provider=quote.source,
         symbol=instrument.symbol,
@@ -475,8 +531,8 @@ def quote_snapshot(
         timestamp=quote.at if quote.at > 0 else None,
         received_at=received,
         exchange_tz=EXCHANGE_TZ.get(instrument.market, "UTC"),
-        realtime=realtime,
-        delayed_minutes=0,
+        realtime=realtime and not delayed_minutes,
+        delayed_minutes=delayed_minutes,
         last=quote.price if quote.price > 0 else None,
         bid=quote.bid,
         ask=quote.ask,
@@ -485,8 +541,39 @@ def quote_snapshot(
             note
             for note in (
                 quote.note,
-                "" if stamped else f"{quote.source} gives no time; time received used",
+                ""
+                if stamped or quote.at <= 0
+                else f"{quote.source} gives no time; time received used",
+                f"{quote.source} publishes this price {delayed_minutes} min late"
+                if delayed_minutes
+                else "",
             )
             if note
         ),
+        stamped=stamped,
+    )
+
+
+SOURCE_KINDS: dict[str, SourceKind] = {
+    "Yahoo Finance": "aggregator",
+    "CoinGecko": "aggregator",
+    "DexScreener": "aggregator",
+    "Coinbase Exchange": "exchange",
+    "Kraken": "exchange",
+}
+
+
+def sizing_snapshot(
+    quote: Quote, instrument: Instrument, *, received: float
+) -> QuoteSnapshot:
+    """The quote an order would be sized from, as a snapshot with its true
+    provider, time, and published delay, so it faces the same checks."""
+    delay = PROVIDER_DELAY_MINUTES.get((quote.source, instrument.market), 0)
+    return quote_snapshot(
+        quote,
+        instrument,
+        received=received,
+        realtime=not quote.note,
+        source_kind=SOURCE_KINDS.get(quote.source, "broker"),
+        delayed_minutes=delay,
     )

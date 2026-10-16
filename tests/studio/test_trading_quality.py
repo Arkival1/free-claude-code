@@ -185,7 +185,7 @@ def test_yahoo_and_broker_quotes_become_honest_snapshots():
     assert no_time is not None and no_time.timestamp is None
 
     halted = Quote("BHP.AX", 45.0, "AUD", 0.0, "IBKR", note="halted")
-    broker = quote_snapshot(halted, asx, received=ASX_OPEN, stamped=False)
+    broker = quote_snapshot(halted, asx, received=ASX_OPEN)
     assert broker.timestamp is None
     assert "halted" in broker.notes and broker.source_kind == "broker"
 
@@ -313,7 +313,10 @@ def test_duplicates_fold_and_confirmation_needs_an_independent_source():
     assert kept.duplicates == 2
     # Only Yahoo (an aggregator) and Reuters itself told it: not confirmed.
     assert not kept.confirmed
-    assert ("Yahoo Finance", "aggregator") in kept.also_from
+    assert any(
+        copy.source == "Yahoo Finance" and copy.kind == "aggregator"
+        for copy in kept.also_from
+    )
 
     confirmed = judge(
         [
@@ -413,6 +416,20 @@ async def test_exchange_feeds_give_real_bid_and_ask():
                 return httpx.Response(
                     200, json={"error": ["EQuery:Unknown asset pair"]}
                 )
+            if request.url.path.endswith("/Spread"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "error": [],
+                        "result": {
+                            "XXBTZUSD": [
+                                [1_799_999_990, "99.97", "100.04"],
+                                [1_799_999_995, "99.98", "100.03"],
+                            ],
+                            "last": 1_799_999_995,
+                        },
+                    },
+                )
             return httpx.Response(
                 200,
                 json={
@@ -439,8 +456,10 @@ async def test_exchange_feeds_give_real_bid_and_ask():
             datetime(2026, 10, 16, 9, 30, 58, 108242, tzinfo=UTC).timestamp()
         )
         assert kraken.provider == "Kraken" and kraken.volume == 250.5
-        assert kraken.timestamp == 1_800_000_000.0
-        assert any("no time" in note for note in kraken.notes)
+        assert kraken.received_at == 1_800_000_000.0
+        # Kraken's bid and ask come from its spread feed, with their time.
+        assert kraken.timestamp == 1_799_999_995 and kraken.stamped
+        assert kraken.bid == 99.98 and kraken.ask == 100.03
         with pytest.raises(ServiceError):
             await books.kraken("NOPE")
     finally:
@@ -861,6 +880,8 @@ def test_news_dates_live_accounts_and_meme_facts():
         limits=LIMITS,
         live=True,
         account_at=US_OPEN - 30,
+        platform=snap(US_OPEN, provider="Kraken", kind="broker"),
+        platform_name="Kraken",
         news=dated_news(US_OPEN),
     )
     assert synced.ok, synced.summary()
