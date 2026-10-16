@@ -43,10 +43,11 @@ from ..workers import WorkerPool
 from .assessment import Holdings, recheck, resize, risk_report, risk_round
 from .briefing import Briefing, build_briefing
 from .brokers.base import Broker, Holding, OrderRequest, OrderResult
+from .brokers.catalog import ensure_catalog
 from .brokers.paper import PaperBroker
 from .brokers.registry import BROKERS, BrokerSetupError, check_values, make_broker
 from .config import LIVE_AUTO_PHRASE, DeskConfig, DeskConfigStore
-from .data import DATA_LIMITS, MarketData, MarketDataError
+from .data import DATA_LIMITS, MarketData, MarketDataError, Quote
 from .debate import Debate, DebateResult
 from .debrief import SUGGESTIBLE, Debriefs
 from .forecasts import due_at, records, score
@@ -115,6 +116,7 @@ class TradingDesk:
         self._transport = transport
         self._clock = clock
         self._sleep = sleep
+        ensure_catalog()
         self._configs = DeskConfigStore(root / "desk.json")
         self._web = Web(
             transport=transport,
@@ -961,10 +963,7 @@ class TradingDesk:
                 data={"gate": gate.view()},
             )
             return
-        quote = await broker.quote(instrument)
-        if quote is None:
-            with contextlib.suppress(MarketDataError):
-                quote = await self._data.quote(instrument)
+        quote = await self._quote_in(broker, instrument, order.currency)
         report = await pre_trade_check(
             broker=broker,
             order=_request(order, instrument),
@@ -976,6 +975,7 @@ class TradingDesk:
             market_open=self._is_open(instrument.market),
             quote=quote,
             base_currency=config.currency,
+            held=held.get(order.symbol, 0.0),
         )
         data["check"] = report.view()
         if not report.passed:
@@ -1036,9 +1036,40 @@ class TradingDesk:
             round_id=order.round_id,
             symbol=order.symbol,
         )
-        await self._route(order, self.config(), approved=True)
+        config = self.config()
+        reply = order.data.get("reply")
+        if isinstance(reply, dict):
+            await self._answer_reply(order, dict(reply), config)
+        else:
+            await self._route(order, config, approved=True)
         updated = await self._store.get(TradeOrder, order_id)
         return order_view(updated or order)
+
+    async def _answer_reply(
+        self, order: TradeOrder, reply: JsonObject, config: DeskConfig
+    ) -> None:
+        """The platform asked a person to confirm a warning, and the owner
+        approved: pass the confirmation on."""
+        broker = self._broker_for(order, config)
+        answer = getattr(broker, "answer_reply", None)
+        if answer is None:
+            await self._route(order, config, approved=True)
+            return
+        data = dict(order.data)
+        data.pop("reply", None)
+        order = await self._set(order, status="submitting", data=data)
+        try:
+            result = await answer(reply, order.client_id, order.symbol)
+        except ServiceError as error:
+            await self._set(order, status="rejected", reason=str(error))
+            await self.feed.emit(
+                "error",
+                f"{broker.name} didn't take the confirmation: {error}",
+                round_id=order.round_id,
+                symbol=order.symbol,
+            )
+            return
+        await self._record(order, result, config)
 
     async def deny(self, order_id: str) -> JsonObject:
         order = await self._store.get(TradeOrder, order_id)
@@ -1101,21 +1132,39 @@ class TradingDesk:
             "rejected": "rejected",
             "needs_reply": "awaiting_approval",
         }.get(result.status, "submitted")
-        rate = result.raw.get("fx_rate")
-        fx = float(rate) if isinstance(rate, int | float) else order.fx_rate
-        if result.filled_qty and not isinstance(rate, int | float):
-            with contextlib.suppress(MarketDataError):
-                fx = await self._data.fx(order.currency, config.currency)
+        data = dict(order.data)
+        changes: dict[str, object] = {}
+        if result.status == "needs_reply":
+            reply = result.raw.get("reply")
+            if isinstance(reply, dict):
+                data["reply"] = dict(reply)
+            changes["due_at"] = now_ms() + config.approval_minutes * 60_000
+        if result.raw.get("bracket"):
+            data["bracket"] = True
+        if result.raw.get("unconfirmed"):
+            data["unconfirmed"] = True
+        price, fx, fees = await self._fill_terms(order, result, config)
         updated = await self._set(
             order,
             status=status,
             broker_order_id=result.broker_order_id or order.broker_order_id,
             filled_qty=result.filled_qty,
-            fill_price=result.fill_price,
-            fees=result.fees,
+            fill_price=price,
+            fees=fees,
             fx_rate=fx,
             reason=result.note or order.reason,
+            data=data,
+            **changes,
         )
+        if result.status == "needs_reply":
+            await self.feed.emit(
+                "order",
+                f"{result.note} Approve to confirm, or deny.",
+                round_id=order.round_id,
+                symbol=order.symbol,
+                data={"order_id": order.id},
+            )
+            return
         if (
             status in {"filled", "partially_filled"}
             and result.filled_qty > order.filled_qty
@@ -1123,7 +1172,13 @@ class TradingDesk:
             await self.feed.emit(
                 "fill",
                 f"Filled: {order.side} {result.filled_qty:g} {order.symbol} at "
-                f"{result.fill_price or 0:g} {order.currency} (fees {result.fees:,.2f}).",
+                f"{price or 0:g} {order.currency} (fees {fees:,.2f} {config.currency})"
+                + (
+                    " (sent by webhook, not confirmed)"
+                    if result.raw.get("unconfirmed")
+                    else ""
+                )
+                + ".",
                 round_id=order.round_id,
                 symbol=order.symbol,
                 data={"order": order_view(updated)},
@@ -1142,6 +1197,55 @@ class TradingDesk:
                 round_id=order.round_id,
                 symbol=order.symbol,
             )
+
+    async def _fill_terms(
+        self, order: TradeOrder, result: OrderResult, config: DeskConfig
+    ) -> tuple[float | None, float, float]:
+        """The fill price in the symbol's own currency, the base currency per
+        unit of it, and the fees in the base currency."""
+        price = result.fill_price
+        fill_currency = str(result.raw.get("currency") or order.currency)
+        fee_currency = str(result.raw.get("fee_currency") or fill_currency)
+        rate = result.raw.get("fx_rate")
+        fx = float(rate) if isinstance(rate, int | float) else order.fx_rate
+        fees = result.fees
+        if not result.filled_qty:
+            return price, fx, fees
+        with contextlib.suppress(MarketDataError):
+            if price is not None and fill_currency != order.currency:
+                price = price * await self._data.fx(fill_currency, order.currency)
+            if not isinstance(rate, int | float):
+                fx = await self._data.fx(order.currency, config.currency)
+            if fees and fee_currency != config.currency:
+                fees = fees * await self._data.fx(fee_currency, config.currency)
+        return price, fx, fees
+
+    async def _quote_in(
+        self, broker: Broker, instrument: Instrument, currency: str
+    ) -> Quote | None:
+        """The platform's live price (else the market data's), in the
+        symbol's own currency so it compares with the decision's."""
+        quote = None
+        with contextlib.suppress(ServiceError):
+            quote = await broker.quote(instrument)
+        if quote is None:
+            with contextlib.suppress(MarketDataError):
+                quote = await self._data.quote(instrument)
+        if quote is None or quote.currency == currency:
+            return quote
+        try:
+            rate = await self._data.fx(quote.currency, currency)
+        except MarketDataError:
+            return None
+        return Quote(
+            quote.symbol,
+            quote.price * rate,
+            currency,
+            quote.at,
+            quote.source,
+            quote.bid * rate if quote.bid else None,
+            quote.ask * rate if quote.ask else None,
+        )
 
     async def _expire_approvals(self, config: DeskConfig) -> None:
         for order in await self._store.find(
@@ -1200,7 +1304,7 @@ class TradingDesk:
                 continue
             if not self._is_open(instrument.market):
                 continue
-            quote = await broker.quote(instrument)
+            quote = await self._quote_in(broker, instrument, position.currency)
             if quote is None:
                 continue
             if position.stop_loss is not None and quote.price <= position.stop_loss:
@@ -1602,9 +1706,20 @@ class TradingDesk:
         self._live[broker_id] = (fingerprint, broker)
         return broker
 
+    async def _positions_of(self, broker: Broker) -> list[Holding]:
+        """What the platform holds; for a webhook, what FCC has kept."""
+        if getattr(broker, "reports_positions", True):
+            return await broker.positions()
+        return [
+            Holding(record.symbol, record.qty, record.avg_price, record.currency)
+            for record in await self._store.find(
+                TradePosition, where={"broker": broker.id}
+            )
+        ]
+
     async def _holdings(self, broker: Broker) -> list[Holding]:
         try:
-            return await broker.positions()
+            return await self._positions_of(broker)
         except ServiceError as error:
             await self.feed.emit(
                 "error", f"Couldn't read holdings on {broker.name}: {error}"
@@ -1636,7 +1751,7 @@ class TradingDesk:
         equity = account.equity * await self._data.fx(account.currency, config.currency)
         exposures: list[Exposure] = []
         held: dict[str, float] = {}
-        for holding in await broker.positions():
+        for holding in await self._positions_of(broker):
             held[holding.symbol] = held.get(holding.symbol, 0.0) + holding.qty
             meme = False
             value = holding.qty * holding.avg_price
@@ -2017,6 +2132,7 @@ def _request(order: TradeOrder, instrument: Instrument) -> OrderRequest:
         limit_price=order.limit_price,
         stop_loss=order.stop_loss,
         take_profit=order.take_profit,
+        price_currency=order.currency,
     )
 
 

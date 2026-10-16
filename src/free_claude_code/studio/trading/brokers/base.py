@@ -114,6 +114,9 @@ class OrderRequest:
     limit_price: float | None = None
     stop_loss: float | None = None
     take_profit: float | None = None
+    price_currency: str = "USD"
+    """The currency the prices above are in (the symbol's own); a platform
+    that prices the pair in another currency converts them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +132,9 @@ class OrderResult:
     fees: float = 0.0
     note: str = ""
     raw: JsonObject = field(default_factory=dict)
+    """Extras: ``currency`` the fill price is in, ``fee_currency`` the fees
+    are in (both default to the order's own), ``bracket`` when the platform
+    holds the stop and target, ``reply`` when it wants a person to confirm."""
 
     @property
     def done(self) -> bool:

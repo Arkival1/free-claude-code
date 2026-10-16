@@ -111,7 +111,10 @@ def make_broker(
         raise BrokerSetupError(
             f"{spec.name} needs: {', '.join(missing)}. Add them on the Trading page."
         )
-    return spec.factory(values, data, transport)
+    try:
+        return spec.factory(values, data, transport)
+    except ValueError as error:
+        raise BrokerSetupError(f"{spec.name}: {error}") from error
 
 
 def check_values(broker_id: str, values: Mapping[str, str]) -> dict[str, str]:

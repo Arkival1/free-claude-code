@@ -10,7 +10,7 @@ It reads the live account and the platform's rules, and checks:
 It runs again when the owner taps Approve, since prices and balances move.
 """
 
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from free_claude_code.core.json_types import JsonObject
@@ -73,6 +73,7 @@ async def pre_trade_check(
     market_open: bool,
     quote: Quote | None,
     base_currency: str,
+    held: float,
 ) -> CheckReport:
     """Check one order against the live account and the platform's rules."""
     items: list[CheckItem] = []
@@ -103,7 +104,6 @@ async def pre_trade_check(
             )
         )
     else:
-        held = await _held(broker, symbol)
         items.append(
             CheckItem(
                 "Holding to sell",
@@ -217,11 +217,3 @@ def _identity(broker: Broker, account: Account, verified: str) -> CheckItem:
         if account.fingerprint == verified
         else "This isn't the account you verified; check the keys.",
     )
-
-
-async def _held(broker: Broker, symbol: str) -> float:
-    try:
-        holdings: Sequence = await broker.positions()
-    except ServiceError:
-        return 0.0
-    return sum(holding.qty for holding in holdings if holding.symbol == symbol)
