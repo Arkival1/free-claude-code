@@ -285,6 +285,8 @@ class ApplicationRuntime:
                         self._studio_service.end_interrupted_runs()
                     )
                     self._studio_service.spawn(self._studio_service.ensure_starters())
+                    # Paper trading carries on after a restart; live waits.
+                    self._studio_service.spawn(self._studio_service.resume_trading())
                 self._started = True
         except asyncio.CancelledError:
             await self.close()

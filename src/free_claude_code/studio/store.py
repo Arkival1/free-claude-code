@@ -44,6 +44,14 @@ from .models import (
     VideoNote,
     now_ms,
 )
+from .trading.records import (
+    TradeDebrief,
+    TradeEvent,
+    TradeForecast,
+    TradeOrder,
+    TradePosition,
+    TradeRound,
+)
 
 _JSON_FIELDS = frozenset(
     {
@@ -104,6 +112,12 @@ TABLES: Mapping[type[Record], str] = {
     FarmCharacter: "studio_farm_characters",
     StudioFlag: "studio_flags",
     TeamPlan: "studio_plans",
+    TradeRound: "studio_trade_rounds",
+    TradeEvent: "studio_trade_events",
+    TradeOrder: "studio_trade_orders",
+    TradePosition: "studio_trade_positions",
+    TradeForecast: "studio_trade_forecasts",
+    TradeDebrief: "studio_trade_debriefs",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (
@@ -117,6 +131,9 @@ _INDEXES: tuple[tuple[str, str, str], ...] = (
     ("studio_videos_video", "studio_videos", "video_id"),
     ("studio_study_lessons_study", "studio_study_lessons", "study_id, ordinal"),
     ("studio_farm_posts_channel", "studio_farm_posts", "channel_id, status"),
+    ("studio_trade_events_seq", "studio_trade_events", "seq"),
+    ("studio_trade_orders_status", "studio_trade_orders", "status, updated_at"),
+    ("studio_trade_forecasts_due", "studio_trade_forecasts", "status, due_at"),
 )
 
 
@@ -344,6 +361,49 @@ class StudioStore:
                 f"DELETE FROM {table} WHERE id = ?", (record_id,)
             )
             return cursor.rowcount > 0
+
+        return await self._call(work)
+
+    async def find_after[T: Record](
+        self,
+        model: type[T],
+        column: str,
+        value: object,
+        *,
+        where: Mapping[str, object] | None = None,
+        order_by: str = "created_at ASC",
+        limit: int | None = None,
+    ) -> tuple[T, ...]:
+        """Return records whose ``column`` is above ``value`` (and that match
+        an equality filter), e.g. a feed's lines after the last one seen."""
+        table = _table(model)
+        criteria = dict(where or {})
+        for key in (column, *criteria):
+            if key not in model.model_fields:
+                raise StudioStoreError(f"Unknown filter column '{key}'.")
+        parts = [f"{column} > ?", *(f"{key} IS ?" for key in criteria)]
+        tail = f" LIMIT {int(limit)}" if limit is not None else ""
+        sql = f"SELECT * FROM {table} WHERE {' AND '.join(parts)} ORDER BY {order_by}{tail}"
+
+        def work(connection: sqlite3.Connection) -> tuple[T, ...]:
+            rows = connection.execute(sql, (value, *criteria.values())).fetchall()
+            return tuple(_decode(model, row) for row in rows)
+
+        return await self._call(work)
+
+    async def delete_before(
+        self, model: type[Record], column: str, value: object
+    ) -> int:
+        """Delete every record whose ``column`` is below ``value``."""
+        table = _table(model)
+        if column not in model.model_fields:
+            raise StudioStoreError(f"Unknown filter column '{column}'.")
+
+        def work(connection: sqlite3.Connection) -> int:
+            cursor = connection.execute(
+                f"DELETE FROM {table} WHERE {column} < ?", (value,)
+            )
+            return cursor.rowcount
 
         return await self._call(work)
 

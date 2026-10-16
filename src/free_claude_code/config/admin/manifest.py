@@ -1328,6 +1328,31 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_LOW_POWER",
+        "Low-Power Mode",
+        "studio",
+        "boolean",
+        settings_attr="studio_low_power",
+        description=(
+            "Keep FCC light while you use the PC: background work (searches, "
+            "market data, model calls) runs half as many jobs at once, and 3D "
+            "views draw fewer frames."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CPU_THROTTLE",
+        "Busy-Processor Pause (%)",
+        "studio",
+        "number",
+        settings_attr="studio_cpu_throttle",
+        advanced=True,
+        description=(
+            "Background jobs that can wait (scans, research) pause while the "
+            "processor is busier than this, for up to 30 seconds, so FCC doesn't "
+            "slow down what you're doing. 100 never pauses."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_AGENT_TEMPERATURE",
         "Agent Temperature",
         "studio",

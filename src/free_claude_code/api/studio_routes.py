@@ -59,6 +59,7 @@ from free_claude_code.studio.photos import MAX_PHOTO_BYTES, PhotoError
 from free_claude_code.studio.playbook import PlaybookNote
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
+from free_claude_code.studio.trading.desk import TradingError
 from free_claude_code.studio.tuning import TuningError
 from free_claude_code.studio.vault import VaultError, item_view
 from free_claude_code.studio.videos import clock, render_note
@@ -3204,6 +3205,323 @@ class LabSavePayload(BaseModel):
 
 class LabRenamePayload(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+
+
+class TradingConfigPayload(BaseModel):
+    values: JsonObject = Field(default_factory=dict)
+    confirm: str = Field(default="", max_length=100)
+
+
+class TradingSymbolPayload(BaseModel):
+    symbol: str = Field(min_length=1, max_length=120)
+
+
+class TradingKillPayload(BaseModel):
+    flatten: bool = False
+
+
+class TradingKeysPayload(BaseModel):
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+class TradingConfirmPayload(BaseModel):
+    fingerprint: str = Field(min_length=4, max_length=64)
+
+
+class TradingResetPayload(BaseModel):
+    cash: float | None = Field(default=None, ge=100, le=10_000_000)
+
+
+class TradingDebriefPayload(BaseModel):
+    market: Literal["asx", "us", "crypto", "weekly"] = "weekly"
+
+
+def _trading_failed(error: Exception) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(error))
+
+
+def _from_pc(request: Request) -> bool:
+    try:
+        _on_this_pc(request)
+    except HTTPException:
+        return False
+    return True
+
+
+@router.get("/studio/api/trading")
+async def trading_status(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The desk: mode, account, waiting orders, seats, and what it's doing."""
+    return await studio.trading.status()
+
+
+@router.post("/studio/api/trading/start")
+async def trading_start(
+    request: Request, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return await studio.trading.start(on_pc=_from_pc(request))
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.post("/studio/api/trading/stop")
+async def trading_stop(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return await studio.trading.stop()
+
+
+@router.post("/studio/api/trading/kill")
+async def trading_kill(
+    payload: TradingKillPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Stop the desk and cancel every waiting order (and sell all, with flatten)."""
+    return await studio.trading.kill(flatten=payload.flatten)
+
+
+@router.get("/studio/api/trading/config")
+async def trading_config(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return studio.trading.config().model_dump()
+
+
+@router.put("/studio/api/trading/config")
+async def trading_set_config(
+    payload: TradingConfigPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Change desk settings; going live works only from the PC."""
+    try:
+        config = await studio.trading.update_config(
+            payload.values, on_pc=_from_pc(request), confirm=payload.confirm
+        )
+    except TradingError as error:
+        raise _trading_failed(error) from error
+    return config.model_dump()
+
+
+@router.post("/studio/api/trading/paper/reset")
+async def trading_reset_paper(
+    payload: TradingResetPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    return await studio.trading.reset_paper(payload.cash)
+
+
+@router.get("/studio/api/trading/feed")
+async def trading_feed(
+    after: int = 0, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The live feed: every line after number ``after``."""
+    events = await studio.trading.events(after)
+    return {
+        "events": events,
+        "last": events[-1]["seq"] if events else after,
+        "pulse": studio.trading.pulse(),
+    }
+
+
+@router.post("/studio/api/trading/debate")
+async def trading_debate(
+    payload: TradingSymbolPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Ask the desk about one symbol now."""
+    try:
+        return await studio.trading.debate(payload.symbol)
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.get("/studio/api/trading/rounds")
+async def trading_rounds(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"rounds": await studio.trading.rounds()}
+
+
+@router.get("/studio/api/trading/rounds/{round_id}")
+async def trading_round(
+    round_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return await studio.trading.round(round_id)
+    except TradingError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/studio/api/trading/orders")
+async def trading_orders(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"orders": await studio.trading.orders()}
+
+
+@router.post("/studio/api/trading/orders/{order_id}/approve")
+async def trading_approve(
+    order_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return await studio.trading.approve(order_id)
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.post("/studio/api/trading/orders/{order_id}/deny")
+async def trading_deny(
+    order_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return await studio.trading.deny(order_id)
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.get("/studio/api/trading/positions")
+async def trading_positions(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return {"positions": await studio.trading.positions()}
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.get("/studio/api/trading/brokers")
+async def trading_brokers(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Every platform FCC can trade on; keys show as set, never their values."""
+    return {"brokers": await studio.trading.brokers()}
+
+
+@router.put("/studio/api/trading/brokers/{broker_id}")
+async def trading_save_keys(
+    broker_id: str,
+    payload: TradingKeysPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+    __: None = Depends(_on_this_pc),
+) -> JsonObject:
+    try:
+        return await studio.trading.save_keys(broker_id, payload.values)
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.delete("/studio/api/trading/brokers/{broker_id}")
+async def trading_remove_keys(
+    broker_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+    __: None = Depends(_on_this_pc),
+) -> JsonObject:
+    await studio.trading.remove_keys(broker_id)
+    return {"removed": True}
+
+
+@router.post("/studio/api/trading/brokers/{broker_id}/test")
+async def trading_test_broker(
+    broker_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Connect and read the account (number masked) for the owner to check."""
+    try:
+        return await studio.trading.test_broker(broker_id)
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.post("/studio/api/trading/brokers/{broker_id}/confirm")
+async def trading_confirm_account(
+    broker_id: str,
+    payload: TradingConfirmPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+    __: None = Depends(_on_this_pc),
+) -> JsonObject:
+    """The owner says the account shown is theirs; every order checks it."""
+    try:
+        return await studio.trading.confirm_account(broker_id, payload.fingerprint)
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.get("/studio/api/trading/forecasts")
+async def trading_forecasts(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"forecasts": await studio.trading.forecasts()}
+
+
+@router.get("/studio/api/trading/seats/stats")
+async def trading_seat_stats(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return await studio.trading.seat_stats()
+
+
+@router.get("/studio/api/trading/debriefs")
+async def trading_debriefs(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"debriefs": await studio.trading.debriefs()}
+
+
+@router.post("/studio/api/trading/debrief")
+async def trading_debrief_now(
+    payload: TradingDebriefPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        return await studio.trading.debrief_now(payload.market)
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.post("/studio/api/trading/debriefs/{debrief_id}/suggestions/{index}")
+async def trading_accept_suggestion(
+    debrief_id: str,
+    index: int,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        return await studio.trading.accept_suggestion(
+            debrief_id, index, on_pc=_from_pc(request)
+        )
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.get("/studio/api/trading/summary")
+async def trading_summary(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Realised profit and loss, closed trades, and win rate."""
+    return await studio.trading.summary()
+
+
+@router.get("/studio/api/trading/export.csv")
+async def trading_export(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> Response:
+    """Every sale as a capital gains row in the base currency, for tax time."""
+    return Response(
+        await studio.trading.export_csv(),
+        media_type="text/csv",
+        headers={"content-disposition": 'attachment; filename="fcc-trades.csv"'},
+    )
 
 
 def _lab_failed(error: LabError) -> HTTPException:

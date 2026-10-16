@@ -303,12 +303,15 @@ from .tools import (
     ToolOutcome,
     tool_tokens,
 )
+from .trading.config import SeatConfig
+from .trading.desk import TradingDesk
 from .tuning import CloudTuner, LightTuner, TuningError
 from .vault import RepoVault
 from .video_ears import Fetch, Hear, VideoEars, VideoEarsError, ytdlp_fetch
 from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
 from .voice import SpeechAudio, VoiceError, VoiceService, speakable
 from .weather import WeatherError, forecast, weather_request
+from .workers import WorkerPool
 
 GUIDE_AGENT_NAME = "Guide"
 BUILDER_AGENT_NAME = "Builder"
@@ -724,6 +727,7 @@ class StudioService:
         media_home: Path | None = None,
         hear: Hear | None = None,
         fetch: Fetch | None = None,
+        market_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._store = store
         # The desktop browser agents drive, opened on first use and kept
@@ -876,6 +880,24 @@ class StudioService:
         )
         self._voice_warmed = False
         self._studying: set[str] = set()
+        # Background lanes that keep FCC light on the PC (the Ops page shows them).
+        self.workers = WorkerPool(
+            low_power=lambda: self.settings.studio_low_power,
+            busy_percent=lambda: float(self.settings.studio_cpu_throttle),
+        )
+        # The Trading Bank: five model seats debate; paper or live trading.
+        self._trading = TradingDesk(
+            store=store,
+            root=self._data_root / "trading",
+            think=self._trading_think,
+            search=self._search,
+            memory=self._memory,
+            keys=ConnectorStore(self._data_root / "trading-keys.json"),
+            workers=self.workers,
+            online=self._connectivity.check,
+            read_page=self._trading_read_page,
+            transport=market_transport or search_transport,
+        )
         self._router.use_stand_in(self._stand_in_model)
         self._router.use_fallback(lambda: self.server_model)
         self._router.use_turns(lambda: self.settings.studio_local_model_turns)
@@ -1722,6 +1744,7 @@ class StudioService:
             self._farm_pilot.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._farm_pilot
+        await self._trading.close()
         await self._engine.stop()
         await self._mcp.close()
         await self.close_desk_browser()
@@ -2366,6 +2389,52 @@ class StudioService:
 
     async def delete_idea(self, idea_id: str) -> bool:
         return await self._ideas.delete(idea_id)
+
+    # ------------------------------------------------------------ trading
+
+    @property
+    def trading(self) -> TradingDesk:
+        """The Trading Bank's desk: seats, debates, the risk period, orders."""
+        return self._trading
+
+    async def _trading_think(
+        self, seat: SeatConfig, system: str, prompt: str, max_tokens: int
+    ) -> str:
+        """A trading seat's question, on its own model and in the right lane;
+        the main AI's model answers when a server model can't."""
+        chosen = await self.effective_model(seat.model or self.server_model)
+        lane = (
+            "model_local" if chosen.startswith(LOCAL_MODEL_PREFIX) else "model_server"
+        )
+        async with self.workers.lane(lane, label=f"{seat.name} thinking"):
+            try:
+                reply = await self._router.complete(
+                    [ChatMessage.user(prompt)],
+                    model=chosen,
+                    system=system,
+                    temperature=seat.temperature,
+                    max_tokens=max_tokens,
+                )
+            except StudioLLMError:
+                own = (await self.main_agent()).model or self.default_model
+                if own == chosen:
+                    raise
+                reply = await self._router.complete(
+                    [ChatMessage.user(prompt)],
+                    model=own,
+                    system=system,
+                    temperature=seat.temperature,
+                    max_tokens=max_tokens,
+                )
+        return reply.text
+
+    async def _trading_read_page(self, url: str) -> str:
+        found = await self._web_tools.fetch(url, egress=self._egress())
+        return found.data
+
+    async def resume_trading(self) -> None:
+        """At start-up: paper trading carries on; live waits for Start."""
+        await self._trading.resume()
 
     # ------------------------------------------------------------ the Lab
 

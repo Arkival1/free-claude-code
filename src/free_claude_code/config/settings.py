@@ -830,6 +830,10 @@ class Settings(BaseModel):
     studio_local_model_turns: bool = Field(
         default=True, validation_alias="STUDIO_LOCAL_MODEL_TURNS"
     )
+    studio_low_power: bool = Field(default=False, validation_alias="STUDIO_LOW_POWER")
+    studio_cpu_throttle: int = Field(
+        default=85, ge=30, le=100, validation_alias="STUDIO_CPU_THROTTLE"
+    )
     studio_private_memory: bool = Field(
         default=True, validation_alias="STUDIO_PRIVATE_MEMORY"
     )
