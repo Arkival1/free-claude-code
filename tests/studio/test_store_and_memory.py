@@ -1,10 +1,12 @@
 """The Studio store keeps records, transcripts, and agent memory coherent."""
 
+import asyncio
+
 import pytest
 
 from free_claude_code.studio.memory import MemoryService, keywords
 from free_claude_code.studio.models import Agent, Chat, MemoryEntry
-from free_claude_code.studio.store import StudioNotFoundError
+from free_claude_code.studio.store import StudioNotFoundError, StudioStore
 
 
 @pytest.mark.asyncio
@@ -107,3 +109,12 @@ async def test_context_block_renders_both_scopes(store):
     block = await memory.context_block("agt_1", "tides")
     assert "Tides follow the moon." in block
     assert "Currently drafting a tide page." in block
+
+
+@pytest.mark.asyncio
+async def test_a_new_database_takes_many_first_requests_at_once(tmp_path):
+    """A page's first requests arrive together; none may find the database
+    locked while another sets it up."""
+    store = StudioStore(tmp_path / "fresh.sqlite3")
+    found = await asyncio.gather(*(store.find(Agent) for _ in range(16)))
+    assert found == [()] * 16

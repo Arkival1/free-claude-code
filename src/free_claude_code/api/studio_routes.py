@@ -82,6 +82,8 @@ _ASSET_FILENAMES = frozenset(
         "farm.js",
         "hq.css",
         "hq.js",
+        "trade.css",
+        "trade.js",
         "icon.svg",
         "icon-180.png",
         "icon-192.png",

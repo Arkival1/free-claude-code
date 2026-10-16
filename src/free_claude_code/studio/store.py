@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import closing
 from pathlib import Path
@@ -185,6 +186,7 @@ class StudioStore:
     def __init__(self, database_path: Path) -> None:
         self._path = database_path
         self._ready = False
+        self._preparing = threading.Lock()
 
     @property
     def path(self) -> Path:
@@ -206,15 +208,21 @@ class StudioStore:
     def _prepare(self) -> None:
         if self._ready:
             return
-        with closing(self._connect()) as connection:
-            for model in TABLES:
-                connection.execute(_schema(model))
-                self._migrate(connection, model)
-            for name, table, columns in _INDEXES:
-                connection.execute(
-                    f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})"
-                )
-        self._ready = True
+        # One thread creates and upgrades the tables while the rest wait: a
+        # page's first requests arrive together, and on a new database they
+        # would race to switch on WAL (or to add the same new column twice).
+        with self._preparing:
+            if self._ready:
+                return
+            with closing(self._connect()) as connection:
+                for model in TABLES:
+                    connection.execute(_schema(model))
+                    self._migrate(connection, model)
+                for name, table, columns in _INDEXES:
+                    connection.execute(
+                        f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})"
+                    )
+            self._ready = True
 
     def _migrate(self, connection: sqlite3.Connection, model: type[Record]) -> None:
         """Add columns introduced after a database was first created."""

@@ -40,4 +40,4 @@ def test_the_hq_is_in_the_tab_bar(page: Page, admin_base_url: str) -> None:
     page.goto(f"{admin_base_url}/studio#agents")
     page.locator(".tab[data-route='hq']").click()
     expect(page.locator(".hq-canvas")).to_be_visible()
-    expect(page.locator(".tab-bar .tab")).to_have_count(8)
+    expect(page.locator(".tab-bar .tab")).to_have_count(9)

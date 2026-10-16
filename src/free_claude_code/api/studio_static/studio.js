@@ -3,7 +3,7 @@
   "use strict";
 
   const TOKEN_KEY = "fcc.studio.token";
-  const TAB_ROUTES = ["home", "chats", "hq", "agents", "lab", "farm", "learn", "more"];
+  const TAB_ROUTES = ["home", "chats", "hq", "agents", "lab", "farm", "trade", "learn", "more"];
   const POLL_MS = 2500;
   const HIDDEN_POLL_MS = 10000;
 
@@ -6056,6 +6056,7 @@
     ["Chats", "chats", "◌"],
     ["Lab", "lab", "⚗"],
     ["Content Farm", "farm", "🌾"],
+    ["Trading Bank", "trade", "📈"],
     ["Classroom", "learn", "✎"],
     ["Models", "models", "▣"],
     ["Model Control", "engine", "⚡"],
@@ -7238,6 +7239,7 @@
         case "lora": return await renderLoraJob(id);
         case "lab": return await renderLab(generation);
         case "farm": return await renderFarm(generation);
+        case "trade": return await renderTrade(generation);
         case "hq": return await renderHQ(generation);
         case "connectors": return await renderConnectors();
         case "ideas": return await renderIdeas();
@@ -7497,6 +7499,21 @@
       .catch(() => {});
   }
 
+  // The Trading Bank lives in trade.js, with the same helpers.
+  async function renderTrade(generation) {
+    if (!window.FCCTrade) throw new Error("The Trading Bank didn't load. Reload the page.");
+    await window.FCCTrade.render({
+      view,
+      el,
+      api,
+      post,
+      remove,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
   function headingFor(name) {
     return (
       {
@@ -7518,6 +7535,7 @@
         lora: "LoRA training",
         lab: "Lab",
         farm: "Content Farm",
+        trade: "Trading Bank",
         hq: "HQ",
         connectors: "Connectors",
         ideas: "Ideas board",
