@@ -210,7 +210,25 @@
       openGuide();
     }
   });
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", navigate);
+
+  // Pages cross-fade where the browser can (View Transitions); a page that
+  // takes longer than a moment to load finishes after the fade. Elsewhere
+  // the new page fades in, and with reduced motion nothing moves.
+  function navigate() {
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) return render();
+    if (!document.startViewTransition) {
+      return render().then(() => {
+        view.classList.remove("view-enter");
+        void view.offsetWidth;
+        view.classList.add("view-enter");
+      });
+    }
+    document.startViewTransition(() =>
+      Promise.race([render(), new Promise((resolve) => setTimeout(resolve, 280))])
+    );
+  }
 
   function startPolling(job) {
     stopPolling();
@@ -6057,6 +6075,7 @@
     ["Lab", "lab", "⚗"],
     ["Content Farm", "farm", "🌾"],
     ["Trading Bank", "trade", "📈"],
+    ["Ops (what the PC is doing)", "ops", "◉"],
     ["Classroom", "learn", "✎"],
     ["Models", "models", "▣"],
     ["Model Control", "engine", "⚡"],
@@ -7240,6 +7259,7 @@
         case "lab": return await renderLab(generation);
         case "farm": return await renderFarm(generation);
         case "trade": return await renderTrade(generation);
+        case "ops": return await renderOps(generation);
         case "hq": return await renderHQ(generation);
         case "connectors": return await renderConnectors();
         case "ideas": return await renderIdeas();
@@ -7514,6 +7534,19 @@
     });
   }
 
+  // Ops (the PC's load, background lanes, busy agents) lives in ops.js.
+  async function renderOps(generation) {
+    if (!window.FCCOps) throw new Error("The Ops page didn't load. Reload the page.");
+    await window.FCCOps.render({
+      view,
+      el,
+      api,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
   function headingFor(name) {
     return (
       {
@@ -7536,6 +7569,7 @@
         lab: "Lab",
         farm: "Content Farm",
         trade: "Trading Bank",
+        ops: "Ops",
         hq: "HQ",
         connectors: "Connectors",
         ideas: "Ideas board",

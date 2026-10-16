@@ -2965,3 +2965,31 @@ h3.subhead {
   overflow-wrap: anywhere;
   font-size: 0.85rem;
 }
+
+/* Page changes: a quick cross-fade (View Transitions), or a fade-in where
+   the browser has none; nothing moves with reduced motion. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
+}
+
+.view.view-enter {
+  animation: view-enter 180ms ease-out;
+}
+
+@keyframes view-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+
+  .view.view-enter {
+    animation: none;
+  }
+}

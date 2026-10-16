@@ -2397,6 +2397,38 @@ class StudioService:
         """The Trading Bank's desk: seats, debates, the risk period, orders."""
         return self._trading
 
+    async def ops(self) -> JsonObject:
+        """The Ops page in one light read: this PC's load, every worker lane,
+        which agents are busy, the local model queue, and the trading desk."""
+        reading = await anyio.to_thread.run_sync(
+            lambda: system_monitor.sample(self._models_dir)
+        )
+        cards = await anyio.to_thread.run_sync(system_monitor.gpus)
+        await self.ensure_defaults()
+        busy = await self.busy_agent_ids()
+        turns = self._router.turns
+        return {
+            "machine": {**reading, "gpus": cards or []},
+            "workers": self.workers.stats(),
+            "agents": [
+                {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "role": agent.role,
+                    "busy": agent.id in busy,
+                }
+                for agent in await self.agents()
+                if not agent.archived
+            ],
+            "turns": {
+                "working": [model_label(model) for model in turns.working],
+                "waiting": [model_label(model) for model in turns.waiting],
+            },
+            "trading": self._trading.pulse(),
+            "low_power": self.settings.studio_low_power,
+            "at": now_ms(),
+        }
+
     async def _trading_think(
         self, seat: SeatConfig, system: str, prompt: str, max_tokens: int
     ) -> str:

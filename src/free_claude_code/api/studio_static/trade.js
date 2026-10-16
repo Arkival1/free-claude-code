@@ -72,6 +72,11 @@
   // an opened account check stays open).
   const painted = new WeakMap();
 
+  // The 3D arena (trade3d.js, with three.js) loads only when the desk is
+  // shown, from the same folder as this script.
+  const BASE = document.currentScript ? new URL(".", document.currentScript.src).href : "";
+  let arenaLoading = null;
+
   let ctx = null;
   let root = null;
   let feedTimer = null;
@@ -436,10 +441,8 @@
     const snapshot = arenaState();
     if (caption) caption.textContent = snapshot.symbol ? `${snapshot.symbol} · ${snapshot.stage || ""}` : "Waiting for a debate";
     const host = root.querySelector("#trade-arena");
-    if (host && window.FCCTradeArena?.show) {
-      window.FCCTradeArena.show(host, snapshot);
-      return;
-    }
+    if (host && window.FCCTradeArena?.show(host, { ...snapshot, lowPower: Boolean(state.status?.low_power) })) return;
+    loadArena();
     const ring = root.querySelector("#arena-ring");
     if (!ring) return;
     const speaking = Number(snapshot.activity.seat || 0);
@@ -462,6 +465,17 @@
         );
       })
     );
+  }
+
+  function loadArena() {
+    if (window.FCCTradeArena || arenaLoading || !BASE) return;
+    arenaLoading = import(`${BASE}trade3d.js`)
+      .then(() => {
+        if (state.tab === "desk" && stillHere()) paintArena();
+      })
+      .catch(() => {
+        arenaLoading = "unavailable"; // the 2D ring stays
+      });
   }
 
   function waitingCard(waiting) {

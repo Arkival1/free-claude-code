@@ -14,7 +14,10 @@ def test_the_trading_bank_opens_on_paper_with_every_tab(
     expect(page.locator(".tab[data-route='trade']")).to_have_attribute(
         "aria-current", "page"
     )
-    expect(page.locator("#trade-arena")).to_be_visible()
+    # The seats are drawn in 3D, or as the flat ring where WebGL isn't on.
+    expect(
+        page.locator("#trade-arena canvas, #trade-arena .ring-seat").first
+    ).to_be_visible()
 
     page.locator(".trade-tab", has_text="Debate").click()
     expect(page.locator("#trade-feed")).to_be_visible()

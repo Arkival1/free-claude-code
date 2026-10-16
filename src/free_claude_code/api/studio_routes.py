@@ -2,6 +2,9 @@
 
 import asyncio
 import contextlib
+import functools
+import gzip
+import hashlib
 import json
 import re
 import secrets
@@ -84,6 +87,14 @@ _ASSET_FILENAMES = frozenset(
         "hq.js",
         "trade.css",
         "trade.js",
+        "fcc3d.js",
+        "trade3d.js",
+        "ops.css",
+        "ops.js",
+        "ops3d.js",
+        "three.module.js",
+        "three.core.js",
+        "three-orbit.js",
         "icon.svg",
         "icon-180.png",
         "icon-192.png",
@@ -423,12 +434,43 @@ def studio_service_worker() -> Response:
     )
 
 
+# Named here, not guessed: Windows can map .js to text/plain in its
+# registry, and browsers refuse to run a module script sent that way.
+_ASSET_TYPES = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+}
+_COMPRESSED_SUFFIXES = frozenset({".js", ".css", ".svg"})
+
+
+@functools.lru_cache(maxsize=32)
+def _gzipped(path: Path, _changed: int) -> tuple[bytes, str]:
+    """A text asset gzip-compressed once (again if the file changes), with
+    an ETag for that exact body."""
+    body = gzip.compress(path.read_bytes(), compresslevel=6, mtime=0)
+    return body, f'"{hashlib.sha256(body).hexdigest()[:24]}"'
+
+
 @router.get("/studio/assets/{version}/{filename}", include_in_schema=False)
-def studio_asset(version: str, filename: str) -> FileResponse:
-    """Serve a versioned Studio asset."""
+def studio_asset(version: str, filename: str, request: Request) -> Response:
+    """Serve a versioned Studio asset; scripts and styles go gzip-compressed
+    (three.js is 2.1 MB as it ships, about 450 KB this way)."""
     if version != package_version() or filename not in _ASSET_FILENAMES:
         raise HTTPException(status_code=404, detail="Studio asset not found")
-    return FileResponse(_asset_path(filename))
+    path = _asset_path(filename)
+    kind = _ASSET_TYPES.get(path.suffix)
+    accepts = request.headers.get("accept-encoding", "")
+    if path.suffix not in _COMPRESSED_SUFFIXES or "gzip" not in accepts:
+        return FileResponse(path, media_type=kind)
+    body, etag = _gzipped(path, path.stat().st_mtime_ns)
+    headers = {"etag": etag, "vary": "Accept-Encoding"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(
+        body, media_type=kind, headers={**headers, "content-encoding": "gzip"}
+    )
 
 
 @router.get("/studio/api/connect")
@@ -3255,7 +3297,19 @@ async def trading_status(
     studio: StudioService = Depends(get_studio), _: None = Access
 ) -> JsonObject:
     """The desk: mode, account, waiting orders, seats, and what it's doing."""
-    return await studio.trading.status()
+    return {
+        **await studio.trading.status(),
+        "low_power": studio.settings.studio_low_power,
+    }
+
+
+@router.get("/studio/api/ops")
+async def ops(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The Ops page: this PC's load, the worker lanes, busy agents, model
+    turns, and the trading desk."""
+    return await studio.ops()
 
 
 @router.post("/studio/api/trading/start")
