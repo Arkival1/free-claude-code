@@ -51,6 +51,22 @@ class TradeRound(Record):
     updated_at: int = Field(default_factory=now_ms)
 
 
+class TradeEvidence(Record):
+    """The numbered evidence pack the seats saw for one round, exactly as
+    they saw it (its text is hashed in ``digest``)."""
+
+    id: str = Field(default_factory=lambda: new_id("evp"))
+    round_id: str = ""
+    symbol: str = ""
+    cutoff_ms: int = 0
+    """Nothing in the pack is from after this time (Unix ms)."""
+    digest: str = ""
+    text: str = ""
+    data: JsonObject = Field(default_factory=dict)
+    """Every item with its number, source, time, and status."""
+    created_at: int = Field(default_factory=now_ms)
+
+
 class TradeEvent(Record):
     """One line of the live feed: a seat speaking, a check, an order, a fill."""
 

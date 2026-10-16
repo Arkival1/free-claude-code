@@ -117,6 +117,7 @@ class MarketData:
         self._wall = wall
         self._cache: dict[tuple[str, ...], tuple[float, object]] = {}
         self._snapshots: dict[str, tuple[float, tuple[QuoteSnapshot, ...]]] = {}
+        self._bar_sources: dict[tuple[str, str], str] = {}
         self._coin_ids: dict[str, str] = dict(COINGECKO_IDS)
 
     def _gecko(self) -> CoinGecko:
@@ -163,7 +164,9 @@ class MarketData:
             logger.info(
                 "Trading: Yahoo has no {} {} bars ({})", symbol, interval, error
             )
+        key = (instrument.symbol, interval)
         if bars or instrument.market != "crypto" or interval != "1d":
+            self._bar_sources[key] = "Yahoo Finance" if bars else ""
             return bars
         try:
             bars = await self._books.coinbase_daily(instrument.symbol)
@@ -172,15 +175,22 @@ class MarketData:
                 "Trading: Coinbase has no {} history ({})", instrument.symbol, error
             )
         if bars:
+            self._bar_sources[key] = "Coinbase Exchange"
             return bars
         coin = await self.coin_id(instrument.symbol)
         if not coin:
             return []
         try:
-            return await self._gecko().daily(coin)
+            bars = await self._gecko().daily(coin)
         except ServiceError as error:
             logger.info("Trading: CoinGecko has no {} history ({})", coin, error)
             return []
+        self._bar_sources[key] = "CoinGecko" if bars else ""
+        return bars
+
+    def bars_source(self, instrument: Instrument, interval: str = "1d") -> str:
+        """Who supplied the candles last fetched for this symbol, or ""."""
+        return self._bar_sources.get((instrument.symbol, interval), "")
 
     async def coin_id(self, symbol: str) -> str:
         found = self._coin_ids.get(symbol)
@@ -262,6 +272,7 @@ class MarketData:
                         volume=facts.volume_24h or None,
                         source_kind="aggregator",
                         notes=("DexScreener gives no time for its price",),
+                        volume_unit="USD, 24 hours",
                     )
                 )
         if taken:
@@ -436,6 +447,11 @@ def yahoo_snapshot(
         notes=(f"Yahoo publishes {instrument.market.upper()} prices {delay} min late",)
         if delay
         else (),
+        # Yahoo counts a coin's volume in dollars over 24 hours, a share's in
+        # shares since the open.
+        volume_unit="USD, 24 hours"
+        if instrument.market == "crypto"
+        else "shares, today",
     )
 
 

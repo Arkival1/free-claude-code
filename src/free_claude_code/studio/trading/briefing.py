@@ -49,6 +49,9 @@ class Briefing:
     beta: float | None
     daily: tuple[Bar, ...] = field(repr=False, default=())
     meme_warnings: tuple[str, ...] = ()
+    evidence_text: str = field(repr=False, default="")
+    """The numbered evidence pack, once built; the seats then read it in
+    place of the plain briefing."""
 
     @property
     def symbol(self) -> str:
@@ -59,6 +62,8 @@ class Briefing:
         return self.quote.price
 
     def shared(self) -> str:
+        if self.evidence_text:
+            return self.evidence_text
         instrument = self.instrument
         label = MARKET_LABELS.get(instrument.market, instrument.market)
         if instrument.meme:

@@ -97,6 +97,9 @@ class QuoteSnapshot:
     volume: float | None = None
     source_kind: SourceKind = "aggregator"
     notes: tuple[str, ...] = ()
+    volume_unit: str = ""
+    """What ``volume`` counts: "coins, 24 hours", "USD, 24 hours", or
+    "shares, today" (sources differ)."""
 
     @property
     def mid(self) -> float | None:
@@ -133,6 +136,7 @@ class QuoteSnapshot:
             "bid": self.bid,
             "ask": self.ask,
             "volume": self.volume,
+            "volume_unit": self.volume_unit,
             "spread_pct": round(self.spread_pct, 4)
             if self.spread_pct is not None
             else None,

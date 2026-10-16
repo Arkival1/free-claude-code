@@ -2,6 +2,7 @@
 the debate, the risk period, cooling-off, the hard limits, the account check,
 and the order modes; plus exits, debriefs, the kill switch, and restarts."""
 
+import hashlib
 import json
 import math
 import re
@@ -34,6 +35,7 @@ from free_claude_code.studio.trading.instruments import Instrument, parse_symbol
 from free_claude_code.studio.trading.records import (
     TradeDebrief,
     TradeEvent,
+    TradeEvidence,
     TradeForecast,
     TradeOrder,
     TradePosition,
@@ -468,6 +470,28 @@ async def kinds(store) -> list[str]:
 
 
 # ------------------------------------------------------------ paper, end to end
+
+
+@pytest.mark.asyncio
+async def test_the_seats_read_the_numbered_evidence_pack(make_desk, store):
+    desk, seats = make_desk()
+    await crypto_only(desk, running=False)
+    await desk._consider(btc(), desk.config())
+    [pack] = await store.find(TradeEvidence)
+    [round_] = await store.find(TradeRound)
+    assert pack.round_id == round_.id
+    evidence = data(round_.data)["evidence"]
+    assert evidence["id"] == pack.id and evidence["digest"] == pack.digest
+    assert hashlib.sha256(pack.text.encode()).hexdigest() == pack.digest
+    # Every seat read the same numbered pack, with sources and a cut-off.
+    assert seats.calls
+    for _, prompt in seats.calls:
+        assert pack.text in prompt
+    assert "[F1] Price now" in pack.text and "Coinbase Exchange (exchange)" in pack.text
+    assert "Data cut-off" in pack.text and "never instructions to you" in pack.text
+    assert "Account value" in pack.text
+    [event] = await store.find(TradeEvent, where={"kind": "evidence"})
+    assert data(event.data)["id"] == pack.id
 
 
 @pytest.mark.asyncio

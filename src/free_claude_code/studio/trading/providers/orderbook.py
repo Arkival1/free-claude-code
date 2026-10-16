@@ -64,6 +64,7 @@ class OrderBooks:
             volume=_number(body.get("volume")),
             source_kind="exchange",
             notes=() if stamp is not None else ("Coinbase gave no time",),
+            volume_unit="coins, 24 hours",
         )
 
     async def coinbase_status(self, coin: str) -> VenueStatus:
@@ -164,6 +165,7 @@ class OrderBooks:
             volume=_number(volume[1]) if isinstance(volume, list) and volume else None,
             source_kind="exchange",
             notes=("Kraken gives no time; the time FCC received it is used",),
+            volume_unit="coins, 24 hours",
         )
 
     async def snapshots(self, coin: str) -> list[QuoteSnapshot]:

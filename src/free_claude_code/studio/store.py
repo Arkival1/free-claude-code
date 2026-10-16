@@ -48,6 +48,7 @@ from .models import (
 from .trading.records import (
     TradeDebrief,
     TradeEvent,
+    TradeEvidence,
     TradeForecast,
     TradeOrder,
     TradePosition,
@@ -119,6 +120,7 @@ TABLES: Mapping[type[Record], str] = {
     TradePosition: "studio_trade_positions",
     TradeForecast: "studio_trade_forecasts",
     TradeDebrief: "studio_trade_debriefs",
+    TradeEvidence: "studio_trade_evidence",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (
@@ -135,6 +137,7 @@ _INDEXES: tuple[tuple[str, str, str], ...] = (
     ("studio_trade_events_seq", "studio_trade_events", "seq"),
     ("studio_trade_orders_status", "studio_trade_orders", "status, updated_at"),
     ("studio_trade_forecasts_due", "studio_trade_forecasts", "status, due_at"),
+    ("studio_trade_evidence_round", "studio_trade_evidence", "round_id"),
 )
 
 

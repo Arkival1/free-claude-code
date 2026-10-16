@@ -25,6 +25,7 @@ import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -50,6 +51,7 @@ from .config import LIVE_AUTO_PHRASE, DeskConfig, DeskConfigStore
 from .data import DATA_LIMITS, MarketData, MarketDataError, Quote, quote_snapshot
 from .debate import Debate, DebateResult
 from .debrief import SUGGESTIBLE, Debriefs
+from .evidence import EvidencePack, PortfolioFacts, build_pack
 from .forecasts import due_at, records, score
 from .indicators import true_ranges
 from .information import PROVIDER_DELAY_MINUTES
@@ -566,13 +568,25 @@ class TradingDesk:
                 symbol=instrument.symbol,
             )
             return
-        quality = await self._check_data(instrument, briefing, config, record.id)
+        quality, news_problems = await self._check_data(
+            instrument, briefing, config, record.id
+        )
+        pack = await self._evidence(briefing, quality, news_problems, config, record.id)
+        briefing = replace(briefing, evidence_text=pack.text)
+        evidence: JsonObject = {
+            "id": pack.id,
+            "digest": pack.digest,
+            "cutoff": pack.cutoff,
+            "missing": list(pack.missing),
+        }
         # Bad data skips the debate for a scanner pick. A holding is still
         # reviewed (it may need selling), and a debate the owner asked for
         # still runs as analysis; neither can buy while the data fails.
         if not quality.ok and position is None and ASKED not in candidate.tags:
             await self._close_round(
-                record.model_copy(update={"data": {"quality": quality.view()}}),
+                record.model_copy(
+                    update={"data": {"quality": quality.view(), "evidence": evidence}}
+                ),
                 "blocked",
                 quality.summary(),
             )
@@ -609,6 +623,7 @@ class TradingDesk:
             "setup": briefing.setup,
             "regime": briefing.regime.label,
             "quality": quality.view(),
+            "evidence": evidence,
         }
         record = record.model_copy(update={"consensus": result.consensus, "data": data})
         decision = result.decision
@@ -649,8 +664,9 @@ class TradingDesk:
         briefing: Briefing,
         config: DeskConfig,
         round_id: str,
-    ) -> QualityReport:
-        """The data-quality checks for one candidate, recorded in the feed."""
+    ) -> tuple[QualityReport, tuple[str, ...]]:
+        """The data-quality checks for one candidate, recorded in the feed,
+        and which news feeds couldn't be read."""
         snapshots = await self._data.snapshots(instrument)
         raw, missing = await self._news.for_instrument(instrument)
         now = self._clock()
@@ -711,7 +727,79 @@ class TradingDesk:
             symbol=instrument.symbol,
             data=view,
         )
-        return report
+        return report, tuple(missing)
+
+    async def _evidence(
+        self,
+        briefing: Briefing,
+        quality: QualityReport,
+        news_problems: tuple[str, ...],
+        config: DeskConfig,
+        round_id: str,
+    ) -> EvidencePack:
+        """Number everything the seats will read, keep it, and say so."""
+        instrument = briefing.instrument
+        broker = self._broker(config)
+        portfolio = await self._portfolio_facts(broker, config)
+        fx: tuple[str, float, float | None] | None = None
+        if instrument.currency and instrument.currency != config.currency:
+            with contextlib.suppress(MarketDataError):
+                rate = await self._data.fx(instrument.currency, config.currency)
+                fx = (f"{config.currency} per {instrument.currency}", rate, None)
+        pack = build_pack(
+            briefing=briefing,
+            quality=quality,
+            config=config,
+            round_id=round_id,
+            now=self._clock(),
+            portfolio=portfolio,
+            fx=fx,
+            history_source=self._data.bars_source(instrument),
+            news_problems=news_problems,
+        )
+        await self._store.put(pack.record())
+        count = len(pack.items) + len(pack.news) + len(pack.reading)
+        await self.feed.emit(
+            "evidence",
+            f"Evidence pack for {instrument.symbol}: {count} numbered items, "
+            f"{len(pack.missing)} things missing.",
+            round_id=round_id,
+            symbol=instrument.symbol,
+            data={
+                "id": pack.id,
+                "digest": pack.digest,
+                "cutoff": pack.cutoff,
+                "missing": list(pack.missing),
+            },
+        )
+        return pack
+
+    async def _portfolio_facts(
+        self, broker: Broker, config: DeskConfig
+    ) -> PortfolioFacts | None:
+        """The account as the platform reports it now; None if it can't be
+        read (the pack then says it's missing)."""
+        try:
+            account = await broker.account()
+            rate = await self._data.fx(account.currency, config.currency)
+            equity, exposures, held = await self._account_picture(broker, config)
+            trades, day_change, _ = await self._day(broker, config, equity)
+        except (TradingError, ServiceError, MarketDataError) as error:
+            logger.info("Trading: account not read for the evidence pack ({})", error)
+            return None
+        return PortfolioFacts(
+            currency=config.currency,
+            source=broker.name,
+            as_of=self._clock(),
+            equity=equity,
+            cash=account.cash * rate,
+            positions=tuple(
+                (item.symbol, held.get(item.symbol, 0.0), item.value)
+                for item in exposures
+            ),
+            trades_today=trades,
+            day_change_pct=day_change,
+        )
 
     async def _close_round(self, record: TradeRound, status: str, note: str) -> None:
         await self._store.put(
