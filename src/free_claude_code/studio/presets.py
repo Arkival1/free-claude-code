@@ -98,6 +98,16 @@ BUILDER_PROMPT = (
     "user taught you. Finish with what you built, its main files, and how to "
     "open it."
 )
+_OLD_BUILDER_PROMPT_V11 = BUILDER_PROMPT
+BUILDER_PROMPT += (
+    " For a page that should feel interactive and 3D (a launch, product, or "
+    "portfolio hero) start from 3d-landing; for live numbers or monitoring "
+    "(anything that updates as work runs) start from 3d-dashboard. Both bring "
+    "three.js in vendor/three and the FCC web kit: restyle with the tokens at "
+    "the top of fcc-kit.css, use fcc-kit.js's reveal, data-count, and "
+    "data-tilt, keep the 3D light (it pauses off-screen and falls back "
+    "without WebGL), and never edit the files in vendor/."
+)
 _OLD_BUILDER_PROMPT_V10 = (
     "Build complete, working websites, apps, and games on your own. For a new "
     "project, start from start_project with the closest template. For a "
@@ -761,6 +771,7 @@ PROMPT_UPGRADES: dict[str, str] = {
     _OLD_BUILDER_PROMPT_V8: BUILDER_PROMPT,
     _OLD_BUILDER_PROMPT_V9: BUILDER_PROMPT,
     _OLD_BUILDER_PROMPT_V10: BUILDER_PROMPT,
+    _OLD_BUILDER_PROMPT_V11: BUILDER_PROMPT,
     _OLD_TESTER_PROMPT_V1: TESTER_PROMPT,
     _OLD_TESTER_PROMPT_V2: TESTER_PROMPT,
     _OLD_TESTER_PROMPT_V3: TESTER_PROMPT,

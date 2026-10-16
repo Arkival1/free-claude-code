@@ -1,8 +1,16 @@
 """Starter projects the Builder begins from: correct, mobile-first, and small."""
 
 from collections.abc import Mapping
+from pathlib import Path
 from string import Template
 
+from .templates_3d import (
+    DASHBOARD_3D,
+    KIT_FILES,
+    LANDING_3D,
+    LIBRARY_DIR,
+    THREE_FILES,
+)
 from .templates_business import BUSINESS, FORM_JS, PLACEHOLDER_TEXT
 
 _HEAD = """<!doctype html>
@@ -726,10 +734,34 @@ TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
     ),
     "webapp": ("A single-page app with saved state (starts as a to-do list)", _WEBAPP),
     "game": ("A canvas game with a game loop, score, and touch controls", _GAME),
+    "3d-landing": (
+        "A landing page with an interactive 3D hero (three.js), scroll reveals, "
+        "counting numbers, and tilt cards, on the FCC web kit (light and dark)",
+        {**KIT_FILES, **LANDING_3D},
+    ),
+    "3d-dashboard": (
+        "A live dashboard: key numbers, a 3D view of services (load bars, "
+        "light along their links), and an activity log, fed by JSON from an API",
+        {**KIT_FILES, **DASHBOARD_3D},
+    ),
     "python-tool": ("A Python command-line tool with a test", _PYTHON_TOOL),
     "python-web": ("A Python web API with a page (FastAPI)", _PYTHON_WEB),
     "node-api": ("A Node web server with a JSON API, no dependencies", _NODE_API),
 }
+
+
+LIBRARIES: Mapping[str, Mapping[str, str]] = {
+    "3d-landing": THREE_FILES,
+    "3d-dashboard": THREE_FILES,
+}
+"""Files a starter copies byte for byte from Studio's own vetted copies."""
+
+
+def template_libraries(name: str) -> dict[str, Path]:
+    """The library files one starter needs: project path → Studio's copy."""
+    return {
+        path: LIBRARY_DIR / source for path, source in LIBRARIES.get(name, {}).items()
+    }
 
 
 def initial_of(title: str) -> str:

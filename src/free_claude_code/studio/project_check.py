@@ -10,6 +10,7 @@ from posixpath import dirname, normpath
 from urllib.parse import unquote, urlsplit
 
 from .templates import STARTER_TEXT
+from .templates_3d import PLACEHOLDER_3D
 
 MAX_PROBLEMS = 40
 CHECKED_FILES = (".html", ".htm", ".css", ".js", ".mjs", ".py", ".json")
@@ -291,7 +292,7 @@ def _check_html(path: str, text: str, files: Mapping[str, str]) -> list[str]:
             "the drawn art."
         )
     problems.extend(_unsent_forms(path, text))
-    left = [phrase for phrase in STARTER_TEXT if phrase in text]
+    left = [phrase for phrase in (*STARTER_TEXT, *PLACEHOLDER_3D) if phrase in text]
     if left:
         problems.insert(
             0,

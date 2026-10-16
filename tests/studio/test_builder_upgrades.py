@@ -83,6 +83,8 @@ def test_every_template_is_listed_and_known():
         "landing",
         "webapp",
         "game",
+        "3d-landing",
+        "3d-dashboard",
         "python-tool",
         "python-web",
         "node-api",

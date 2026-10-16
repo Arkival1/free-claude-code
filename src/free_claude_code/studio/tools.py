@@ -62,7 +62,7 @@ from .sites import (
     is_starter,
     tidy_html,
 )
-from .templates import template_files
+from .templates import template_files, template_libraries
 from .videos import VideoStudy, at, clock, passages, render_note, studied
 
 FINISH_TOOL = "finish"
@@ -560,7 +560,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "(professional multi-page site: Home, About, Services with tabs, "
             "Gallery, Contact; for any café, shop, salon, trade, or studio), "
             "website (one page), landing, webapp (single-page app with saved "
-            "state), game (canvas game loop with touch controls), python-tool, "
+            "state), game (canvas game loop with touch controls), 3d-landing "
+            "(landing page with an interactive 3D hero, scroll reveals and "
+            "counting numbers), 3d-dashboard (live dashboard with a 3D view of "
+            "services and an activity log, fed by JSON), python-tool, "
             "python-web (FastAPI), node-api. Existing work is never overwritten "
             "unless overwrite is set."
         ),
@@ -575,6 +578,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "landing",
                         "webapp",
                         "game",
+                        "3d-landing",
+                        "3d-dashboard",
                         "python-tool",
                         "python-web",
                         "node-api",
@@ -2207,6 +2212,10 @@ class AgentToolbox:
                     continue
             await self._sites.write(site_id, path, text)
             written.append(path)
+        for path, source in template_libraries(template).items():
+            if path not in existing or overwrite:
+                await self._sites.copy_library(site_id, path, source)
+                written.append(path)
         lines = [
             f"Started a {template} project: wrote {', '.join(written) or 'nothing'}."
         ]
@@ -2882,7 +2891,9 @@ class AgentToolbox:
         for item in await self._sites.files(site_id):
             if item.path.startswith("lab/"):
                 continue
-            if not item.path.endswith(CHECKED_FILES):
+            # Libraries (three.js) are other people's tested code: they count
+            # as present for links, but aren't checked line by line.
+            if not item.path.endswith(CHECKED_FILES) or item.path.startswith("vendor/"):
                 others.append(item.path)
                 continue
             try:

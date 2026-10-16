@@ -14,6 +14,8 @@ from pathlib import Path
 import anyio.to_thread
 
 MAX_FILE_BYTES = 512_000
+MAX_LIBRARY_BYTES = 4_000_000
+"""Studio's own vetted library files (three.js) may be bigger than an agent's."""
 MAX_SITE_FILES = 1_500
 MAX_DEPTH = 12
 ALLOWED_SUFFIXES = frozenset(
@@ -499,6 +501,31 @@ class SiteWorkspace:
             return SiteFile(
                 path=self._relative(site_id, target),
                 size=len(encoded),
+                content_type=content_type_for(target.name),
+            )
+
+        return await anyio.to_thread.run_sync(work)
+
+    async def copy_library(
+        self, site_id: str, relative_path: str, source: Path
+    ) -> SiteFile:
+        """Copy one of Studio's own library files (three.js) into the site byte
+        for byte. Only Studio calls this, with files it ships; agents write
+        through write(), which keeps the smaller limit."""
+        target = self.resolve(site_id, relative_path)
+
+        def work() -> SiteFile:
+            data = source.read_bytes()
+            if len(data) > MAX_LIBRARY_BYTES:
+                raise SiteError(f"{source.name} is too big to copy into a site.")
+            directory = self.directory(site_id)
+            if not target.exists() and self._count(directory) >= MAX_SITE_FILES:
+                raise SiteError("This site already has the maximum number of files.")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            return SiteFile(
+                path=self._relative(site_id, target),
+                size=len(data),
                 content_type=content_type_for(target.name),
             )
 
