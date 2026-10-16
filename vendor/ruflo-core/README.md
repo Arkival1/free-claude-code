@@ -12,7 +12,14 @@ files are kept in the repo instead, where every session loads them:
 | --- | --- | --- |
 | `.claude/agents/ruflo-coder.md`, `ruflo-researcher.md`, `ruflo-reviewer.md` | `agents/coder.md`, `researcher.md`, `reviewer.md` | Renamed with a `ruflo-` prefix |
 | `.claude/skills/ruflo-status/`, `ruflo-doctor/`, `ruflo-discover-plugins/` | `skills/ruflo-status/`, `ruflo-doctor/`, `discover-plugins/` | `discover-plugins` renamed |
-| `.mcp.json` (`ruflo` server) | `.mcp.json` | Runs `npx -y @claude-flow/cli@3.56.10 mcp start` directly |
+| `.mcp.json` (`ruflo` server) | `.mcp.json` | Runs `npx -y @claude-flow/cli@3.56.10 mcp start` directly, without npm's optional packages |
+
+A fresh cloud session downloads the CLI before the server starts. With
+npm's optional packages that is about 1.8 GB and 90 seconds; without them
+(`npm_config_omit=optional`) it is about 335 MB and 35 seconds, all 358
+tools still list, and memory search runs without vector embeddings.
+`.claude/settings.json` sets `MCP_TIMEOUT` to 120000 so the server has two
+minutes to start instead of the default 30 seconds.
 
 In every copied file `@claude-flow/cli@latest` is pinned to `3.56.10`, and
 the plugin's MCP tool names (`mcp__plugin_ruflo-core_ruflo__…`) are renamed
