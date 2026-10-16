@@ -26,3 +26,53 @@ releases) is deleted later.
 
 `./scripts/ci.sh --skip playwright` runs format, lint, ty, and pytest;
 `pytest e2e` runs the browser tests.
+
+## Working with the owner
+
+Notes carried over from the long session that built FCC Studio (LCC).
+
+- The owner writes casually from an iPhone, with typos. Read for intent and
+  answer short and plain; they watch their usage closely, so skip long live
+  tests, long-running monitors and long reports unless asked.
+- Don't touch Content Farm (`studio/farm/`, `farm.js`, `farm.css`) unless
+  they ask.
+- Don't power their app with this session's own credentials or keys.
+- Work on `claude/multi-agent-local-models-app-s6uxxh` and push there. Use
+  one session at a time for code changes so pushes don't clash. Don't open
+  pull requests unless asked.
+- Each release bumps the version in `pyproject.toml` and `uv.lock`
+  (6.71.1 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
+
+## The owner's setup
+
+- Windows PC with a 6 GB graphics card; local models run in LM Studio 0.4
+  (Jarvis uses a small Qwen 3.5 4B model). Server agents use the NVIDIA NIM
+  key. FCC keeps keys and data in `%USERPROFILE%\.fcc`, not the app folder.
+- They also use the FCC phone app and Claude Code from the Claude iPhone
+  app (cloud sessions).
+
+## Decisions already made
+
+- Server agents share one memory area (`server:team`), separate from the
+  local agents' memory; `remember` with `private` keeps a note to one agent.
+- Starter repos install switched off; the owner turns each one on.
+- The ideas board sorts ideas into website, app, lab and general; each
+  agent reads its own category (builder: website, coder/tester: app).
+- Agents that write files get the Builder's step budget (40); relays run
+  one stage at a time.
+- Ruflo-core is set up for Claude Code here as project files
+  (`.claude/agents`, `.claude/skills`, `.mcp.json`); see
+  `vendor/ruflo-core/README.md`. Its `.claude-flow/` runtime folder is
+  ignored.
+
+## Offered, not built yet
+
+Build these only when the owner says yes:
+
+- A colour palette taken from the ideas-board photos, and sending those
+  photos to models that can see.
+- A clear "ran out of steps: wrote X, say continue" message, and more
+  Builder steps for multi-page sites.
+- The professional-website relay test was stopped before the site was
+  finished.
