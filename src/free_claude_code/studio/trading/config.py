@@ -107,6 +107,50 @@ class AssessmentLimits(BaseModel):
     """A jump in volatility (ATR %) this big during the wait aborts the trade."""
 
 
+class DataQualityLimits(BaseModel):
+    """What the data must look like before a new trade is considered. A
+    failing critical check stops new trades; held positions are still
+    managed."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    share_quote_age_s: float = Field(default=300.0, ge=10.0, le=3600.0)
+    """A real-time share price older than this is stale (in trading hours)."""
+    crypto_quote_age_s: float = Field(default=60.0, ge=5.0, le=3600.0)
+    delayed_grace_s: float = Field(default=300.0, ge=0.0, le=3600.0)
+    """Delayed prices may be this much older than their published delay."""
+    allow_delayed_in_paper: bool = True
+    """Paper may use delayed prices (labelled); live never does."""
+    spread_pct: dict[str, float] = Field(
+        default_factory=lambda: {"us": 0.5, "asx": 1.0, "crypto": 0.5, "meme": 2.0}
+    )
+    """The widest bid/ask spread allowed, in percent of the price."""
+    conflict_pct: dict[str, float] = Field(
+        default_factory=lambda: {"us": 0.5, "asx": 1.0, "crypto": 0.5, "meme": 2.0}
+    )
+    """Two sources further apart than this disagree; three times this blocks
+    the trade (likely a different instrument)."""
+    min_daily_value: dict[str, float] = Field(
+        default_factory=lambda: {
+            "us": 2_000_000.0,
+            "asx": 500_000.0,
+            "crypto": 5_000_000.0,
+            "meme": 1_000_000.0,
+        }
+    )
+    """The least average daily turnover (in the price's currency)."""
+    missing_bars_warn_pct: float = Field(default=8.0, ge=0.0, le=100.0)
+    missing_bars_block_pct: float = Field(default=20.0, ge=1.0, le=100.0)
+    bars_max_age_days: dict[str, float] = Field(
+        default_factory=lambda: {"us": 5.0, "asx": 5.0, "crypto": 2.0, "meme": 2.0}
+    )
+    news_max_age_days: float = Field(default=14.0, ge=1.0, le=90.0)
+    account_max_age_s: float = Field(default=300.0, ge=10.0, le=3600.0)
+    open_grace_minutes: float = Field(default=30.0, ge=5.0, le=240.0)
+    """After this long in a session with no trade since the open, the market
+    is treated as closed (a holiday) or the symbol as halted."""
+
+
 class DeskConfig(BaseModel):
     """Everything the owner sets on the Trading page."""
 
@@ -126,6 +170,7 @@ class DeskConfig(BaseModel):
     seats: list[SeatConfig] = Field(default_factory=lambda: list(DEFAULT_SEATS))
     risk: RiskLimits = Field(default_factory=RiskLimits)
     assessment: AssessmentLimits = Field(default_factory=AssessmentLimits)
+    data: DataQualityLimits = Field(default_factory=DataQualityLimits)
     approval_minutes: int = Field(default=10, ge=1, le=1440)
     crypto_debrief_hour_utc: int = Field(default=14, ge=0, le=23)
     """When the crypto session debrief runs (14:00 UTC is midnight in Sydney)."""

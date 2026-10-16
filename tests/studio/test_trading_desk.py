@@ -29,7 +29,7 @@ from free_claude_code.studio.trading.brokers.base import (
 from free_claude_code.studio.trading.brokers.registry import BrokerSpec, KeyField
 from free_claude_code.studio.trading.config import LIVE_AUTO_PHRASE, SeatConfig
 from free_claude_code.studio.trading.data import Quote
-from free_claude_code.studio.trading.desk import TradingDesk, TradingError
+from free_claude_code.studio.trading.desk import ASKED, TradingDesk, TradingError
 from free_claude_code.studio.trading.instruments import Instrument, parse_symbol
 from free_claude_code.studio.trading.records import (
     TradeDebrief,
@@ -107,7 +107,7 @@ def market(request: httpx.Request) -> httpx.Response:
         stamps, closes = bars_for(interval, start)
         if symbol == "^VIX":
             closes = [15.0] * len(closes)
-        daily_stamps, daily = bars_for("1d", start)
+        _, daily = bars_for("1d", start)
         return httpx.Response(
             200,
             json={
@@ -118,7 +118,7 @@ def market(request: httpx.Request) -> httpx.Response:
                                 "regularMarketPrice": closes[-1]
                                 if symbol == "^VIX"
                                 else daily[-1],
-                                "regularMarketTime": daily_stamps[-1],
+                                "regularMarketTime": int(time.time()) - 30,
                                 "currency": "AUD" if symbol.endswith(".AX") else "USD",
                             },
                             "timestamp": stamps,
@@ -129,7 +129,9 @@ def market(request: httpx.Request) -> httpx.Response:
                                         "high": [c * 1.01 for c in closes],
                                         "low": [c * 0.99 for c in closes],
                                         "close": closes,
-                                        "volume": [1_000_000.0] * len(closes),
+                                        # Coins trade in dollars here, so
+                                        # this is a busy market either way.
+                                        "volume": [50_000_000.0] * len(closes),
                                     }
                                 ]
                             },
@@ -137,6 +139,36 @@ def market(request: httpx.Request) -> httpx.Response:
                     ],
                     "error": None,
                 }
+            },
+        )
+    if host == "api.exchange.coinbase.com" and path.endswith("/ticker"):
+        _, daily = bars_for("1d", 100.0)
+        price = daily[-1]
+        return httpx.Response(
+            200,
+            json={
+                "price": f"{price:.6f}",
+                "bid": f"{price * 0.9998:.6f}",
+                "ask": f"{price * 1.0002:.6f}",
+                "volume": "12345.6",
+                "time": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            },
+        )
+    if host == "api.kraken.com" and path.endswith("/Ticker"):
+        _, daily = bars_for("1d", 100.0)
+        price = daily[-1]
+        return httpx.Response(
+            200,
+            json={
+                "error": [],
+                "result": {
+                    "XXBTZUSD": {
+                        "a": [f"{price * 1.0002:.6f}", "1", "1.000"],
+                        "b": [f"{price * 0.9998:.6f}", "1", "1.000"],
+                        "c": [f"{price:.6f}", "0.1"],
+                        "v": ["100.0", "2000.0"],
+                    }
+                },
             },
         )
     if host == "api.coingecko.com":
@@ -340,7 +372,17 @@ class FakeLive:
         return Rules(tradable=True, broker_symbol=instrument.symbol)
 
     async def quote(self, instrument: Instrument) -> Quote | None:
-        return None
+        _, daily = bars_for("1d", 100.0)
+        price = daily[-1]
+        return Quote(
+            instrument.symbol,
+            price,
+            "USD",
+            time.time(),
+            "Fake live",
+            price * 0.9998,
+            price * 1.0002,
+        )
 
     async def place(self, order: OrderRequest) -> OrderResult:
         self.placed += 1
@@ -426,6 +468,47 @@ async def kinds(store) -> list[str]:
 
 
 # ------------------------------------------------------------ paper, end to end
+
+
+@pytest.mark.asyncio
+async def test_a_debate_the_owner_asked_for_runs_but_cant_buy_on_bad_data(
+    make_desk, store
+):
+    desk, seats = make_desk()
+    await crypto_only(desk, running=True)
+    await desk._consider(Candidate(parse_symbol("DOGE"), 0.0, (ASKED,)), desk.config())
+    # The seats still debated it (the owner wants their view)...
+    assert seats.calls
+    [round_] = await store.find(TradeRound)
+    # ...but nothing is bought while the data checks fail.
+    assert round_.status == "blocked"
+    assert "Buy decided, but" in round_.note
+    assert "Meme-coin liquidity known" in round_.note
+    assert not await store.find(TradeOrder)
+
+
+@pytest.mark.asyncio
+async def test_bad_data_stops_a_candidate_before_any_seat_is_asked(make_desk, store):
+    desk, seats = make_desk()
+    await crypto_only(desk, running=True)
+    # DexScreener has nothing on this meme coin, so its liquidity is unknown.
+    await desk._consider(
+        Candidate(parse_symbol("DOGE"), 1.0, ("uptrend",)), desk.config()
+    )
+    assert seats.calls == []
+    [round_] = await store.find(TradeRound)
+    assert round_.status == "blocked"
+    assert "Meme-coin liquidity known" in round_.note
+    quality = data(round_.data)["quality"]
+    assert quality["ok"] is False
+    assert {snap["provider"] for snap in quality["snapshots"]} >= {
+        "Yahoo Finance",
+        "Coinbase Exchange",
+        "Kraken",
+    }
+    [event] = await store.find(TradeEvent, where={"kind": "data_quality"})
+    assert data(event.data)["news_missing"]
+    assert not await store.find(TradeOrder)
 
 
 @pytest.mark.asyncio

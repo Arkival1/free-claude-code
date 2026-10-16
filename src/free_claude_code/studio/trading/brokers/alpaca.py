@@ -16,6 +16,7 @@ import httpx
 
 from ...resilience import ServiceError, read_json
 from ..data import MarketData, Quote
+from ..information import seconds_from_iso
 from ..instruments import Instrument
 from .base import Account, Holding, OrderRequest, OrderResult, Rules, fingerprint
 from .common import items, make_web, number, obj, text
@@ -177,7 +178,17 @@ class AlpacaBroker:
         bid, ask = number(row.get("bp")), number(row.get("ap"))
         if bid <= 0 or ask <= 0:
             return None
-        return Quote(instrument.symbol, (bid + ask) / 2, "USD", 0.0, "Alpaca", bid, ask)
+        # The quote's own time; 0 when Alpaca gives none (the checks treat
+        # an untimed price as stale rather than guess).
+        return Quote(
+            instrument.symbol,
+            (bid + ask) / 2,
+            "USD",
+            seconds_from_iso(row.get("t")) or 0.0,
+            "Alpaca",
+            bid,
+            ask,
+        )
 
     async def place(self, order: OrderRequest) -> OrderResult:
         crypto = order.instrument.market == "crypto"

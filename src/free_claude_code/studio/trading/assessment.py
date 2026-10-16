@@ -345,6 +345,11 @@ def risk_report(
         )
     if briefing.tech.avg_volume and qty > 0:
         adv_pct = qty / briefing.tech.avg_volume * 100
+        if briefing.instrument.market == "crypto":
+            # A coin's daily volume is in dollars, so the order's value is the
+            # fair comparison; the larger figure is kept so this check can
+            # only get stricter than it was.
+            adv_pct = max(adv_pct, qty * entry / briefing.tech.avg_volume * 100)
         if adv_pct > limits.max_adv_pct:
             lower(
                 "D",

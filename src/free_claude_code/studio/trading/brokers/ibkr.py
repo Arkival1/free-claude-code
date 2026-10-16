@@ -196,16 +196,22 @@ class IbkrBroker:
                 )
             )
             row = rows[0] if rows else {}
-            last = number(text(row.get("31")).lstrip("CH"))
+            raw = text(row.get("31"))
+            # IBKR prefixes a halted symbol's price with H, and the last
+            # close (no trade yet today) with C: neither is a live price, so
+            # the quote says so and carries no time.
+            halted, closed = raw.startswith("H"), raw.startswith("C")
+            last = number(raw.lstrip("CH"))
             if last > 0:
                 return Quote(
                     instrument.symbol,
                     last,
                     "AUD" if instrument.market == "asx" else "USD",
-                    self._clock(),
+                    0.0 if halted or closed else self._clock(),
                     "IBKR",
                     number(row.get("84")) or None,
                     number(row.get("86")) or None,
+                    note="halted" if halted else "last close" if closed else "",
                 )
         return None
 

@@ -47,15 +47,19 @@ from .brokers.catalog import ensure_catalog
 from .brokers.paper import PaperBroker
 from .brokers.registry import BROKERS, BrokerSetupError, check_values, make_broker
 from .config import LIVE_AUTO_PHRASE, DeskConfig, DeskConfigStore
-from .data import DATA_LIMITS, MarketData, MarketDataError, Quote
+from .data import DATA_LIMITS, MarketData, MarketDataError, Quote, quote_snapshot
 from .debate import Debate, DebateResult
 from .debrief import SUGGESTIBLE, Debriefs
 from .forecasts import due_at, records, score
 from .indicators import true_ranges
+from .information import PROVIDER_DELAY_MINUTES
 from .instruments import Instrument, SymbolError, parse_symbol, universe
 from .ledger import build_ledger, tax_csv
 from .log import Feed, event_view
+from .news import judge
 from .precheck import pre_trade_check
+from .providers.news import NewsFeeds
+from .quality import QualityReport, assess, profile_of
 from .records import (
     OPEN_ORDER_STATUSES,
     TradeDebrief,
@@ -71,6 +75,8 @@ from .seats import Decision, Forecast, Think
 from .sessions import last_close, session, sydney_offset
 
 TICK_SECONDS = 10.0
+ASKED = "asked by you"
+"""The tag on a debate the owner asked for."""
 SCORE_SECONDS = 300.0
 ACCOUNT_SECONDS = 30.0
 DEBRIEF_LATE_HOURS = 12.0
@@ -126,9 +132,11 @@ class TradingDesk:
         self._data = MarketData(
             self._web,
             coingecko_key=lambda: self._keys.values("coingecko").get("api_key", ""),
+            wall=clock,
         )
         self.feed = Feed(store, root / "logs")
         self._research = DeskResearch(search=search, read_page=read_page)
+        self._news = NewsFeeds(self._web, wall=clock)
         self._debriefs = Debriefs(
             store=store, feed=self.feed, think=think, remember=self._remember
         )
@@ -514,9 +522,7 @@ class TradingDesk:
         broker = self._broker(config)
         held = {holding.symbol for holding in await self._holdings(broker)}
         await self._consider(
-            Candidate(
-                instrument, 0.0, ("asked by you",), held=instrument.symbol in held
-            ),
+            Candidate(instrument, 0.0, (ASKED,), held=instrument.symbol in held),
             config,
         )
 
@@ -560,6 +566,17 @@ class TradingDesk:
                 symbol=instrument.symbol,
             )
             return
+        quality = await self._check_data(instrument, briefing, config, record.id)
+        # Bad data skips the debate for a scanner pick. A holding is still
+        # reviewed (it may need selling), and a debate the owner asked for
+        # still runs as analysis; neither can buy while the data fails.
+        if not quality.ok and position is None and ASKED not in candidate.tags:
+            await self._close_round(
+                record.model_copy(update={"data": {"quality": quality.view()}}),
+                "blocked",
+                quality.summary(),
+            )
+            return
         weights = {seat: found.weight for seat, found in seat_records.items()}
         debate = Debate(
             think=self._think,
@@ -591,6 +608,7 @@ class TradingDesk:
             "converged": result.converged,
             "setup": briefing.setup,
             "regime": briefing.regime.label,
+            "quality": quality.view(),
         }
         record = record.model_copy(update={"consensus": result.consensus, "data": data})
         decision = result.decision
@@ -618,7 +636,82 @@ class TradingDesk:
                 round_id=record.id,
             )
             return
+        if not quality.ok:
+            await self._close_round(
+                record, "blocked", f"Buy decided, but {quality.summary()}"
+            )
+            return
         await self._buy(record, briefing, result, decision, config)
+
+    async def _check_data(
+        self,
+        instrument: Instrument,
+        briefing: Briefing,
+        config: DeskConfig,
+        round_id: str,
+    ) -> QualityReport:
+        """The data-quality checks for one candidate, recorded in the feed."""
+        snapshots = await self._data.snapshots(instrument)
+        raw, missing = await self._news.for_instrument(instrument)
+        now = self._clock()
+        news = judge(
+            raw,
+            symbol=instrument.symbol,
+            now=now,
+            bars=briefing.daily,
+            atr=briefing.tech.atr,
+            max_age_days=config.data.news_max_age_days,
+        )
+        broker = self._broker(config)
+        live = config.mode != "paper" and broker.live
+        account_at: float | None = None
+        if live:
+            try:
+                await broker.account()
+            except (TradingError, ServiceError) as error:
+                logger.info("Trading: account read failed ({})", error)
+            else:
+                account_at = self._clock()
+            quote = None
+            with contextlib.suppress(ServiceError):
+                quote = await broker.quote(instrument)
+            if quote is not None:
+                # Only Alpaca sends the quote's own time; the others' is when
+                # FCC received it, and the snapshot says so.
+                snapshots = [
+                    quote_snapshot(
+                        quote,
+                        instrument,
+                        received=now,
+                        stamped=quote.source == "Alpaca",
+                    ),
+                    *snapshots,
+                ]
+        report = assess(
+            instrument,
+            now=now,
+            snapshots=snapshots,
+            daily=briefing.daily,
+            limits=config.data,
+            live=live,
+            news=news,
+            account_at=account_at,
+            meme_facts=(briefing.dex is not None)
+            if instrument.meme or instrument.market == "dex"
+            else None,
+            venue=await self._data.venue_status(instrument),
+        )
+        view = report.view()
+        view["news"] = [item.view() for item in news]
+        view["news_missing"] = list(missing)
+        await self.feed.emit(
+            "data_quality",
+            report.summary(),
+            round_id=round_id,
+            symbol=instrument.symbol,
+            data=view,
+        )
+        return report
 
     async def _close_round(self, record: TradeRound, status: str, note: str) -> None:
         await self._store.put(
@@ -976,6 +1069,9 @@ class TradingDesk:
             quote=quote,
             base_currency=config.currency,
             held=held.get(order.symbol, 0.0),
+            now=self._clock(),
+            max_age_s=_quote_age_limit(config, instrument, live=broker.live),
+            spread_limit_pct=config.data.spread_pct.get(profile_of(instrument)),
         )
         data["check"] = report.view()
         if not report.passed:
@@ -1245,6 +1341,7 @@ class TradingDesk:
             quote.source,
             quote.bid * rate if quote.bid else None,
             quote.ask * rate if quote.ask else None,
+            note=quote.note,
         )
 
     async def _expire_approvals(self, config: DeskConfig) -> None:
@@ -2198,3 +2295,20 @@ def _sydney_midnight_ms(seconds: float) -> int:
     local = when + timedelta(hours=offset)
     midnight_local = local.replace(hour=0, minute=0, second=0, microsecond=0)
     return int((midnight_local - timedelta(hours=offset)).timestamp() * 1000)
+
+
+def _quote_age_limit(
+    config: DeskConfig, instrument: Instrument, *, live: bool
+) -> float:
+    """How old the order-time price may be. Paper may fall back to delayed
+    market data (when allowed), so its limit includes the published delay."""
+    limits = config.data
+    base = (
+        limits.crypto_quote_age_s
+        if instrument.market == "crypto"
+        else limits.share_quote_age_s
+    )
+    if live or not limits.allow_delayed_in_paper:
+        return base
+    delay = PROVIDER_DELAY_MINUTES.get(("Yahoo Finance", instrument.market), 0)
+    return base + delay * 60 + (limits.delayed_grace_s if delay else 0.0)

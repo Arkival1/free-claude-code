@@ -5,6 +5,8 @@ It reads the live account and the platform's rules, and checks:
 - the account can trade, and has the money (or the holding, to sell);
 - the platform trades this symbol, in this size;
 - the market is open, and the price hasn't run from the decision's;
+- the price is fresh, not flagged halted, and (for buys) the bid/ask spread
+  is inside the limit (a sell to protect a position is never held up by it);
 - no other order for the symbol is open;
 - the US pattern-day-trader rule won't lock the account.
 It runs again when the owner taps Approve, since prices and balances move.
@@ -74,6 +76,9 @@ async def pre_trade_check(
     quote: Quote | None,
     base_currency: str,
     held: float,
+    now: float | None = None,
+    max_age_s: float | None = None,
+    spread_limit_pct: float | None = None,
 ) -> CheckReport:
     """Check one order against the live account and the platform's rules."""
     items: list[CheckItem] = []
@@ -169,6 +174,16 @@ async def pre_trade_check(
                 f"({moved:.2f}% move; limit {slippage_pct:g}%).",
             )
         )
+        items.extend(
+            _quote_quality(
+                quote,
+                buying=order.side == "buy",
+                live=broker.live,
+                now=now,
+                max_age_s=max_age_s,
+                spread_limit_pct=spread_limit_pct,
+            )
+        )
     try:
         waiting = [
             result
@@ -217,3 +232,71 @@ def _identity(broker: Broker, account: Account, verified: str) -> CheckItem:
         if account.fingerprint == verified
         else "This isn't the account you verified; check the keys.",
     )
+
+
+def _quote_quality(
+    quote: Quote,
+    *,
+    buying: bool,
+    live: bool,
+    now: float | None,
+    max_age_s: float | None,
+    spread_limit_pct: float | None,
+) -> list[CheckItem]:
+    """Freshness, halts, and the spread, from the quote the order will meet.
+    They block new buys; sells to protect a position go ahead regardless."""
+    found: list[CheckItem] = []
+    if quote.note == "halted":
+        found.append(
+            CheckItem(
+                "Not halted",
+                False,
+                f"{quote.source} marks {quote.symbol} halted.",
+                blocking=buying,
+            )
+        )
+    if now is not None and max_age_s is not None:
+        if quote.at <= 0:
+            found.append(
+                CheckItem(
+                    "Price fresh",
+                    False,
+                    f"{quote.source} gave no time for its price"
+                    + (f" ({quote.note})" if quote.note else "")
+                    + ".",
+                    blocking=buying and live,
+                )
+            )
+        else:
+            age = max(0.0, now - quote.at)
+            found.append(
+                CheckItem(
+                    "Price fresh",
+                    age <= max_age_s,
+                    f"{quote.source}'s price is {age:.0f} s old "
+                    f"(limit {max_age_s:.0f} s).",
+                    blocking=buying,
+                )
+            )
+    if spread_limit_pct is not None:
+        spread = quote.spread_pct
+        if spread is None:
+            found.append(
+                CheckItem(
+                    "Spread acceptable",
+                    False,
+                    f"{quote.source} gave no bid and ask"
+                    + ("." if live else "; paper fills assume a spread."),
+                    blocking=buying and live,
+                )
+            )
+        else:
+            found.append(
+                CheckItem(
+                    "Spread acceptable",
+                    spread <= spread_limit_pct,
+                    f"{spread:.3f}% between bid and ask (limit {spread_limit_pct:g}%).",
+                    blocking=buying,
+                )
+            )
+    return found

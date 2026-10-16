@@ -41,8 +41,10 @@ Notes carried over from the long session that built FCC Studio (LCC).
 - The owner writes casually from an iPhone, with typos. Read for intent and
   answer short and plain; they watch their usage closely, so skip long live
   tests, long-running monitors and long reports unless asked.
-- Don't touch Content Farm (`studio/farm/`, `farm.js`, `farm.css`) unless
-  they ask.
+- Don't touch, test or bug-check Content Farm (`studio/farm/`, `farm.js`,
+  `farm.css`) unless they ask: keep it exactly as it is, and leave its tests
+  out of full runs (`--ignore` `tests/studio/test_content_farm*.py`,
+  `tests/studio/test_cartoon_paint.py` and `e2e/test_content_farm.py`).
 - Don't power their app with this session's own credentials or keys.
 - Work on `claude/multi-agent-local-models-app-s6uxxh` and push there. Use
   one session at a time for code changes so pushes don't clash. Don't open
