@@ -38,6 +38,7 @@ from free_claude_code.studio.trading.data import Quote
 from free_claude_code.studio.trading.decisions import config_version, decision_id
 from free_claude_code.studio.trading.desk import ASKED, TradingDesk, TradingError
 from free_claude_code.studio.trading.instruments import Instrument, parse_symbol
+from free_claude_code.studio.trading.positions import Plan
 from free_claude_code.studio.trading.records import (
     TradeAudit,
     TradeDebrief,
@@ -1649,4 +1650,70 @@ async def test_platform_stops_stay_until_each_holding_is_actually_sold(
     assert [
         order.symbol for order in await store.find(TradeOrder) if order.side == "sell"
     ] == ["AAPL"]
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_practice_order_is_recorded_not_left_open(make_desk, store):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    order = TradeOrder(
+        client_id="fcc-wait",
+        symbol="BTC",
+        market="crypto",
+        qty=0.01,
+        order_type="limit",
+        limit_price=1.0,
+        status="submitted",
+    )
+    await store.put(order)
+    waiting = await desk._paper(desk.config()).place(
+        OrderRequest(
+            client_id="fcc-wait",
+            instrument=parse_symbol("BTC"),
+            side="buy",
+            qty=0.01,
+            order_type="limit",
+            limit_price=1.0,
+        )
+    )
+    assert waiting.status == "submitted"
+    await desk.kill(reason="test")
+    await desk.tick()
+    found = await store.get(TradeOrder, order.id)
+    assert found is not None and found.status == "cancelled"
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_the_position_manager_raises_the_stop_and_ends_on_time(make_desk, store):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    position = await store.get(TradePosition, "paper:BTC")
+    assert position is not None
+    plan = position.data["plan"]
+    assert plan["entry"] > 0 and plan["holding_days"] >= 1
+    # The price has risen by more than the trade risked: stop to the entry.
+    risk = plan["entry"] - plan["initial_stop"]
+    moved, ended = await desk._manage(
+        position,
+        Plan.read(plan),
+        plan["entry"] + 1.5 * risk,
+        move_stop=True,
+    )
+    assert moved.stop_loss == plan["entry"] and ended == ""
+    assert moved.data["mfe_pct"] > 0
+    assert "position" in await kinds(store)
+    # Past the holding period the watcher sells it, and the record says why.
+    later = time.time() + (plan["holding_days"] + 1) * 86_400
+    desk._clock = lambda: later
+    await desk.tick()
+    assert await store.get(TradePosition, "paper:BTC") is None
+    [record] = await store.find(TradeDecision)
+    result = record.data["result"]
+    assert "holding period" in result["exit"]
+    assert result["mfe_pct"] > 0 and result["planned_stop"] == plan["initial_stop"]
     await desk.close()

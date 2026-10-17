@@ -88,6 +88,7 @@ from .instruments import Instrument, SymbolError, parse_symbol, universe
 from .ledger import build_ledger, tax_csv
 from .log import Feed, event_view
 from .news import judge
+from .positions import Plan, manage
 from .precheck import pre_trade_check
 from .protection import FLATTEN_PHRASE, Health, Trip, may_clear, trip
 from .protection import check as breaker_check
@@ -2076,6 +2077,16 @@ class TradingDesk:
             reason=decision.rationale[:500],
             data={
                 "decision": decision.model_dump(),
+                "plan": {
+                    "trailing_pct": result.plan.trailing_stop_pct
+                    if result.plan is not None
+                    else None,
+                    "holding_days": decision.horizon_days,
+                    "invalidation": list(result.plan.prove_wrong)
+                    if result.plan is not None
+                    else [],
+                    "thesis": decision.rationale[:300],
+                },
                 "assessment": assessment.view(),
                 "consensus": result.consensus,
                 "confidence": tightened.confidence,
@@ -2508,6 +2519,7 @@ class TradingDesk:
             )
             new_fees = max(0.0, fees - order.fees)
             fees_known = result.raw.get("fees_reported") is not False
+            basis = str(result.raw.get("basis") or "")
             await self._store.put(
                 TradeFill(
                     order_id=order.id,
@@ -2520,6 +2532,7 @@ class TradingDesk:
                     fees=new_fees,
                     fees_known=fees_known,
                     currency=order.currency,
+                    basis=basis,
                 )
             )
             await self.feed.emit(
@@ -2541,6 +2554,7 @@ class TradingDesk:
                     if result.raw.get("unconfirmed")
                     else ""
                 )
+                + (f"; practice fill from {basis}" if basis else "")
                 + ".",
                 round_id=order.round_id,
                 symbol=order.symbol,
@@ -2567,6 +2581,7 @@ class TradingDesk:
                         new_price or price or order.entry_price,
                         new_fees,
                     )
+                await self._attach_plan(updated)
             else:
                 await self._after_sell(updated, config, sold=new_qty)
         elif status == "rejected":
@@ -2644,16 +2659,12 @@ class TradingDesk:
                 )
 
     async def _sync_orders(self, config: DeskConfig) -> None:
-        paper = self._paper(config)
-        for result in await paper.tick():
-            order = await self._order_by_client(result.client_id)
-            if order is not None:
-                await self._record(order, result, config)
+        # Practice orders fill on as the market allows (and expire); then
+        # every account's orders still working are brought up to date, so a
+        # cancellation or expiry is recorded as well as a fill.
+        await self._paper(config).tick()
         for order in await self._store.find(TradeOrder):
-            if (
-                order.status not in {"submitted", "partially_filled"}
-                or order.broker == "paper"
-            ):
+            if order.status not in {"submitted", "partially_filled"}:
                 continue
             broker = self._broker_for(order, config)
             try:
@@ -2683,15 +2694,15 @@ class TradingDesk:
         for position in await self._store.find(
             TradePosition, where={"broker": broker.id}
         ):
-            platform_holds = broker.supports_brackets and position.data.get("bracket")
-            if platform_holds and not closing:
-                continue
-            if (
-                not closing
-                and position.stop_loss is None
-                and position.take_profit is None
-            ):
-                continue
+            platform_holds = bool(
+                broker.supports_brackets and position.data.get("bracket")
+            )
+            plan = Plan.read(position.data.get("plan"))
+            if not closing and plan is None:
+                if platform_holds:
+                    continue
+                if position.stop_loss is None and position.take_profit is None:
+                    continue
             try:
                 instrument = parse_symbol(position.symbol)
             except SymbolError:
@@ -2703,6 +2714,15 @@ class TradingDesk:
                 continue
             quote = await self._quote_in(broker, instrument, position.currency)
             if quote is None:
+                continue
+            if plan is not None:
+                position, time_up = await self._manage(
+                    position, plan, quote.price, move_stop=not platform_holds
+                )
+                if time_up:
+                    await self._exit(position, time_up, config)
+                    continue
+            if platform_holds:
                 continue
             if position.stop_loss is not None and quote.price <= position.stop_loss:
                 await self._exit(
@@ -2773,7 +2793,19 @@ class TradingDesk:
             currency=position.currency,
             status="approved",
             reason=f"Exit: {reason}",
-            data={"exit": reason, "protective": not round_id},
+            data={
+                "exit": reason,
+                "protective": not round_id,
+                # How the holding stood when it was sold, for the record
+                # (the holding itself is gone once sold).
+                "position": {
+                    "stop": position.stop_loss,
+                    "target": position.take_profit,
+                    "plan": position.data.get("plan"),
+                    "mae_pct": position.data.get("mae_pct"),
+                    "mfe_pct": position.data.get("mfe_pct"),
+                },
+            },
         )
         await self._store.put(order)
         await self.feed.emit(
@@ -2785,6 +2817,94 @@ class TradingDesk:
         # Every sell is checked against the account; only a Portfolio
         # Manager's sell waits for a tap in approve mode.
         await self._route(order, config, approved=force or not round_id)
+
+    async def _attach_plan(self, order: TradeOrder) -> None:
+        """Keep the plan the desk bought on with the holding, the first time
+        it fills: the entry, the first stop, any trailing stop, and the
+        holding period (the position manager works from these)."""
+        position = await self._store.get(
+            TradePosition, f"{order.broker}:{order.symbol}"
+        )
+        if position is None or isinstance(position.data.get("plan"), dict):
+            return
+        details = order.data.get("plan")
+        details = details if isinstance(details, dict) else {}
+        trailing = details.get("trailing_pct")
+        days = details.get("holding_days")
+        entry = order.fill_price or order.entry_price
+        if entry <= 0:
+            return
+        plan = Plan(
+            entry=entry,
+            initial_stop=order.stop_loss
+            if order.stop_loss is not None and order.stop_loss < entry
+            else None,
+            trailing_pct=float(trailing) if isinstance(trailing, int | float) else None,
+            holding_days=int(days)
+            if isinstance(days, int | float) and not isinstance(days, bool)
+            else None,
+            opened_at=self._clock(),
+        )
+        await self._store.put(
+            position.model_copy(
+                update={
+                    "data": {
+                        **position.data,
+                        "plan": plan.view(),
+                        "high": entry,
+                        "low": entry,
+                    },
+                    "round_id": position.round_id or order.round_id,
+                    "updated_at": now_ms(),
+                }
+            )
+        )
+
+    async def _manage(
+        self, position: TradePosition, plan: Plan, price: float, *, move_stop: bool
+    ) -> tuple[TradePosition, str]:
+        """One look by the position manager: the highest and lowest price
+        so far, a stop moved up (never down), and whether the holding
+        period is over."""
+        high = position.data.get("high")
+        low = position.data.get("low")
+        step = manage(
+            plan,
+            price=price,
+            stop=position.stop_loss,
+            high=float(high) if isinstance(high, int | float) else plan.entry,
+            low=float(low) if isinstance(low, int | float) else plan.entry,
+            now=self._clock(),
+            move_stop=move_stop,
+        )
+        mae, mfe = step.excursions(plan.entry)
+        changed = (
+            step.stop != position.stop_loss or step.high != high or step.low != low
+        )
+        if changed:
+            position = position.model_copy(
+                update={
+                    "stop_loss": step.stop,
+                    "data": {
+                        **position.data,
+                        "high": step.high,
+                        "low": step.low,
+                        "mae_pct": mae,
+                        "mfe_pct": mfe,
+                    },
+                    "updated_at": now_ms(),
+                }
+            )
+            await self._store.put(position)
+        for note in step.notes:
+            await self.feed.emit(
+                "position",
+                f"{position.symbol}: {note}.",
+                round_id=position.round_id,
+                symbol=position.symbol,
+                data={"stop": step.stop, "high": step.high},
+            )
+        return position, step.exit
 
     async def _cancel_legs(self, position: TradePosition, config: DeskConfig) -> bool:
         """Before selling a holding whose stop and target sit on the platform
@@ -2907,6 +3027,7 @@ class TradingDesk:
                         "entry": entry,
                         "exit_price": order.fill_price,
                         "held_days": round(held_days, 2),
+                        **_exit_details(order, opening),
                     },
                 },
             )
@@ -3168,6 +3289,7 @@ class TradingDesk:
             starting_cash=config.paper_cash,
             fee_pct=config.fee_pct,
             min_fee=config.min_fee,
+            limits=config.data,
         )
 
     def _broker(self, config: DeskConfig, market: str = "") -> Broker:
@@ -3729,12 +3851,6 @@ class TradingDesk:
         logger.warning("Trading: {}", text)
         await self.feed.emit("error", text)
 
-    async def _order_by_client(self, client_id: str) -> TradeOrder | None:
-        found = await self._store.find(
-            TradeOrder, where={"client_id": client_id}, limit=1
-        )
-        return found[0] if found else None
-
     async def _set(self, order: TradeOrder, **changes: object) -> TradeOrder:
         updated = order.model_copy(update={**changes, "updated_at": now_ms()})
         await self._store.put(updated)
@@ -3815,6 +3931,37 @@ def _round_trip_pct(config: DeskConfig, quality: QualityReport) -> float:
         snap.spread_pct for snap in quality.snapshots if snap.spread_pct is not None
     ]
     return round(2 * config.fee_pct + (min(spreads) if spreads else 0.1), 4)
+
+
+def _exit_details(order: TradeOrder, opening: TradeOrder | None) -> JsonObject:
+    """What the record keeps about a sale: the plan against what happened,
+    the price expected and the one filled, the costs, and how far the trade
+    went for and against it while held."""
+    held = order.data.get("position")
+    held = held if isinstance(held, dict) else {}
+    plan = held.get("plan")
+    plan = plan if isinstance(plan, dict) else {}
+    opened = opening.data.get("plan") if opening is not None else None
+    opened = opened if isinstance(opened, dict) else {}
+    expected = order.entry_price
+    slippage = (
+        round((1 - order.fill_price / expected) * 100, 3)
+        if order.fill_price and expected
+        else None
+    )
+    return {
+        "planned_stop": plan.get("initial_stop"),
+        "planned_target": held.get("target"),
+        "stop_at_exit": held.get("stop"),
+        "planned_holding_days": plan.get("holding_days"),
+        "expected_exit_price": expected,
+        "exit_slippage_pct": slippage,
+        "fees": round(order.fees + (opening.fees if opening is not None else 0.0), 2),
+        "mae_pct": held.get("mae_pct"),
+        "mfe_pct": held.get("mfe_pct"),
+        "thesis": opened.get("thesis", ""),
+        "invalidation": opened.get("invalidation", []),
+    }
 
 
 def _sent(order: TradeOrder) -> Sent:

@@ -189,6 +189,9 @@ class TradeFill(Record):
     """In the base currency; unknown when the platform doesn't say."""
     fees_known: bool = True
     currency: str = ""
+    basis: str = ""
+    """For a practice fill: how its price was worked out (the live bid or
+    ask, or an assumed spread, and the slippage)."""
     created_at: int = Field(default_factory=now_ms)
 
 
