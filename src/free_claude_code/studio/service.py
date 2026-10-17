@@ -33,6 +33,7 @@ from free_claude_code.core.version import package_version
 from . import system_monitor
 from .agents import SEALED_TOOLS, AgentRunner, TurnResult, step_budget
 from .assistant_tools import describe_time, now_line, parse_when
+from .changer import Changer, ChangerError, app_root
 from .claw import ClawCode, ClawError
 from .code_loop import code_and_test, project_name
 from .commands import CommandBroker, CommandError
@@ -194,7 +195,7 @@ from .orders import (
     web_request,
     worth_routing,
 )
-from .page_try import PageReport, try_page
+from .page_try import PageReport, page_try_ready, screenshot_pages, try_page
 from .phone_link import (
     MAX_MEMORY_CHARS,
     MAX_PULL,
@@ -229,6 +230,8 @@ from .playbook import (
 )
 from .presets import (
     BUILDER_PROMPT,
+    CHANGER_PROMPT,
+    CHANGER_TOOLS,
     CODER_PROMPT,
     CODER_TOOLS,
     FARM_AGENT_PROMPT,
@@ -290,6 +293,7 @@ from .teamplan import (
 from .teamplan import summary as plan_summary
 from .tools import (
     ALL_TOOL_NAMES,
+    CHANGER_TOOL,
     DEFAULT_TOOL_NAMES,
     IDEAS_TOOL,
     MAIN_ONLY_TOOLS,
@@ -326,6 +330,9 @@ TESTER_AGENT_NAME = "Tester"
 CODER_AGENT_NAME = "Coder"
 LAB_AGENT_NAME = "Lab"
 FARM_AGENT_NAME = "Farm"
+CHANGER_AGENT_NAME = "Changer"
+CHANGER_COPY_NAME = "FCC (Changer copy)"
+CHANGER_HELPER_SECONDS = 1800.0
 _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     BUILDER_AGENT_NAME: (
         "skill",
@@ -832,6 +839,14 @@ class StudioService:
         self._lab = LabBench(store, think=self._lab_think, transport=search_transport)
         # The maths tutor asks the same server AI as the Lab (for explanations only).
         self._tutor = Tutor(store, think=self._lab_think)
+        # The Changer changes a copy of FCC itself and packs update zips.
+        self._changer = Changer(
+            self._data_root / "changer",
+            source=app_root(),
+            shooter=screenshot_pages if page_try_ready() else None,
+        )
+        self._changer_helpers: set[str] = set()
+        self._changer_last: JsonObject = {}
         self._lab_busy = 0
         self._lab_error: str | None = None
         self._farm = ContentFarm(
@@ -1575,6 +1590,8 @@ class StudioService:
         """The first tool call of a turn where the user named a connected
         service: a hand-off ('ask the Researcher') goes back to the mcp tool,
         once, so a small model uses the service the user asked for."""
+        if call.name == CHANGER_TOOL:
+            return await self._changer_tool(call, context)
         said = self._turn_said.get(context.chat_id, "")
         asked = slash_names(said)
         used = slash_names(json.dumps(call.arguments, ensure_ascii=False))
@@ -2244,7 +2261,7 @@ class StudioService:
                     name
                     for name in ALL_TOOL_NAMES
                     if name not in agent.tools
-                    and name != TOOLSHED_TOOL
+                    and name not in {TOOLSHED_TOOL, CHANGER_TOOL}
                     and (agent.role == MAIN_ROLE or name not in MAIN_ONLY_TOOLS)
                 ),
             )
@@ -2496,6 +2513,292 @@ class StudioService:
     def tutor(self) -> Tutor:
         """The maths tutor for the path to an electrician's licence."""
         return self._tutor
+
+    # ------------------------------------------------------------ the Changer
+
+    async def _changer_agent(self) -> Agent:
+        """The Changer: an agent on a server AI that changes FCC itself."""
+        for agent in await self._store.find(
+            Agent, where={"name": CHANGER_AGENT_NAME}, order_by="created_at ASC"
+        ):
+            if not agent.archived:
+                return agent
+        return await self.create_agent(
+            name=CHANGER_AGENT_NAME,
+            role="agent",
+            model=self.server_model,
+            system_prompt=CHANGER_PROMPT,
+            tools=CHANGER_TOOLS,
+            description="Changes FCC itself in a copy and packs update zips.",
+            all_tools=False,
+        )
+
+    async def _changer_copy(self) -> SiteProject | None:
+        found = await self._store.find(
+            SiteProject, where={"name": CHANGER_COPY_NAME}, order_by="created_at ASC"
+        )
+        return found[0] if found else None
+
+    async def changer_fresh_copy(self) -> SiteProject:
+        """A new copy of FCC's files for the Changer (the old copy's
+        unpacked changes are dropped)."""
+        if await self._changer_busy():
+            raise StudioError("The Changer is working; wait for it to finish first.")
+        copy = await self._changer_copy()
+        if copy is None:
+            copy = SiteProject.model_validate(
+                {
+                    "name": CHANGER_COPY_NAME,
+                    "slug": slugify(CHANGER_COPY_NAME),
+                    "description": "A copy of FCC's own files that the Changer edits.",
+                }
+            )
+        target = self._sites.directory(copy.id)
+        try:
+            count = await asyncio.to_thread(self._changer.make_copy, target)
+        except ChangerError as error:
+            raise StudioError(str(error)) from error
+        copy = copy.model_copy(update={"file_count": count, "updated_at": now_ms()})
+        await self._store.put(copy)
+        self._changer_last = {}
+        return copy
+
+    async def _changer_busy(self) -> bool:
+        agent = await self._changer_agent()
+        return any(
+            run.status in {"queued", "running"}
+            for run in await self.runs(agent_id=agent.id)
+        )
+
+    async def changer_start(self, request: str) -> JsonObject:
+        """Hand the Changer a change to make; it works in the background."""
+        if not request.strip():
+            raise StudioError("Say what the Changer should change.")
+        if await self._changer_busy():
+            raise StudioError("The Changer is already working on a change.")
+        agent = await self._changer_agent()
+        copy = await self._changer_copy() or await self.changer_fresh_copy()
+        run = await self.start_task(
+            agent_id=agent.id, goal=request.strip(), site_id=copy.id
+        )
+        return {"run_id": run.id, "chat_id": run.chat_id}
+
+    async def changer_view(self) -> JsonObject:
+        """Everything the Changer page shows."""
+        agent = await self._changer_agent()
+        copy = await self._changer_copy()
+        target = self._sites.directory(copy.id) if copy else None
+        changes = (
+            await asyncio.to_thread(self._changer.changes, target) if target else None
+        )
+        version = ""
+        if target is not None and (target / "pyproject.toml").is_file():
+            found = re.search(
+                r'^version = "([^"]+)"',
+                (target / "pyproject.toml").read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+            version = found.group(1) if found else ""
+        runs = (await self.runs(agent_id=agent.id))[:10]
+        return {
+            "ready": self._changer.source is not None,
+            "agent": {"id": agent.id, "name": agent.name, "model": agent.model},
+            "copy": (
+                {
+                    "id": copy.id,
+                    "files": copy.file_count,
+                    "made_at": self._changer.made_at(),
+                    "version": version,
+                }
+                if copy
+                else None
+            ),
+            "changes": changes,
+            "runs": [
+                {
+                    "id": run.id,
+                    "chat_id": run.chat_id,
+                    "goal": run.goal,
+                    "status": run.status,
+                    "step": run.step,
+                    "max_steps": run.max_steps,
+                    "result": run.result,
+                    "error": run.error,
+                    "helper": run.chat_id in self._changer_helpers
+                    or run.goal.startswith("Helper: "),
+                    "created_at": run.created_at,
+                }
+                for run in runs
+            ],
+            "check": self._changer_last.get("check"),
+            "shots": self._changer.shots(),
+            "shots_note": self._changer_last.get("shots_note", ""),
+            "screenshots_ready": page_try_ready(),
+            "updates": self._changer.updates(),
+        }
+
+    async def _changer_target(self) -> Path:
+        copy = await self._changer_copy()
+        if copy is None:
+            raise StudioError("There is no Changer copy yet. Start a change first.")
+        return self._sites.directory(copy.id)
+
+    async def changer_check(self) -> JsonObject:
+        report = await self._changer.check(await self._changer_target())
+        self._changer_last["check"] = report.view()
+        return report.view()
+
+    async def changer_screenshots(
+        self, pages: Sequence[str] = (), *, phone: bool = False
+    ) -> JsonObject:
+        target = await self._changer_target()
+        try:
+            result = await self._changer.screenshots(
+                target, pages or ("home", "lab", "trade", "learn"), phone=phone
+            )
+        except ChangerError as error:
+            self._changer_last["shots_note"] = str(error)
+            raise StudioError(str(error)) from error
+        problems = result.get("problems")
+        self._changer_last["shots_note"] = (
+            "; ".join(str(item) for item in problems)
+            if isinstance(problems, list)
+            else ""
+        )
+        return result
+
+    async def changer_package(self, note: str) -> JsonObject:
+        target = await self._changer_target()
+        try:
+            return await asyncio.to_thread(self._changer.package, target, note)
+        except ChangerError as error:
+            raise StudioError(str(error)) from error
+
+    async def changer_diff(self, path: str) -> str:
+        target = await self._changer_target()
+        try:
+            return await asyncio.to_thread(self._changer.diff, target, path)
+        except ChangerError as error:
+            raise StudioError(str(error)) from error
+
+    def changer_file(self, kind: str, name: str) -> Path:
+        try:
+            if kind == "shot":
+                return self._changer.shot(name)
+            return self._changer.update_file(name)
+        except ChangerError as error:
+            raise StudioNotFoundError(str(error)) from error
+
+    async def _changer_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        """The Changer's own tool: checks, screenshots, helpers, update zips."""
+        copy = await self._changer_copy()
+        if copy is None or context.site_id != copy.id:
+            return ToolOutcome(
+                text="fcc_changer works only in the Changer copy: the owner starts "
+                "changes from the Changer page.",
+                data={"tool": CHANGER_TOOL},
+                failed=True,
+            )
+        target = self._sites.directory(copy.id)
+        arguments = call.arguments
+        action = str(arguments.get("action", ""))
+        data: JsonObject = {"tool": CHANGER_TOOL, "action": action}
+        try:
+            if action == "changes":
+                changes = await asyncio.to_thread(self._changer.changes, target)
+                lines = [
+                    f"{label}: {', '.join(changes[key]) or 'none'}"
+                    for key, label in (
+                        ("changed", "Changed"),
+                        ("added", "Added"),
+                        ("deleted", "Deleted"),
+                    )
+                ]
+                return ToolOutcome(text="\n".join(lines), data={**data, **changes})
+            if action == "check":
+                report = await self._changer.check(target)
+                self._changer_last["check"] = report.view()
+                return ToolOutcome(
+                    text=report.text(),
+                    data={**data, **report.view()},
+                    failed=not report.passed,
+                )
+            if action == "screenshots":
+                raw = arguments.get("pages")
+                pages = [str(item) for item in raw] if isinstance(raw, list) else []
+                result = await self.changer_screenshots(
+                    pages, phone=arguments.get("phone") is True
+                )
+                shots = result.get("shots")
+                taken = (
+                    ", ".join(str(item) for item in shots)
+                    if isinstance(shots, list)
+                    else ""
+                )
+                note = self._changer_last.get("shots_note") or ""
+                return ToolOutcome(
+                    text=f"Screenshots taken: {taken or 'none'}. They are on the "
+                    f"Changer page for the owner.{f' Problems: {note}' if note else ''}",
+                    data={**data, **result},
+                    failed=not taken,
+                )
+            if action == "subagent":
+                return await self._changer_helper(
+                    context, str(arguments.get("task", ""))
+                )
+            if action == "package":
+                result = await self.changer_package(str(arguments.get("note", "")))
+                return ToolOutcome(
+                    text=f"Packed {result['name']} (version {result['version']}), with "
+                    f"the backup {result['backup']}. The owner downloads it from "
+                    "the Changer page.",
+                    data={**data, **result},
+                )
+        except (StudioError, ChangerError) as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+        return ToolOutcome(
+            text="Pick an action: changes, check, screenshots, subagent, or package.",
+            data=data,
+            failed=True,
+        )
+
+    async def _changer_helper(self, context: ToolContext, task: str) -> ToolOutcome:
+        """A helper Changer on part of the job, in the same copy; one level
+        deep, so helpers don't hand work on again."""
+        data: JsonObject = {"tool": CHANGER_TOOL, "action": "subagent"}
+        if not task.strip():
+            return ToolOutcome(text="Give the helper a task.", data=data, failed=True)
+        if context.chat_id in self._changer_helpers:
+            return ToolOutcome(
+                text="Helpers do their part themselves; they can't hand it on.",
+                data=data,
+                failed=True,
+            )
+        agent = await self._changer_agent()
+        run = await self.start_task(
+            agent_id=agent.id, goal=f"Helper: {task.strip()}", site_id=context.site_id
+        )
+        self._changer_helpers.add(run.chat_id)
+        job = self._run_jobs.get(run.id)
+        if job is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(job), CHANGER_HELPER_SECONDS)
+            except TimeoutError:
+                return ToolOutcome(
+                    text="The helper is still working after 30 minutes; check its "
+                    "changes with action changes before going on.",
+                    data={**data, "run_id": run.id},
+                    failed=True,
+                )
+        finished = await self._store.require(AgentRun, run.id)
+        report = (
+            finished.result or finished.error or "The helper finished without a report."
+        )
+        return ToolOutcome(
+            text=f"Helper ({finished.status}): {report}",
+            data={**data, "run_id": run.id, "status": finished.status},
+            failed=finished.status != "succeeded",
+        )
 
     async def _lab_think(self, system: str, prompt: str) -> str:
         """The Lab's own questions go to a server AI: it knows more chemistry.

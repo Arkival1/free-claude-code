@@ -6088,6 +6088,7 @@
     ["Ops (what the PC is doing)", "ops", "◉"],
     ["Classroom", "learn", "✎"],
     ["Maths tutor (electrician)", "tutor", "∑"],
+    ["The Changer (change FCC)", "changer", "⟳"],
     ["Models", "models", "▣"],
     ["Model Control", "engine", "⚡"],
     ["Tuning & LoRA", "tune", "⟁"],
@@ -7271,6 +7272,7 @@
         case "farm": return await renderFarm(generation);
         case "trade": return await renderTrade(generation);
         case "tutor": return await renderTutor(generation);
+        case "changer": return await renderChanger(generation);
         case "ops": return await renderOps(generation);
         case "hq": return await renderHQ(generation);
         case "connectors": return await renderConnectors();
@@ -7546,6 +7548,21 @@
     });
   }
 
+  // The Changer (an AI that changes FCC itself, in a copy) lives in changer.js.
+  async function renderChanger(generation) {
+    if (!window.FCCChanger) throw new Error("The Changer didn't load. Reload the page.");
+    await window.FCCChanger.render({
+      view,
+      el,
+      api,
+      post,
+      notify,
+      go,
+      token,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
   // The maths tutor (electrician's licence, NSW) lives in tutor.js.
   async function renderTutor(generation) {
     if (!window.FCCTutor) throw new Error("The maths tutor didn't load. Reload the page.");
@@ -7596,6 +7613,7 @@
         farm: "Content Farm",
         trade: "Trading Bank",
         tutor: "Maths tutor",
+        changer: "The Changer",
         ops: "Ops",
         hq: "HQ",
         connectors: "Connectors",

@@ -562,7 +562,14 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Run and test code",
-        ("run_command", "test_code", "check_project", "polish_check", "try_page"),
+        (
+            "run_command",
+            "test_code",
+            "check_project",
+            "polish_check",
+            "try_page",
+            "fcc_changer",
+        ),
     ),
     (
         "Ask teammates",
@@ -649,6 +656,46 @@ CODER_TOOLS: tuple[str, ...] = (
     "mcp",
     *_WEB,
     *_MEMORY,
+)
+CHANGER_PROMPT = (
+    "You are the Changer: you change FCC (Free Claude Code and FCC Studio) "
+    "itself for the owner. You work in the Changer copy, a project holding a "
+    "copy of FCC's own files, never the running app; the owner installs your "
+    "work as an update zip. Start by reading CLAUDE.md and "
+    ".claude/skills/fcc-studio/SKILL.md (the map of the app and the owner's "
+    "rules), then use search_files to find the code you need and read it "
+    "before changing it. Make the smallest change that does the job and "
+    "match the code around it; change the back end (src/free_claude_code/"
+    "studio, api/studio_routes.py) and the page (api/studio_static) "
+    "together. Use edit_file for changes to existing files. Don't add Python "
+    "packages, don't put keys or passwords in any file, don't weaken a "
+    "safety check (the Trading Bank only ever gets stricter), and don't "
+    "touch Content Farm unless the owner asks. After editing, call "
+    "fcc_changer with action check and fix every problem until it passes. "
+    "When you changed a page, call fcc_changer with action screenshots and "
+    "the pages to look at, and say what they show. For a big job, hand a "
+    "separate part to a helper with fcc_changer action subagent: give it "
+    "everything it needs and say which files are its own. When the checks "
+    "pass, call fcc_changer with action package and a plain note of what "
+    "changed, then finish with a short summary: what changed, the files, "
+    "the checks, the update zip's name, and anything left to do."
+)
+CHANGER_TOOLS: tuple[str, ...] = (
+    "read_file",
+    "write_file",
+    "edit_file",
+    "search_files",
+    "list_files",
+    "delete_file",
+    "restore_file",
+    "update_plan",
+    "fcc_changer",
+    "run_command",
+    "ask_researcher",
+    "skill",
+    *_WEB,
+    "remember",
+    "recall",
 )
 LAB_AGENT_PROMPT = (
     "Run the Lab for the team: when Jarvis hands you a job, do it in the Lab "

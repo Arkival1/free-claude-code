@@ -682,6 +682,42 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="The Changer (change FCC itself)",
+        route="/studio#changer",
+        where=(
+            "MENU (Home), The Changer. Type what to change, press Start the "
+            "change; Watch it work opens its task."
+        ),
+        terms=(
+            "changer",
+            "change fcc",
+            "update fcc",
+            "fix fcc",
+            "fix a bug",
+            "new feature",
+            "update zip",
+            "edit the app",
+            "change the app",
+            "subagents",
+            "subagent",
+        ),
+        body=(
+            "The Changer is an AI on a server model that changes FCC itself. It "
+            "works in a copy of FCC's own files (the FCC (Changer copy) project), "
+            "never the app you're using. It reads the map of the app, edits the "
+            "code, runs checks (every changed file, and the app loading from the "
+            "copy), takes screenshots of the changed copy running on a spare port "
+            "with no keys and no data, and can hand separate parts to helper "
+            "Changers (subagents) that work in the same copy. When the checks "
+            "pass it makes an update zip, listed on the page with a backup zip. "
+            "To install: close FCC, unzip the update into the folder that holds "
+            "your fcc folder, choose Replace, start FCC; unzip the backup the "
+            "same way to undo. Change its model on its agent page (an API model "
+            "codes best). Start over from a fresh copy drops changes not yet in "
+            "a zip."
+        ),
+    ),
+    GuideTopic(
         title="Maths tutor (electrician)",
         route="/studio#tutor",
         where=(

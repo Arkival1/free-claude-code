@@ -111,6 +111,7 @@ TEAM_PLAN_TOOL = "team_plan"
 SKILL_TOOL = "skill"
 TOOLSHED_TOOL = "toolshed"
 MCP_TOOL = "mcp"
+CHANGER_TOOL = "fcc_changer"
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
 MAX_LISTED_PHOTOS = 30
@@ -1375,6 +1376,37 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=CHANGER_TOOL,
+        description=(
+            "The Changer's own tool, for changing FCC itself in the Changer "
+            "copy. action changes: list the files changed so far. check: "
+            "syntax-check every changed file and load the app from the copy; "
+            "fix every problem it reports. screenshots: run the changed copy on "
+            "a spare port (no keys, empty data) and screenshot Studio pages "
+            "(pages: home, lab, trade, learn, tutor, agents, settings...; "
+            "phone true for phone size). subagent: hand a separate, "
+            "self-contained part of the job to a helper Changer that works in "
+            "the same copy and reports back (task: everything it needs, "
+            "including which files are its own). package: when the checks "
+            "pass, pack the changes into an update zip for the owner (note: "
+            "what changed, in plain words)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["changes", "check", "screenshots", "subagent", "package"],
+                },
+                "pages": {"type": "array", "items": {"type": "string"}},
+                "phone": {"type": "boolean"},
+                "task": {"type": "string"},
+                "note": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
         name=FINISH_TOOL,
         description="Finish the task and report the result to the user.",
         parameters={
@@ -1418,6 +1450,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         CODE_TOOL,
         TEAM_PLAN_TOOL,
         TOOLSHED_TOOL,
+        CHANGER_TOOL,
     }
 )
 NOT_IN_THE_SHED = frozenset(
@@ -1437,6 +1470,7 @@ NOT_IN_THE_SHED = frozenset(
         "list_photos",
         "use_photo",
         TOOLSHED_TOOL,
+        CHANGER_TOOL,
         FINISH_TOOL,
     }
 )
@@ -1759,7 +1793,7 @@ class AgentToolbox:
             name
             for name in ALL_TOOL_NAMES
             if name not in names
-            and name != TOOLSHED_TOOL
+            and name not in {TOOLSHED_TOOL, CHANGER_TOOL}
             and (role == MAIN_ROLE or name not in MAIN_ONLY_TOOLS)
         )
         return (*names, *extra)

@@ -11,10 +11,10 @@ from tests.api.support import create_test_app
 TEAM_TOOLS = [
     name
     for name in ALL_TOOL_NAMES
-    if name not in MAIN_ONLY_TOOLS and name != "toolshed"
+    if name not in MAIN_ONLY_TOOLS and name not in {"toolshed", "fcc_changer"}
 ]
 """Every tool but the ones only the main AI has (and the toolshed, which an
-agent with every tool never needs)."""
+agent with every tool never needs, and the Changer's own tool)."""
 
 
 async def team(make_studio, replies=("Done.",), **settings):
@@ -38,9 +38,10 @@ async def test_every_agent_gets_every_tool(make_studio):
         assert TEAM_PROMPT in str(model.calls[-1]["system"])
 
     await studio.main_say("hello", background=False)
-    assert offered(model.calls[-1]) == set(ALL_TOOL_NAMES) - {"toolshed"}, (
-        "Jarvis too (with every tool, nobody needs the toolshed)"
-    )
+    assert offered(model.calls[-1]) == set(ALL_TOOL_NAMES) - {
+        "toolshed",
+        "fcc_changer",
+    }, "Jarvis too (with every tool, nobody needs the toolshed)"
     assert TEAM_PROMPT not in str(model.calls[-1]["system"])
 
 

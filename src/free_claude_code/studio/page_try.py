@@ -204,6 +204,45 @@ async def try_page(
     return report
 
 
+async def screenshot_pages(
+    pages: Sequence[tuple[str, str]],
+    folder: Path,
+    *,
+    size: tuple[int, int] = DESKTOP_SIZE,
+    settle_ms: int = 2500,
+    launch: Launch = _launch,
+) -> tuple[list[Path], list[str]]:
+    """Screenshot web pages by URL: ``(name, url)`` pairs → ``folder/name.png``.
+
+    Returns the pictures taken and a line for each page that failed.
+    """
+    folder.mkdir(parents=True, exist_ok=True)
+    taken: list[Path] = []
+    problems: list[str] = []
+    runner, browser = await launch()
+    try:
+        context = await browser.new_context(
+            viewport={"width": size[0], "height": size[1]}
+        )
+        tab = await context.new_page()
+        for name, url in pages:
+            target = folder / f"{name}.png"
+            try:
+                await tab.goto(url, wait_until="load", timeout=30_000)
+                await tab.wait_for_timeout(settle_ms)
+                await tab.screenshot(path=str(target))
+            except Exception as error:  # one page failing keeps the rest
+                problems.append(f"{name}: {str(error).splitlines()[0][:200]}")
+                continue
+            taken.append(target)
+    finally:
+        try:
+            await browser.close()
+        finally:
+            await runner.stop()
+    return taken, problems
+
+
 def _listen(tab: Any, report: PageReport, folder: Path) -> None:
     def on_dialog(dialog: Any) -> None:
         report.problems.append(

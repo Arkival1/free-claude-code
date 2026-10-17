@@ -1326,6 +1326,32 @@ the warning, so you know never to do them.
 </details>
 
 <details>
+<summary><strong>The Changer: an AI that changes FCC itself</strong></summary>
+
+Open the HUD menu, **The Changer**. Type what to change or fix in FCC and
+press **Start the change**. The Changer is an agent on a server model (change
+its model on its agent page) that works in a copy of FCC's own files, the
+**FCC (Changer copy)** project, never the app you're using:
+
+- It reads the app's map (`CLAUDE.md`, the fcc-studio skill), finds the code,
+  and edits it, with undo for every file like any project.
+- **Check** syntax-checks every changed file and loads the app from the copy.
+- **Screenshots** run the changed copy on a spare port with no keys and an
+  empty data folder, and take pictures of the Studio pages you name (needs
+  Playwright's browser: `uv run playwright install chromium`).
+- For a big job it hands separate parts to **helper Changers** (subagents) that
+  work in the same copy and report back; helpers can't hand work on again.
+- When the checks pass it makes an **update zip** (only the changed files, the
+  version raised by one, and a note) plus a **backup zip** of the files it
+  replaces. Both download from the page.
+
+To install an update: close FCC, unzip it into the folder that holds your
+`fcc` folder (choose Replace), and start FCC. To undo it, unzip the backup the
+same way. **Start over from a fresh copy** drops changes not yet in a zip.
+
+</details>
+
+<details>
 <summary><strong>Maths tutor: the maths to become an electrician in NSW</strong></summary>
 
 Open **Learn** in the tab bar and press **Open the maths tutor** (or the HUD

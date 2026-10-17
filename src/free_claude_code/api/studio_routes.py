@@ -88,6 +88,8 @@ _ASSET_FILENAMES = frozenset(
         "hq.js",
         "trade.css",
         "trade.js",
+        "changer.css",
+        "changer.js",
         "tutor.css",
         "tutor.js",
         "fcc3d.js",
@@ -3254,6 +3256,19 @@ class LabKeepPayload(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class ChangerStartPayload(BaseModel):
+    request: str = Field(min_length=1, max_length=8000)
+
+
+class ChangerShotsPayload(BaseModel):
+    pages: list[str] = Field(default_factory=list, max_length=8)
+    phone: bool = False
+
+
+class ChangerPackPayload(BaseModel):
+    note: str = Field(default="", max_length=4000)
+
+
 class TutorCheckPayload(BaseModel):
     question_id: str = Field(min_length=3, max_length=60)
     answer: str = Field(default="", max_length=80)
@@ -4656,3 +4671,84 @@ async def tutor_ask(
         return await studio.tutor.ask(payload.question)
     except TutorError as error:
         raise _tutor_failed(error) from error
+
+
+# ------------------------------------------------------------ the Changer
+
+
+@router.get("/studio/api/changer")
+async def changer_view(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The Changer: its copy of FCC, what changed, checks, screenshots, zips."""
+    return await studio.changer_view()
+
+
+@router.post("/studio/api/changer/start")
+async def changer_start(
+    payload: ChangerStartPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Hand the Changer a change to make (it works in its copy, not the app)."""
+    return await studio.changer_start(payload.request)
+
+
+@router.post("/studio/api/changer/fresh")
+async def changer_fresh(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Start over from a new copy of the app's files."""
+    copy = await studio.changer_fresh_copy()
+    return {"id": copy.id, "files": copy.file_count}
+
+
+@router.post("/studio/api/changer/check")
+async def changer_check(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return await studio.changer_check()
+
+
+@router.post("/studio/api/changer/screenshots")
+async def changer_screenshots(
+    payload: ChangerShotsPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Run the changed copy on a spare port and screenshot Studio pages."""
+    return await studio.changer_screenshots(payload.pages, phone=payload.phone)
+
+
+@router.post("/studio/api/changer/package")
+async def changer_package(
+    payload: ChangerPackPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Pack the changes into an update zip, with a backup zip to undo it."""
+    return await studio.changer_package(payload.note)
+
+
+@router.get("/studio/api/changer/diff")
+async def changer_diff(
+    path: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"path": path, "diff": await studio.changer_diff(path)}
+
+
+@router.get("/studio/api/changer/shots/{name}", include_in_schema=False)
+async def changer_shot(
+    name: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> FileResponse:
+    return FileResponse(studio.changer_file("shot", name), media_type="image/png")
+
+
+@router.get("/studio/api/changer/updates/{name}", include_in_schema=False)
+async def changer_update(
+    name: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> FileResponse:
+    """Download an update zip (or its backup)."""
+    return FileResponse(
+        studio.changer_file("update", name), media_type="application/zip", filename=name
+    )

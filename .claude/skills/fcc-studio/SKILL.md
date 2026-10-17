@@ -40,6 +40,7 @@ the user-facing description of every feature is the `## Studio` section of
 | Model Control (`#engine`) | Built-in llama.cpp engine (instead of LM Studio): GPU detection, Tune for my PC, speed test |
 | Tuning (`#tune`, `#job`, `#lora`) | Light tuning, and LoRA training on a rented GPU that installs the new model |
 | Classroom / Learn (`#learn`, `#class/<id>`) | A teacher model teaches a student model; Learn mode where Jarvis studies a topic |
+| The Changer (`#changer`, menu) | An agent (server model) that changes a copy of FCC's own files (project "FCC (Changer copy)"), checks it, screenshots it on a spare port, uses helper Changers, and packs update + backup zips (`changer.py`, the `fcc_changer` tool) |
 | Maths tutor (`#tutor`, from Learn) | Electrician maths for the owner (NSW licence path): questions made and marked in code (`tutor/topics.py`), progress and tests (`tutor/coach.py`), the AI only explains |
 | Lab (`#lab`) | Chemistry, materials, tech and design sandbox with a lab chat; designs drawn in real materials with a physics check (`lab/design.py`), saved parts to reuse |
 | Content Farm (`#farm`) | Video channels, scripts, cartoons, beat edits, rendering. Don't touch unless asked |
@@ -67,7 +68,7 @@ src/free_claude_code/
                   team_mcp.py (LCC as MCP server), phone_cors.py
   api/studio_static/  Studio UI: index.html, studio.js (the whole single-page app:
                   router, pages, HUD), studio.css, hq.js/css, lab.js/css,
-                  farm.js/css, trade.js/css (Trading Bank), tutor.js/css (maths tutor),
+                  farm.js/css, trade.js/css (Trading Bank), tutor.js/css (maths tutor), changer.js/css (the Changer),
                   ops.js/css (Ops),
                   fcc3d.js (shared 3D engine), trade3d.js and ops3d.js (3D
                   views, loaded only when shown), three.*.js and three-orbit.js
@@ -106,6 +107,7 @@ docs/             GitHub Pages: index.html and docs/phone (built phone app)
 | `guide.py` | The in-app Guide's knowledge of every page and setting. Keep it in step with features |
 | `playbook.py`, `call_guard.py`, `presets.py` | Jarvis's tool notes, small-model call guard, agent presets |
 | `voice.py`, `local_voice.py`, `obsidian.py`, `phone_link.py`, `hq.py`, `lab/`, `farm/` | Voice, Obsidian mirror, phone pairing, HQ, Lab, Content Farm |
+| `changer.py` | The Changer: `Changer` (copy of the app, baseline hashes, changes/diffs, checks, screenshots of the copy run with an empty HOME and no key env vars, update and backup zips); glue in `service.py` (`changer_*`, `_changer_tool`, `_changer_helper`) |
 | `tutor/` | The maths tutor: `topics.py` (28 topics, each question made from a seed and solved step by step in code), `coach.py` (`Tutor`: marking, `TutorAttempt` progress, practice tests, AI explanations), `pathway.py` (NSW licence path and sources) |
 | `trading/` | The Trading Bank: `desk.py` (`TradingDesk`: the loop, debates, risk period, routing, approvals, protection, views), `debate.py` (four rounds; `breaks.py` research/brainstorm, `simulate.py`), `contract.py` (checked seat answers), `seats.py`, `briefing.py`, `information.py`/`quality.py`/`news.py` (data checks), `evidence.py` (numbered evidence pack), `infotest.py` (information stress test), `assessment.py` (risk period), `stress.py` (investment stress test), `engine.py`/`scorecard.py`/`conflicts.py`/`regime.py` (decision layer), `decisions.py` (decision records, audit trail), `protection.py` (circuit breaker, kill latch), `fills.py` (practice fills), `positions.py` (position manager), `worker.py` (lease, step health, job retries, metrics), `learning.py` (versioned vote weights), `backtest.py`, `keyvault.py` (encrypted keys), `hlsign.py` (Hyperliquid signing), `risk.py` (hard limits), `precheck.py` (account check), `forecasts.py`, `debrief.py`, `ledger.py` (FIFO, AU tax CSV), `scanner.py`, `patterns.py`, `indicators.py`, `sessions.py` (ASX/NY hours), `data.py` and `providers/` (Yahoo, CoinGecko, DexScreener, Coinbase/Kraken books, news, Hyperliquid), `brokers/` (paper, Alpaca, IBKR, Kraken, Coinbase, BTC Markets, Independent Reserve, CoinSpot, Swyftx, Hyperliquid/Invo, webhook; `registry.py`, `catalog.py`, `common.py` with the no-money-moves guard), `config.py`, `log.py` |
 | `workers.py`, `resilience.py`, `jsonish.py`, `system_monitor.py` | Background lanes (`WorkerPool`), retries/rate limits/circuit breakers/`submit_once`, forgiving JSON reading, CPU/RAM/GPU readings |
