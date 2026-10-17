@@ -103,6 +103,7 @@ from .positions import Plan, manage
 from .precheck import pre_trade_check
 from .protection import FLATTEN_PHRASE, Health, Trip, may_clear, trip
 from .protection import check as breaker_check
+from .providers.hyperliquid import HyperliquidData
 from .providers.news import NewsFeeds
 from .quality import (
     QualityCheck,
@@ -225,6 +226,7 @@ class TradingDesk:
             wall=clock,
         )
         self.feed = Feed(store, root / "logs")
+        self._hyperliquid = HyperliquidData(self._web, wall=clock)
         self._decisions = DecisionBook(store, clock)
         self._rechecks: list[str] = []
         """Symbols whose decision went stale: analysed again from scratch."""
@@ -3631,6 +3633,9 @@ class TradingDesk:
             fee_pct=config.fee_pct,
             min_fee=config.min_fee,
             limits=config.data,
+            coin_book=self._hyperliquid.book
+            if config.practice_book == "hyperliquid"
+            else None,
         )
 
     def _broker(self, config: DeskConfig, market: str = "") -> Broker:

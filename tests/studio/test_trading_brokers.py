@@ -115,6 +115,7 @@ def test_every_platform_is_offered_with_australian_notes():
         "independentreserve",
         "coinspot",
         "swyftx",
+        "hyperliquid",
         "webhook",
     }
     for spec in PLATFORMS:

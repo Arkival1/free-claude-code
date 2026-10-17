@@ -204,6 +204,9 @@ class DeskConfig(BaseModel):
     routes: dict[str, str] = Field(default_factory=dict)
     """With real money: the account each market trades on (coins, US shares,
     ASX shares), several at once; a market not listed uses ``broker``."""
+    practice_book: Literal["exchanges", "hyperliquid"] = "exchanges"
+    """Where practice coin orders take their live bid and ask: the coin
+    exchanges (Coinbase, Kraken), or Hyperliquid's futures book (Invo)."""
     approval_minutes: int = Field(default=10, ge=1, le=1440)
     crypto_debrief_hour_utc: int = Field(default=14, ge=0, le=23)
     """When the crypto session debrief runs (14:00 UTC is midnight in Sydney)."""

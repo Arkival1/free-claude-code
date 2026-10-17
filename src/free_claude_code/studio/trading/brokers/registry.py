@@ -124,6 +124,8 @@ def environment_of(broker_id: str, values: Mapping[str, str]) -> str:
         return "practice"
     if broker_id == "swyftx" and values.get("environment", "demo") != "live":
         return "practice"
+    if broker_id == "hyperliquid" and values.get("environment") == "testnet":
+        return "practice"
     return "live"
 
 

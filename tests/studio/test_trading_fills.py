@@ -2,6 +2,7 @@
 fills in a thin market, and limit orders that wait and expire."""
 
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -284,3 +285,25 @@ async def test_a_practice_limit_waits_for_the_ask_and_expires_after_a_day(
     [expired] = await paper.tick()
     assert expired.status == "cancelled" and "Expired" in expired.note
     assert await store.get(TradePosition, "paper:BTC") is None
+
+
+@pytest.mark.asyncio
+async def test_practice_can_fill_on_hyperliquids_live_book(tmp_path, store):
+    clock = [time.time()]
+    market = FakeMarket(days(22, volume=1e12), [book(99.9, 100.1)])
+
+    async def hyperliquid(coin: str) -> QuoteSnapshot:
+        snap = book(100.4, 100.6)
+        return replace(snap, provider="Hyperliquid", exchange="Hyperliquid")
+
+    paper = PaperBroker(
+        store,
+        tmp_path / "paper.json",
+        market,
+        starting_cash=100_000.0,
+        coin_book=hyperliquid,
+        clock=lambda: clock[0],
+    )
+    filled = await paper.place(buy(1))
+    assert str(filled.raw["basis"]).startswith("Hyperliquid ask")
+    assert filled.fill_price is not None and filled.fill_price > 100.6

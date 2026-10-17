@@ -14,15 +14,17 @@ first parcel ($500) applies, and ASX shares trade in whole units.
 import json
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ...models import now_ms
+from ...resilience import ServiceError
 from ...store import StudioStore
 from ..config import DataQualityLimits
 from ..data import MarketData, MarketDataError, Quote
 from ..fills import LIMIT_HOURS, Conditions, conditions, next_slice
+from ..information import QuoteSnapshot
 from ..instruments import Instrument, parse_symbol
 from ..quality import bid_ask_source, profile_of
 from ..records import TradePosition
@@ -52,6 +54,7 @@ class PaperBroker:
         fee_pct: float = 0.1,
         min_fee: float = 1.0,
         limits: DataQualityLimits | None = None,
+        coin_book: Callable[[str], Awaitable[QuoteSnapshot]] | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._store = store
@@ -62,6 +65,8 @@ class PaperBroker:
         self._fee_pct = fee_pct
         self._min_fee = min_fee
         self._limits = limits or DataQualityLimits()
+        self._coin_book = coin_book
+        """When set, coins fill on this book (Hyperliquid's, for Invo)."""
         self._clock = clock
 
     def markets(self) -> frozenset[str]:
@@ -227,6 +232,12 @@ class PaperBroker:
                     for snap in await self._data.snapshots(instrument)
                     if snap.currency == quote.currency
                 ]
+                if self._coin_book is not None:
+                    # Practice on the account's own market: only its book.
+                    try:
+                        snapshots = [await self._coin_book(instrument.symbol)]
+                    except ServiceError:
+                        snapshots = []
                 found = bid_ask_source(
                     snapshots,
                     None,

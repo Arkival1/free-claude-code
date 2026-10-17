@@ -6,6 +6,7 @@ from .alpaca import AlpacaBroker
 from .btcmarkets import BtcMarketsBroker
 from .coinbase import CoinbaseBroker
 from .coinspot import CoinSpotBroker
+from .hyperliquid import HyperliquidBroker
 from .ibkr import IbkrBroker
 from .independent_reserve import IndependentReserveBroker
 from .kraken import KrakenBroker
@@ -174,6 +175,33 @@ PLATFORMS: tuple[BrokerSpec, ...] = (
             ),
         ),
         factory=SwyftxBroker,
+    ),
+    BrokerSpec(
+        id="hyperliquid",
+        name="Hyperliquid / Invo (beta)",
+        markets=("crypto",),
+        what="Coin perpetual futures on Hyperliquid, the exchange the Invo app "
+        "trades on. FCC trades at 1x (no borrowed money), isolated, long only, "
+        "with the stop and target held by the exchange. Beta: try the testnet "
+        "or a small order first.",
+        get_keys="app.hyperliquid.xyz: connect the wallet your Invo account uses, "
+        "then More, API, and create an API wallet. Paste its private key and "
+        "your account address here. An API wallet can trade but has no "
+        "withdrawal rights (those need your main wallet).",
+        australia="Non-custodial and open in Australia; trades in USDC. Futures "
+        "carry an hourly funding payment between longs and shorts.",
+        fields=(
+            KeyField("address", "Account address", secret=False, placeholder="0x..."),
+            KeyField("agent_key", "API wallet private key"),
+            KeyField(
+                "environment",
+                "Network",
+                secret=False,
+                choices=("mainnet", "testnet"),
+                placeholder="mainnet",
+            ),
+        ),
+        factory=HyperliquidBroker,
     ),
     BrokerSpec(
         id="webhook",
