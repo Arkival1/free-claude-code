@@ -730,6 +730,7 @@ def test_the_old_buy_rules_still_hold_in_the_new_contract():
             "stop_loss": 95.0,
             "take_profit": 110.0,
             "holding_days": 5,
+            "size_pct": 100,
             "data_timestamp": "evp_x",
         }
         raw.update(changes)

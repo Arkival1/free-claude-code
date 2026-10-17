@@ -28,7 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from free_claude_code.core.json_types import JsonObject
 
-from ..jsonish import lenient_object
+from ..jsonish import cut_off, lenient_object
 from ..llm import strip_thinking
 from .config import SeatConfig
 from .instruments import Instrument
@@ -80,8 +80,13 @@ LIMIT_ABOVE_PRICE = 1.02
 MARKET_SLACK = 0.01
 """A market order's entry range must include the price now, give or take 1%."""
 FACT_PREFIXES = frozenset("FMCNPR")
-"""Evidence a trade can rest on: facts, market, calculations, news,
-portfolio, rules. Opinions (O) and web reading (W) can't carry a trade."""
+"""Evidence a fact can be tied to: facts, market, calculations, news,
+portfolio, rules. Opinions (O) and web reading (W) are never facts."""
+SUPPORT_PREFIXES = frozenset("FMCN")
+"""Evidence a trade can rest on: what the asset and the market are doing.
+The owner's limits (R) and the holdings (P) can be cited, but they say
+nothing about the price, so they never carry a trade alone."""
+_PACK_ID = re.compile(r"evp_[0-9A-Za-z]+(?:\.\d+)?")
 
 
 def _word(value: object, table: dict[str, str], what: str) -> object:
@@ -112,7 +117,7 @@ def _clean_text(value: object) -> object:
 
 
 class Idea(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     idea: str = Field(min_length=3, max_length=240)
     kind: Literal["needs_data", "simulate", "argue"]
@@ -139,7 +144,7 @@ class Idea(BaseModel):
 class Fact(BaseModel):
     """A claim the Researcher makes, tied to the evidence it comes from."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     claim: str = Field(min_length=3, max_length=300)
     ref: str
@@ -153,7 +158,7 @@ class Fact(BaseModel):
 class TradePlan(BaseModel):
     """The plan fields every trade-shaped answer shares."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     entry_low: float | None = Field(default=None, gt=0)
     entry_high: float | None = Field(default=None, gt=0)
@@ -274,8 +279,9 @@ class PMDecision(TradePlan):
     the hard limits in code."""
 
     action: Direction
-    size_pct: float = Field(default=100.0, ge=0, le=100)
-    """The share of the size the limits allow that the PM wants."""
+    size_pct: float | None = Field(default=None, ge=0, le=100)
+    """The share of the size the limits allow that the PM wants (a trade
+    must say; a missing size is sent back, never taken as the most)."""
     confidence: int = Field(ge=0, le=100)
     p_up: float = Field(ge=0, le=1)
     p_target: float | None = Field(default=None, ge=0, le=1)
@@ -305,15 +311,15 @@ class PMDecision(TradePlan):
 
 
 class Scenario(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     name: str = Field(min_length=3, max_length=80)
-    fall_pct: float = Field(ge=0, le=90)
-    """A move against the position, 0-90%."""
+    fall_pct: float = Field(ge=0, le=100)
+    """A move against the position, 0-100% (the stress test caps it)."""
 
 
 class GuardianCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     check: str = Field(min_length=2, max_length=120)
     ok: bool
@@ -324,10 +330,10 @@ class GuardianReview(BaseModel):
     """The Risk Guardian's verdict on the draft plan code built: it can
     approve, approve smaller, delay, or reject (a veto)."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     verdict: Literal["approved", "approved_smaller", "delayed", "rejected"]
-    size_factor: float = Field(default=1.0, gt=0, le=1)
+    size_factor: float = Field(default=1.0, ge=0, le=1)
     reasons: list[str] = Field(min_length=1, max_length=8)
     evidence: list[str] = Field(default_factory=list, max_length=20)
     checks: list[GuardianCheck] = Field(default_factory=list, max_length=12)
@@ -361,7 +367,7 @@ class GuardianReview(BaseModel):
 
 
 class AttackItem(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     id: str
     verdict: Literal["holds", "weak", "fails"]
@@ -393,7 +399,7 @@ class AttackItem(BaseModel):
 class EvidenceAttack(BaseModel):
     """A seat's attempt to knock down the evidence a buy rests on."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     items: list[AttackItem] = Field(min_length=1, max_length=20)
     still_buy_without_strongest: bool
@@ -403,7 +409,7 @@ class EvidenceAttack(BaseModel):
 class FinalCheck(BaseModel):
     """The Risk Guardian's last word on the exact order: clear it or block it."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
 
     verdict: Literal["clear", "block"]
     point: str = Field(default="", max_length=400)
@@ -441,8 +447,18 @@ class PackView:
 
 
 def _stamp_problem(stamp: str, pack: PackView) -> list[str]:
-    if pack.id in stamp or (pack.cutoff_text and pack.cutoff_text in stamp):
+    """The answer must name exactly this pack (or this version of it), and
+    no other: a near match or an older version may rest on older data."""
+    named = set(_PACK_ID.findall(stamp))
+    if not _PACK_ID.fullmatch(pack.id):
+        named = {pack.id} if pack.id in stamp else set()
+    if named == {pack.id}:
         return []
+    if pack.id in named:
+        return [
+            f"data_timestamp names more than one pack ({', '.join(sorted(named))}); "
+            f"give only this pack's id ({pack.id})"
+        ]
     return [
         f"data_timestamp must be this pack's id ({pack.id}); it was {stamp!r}, so "
         "the answer may rest on older data"
@@ -533,15 +549,25 @@ def check_call(
     found += _stamp_problem(call.data_timestamp, pack)
     found += _ref_problems(call.evidence, pack, "evidence")
     found += _ref_problems([fact.ref for fact in call.facts], pack, "facts")
+    opinions = [fact.ref for fact in call.facts if fact.ref[:1] not in FACT_PREFIXES]
+    if opinions:
+        found.append(
+            "a fact can't come from opinions (O) or web reading (W): "
+            + ", ".join(opinions[:6])
+        )
     if call.direction == "sell" and not held:
         found.append("sell is only for something we hold; use no_trade or short")
     if call.direction in TRADES | {"sell"}:
         if not call.evidence:
             found.append(f"a {call.direction} must cite evidence numbers")
         elif call.direction in TRADES and not any(
-            ref[:1] in FACT_PREFIXES for ref in call.evidence
+            ref[:1] in SUPPORT_PREFIXES for ref in call.evidence
         ):
-            found.append("a trade can't rest only on opinions (O) or web reading (W)")
+            found.append(
+                "a trade must rest on facts, market data, calculations, or news "
+                "(F, M, C, N); limits (R), holdings (P), opinions (O) and web "
+                "reading (W) can't carry it"
+            )
         if call.direction in TRADES and not call.prove_wrong:
             found.append("say what would prove the call wrong (prove_wrong)")
     if call.direction == "long" and call.p_up <= 0.5:
@@ -575,11 +601,17 @@ def check_decision(
     if decision.action in TRADES:
         if not decision.supporting:
             found.append("a trade must cite its supporting evidence")
-        elif not any(ref[:1] in FACT_PREFIXES for ref in decision.supporting):
-            found.append("a trade can't rest only on opinions (O) or web reading (W)")
+        elif not any(ref[:1] in SUPPORT_PREFIXES for ref in decision.supporting):
+            found.append(
+                "a trade must rest on facts, market data, calculations, or news "
+                "(F, M, C, N); limits (R), holdings (P), opinions (O) and web "
+                "reading (W) can't carry it"
+            )
         if not decision.prove_wrong:
             found.append("say what would prove the decision wrong (prove_wrong)")
-        if decision.size_pct <= 0:
+        if decision.size_pct is None:
+            found.append(f"a {decision.action} needs size_pct")
+        elif decision.size_pct <= 0:
             found.append("size_pct must be above 0 for a trade")
         if (
             order_types is not None
@@ -636,10 +668,17 @@ def _long_order_problems(decision: PMDecision, price: float) -> list[str]:
 
 
 def check_review(review: GuardianReview, *, pack: PackView) -> list[str]:
+    """The stamp and the references must hold for an approval; a veto or a
+    delay stands whatever else is wrong with it (the cautious answer is
+    never thrown away)."""
+    if review.verdict in {"rejected", "delayed"}:
+        return []
     found = _stamp_problem(review.data_timestamp, pack)
     found += _ref_problems(review.evidence, pack, "evidence")
-    if review.verdict == "approved_smaller" and review.size_factor >= 1:
-        found.append("approved_smaller needs a size_factor below 1")
+    if review.verdict == "approved_smaller" and not 0 < review.size_factor < 1:
+        found.append("approved_smaller needs a size_factor above 0 and below 1")
+    if review.verdict == "approved" and review.size_factor < 1:
+        found.append("a smaller size is approved_smaller, not approved")
     return found
 
 
@@ -701,7 +740,11 @@ class Checked[M: BaseModel]:
 def read_checked[M: BaseModel](
     text: str, model: type[M], check: Callable[[M], list[str]]
 ) -> tuple[M | None, list[str]]:
-    data = lenient_object(strip_thinking(text))
+    reply = strip_thinking(text)
+    if cut_off(reply):
+        # Finishing a cut-off answer would mean guessing its last values.
+        return None, ["the reply was cut off before its JSON object closed"]
+    data = lenient_object(reply)
     if not data:
         return None, ["the reply had no JSON object"]
     try:

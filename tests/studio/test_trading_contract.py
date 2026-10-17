@@ -106,7 +106,10 @@ def test_unknown_words_are_refused_not_turned_into_hold():
     [
         ({"data_timestamp": "yesterday"}, "older data"),
         ({"evidence": ["F1", "F9"]}, "isn't in the pack: F9"),
-        ({"evidence": ["O1", "W1"]}, "only on opinions"),
+        ({"evidence": ["O1", "W1"]}, "can't carry it"),
+        # Limits and holdings say nothing about the price either.
+        ({"evidence": ["R1", "W1", "O1"]}, "can't carry it"),
+        ({"facts": [{"claim": "Earnings beat", "ref": "W1"}]}, "can't come from"),
         ({"evidence": []}, "must cite evidence"),
         ({"prove_wrong": []}, "prove the call wrong"),
         ({"p_up": 0.4}, "p_up above 0.5"),
@@ -200,9 +203,16 @@ def test_the_managers_decision_is_checked():
     )
     assert found is None and any("shorts are switched off" in p for p in problems)
     found, problems = decide(decision(supporting=["W1"]))
-    assert found is None and any("only on opinions" in p for p in problems)
+    assert found is None and any("can't carry it" in p for p in problems)
+    found, problems = decide(decision(supporting=["P1", "R1"]))
+    assert found is None and any("can't carry it" in p for p in problems)
     found, problems = decide(decision(size_pct=150))
     assert found is None
+    # A trade that leaves out its size is sent back, never sized at the most.
+    raw = decision()
+    del raw["size_pct"]
+    found, problems = decide(raw)
+    assert found is None and any("needs size_pct" in p for p in problems)
 
 
 def test_the_guardians_review_and_scenarios_are_bounded():
@@ -227,9 +237,15 @@ def test_the_guardians_review_and_scenarios_are_bounded():
     assert found.scenarios[0].fall_pct == 80
     assert review(verdict="veto")[0] is not None
     found, problems = review(size_factor=1.0)
-    assert found is None and any("size_factor below 1" in p for p in problems)
-    found, problems = review(scenarios=[{"name": "total wipeout", "fall_pct": 100}])
+    assert found is None and any("below 1" in p for p in problems)
+    # A 100% fall is the most cautious answer there is: it is kept.
+    found, _ = review(scenarios=[{"name": "total wipeout", "fall_pct": 100}])
+    assert found is not None
+    found, problems = review(scenarios=[{"name": "total wipeout", "fall_pct": 101}])
     assert found is None
+    # A veto stands even when its references are wrong.
+    found, _ = review(verdict="rejected", evidence=["F99"], data_timestamp="old")
+    assert found is not None and found.verdict == "rejected"
     found, problems = review(scenarios=[{"name": "a", "fall_pct": 10}] * 3)
     assert found is None
     found, problems = review(reasons=[])
@@ -318,3 +334,37 @@ async def test_one_repair_then_the_seat_is_left_out():
     )
     assert dropped.ignored and dropped.repaired and len(prompts) == 2
     assert data(dropped.view())["ignored"] is True
+
+
+def test_only_this_exact_pack_counts_as_the_stamp():
+    view = PackView("evp_new.2", "2026-10-14 18:00 UTC", PACK.refs)
+
+    def stamped(stamp: str) -> list[str]:
+        return read_checked(
+            json.dumps(call(data_timestamp=stamp)),
+            SeatCall,
+            lambda found: check_call(
+                found, instrument=BTC, pack=view, price=100.0, held=False
+            ),
+        )[1]
+
+    assert stamped("evp_new.2") == []
+    assert stamped("pack evp_new.2.") == []
+    # The same minute's cut-off, an older version, or two packs: refused.
+    assert stamped("2026-10-14 18:00 UTC")
+    assert stamped("evp_new")
+    assert stamped("evp_old, cut-off 2026-10-14 18:00 UTC")
+    assert any("more than one pack" in p for p in stamped("evp_new.2 and evp_old"))
+
+
+def test_cut_off_and_infinite_answers_are_refused():
+    whole = json.dumps(call())
+    found, problems = read_checked(
+        whole[: whole.index('"stop_loss": 95') + len('"stop_loss": 9')],
+        SeatCall,
+        lambda _: [],
+    )
+    assert found is None and any("cut off" in p for p in problems)
+    endless = whole.replace('"take_profit": 110.0', '"take_profit": Infinity')
+    found, problems = read_checked(endless, SeatCall, lambda _: [])
+    assert found is None and any("take_profit" in p for p in problems)

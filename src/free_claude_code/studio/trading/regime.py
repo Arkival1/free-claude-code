@@ -25,6 +25,9 @@ class Regime:
     vix: float | None
     risk_scale: float
     """What every position size is multiplied by in this regime."""
+    index_at: float | None = None
+    """When the index's latest daily candle started (Unix seconds)."""
+    vix_at: float | None = None
 
     @property
     def label(self) -> str:
@@ -96,4 +99,13 @@ def read_regime(market: str, index: Sequence[Bar], vix: Sequence[Bar] = ()) -> R
         elif vix_level < 14 and volatility == "normal":
             volatility = "low"
     scale = 0.5 if volatility == "high" else 0.75 if trend == "down" else 1.0
-    return Regime(market, trend, volatility, roc(values, 20), vix_level, scale)
+    return Regime(
+        market,
+        trend,
+        volatility,
+        roc(values, 20),
+        vix_level,
+        scale,
+        index_at=float(index[-1].t) if index else None,
+        vix_at=float(vix[-1].t) if vix else None,
+    )

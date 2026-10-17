@@ -860,7 +860,11 @@ class TradingDesk:
         if instrument.currency and instrument.currency != config.currency:
             with contextlib.suppress(MarketDataError):
                 rate = await self._data.fx(instrument.currency, config.currency)
-                fx = (f"{config.currency} per {instrument.currency}", rate, None)
+                fx = (
+                    f"{config.currency} per {instrument.currency}",
+                    rate,
+                    self._data.fx_time(instrument.currency, config.currency),
+                )
         pack = build_pack(
             briefing=briefing,
             quality=quality,
@@ -897,6 +901,8 @@ class TradingDesk:
         try:
             account = await broker.account()
             rate = await self._data.fx(account.currency, config.currency)
+            # Today's change is only known against an earlier reading today.
+            marked = self._has_mark(broker.id)
             equity, exposures, held = await self._account_picture(broker, config)
             trades, day_change, _ = await self._day(broker, config, equity)
         except (TradingError, ServiceError, MarketDataError) as error:
@@ -913,7 +919,8 @@ class TradingDesk:
                 for item in exposures
             ),
             trades_today=trades,
-            day_change_pct=day_change,
+            day_change_pct=day_change if marked else None,
+            estimated=tuple(item.symbol for item in exposures if item.estimated),
         )
 
     async def _keep_pack(self, pack: EvidencePack) -> None:
@@ -2153,17 +2160,26 @@ class TradingDesk:
             meme = False
             value = holding.qty * holding.avg_price
             currency = holding.currency
+            estimated = True
             with contextlib.suppress(SymbolError, MarketDataError):
                 instrument = parse_symbol(holding.symbol)
                 meme = instrument.meme
                 quote = await self._data.quote(instrument)
                 value = holding.qty * quote.price
                 currency = quote.currency
-            with contextlib.suppress(MarketDataError):
+                estimated = False
+            try:
                 value *= await self._data.fx(currency, config.currency)
-            exposures.append(Exposure(holding.symbol, value, meme))
+            except MarketDataError:
+                estimated = True
+            exposures.append(Exposure(holding.symbol, value, meme, estimated))
         self._mark_equity(broker.id, equity)
         return equity, exposures, held
+
+    def _has_mark(self, broker_id: str) -> bool:
+        marks = self._state().get("marks")
+        key = f"{broker_id}:{_sydney_day(self._clock())}"
+        return isinstance(marks, dict) and key in marks
 
     def _mark_equity(self, broker_id: str, equity: float) -> None:
         key = f"{broker_id}:{_sydney_day(self._clock())}"

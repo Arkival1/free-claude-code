@@ -387,7 +387,9 @@ def test_opposite_stories_are_shown_side_by_side():
     )
     news_conflicts = [c for c in report.conflicts if c.kind == "news"]
     assert news_conflicts and not news_conflicts[0].blocking
-    assert {item["source"] for item in news_conflicts[0].items} == {"Reuters", "CNBC"}
+    # Publisher names come from the feed, so they are shown as fenced data.
+    sources = {item["source"] for item in news_conflicts[0].items}
+    assert sources == {"<<<Reuters>>>", "<<<CNBC>>>"}
     assert report.ok and report.size_factor <= 0.75
     assert checks(report)["news_agree"] == "warning"
 

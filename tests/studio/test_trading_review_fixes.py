@@ -492,3 +492,38 @@ async def test_a_dexscreener_failure_is_asked_again_and_said_plainly():
     # A real answer ("no pair") is kept.
     assert await market.dex_facts(pepe) is None
     assert calls["count"] == calls_before
+
+
+@pytest.mark.asyncio
+async def test_kept_dexscreener_facts_carry_the_time_they_were_fetched():
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "api.dexscreener.com":
+            return httpx.Response(
+                200,
+                json={
+                    "pairs": [
+                        {
+                            "baseToken": {"symbol": "PEPE", "name": "Pepe"},
+                            "chainId": "ethereum",
+                            "dexId": "uniswap",
+                            "liquidity": {"usd": 900_000},
+                            "volume": {"h24": 2_000_000},
+                            "txns": {"h24": {"buys": 10, "sells": 5}},
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(404)
+
+    clock = {"wall": 1_000.0}
+    market = MarketData(
+        Web(transport=httpx.MockTransport(answer), attempts=1),
+        wall=lambda: clock["wall"],
+    )
+    pepe = parse_symbol("PEPE")
+    first = await market.dex_facts(pepe)
+    assert first is not None and first.fetched_at == 1_000.0
+    clock["wall"] = 1_840.0
+    # Served from the 15-minute store: still dated when it was fetched.
+    again = await market.dex_facts(pepe)
+    assert again is not None and again.fetched_at == 1_000.0

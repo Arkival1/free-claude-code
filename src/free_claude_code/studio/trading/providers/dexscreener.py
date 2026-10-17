@@ -32,6 +32,8 @@ class DexFacts:
     change_24h: float | None
     pairs: int
     url: str = ""
+    fetched_at: float | None = None
+    """When FCC fetched these facts (Unix seconds); they are kept a while."""
 
     @property
     def buy_ratio(self) -> float | None:

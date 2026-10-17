@@ -418,6 +418,29 @@ class Conflict:
 
 
 _WORDS = re.compile(r"[a-z0-9]+")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+MAX_FENCED = 300
+"""Characters kept from any one piece of web text."""
+
+
+def fence(text: str, *, limit: int = MAX_FENCED) -> str:
+    """Text from outside FCC as inert data: one line, no control characters,
+    cut to ``limit`` characters, between <<< and >>>. Its own angle brackets
+    become look-alike characters, so no fence marker can be made inside it,
+    however many brackets it has."""
+    cleaned = _CONTROL.sub(" ", text).replace("<", "\u2039").replace(">", "\u203a")
+    cleaned = " ".join(cleaned.split())
+    if len(cleaned) > limit:
+        cleaned = cleaned[: limit - 1].rstrip() + "\u2026"
+    return f"<<<{cleaned}>>>"
+
+
+def clean_name(text: str, *, limit: int = 60) -> str:
+    """A publisher's or site's name from a feed: one line, no control
+    characters or brackets, at most ``limit`` characters."""
+    cleaned = _CONTROL.sub(" ", text)
+    cleaned = re.sub(r"[\[\]<>{}()]", " ", cleaned)
+    return " ".join(cleaned.split())[:limit]
 
 
 def news_key(headline: str) -> str:

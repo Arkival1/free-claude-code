@@ -14,7 +14,7 @@ is left out and asked again next time, never remembered as "nothing".
 
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 from loguru import logger
@@ -132,6 +132,7 @@ class MarketData:
         self._books = OrderBooks(web, wall=wall)
         self._clock = clock
         self._wall = wall
+        self._fx_times: dict[tuple[str, str], float | None] = {}
         self._cache: dict[tuple[str, ...], tuple[float, object]] = {}
         self._snapshots: dict[str, tuple[float, tuple[QuoteSnapshot, ...]]] = {}
         self._bar_sources: dict[tuple[str, str], str] = {}
@@ -385,11 +386,23 @@ class MarketData:
         except ServiceError as error:
             raise MarketDataError(f"No {base}/{currency} rate: {error}") from error
         rate = meta.get("regularMarketPrice")
+        stamp = meta.get("regularMarketTime")
         if not isinstance(rate, int | float) and bars:
             rate = bars[-1].c
+            stamp = bars[-1].t
         if not isinstance(rate, int | float) or rate <= 0:
             raise MarketDataError(f"No {base}/{currency} rate from Yahoo.")
+        self._fx_times[(currency, base)] = (
+            float(stamp)
+            if isinstance(stamp, int | float) and not isinstance(stamp, bool)
+            else None
+        )
         return 1.0 / float(rate)
+
+    def fx_time(self, currency: str, base: str = "AUD") -> float | None:
+        """When the last exchange rate fetched for this pair was true, as
+        Yahoo said (None when it didn't say)."""
+        return self._fx_times.get((currency.upper(), base.upper()))
 
     async def venue_status(self, instrument: Instrument) -> VenueStatus | None:
         """Whether Coinbase trades the coin right now; None for anything
@@ -432,6 +445,8 @@ class MarketData:
             self._dex_errors[instrument.symbol] = str(error)
             return None
         self._dex_errors.pop(instrument.symbol, None)
+        if facts is not None:
+            facts = replace(facts, fetched_at=self._wall())
         self._cache[key] = (now, facts)
         return facts
 

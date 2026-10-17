@@ -37,6 +37,7 @@ from .information import (
     NewsItem,
     Sentiment,
     SourceKind,
+    clean_name,
     words_of,
 )
 
@@ -415,7 +416,7 @@ def judge(
         if not headline:
             continue
         kind = source_kind(item.url, official=item.official)
-        publisher = item.source or item.provider
+        publisher = clean_name(item.source or "") or clean_name(item.provider)
         status: DataStatus = "ok"
         note = ""
         if not publisher and not item.url:

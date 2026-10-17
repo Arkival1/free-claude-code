@@ -77,6 +77,8 @@ class Exposure:
     symbol: str
     value: float
     meme: bool = False
+    estimated: bool = False
+    """Valued at cost or without a current exchange rate (no live price)."""
 
 
 @dataclass(frozen=True, slots=True)

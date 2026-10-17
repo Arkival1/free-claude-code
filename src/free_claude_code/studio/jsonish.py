@@ -78,6 +78,19 @@ def lenient_object(text: str) -> JsonObject:
     return {}
 
 
+def cut_off(text: str) -> bool:
+    """True when the reply's JSON object never closes: the reply was cut
+    off part way, so finishing it would mean guessing."""
+    if extract_object(text):
+        return False
+    candidates = _candidates(text)
+    for candidate in candidates:
+        stack, in_string, _ = _scan(candidate)
+        if not stack and not in_string:
+            return False
+    return bool(candidates)
+
+
 def _json_word(found: re.Match[str]) -> str:
     return _JSON_WORDS[found.group(1)]
 

@@ -1637,9 +1637,9 @@ class Debate:
             + (f", {risk / atr:.1f} ATR" if atr > 0 else "")
             + f"), target {target:g} ({(target / entry - 1) * 100:+.2f}%), "
             f"reward-to-risk {ratio:.2f}, hold up to {plan.holding_days or 5} days.",
-            f"Size: {plan.size_pct:g}% of the most the limits allow; after the "
+            f"Size: {plan.size_pct or 0:g}% of the most the limits allow; after the "
             f"information stress test x{info.size_factor:.2f} = "
-            f"{plan.size_pct * info.size_factor:.1f}%. The hard limits in code cap "
+            f"{(plan.size_pct or 0) * info.size_factor:.1f}%. The hard limits in code cap "
             "it further.",
             f"Confidence {plan.confidence}/100"
             + (
@@ -1782,7 +1782,7 @@ def _decision(
         limit_price=plan.entry_high if limit else None,
         stop_loss=plan.stop_loss,
         take_profit=plan.take_profit,
-        size_pct=round(plan.size_pct * min(1.0, size_factor), 4),
+        size_pct=round((plan.size_pct or 0.0) * min(1.0, size_factor), 4),
         horizon_days=max(1, min(60, plan.holding_days or 5)),
         p_up=plan.p_up,
         p_target=plan.p_target,

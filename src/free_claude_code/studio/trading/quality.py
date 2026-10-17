@@ -37,6 +37,7 @@ from .information import (
     NewsItem,
     QuoteSnapshot,
     VenueStatus,
+    fence,
     iso,
 )
 from .instruments import Instrument
@@ -343,7 +344,7 @@ def assess(
                 "Meme-coin liquidity known",
                 False,
                 True,
-                detail=f"DexScreener couldn't be read ({meme_facts_note})"
+                detail=f"DexScreener couldn't be read ({fence(meme_facts_note, limit=200)})"
                 if meme_facts_note
                 else "DexScreener has no trading pair with liquidity facts for it",
             )
@@ -375,7 +376,7 @@ def failed_report(symbol: str, *, now: float, live: bool, error: str) -> Quality
                 "Data checks ran",
                 False,
                 True,
-                detail=f"the data checks failed ({error[:200]})",
+                detail=f"the data checks failed ({fence(error, limit=200)})",
             ),
         ),
     )
@@ -521,7 +522,7 @@ def _venue(venue: VenueStatus) -> QualityCheck:
             measured=", ".join(flags),
             limit="online",
             detail=f"{venue.venue} has stopped normal trading ({', '.join(flags)})"
-            + (f": {venue.message}" if venue.message else ""),
+            + (f": {fence(venue.message, limit=200)}" if venue.message else ""),
         )
     if venue.restricted:
         flags = [
@@ -545,6 +546,47 @@ def _venue(venue: VenueStatus) -> QualityCheck:
     return QualityCheck("venue", name, True, True, measured="online")
 
 
+def is_fresh(
+    snap: QuoteSnapshot,
+    *,
+    now: float,
+    limits: DataQualityLimits,
+    profile: str,
+) -> bool:
+    """It has its own time, isn't timed ahead of FCC's clock, and is within
+    the age limit for its market (plus any published delay)."""
+    age = snap.age_s(now)
+    return (
+        age is not None
+        and not snap.in_future(now)
+        and age <= _age_limit(snap, limits, profile)
+    )
+
+
+def bid_ask_source(
+    snapshots: Sequence[QuoteSnapshot],
+    preferred: QuoteSnapshot | None,
+    *,
+    now: float,
+    limits: DataQualityLimits,
+    profile: str,
+) -> QuoteSnapshot | None:
+    """The fresh quote whose bid and ask are used: the preferred source when
+    it has a fresh book, else the most reliable fresh one; None when no
+    fresh source gave both sides."""
+    quoted = [
+        snap
+        for snap in snapshots
+        if snap.spread_pct is not None
+        and is_fresh(snap, now=now, limits=limits, profile=profile)
+    ]
+    if not quoted:
+        return None
+    if preferred is not None and preferred in quoted:
+        return preferred
+    return max(quoted, key=lambda snap: SOURCE_RANK.get(snap.source_kind, 0))
+
+
 def freshest(
     snapshots: Sequence[QuoteSnapshot],
     *,
@@ -556,10 +598,7 @@ def freshest(
     source has a fresh one (never an old price passed off as current)."""
     priced = [snap for snap in snapshots if snap.last]
     best = _preferred(priced, now, limits, profile)
-    if best is None:
-        return None
-    age = best.age_s(now)
-    if age is None or best.in_future(now) or age > _age_limit(best, limits, profile):
+    if best is None or not is_fresh(best, now=now, limits=limits, profile=profile):
         return None
     return best
 
@@ -583,15 +622,11 @@ def _preferred(
     if not priced:
         return None
 
-    def fresh(snap: QuoteSnapshot) -> bool:
-        age = snap.age_s(now)
-        return (
-            age is not None
-            and not snap.in_future(now)
-            and age <= _age_limit(snap, limits, profile)
-        )
-
-    candidates = [snap for snap in priced if fresh(snap)] or list(priced)
+    candidates = [
+        snap
+        for snap in priced
+        if is_fresh(snap, now=now, limits=limits, profile=profile)
+    ] or list(priced)
 
     def middle(snap: QuoteSnapshot) -> float:
         """How far a price sits from the middle of the others in its
@@ -709,15 +744,8 @@ def _bid_ask(
     limits: DataQualityLimits,
     profile: str,
 ) -> list[QualityCheck]:
-    quoted = [
-        snap
-        for snap in priced
-        if snap.spread_pct is not None
-        and not snap.in_future(now)
-        and (age := snap.age_s(now)) is not None
-        and age <= _age_limit(snap, limits, profile)
-    ]
-    if not quoted:
+    best = bid_ask_source(priced, preferred, now=now, limits=limits, profile=profile)
+    if best is None:
         return [
             QualityCheck(
                 "bid_ask",
@@ -728,11 +756,6 @@ def _bid_ask(
                 + ("" if live else "; paper fills assume a spread"),
             )
         ]
-    best = (
-        preferred
-        if preferred is not None and preferred in quoted
-        else max(quoted, key=lambda snap: SOURCE_RANK.get(snap.source_kind, 0))
-    )
     spread = best.spread_pct or 0.0
     limit = limits.spread_pct.get(profile, 1.0)
     ok = spread <= limit
@@ -1028,14 +1051,14 @@ def _news(news: Sequence[NewsItem]) -> tuple[list[QualityCheck], list[Conflict]]
             subject=first.symbol,
             items=tuple(
                 {
-                    "source": item.source,
-                    "value": f"{item.sentiment}: {item.headline}",
+                    "source": fence(item.source, limit=60),
+                    "value": f"{item.sentiment}: {fence(item.headline, limit=160)}",
                     "when": iso(item.published_at),
                     "kind": item.source_kind,
                 }
                 for item in (first, second)
             ),
-            preferred=_newer_reliable(first, second).source,
+            preferred=fence(_newer_reliable(first, second).source, limit=60),
             reason="stories point opposite ways; confidence and size are cut",
             confidence_penalty=10.0,
             size_factor=0.75,
