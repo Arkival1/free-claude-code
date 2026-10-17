@@ -2993,3 +2993,35 @@ h3.subhead {
     animation: none;
   }
 }
+
+/* Subagents card (Agents page). */
+.subagents {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subagent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.subagent-row .switch-row {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.subagent-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.subagent-add input {
+  flex: 1 1 180px;
+  min-width: 0;
+}

@@ -827,7 +827,8 @@
   function describe(info) {
     if (!info) return "";
     const station = (state.data.stations.find((s) => s.id === info.station) || {}).name || "";
-    return `${info.name}: ${info.busy ? `working in the ${station.toLowerCase()}` : "free"}${info.tool ? ` (${info.tool.replace(/_/g, " ")})` : ""}`;
+    const sub = info.subagent ? (info.active === false ? " (subagent, off)" : " (subagent)") : "";
+    return `${info.name}${sub}: ${info.busy ? `working in the ${station.toLowerCase()}` : "free"}${info.tool ? ` (${info.tool.replace(/_/g, " ")})` : ""}`;
   }
 
   async function choose(target) {

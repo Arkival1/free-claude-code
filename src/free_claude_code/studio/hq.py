@@ -161,6 +161,7 @@ ROLE_HOME: dict[str, str] = {
     "researcher": "library",
     "builder": "workshop",
     "coder": "workshop",
+    "developer": "workshop",
     "tester": "testbench",
     "lab": "lab",
     "farm": "studio",
@@ -170,7 +171,11 @@ ROLE_HOME: dict[str, str] = {
     "assistant": "mailroom",
 }
 
-IDLE_HOME: dict[str, str] = {"coder": "mailroom", "tester": "mailroom"}
+IDLE_HOME: dict[str, str] = {
+    "coder": "mailroom",
+    "developer": "mailroom",
+    "tester": "mailroom",
+}
 """Where an agent waits between jobs, when not the break room: the Coder and
 the Tester wait in the mailroom for the next coding job handed to them."""
 

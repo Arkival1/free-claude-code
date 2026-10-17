@@ -682,6 +682,35 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Subagents",
+        route="/studio#agents",
+        where="Agents page, Subagents card: name, role, Add subagent; the On box and the bin.",
+        terms=(
+            "subagent",
+            "subagents",
+            "helper agents",
+            "add helper",
+            "developer",
+            "developer role",
+            "auto help",
+            "agents help each other",
+        ),
+        body=(
+            "Subagents are helpers you add on the Agents page, each with a role: "
+            "Developer, Coder, Builder, Researcher, Tester, or Reviewer. When any "
+            "agent starts a task that fits a subagent's role, it joins by itself "
+            "in the same project: developers, coders, and builders take a "
+            "separate part, researchers report findings, and testers and "
+            "reviewers check the work once the task is done. Up to two join a "
+            "task; their progress shows in that task's chat and they appear in "
+            "the HQ like the rest of the team (marked subagent). Untick On to "
+            "switch one off; the bin deletes it. They use a server model by "
+            "default; change it on the agent's page. The Developer role builds "
+            "whole programs, front end to back end, and can also be added as a "
+            "normal agent."
+        ),
+    ),
+    GuideTopic(
         title="The Changer (change FCC itself)",
         route="/studio#changer",
         where=(

@@ -965,6 +965,93 @@
     ]);
   }
 
+  // Subagents: helpers with a role that join fitting tasks on their own.
+  function subagentsCard() {
+    const box = el("div", { class: "subagents" }, [el("p", { class: "muted", text: "Loading…" })]);
+    api("/studio/api/subagents")
+      .then((data) => paintSubagents(box, data))
+      .catch((error) => box.replaceChildren(el("p", { class: "muted", text: error.message })));
+    return card("Subagents", [
+      el("p", {
+        class: "muted",
+        text: "Helpers you add, each with a role. When any agent starts a task that fits a subagent's role, it joins in by itself: developers, coders, builders, and researchers help while the work runs; testers and reviewers check it when it's done. They show in the HQ like the rest of the team. Switch one off to keep it out.",
+      }),
+      box,
+    ]);
+  }
+
+  function paintSubagents(box, data) {
+    const name = el("input", { type: "text", maxlength: "60", placeholder: "Name, e.g. Dev-1", "aria-label": "Subagent name" });
+    const role = el(
+      "select",
+      { "aria-label": "Subagent role" },
+      data.roles.map((item) =>
+        el("option", { value: item.role, text: `${item.title} (${item.when === "after" ? "checks after" : "helps during"})` })
+      )
+    );
+    const rows = data.subagents.map((agent) =>
+      el("div", { class: "subagent-row" }, [
+        el("button", { class: "list-item grow", onclick: () => go(`agent/${agent.id}`) }, [
+          el("span", { class: "grow" }, [
+            el("strong", { text: agent.name }),
+            el("span", { text: `${agent.role} · ${agent.model}` }),
+          ]),
+          el("span", { class: `pill ${agent.active ? "good" : "warn"}`, text: agent.active ? "on" : "off" }),
+        ]),
+        el("label", { class: "switch-row" }, [
+          el("input", {
+            type: "checkbox",
+            checked: agent.active,
+            "aria-label": `${agent.name} on`,
+            onchange: async (event) => {
+              try {
+                await api(`/studio/api/subagents/${agent.id}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ active: event.target.checked }),
+                });
+                render();
+              } catch (error) {
+                notify(error.message);
+                event.target.checked = !event.target.checked;
+              }
+            },
+          }),
+          " On",
+        ]),
+        el("button", {
+          class: "danger icon-button",
+          type: "button",
+          text: "🗑",
+          title: `Delete ${agent.name}`,
+          "aria-label": `Delete ${agent.name}`,
+          onclick: () => confirmDeleteAgent(agent, () => render()),
+        }),
+      ])
+    );
+    box.replaceChildren(
+      ...(rows.length ? rows : [empty("No subagents yet.")]),
+      el("div", { class: "subagent-add" }, [
+        name,
+        role,
+        el("button", {
+          class: "primary",
+          type: "button",
+          text: "Add subagent",
+          onclick: async () => {
+            if (!name.value.trim()) return notify("Give the subagent a name.");
+            try {
+              await post("/studio/api/subagents", { name: name.value.trim(), role: role.value });
+              notify(`${name.value.trim()} joined as a subagent.`);
+              render();
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+      ])
+    );
+  }
+
   async function renderAgents() {
     const generation = renderGeneration;
     const [{ agents }, { sites }, { runs }, { photos }] = await Promise.all([
@@ -997,6 +1084,9 @@
                     agent.tune_pack_id
                       ? el("span", { class: "pill good", text: "tuned" })
                       : null,
+                    agent.subagent
+                      ? el("span", { class: "pill", text: agent.active ? "subagent" : "subagent · off" })
+                      : null,
                   ]
                 ),
                 PERMANENT_ROLES.includes(agent.role)
@@ -1013,6 +1103,7 @@
             )
           : empty("No agents yet.")
       ),
+      subagentsCard(),
       card("Team brains", [
         el("p", {
           class: "muted",

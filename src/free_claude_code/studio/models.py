@@ -16,6 +16,7 @@ type AgentRole = Literal[
     "helper",
     "tester",
     "coder",
+    "developer",
     "lab",
     "farm",
     "teacher",
@@ -31,6 +32,7 @@ AGENT_ROLES: tuple[str, ...] = (
     "helper",
     "tester",
     "coder",
+    "developer",
     "lab",
     "farm",
     "teacher",
@@ -98,6 +100,10 @@ class Agent(Record):
     """The Main AI Model setting this agent last followed (main AI only)."""
     all_tools: bool = True
     """Whether this agent gets every tool (when the setting allows it)."""
+    subagent: bool = False
+    """A helper that joins other agents' tasks that fit its role on its own."""
+    active: bool = True
+    """A subagent that is switched off waits until it is switched on again."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 

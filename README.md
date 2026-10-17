@@ -1326,6 +1326,26 @@ the warning, so you know never to do them.
 </details>
 
 <details>
+<summary><strong>Subagents: helpers that join fitting work on their own</strong></summary>
+
+On the **Agents** page, the **Subagents** card adds helpers with a role:
+**Developer** (new: builds whole programs, front end to back end), **Coder**,
+**Builder**, **Researcher**, **Tester**, or **Reviewer**. When any agent
+starts a task that fits a subagent's role, the subagent joins by itself in
+the same project, at most two per task:
+
+- Developers, coders and builders take a separate part of the job while it
+  runs; researchers report what they find.
+- Testers and reviewers come in when the task has finished and check it.
+- Their progress shows in that task's chat, and they appear in the **HQ**
+  (marked subagent). Subagents never call more subagents.
+
+Untick **On** to switch one off, and the bin deletes it. They start on a
+server model; change it on the agent's page.
+
+</details>
+
+<details>
 <summary><strong>The Changer: an AI that changes FCC itself</strong></summary>
 
 Open the HUD menu, **The Changer**. Type what to change or fix in FCC and

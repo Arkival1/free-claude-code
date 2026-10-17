@@ -740,7 +740,7 @@ def step_budget(
     agent: Agent, *, agent_steps: int, builder_steps: int, coder_steps: int
 ) -> int:
     """How many steps one turn or task of this agent may take."""
-    if agent.role == "coder":
+    if agent.role in {"coder", "developer"}:
         return max(coder_steps, agent_steps)
     if agent.role == "builder" or writes_like_builder(agent):
         return max(builder_steps, agent_steps)

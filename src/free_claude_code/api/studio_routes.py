@@ -62,6 +62,7 @@ from free_claude_code.studio.photos import MAX_PHOTO_BYTES, PhotoError
 from free_claude_code.studio.playbook import PlaybookNote
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
+from free_claude_code.studio.subagents import HELPER_ROLES
 from free_claude_code.studio.trading.desk import TradingError
 from free_claude_code.studio.tuning import TuningError
 from free_claude_code.studio.tutor.coach import TutorError
@@ -3256,6 +3257,16 @@ class LabKeepPayload(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class SubagentPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    role: str = Field(min_length=1, max_length=30)
+    model: str = Field(default="", max_length=200)
+
+
+class SubagentSwitchPayload(BaseModel):
+    active: bool
+
+
 class ChangerStartPayload(BaseModel):
     request: str = Field(min_length=1, max_length=8000)
 
@@ -4752,3 +4763,51 @@ async def changer_update(
     return FileResponse(
         studio.changer_file("update", name), media_type="application/zip", filename=name
     )
+
+
+# ------------------------------------------------------------ subagents
+
+
+@router.get("/studio/api/subagents")
+async def subagents_view(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The owner's subagents and the roles one can have."""
+    return {
+        "roles": [
+            {
+                "role": role.role,
+                "title": role.title,
+                "when": role.when,
+                "part": role.part,
+            }
+            for role in HELPER_ROLES
+        ],
+        "subagents": [
+            await studio.agent_view(agent) for agent in await studio.subagents()
+        ],
+    }
+
+
+@router.post("/studio/api/subagents")
+async def subagent_add(
+    payload: SubagentPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    agent = await studio.create_subagent(
+        name=payload.name, role=payload.role, model=payload.model
+    )
+    return await studio.agent_view(agent)
+
+
+@router.patch("/studio/api/subagents/{agent_id}")
+async def subagent_switch(
+    agent_id: str,
+    payload: SubagentSwitchPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Switch a subagent on or off."""
+    agent = await studio.set_subagent_active(agent_id, payload.active)
+    return await studio.agent_view(agent)

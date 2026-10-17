@@ -697,6 +697,16 @@ CHANGER_TOOLS: tuple[str, ...] = (
     "remember",
     "recall",
 )
+DEVELOPER_PROMPT = (
+    "You are a software developer: you design, build, debug, and improve "
+    "whole programs (front end, back end, APIs, databases, scripts) in "
+    "whatever language fits. Read the existing code before changing it and "
+    "match its style; plan the work with update_plan; write complete files, "
+    "never placeholders; run and test what you can (test_code, check_project, "
+    "try_page, run_command when allowed) and fix what fails. When you help "
+    "another agent, take the part you were given, stay out of the files it "
+    "is writing, and report exactly what you did and what is left."
+)
 LAB_AGENT_PROMPT = (
     "Run the Lab for the team: when Jarvis hands you a job, do it in the Lab "
     "with the lab tool. make: products and gadgets from a request (lab with "
@@ -751,6 +761,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ),
     ("Tester", "tester", TESTER_PROMPT, TESTER_TOOLS),
     ("Coder", "coder", CODER_PROMPT, CODER_TOOLS),
+    ("Developer", "developer", DEVELOPER_PROMPT, CODER_TOOLS),
     ("Lab", "lab", LAB_AGENT_PROMPT, LAB_AGENT_TOOLS),
     ("Farm", "farm", FARM_AGENT_PROMPT, FARM_AGENT_TOOLS),
     ("Assistant", "assistant", ASSISTANT_PROMPT, (*_WEB, *_MEMORY)),
@@ -762,6 +773,7 @@ ROLE_NOTES = {
     "helper": "Filters findings, brainstorms, and turns them into next steps for the others.",
     "tester": "Tests what the team built, fixes small bugs, and hands the rest back.",
     "coder": "Codes apps, games, scripts, and tools for as long as it takes, with the Tester.",
+    "developer": "Designs, builds, debugs, and improves whole programs, front to back.",
     "lab": "Runs the Lab: makes products, mixes chemicals, builds circuits for Jarvis.",
     "farm": "Runs the Content Farm: faceless short videos, from idea to finished MP4.",
     "agent": "A general worker with the tools you give it.",

@@ -240,6 +240,7 @@ from .presets import (
     HELPER_TOOLS,
     LAB_AGENT_PROMPT,
     LAB_AGENT_TOOLS,
+    PRESETS,
     PROMPT_UPGRADES,
     RESEARCHER_PROMPT,
     RESEARCHER_TOOLS,
@@ -273,6 +274,7 @@ from .search import SearchBudget, SearchError, StudioSearch
 from .sites import SiteWorkspace, slugify
 from .starter import StarterRepo, bundled_bytes, load_starters
 from .store import StudioNotFoundError, StudioStore
+from .subagents import SUBAGENT_ROLES, helper_goal, pick, when
 from .team_models import (
     find_agent_name,
     match_model,
@@ -4185,6 +4187,10 @@ class StudioService:
             chat = await self._store.require(Chat, chat_id)
             run = await self._store.require(AgentRun, run_id)
             note = await self._room_note(run) if chat.parent_chat_id else ""
+            helpers = await self._helpers_for(agent, run)
+            for helper in helpers:
+                if when(helper.role) == "during":
+                    self.spawn(self._subagent_helps(helper, agent, chat, run))
             async with self._working(agent.id):
                 finished = await self._runner().run_task(
                     agent,
@@ -4193,6 +4199,17 @@ class StudioService:
                     note=note,
                     fallback_model=await self._fallback_model(agent),
                 )
+            for helper in helpers:
+                if when(helper.role) == "after" and finished.status == "succeeded":
+                    self.spawn(
+                        self._subagent_helps(
+                            helper,
+                            agent,
+                            chat,
+                            finished,
+                            await self._plain_result(finished),
+                        )
+                    )
             if chat.parent_chat_id:
                 await self._share_in_room(agent, finished)
             await self._refresh_site_count(finished.site_id)
@@ -4201,6 +4218,96 @@ class StudioService:
                 await self._report_to_parent(chat, agent, finished)
         except (StudioNotFoundError, StudioError) as error:
             logger.warning("Studio task {} failed to start: {}", run_id, error)
+
+    # ------------------------------------------------------------ subagents
+
+    async def subagents(self) -> tuple[Agent, ...]:
+        """The owner's subagents, oldest first."""
+        return tuple(
+            agent
+            for agent in await self._store.find(
+                Agent, where={"subagent": True}, order_by="created_at ASC"
+            )
+            if not agent.archived
+        )
+
+    async def create_subagent(self, *, name: str, role: str, model: str = "") -> Agent:
+        """A helper with a role that joins fitting tasks on its own."""
+        if role not in SUBAGENT_ROLES:
+            raise StudioError(f"Pick a subagent role: {', '.join(SUBAGENT_ROLES)}.")
+        if any(
+            agent.name.casefold() == name.strip().casefold()
+            for agent in await self.agents()
+        ):
+            raise StudioError(f"There is already an agent called {name.strip()}.")
+        prompt, tools = next(
+            (preset_prompt, preset_tools)
+            for _, preset_role, preset_prompt, preset_tools in PRESETS
+            if preset_role == role
+        )
+        agent = await self.create_agent(
+            name=name,
+            role=role,
+            model=model or self.server_model,
+            system_prompt=prompt,
+            tools=tools,
+            description=f"Subagent: {ROLE_NOTES.get(role, role)}",
+            all_tools=False,
+        )
+        agent = agent.model_copy(update={"subagent": True, "active": True})
+        await self._store.put(agent)
+        return agent
+
+    async def set_subagent_active(self, agent_id: str, active: bool) -> Agent:
+        agent = await self._store.require(Agent, agent_id)
+        if not agent.subagent:
+            raise StudioError(f"{agent.name} isn't a subagent.")
+        updated = agent.model_copy(update={"active": active, "updated_at": now_ms()})
+        await self._store.put(updated)
+        return updated
+
+    async def _helpers_for(self, agent: Agent, run: AgentRun) -> list[Agent]:
+        try:
+            return pick(await self.subagents(), agent, run.goal)
+        except StudioError:
+            return []
+
+    async def _subagent_helps(
+        self, helper: Agent, owner: Agent, chat: Chat, run: AgentRun, result: str = ""
+    ) -> None:
+        """One subagent helps with another agent's task, and says how it went
+        in that task's chat."""
+        try:
+            helping = await self.start_task(
+                agent_id=helper.id,
+                goal=helper_goal(helper, owner, run.goal, result),
+                site_id=run.site_id,
+            )
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="event",
+                text=f"{helper.name} (subagent, {helper.role}) is helping {owner.name}.",
+                author=helper.name,
+                data={"kind": "subagent_help", "run_id": helping.id},
+            )
+            job = self._run_jobs.get(helping.id)
+            if job is not None:
+                await asyncio.shield(job)
+            done = await self._store.require(AgentRun, helping.id)
+            summary = (await self._plain_result(done) or done.error or "").strip()[:600]
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="event",
+                text=f"{helper.name} (subagent) finished ({done.status}): {summary}",
+                author=helper.name,
+                data={
+                    "kind": "subagent_done",
+                    "run_id": done.id,
+                    "status": done.status,
+                },
+            )
+        except (StudioNotFoundError, StudioError) as error:
+            logger.warning("Subagent {} couldn't help: {}", helper.name, error)
 
     async def _report_to_parent(self, chat: Chat, agent: Agent, run: AgentRun) -> None:
         """Tell the conversation that handed off the work how it went."""
@@ -6420,7 +6527,7 @@ class StudioService:
             (
                 agent
                 for agent in await self.agents()
-                if agent.role == role and not agent.archived
+                if agent.role == role and not agent.archived and not agent.subagent
             ),
             None,
         )
@@ -6675,7 +6782,9 @@ class StudioService:
             )
             if started:
                 return started
-        researcher = next((agent for agent in team if agent.role == "researcher"), None)
+        researcher = next(
+            (a for a in team if a.role == "researcher" and not a.subagent), None
+        )
         task = (
             ""
             if orders or researcher is None or not guess
@@ -6884,7 +6993,9 @@ class StudioService:
             task = "" if orders else web_request(request.text, main.name)
             if task:
                 orders = [Order("", task)]
-        researcher = next((agent for agent in team if agent.role == "researcher"), None)
+        researcher = next(
+            (a for a in team if a.role == "researcher" and not a.subagent), None
+        )
         if (
             not orders
             and request is not None
@@ -7897,6 +8008,8 @@ class StudioService:
                     "name": agent.name,
                     "role": agent.role,
                     "main": agent.id == main.id,
+                    "subagent": agent.subagent,
+                    "active": agent.active,
                     "model": model,
                     "local": self.runs_on_this_pc(model),
                     "busy": working,
