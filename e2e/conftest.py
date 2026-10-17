@@ -1,6 +1,7 @@
 """Isolated browser-test composition for the local Admin UI."""
 
 import asyncio
+import re
 import socket
 import sys
 import threading
@@ -8,6 +9,7 @@ import time
 from collections.abc import AsyncIterator, Iterator, Mapping
 from pathlib import Path
 
+import httpx
 import pytest
 import uvicorn
 from playwright.sync_api import Page
@@ -39,7 +41,30 @@ from free_claude_code.runtime.asgi import RuntimeASGIApp
 from free_claude_code.runtime.configuration import ConfigurationService
 from free_claude_code.runtime.folder_picker import NativeFolderPicker
 from free_claude_code.runtime.provider_manager import ProviderRuntimeManager
+from free_claude_code.studio import StudioService, StudioStore
+from free_claude_code.studio.llm import LLMReply, StudioModelRouter
 from tests.web_tools_support import StubWebToolsClient
+
+
+class _StudioEchoModel:
+    """Answer as whichever Studio agent is speaking, without any network."""
+
+    async def complete(
+        self,
+        messages,
+        *,
+        system="",
+        tools=(),
+        temperature=0.2,
+        max_tokens=1024,
+        model=None,
+    ) -> LLMReply:
+        del messages, tools, temperature, max_tokens
+        match = re.search(
+            r"You are (\w+), (?:one of several AI agents|the user's main AI)", system
+        )
+        name = match.group(1) if match else "Agent"
+        return LLMReply(text=f"{name} ({model}) is on it.")
 
 
 class _ModelListingProvider(BaseProvider):
@@ -131,12 +156,20 @@ def admin_client_files():
 
 
 @pytest.fixture
+def studio_starter_repos() -> Path | None:
+    """The starter repo pack Studio installs; a test module that needs the
+    repos returns the real bundle, the rest stay fast without them."""
+    return None
+
+
+@pytest.fixture
 def admin_base_url(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     code_control: CodeControl,
     admin_client_files,
+    studio_starter_repos: Path | None,
 ) -> Iterator[str]:
     """Serve one fully isolated Admin application on an OS-assigned port."""
 
@@ -240,14 +273,28 @@ def admin_base_url(
         "_select",
         lambda _picker, initial, stop: code_control.folder_picker.select(initial, stop),
     )
+    web_tools = StubWebToolsClient()
+    studio = StudioService(
+        store=StudioStore(tmp_path / "studio" / "studio.db"),
+        web_tools=web_tools,
+        settings_provider=manager.current_settings,
+        models_dir=tmp_path / "studio" / "models",
+        sites_dir=tmp_path / "studio" / "sites",
+        router=StudioModelRouter(proxy=_StudioEchoModel(), local=_StudioEchoModel()),
+        starter_repos=studio_starter_repos,
+        # Browser tests never download the voice models or search the web.
+        voice_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+        search_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+    )
     app = RuntimeASGIApp(
         create_app(
             ApiServices(
                 requests=manager,
                 admin=runtime,
                 tasks=runtime,
-                web_tools=StubWebToolsClient(),
+                web_tools=web_tools,
                 code=code_control.service,
+                studio=studio,
             )
         ),
         runtime,

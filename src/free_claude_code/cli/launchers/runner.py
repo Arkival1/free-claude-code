@@ -45,6 +45,8 @@ class HarnessSpec:
     configure: Callable[[LaunchContext, list[str], LaunchResources], PreparedLaunch]
     catalog_view: Literal["messages", "responses"] | None = None
     compatibility_check: NativeCheck | None = None
+    binary_finder: Callable[[], str | None] | None = None
+    """Where to look before PATH (a binary FCC built itself)."""
 
 
 class LaunchError(Exception):
@@ -96,7 +98,8 @@ def launch_harness(spec: HarnessSpec, argv: Sequence[str] | None = None) -> None
     auth_token = base_env.get("ANTHROPIC_AUTH_TOKEN", "")
     stage = "load settings"
     try:
-        binary_path = resolve_client_binary(
+        found = spec.binary_finder() if spec.binary_finder else None
+        binary_path = found or resolve_client_binary(
             binary_name=spec.binary_name,
             display_name=spec.display_name,
             install_hint=spec.install_hint,

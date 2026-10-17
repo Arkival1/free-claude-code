@@ -1,0 +1,142 @@
+/* The Changer: request box, changed files with diffs, checks, screenshots,
+   and update zips. */
+body[data-page="changer"] .view {
+  max-width: 1200px;
+}
+
+.changer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.changer .good { color: var(--good); }
+.changer .warn { color: var(--warn); }
+.changer .bad { color: var(--bad); }
+
+.changer textarea,
+.changer input[type="text"] {
+  width: 100%;
+  min-width: 0;
+}
+
+.changer .row input[type="text"] {
+  flex: 1 1 220px;
+}
+
+.changer-goal {
+  font-size: 17px;
+}
+
+.changer-files,
+.changer-updates,
+.changer-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changer-files li,
+.changer-updates li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.changer-runs li {
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+
+.changer button.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.changer button.link:hover {
+  color: var(--accent);
+}
+
+.changer .pill.changed { color: var(--warn); }
+.changer .pill.added { color: var(--good); }
+.changer .pill.deleted { color: var(--bad); }
+
+.changer-diff {
+  max-height: 480px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.changer-check {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.changer-check pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.changer-phone {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.changer-shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.changer-shots a {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.changer-shots img {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+
+.changer .primary-link {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.changer button.ghost {
+  min-height: var(--tap);
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}

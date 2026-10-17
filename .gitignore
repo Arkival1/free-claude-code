@@ -1,5 +1,9 @@
 __pycache__
-.claude
+.claude/*
+!.claude/settings.json
+!.claude/agents/
+!.claude/skills/
+.claude-flow/
 .cursor
 .pytest_cache
 .ruff_cache

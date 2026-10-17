@@ -62,6 +62,10 @@ def _validate_model_ref(value: str) -> str:
     return value
 
 
+IMAGE_STYLES = ("superhero", "superhero-small")
+"""The image engine's styles (studio.image_engine.STYLES, kept in step by a test)."""
+
+
 class Settings(BaseModel):
     """Validated application settings with no file or process I/O."""
 
@@ -601,6 +605,9 @@ class Settings(BaseModel):
         default=True,
         validation_alias="ENABLE_NETWORK_PROBE_MOCK",
     )
+    allow_background_subagents: bool = Field(
+        default=False, validation_alias="ALLOW_BACKGROUND_SUBAGENTS"
+    )
     enable_title_generation_skip: bool = Field(
         default=True,
         validation_alias="ENABLE_TITLE_GENERATION_SKIP",
@@ -626,6 +633,293 @@ class Settings(BaseModel):
     # When true, skip private/loopback/link-local IP blocking for web_fetch (lab only).
     web_fetch_allow_private_networks: bool = Field(
         default=False, validation_alias="WEB_FETCH_ALLOW_PRIVATE_NETWORKS"
+    )
+
+    # ==================== Studio (agents, local models, tuning, school) ====================
+    studio_enabled: bool = Field(default=True, validation_alias="STUDIO_ENABLED")
+    studio_default_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_DEFAULT_MODEL"
+    )
+    studio_local_base_url: NonEmptyString = Field(
+        default="http://localhost:1234/v1",
+        validation_alias="STUDIO_LOCAL_BASE_URL",
+    )
+    studio_local_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LOCAL_API_KEY"
+    )
+    studio_guide_model: NonEmptyString = Field(
+        default="local/qwen3-0.6b", validation_alias="STUDIO_GUIDE_MODEL"
+    )
+    studio_guide_catalog_id: NonEmptyString = Field(
+        default="qwen3-0.6b-q4", validation_alias="STUDIO_GUIDE_CATALOG_ID"
+    )
+    studio_models_dir: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_MODELS_DIR"
+    )
+    studio_agent_max_steps: int = Field(
+        default=12, ge=1, le=64, validation_alias="STUDIO_AGENT_MAX_STEPS"
+    )
+    studio_builder_max_steps: int = Field(
+        default=40, ge=1, le=120, validation_alias="STUDIO_BUILDER_MAX_STEPS"
+    )
+    studio_coder_max_steps: int = Field(
+        default=80, ge=1, le=300, validation_alias="STUDIO_CODER_MAX_STEPS"
+    )
+    studio_code_test_rounds: int = Field(
+        default=3, ge=1, le=10, validation_alias="STUDIO_CODE_TEST_ROUNDS"
+    )
+    studio_farm_image_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_FARM_IMAGE_URL"
+    )
+    studio_farm_video_size: NonEmptyString = Field(
+        default="720p", validation_alias="STUDIO_FARM_VIDEO_SIZE"
+    )
+    studio_cartoon_art: NonEmptyString = Field(
+        default="auto", validation_alias="STUDIO_CARTOON_ART"
+    )
+    studio_image_source: NonEmptyString = Field(
+        default="pc", validation_alias="STUDIO_IMAGE_SOURCE"
+    )
+    studio_image_build: NonEmptyString = Field(
+        default="vulkan", validation_alias="STUDIO_IMAGE_BUILD"
+    )
+    studio_image_style: NonEmptyString = Field(
+        default="superhero", validation_alias="STUDIO_IMAGE_STYLE"
+    )
+    studio_image_cloud_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_IMAGE_CLOUD_URL"
+    )
+    studio_image_cloud_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_IMAGE_CLOUD_KEY"
+    )
+    studio_image_cloud_model: NonEmptyString = Field(
+        default="gpt-image-1", validation_alias="STUDIO_IMAGE_CLOUD_MODEL"
+    )
+    studio_farm_music: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_FARM_MUSIC"
+    )
+    studio_farm_pexels_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_FARM_PEXELS_KEY"
+    )
+    studio_memory_working_limit: int = Field(
+        default=20, ge=1, le=200, validation_alias="STUDIO_MEMORY_WORKING_LIMIT"
+    )
+    studio_memory_recall_limit: int = Field(
+        default=6, ge=1, le=50, validation_alias="STUDIO_MEMORY_RECALL_LIMIT"
+    )
+    studio_light_tuning_enabled: bool = Field(
+        default=False, validation_alias="STUDIO_LIGHT_TUNING_ENABLED"
+    )
+    studio_tuning_backend: NonEmptyString = Field(
+        default="local_light", validation_alias="STUDIO_TUNING_BACKEND"
+    )
+    studio_tuning_rounds: int = Field(
+        default=3, ge=1, le=8, validation_alias="STUDIO_TUNING_ROUNDS"
+    )
+    studio_cloud_tuning_base_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_CLOUD_TUNING_BASE_URL"
+    )
+    studio_cloud_tuning_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_CLOUD_TUNING_API_KEY"
+    )
+    studio_cloud_tuning_provider: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_CLOUD_TUNING_PROVIDER"
+    )
+    studio_obsidian_memory_sync: bool = Field(
+        default=False, validation_alias="STUDIO_OBSIDIAN_MEMORY_SYNC"
+    )
+    studio_lora_python: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LORA_PYTHON"
+    )
+    studio_lora_llama_cpp: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LORA_LLAMA_CPP"
+    )
+    studio_lora_ollama: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LORA_OLLAMA"
+    )
+    studio_lmstudio_models_dir: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LMSTUDIO_MODELS_DIR"
+    )
+    studio_lora_public_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LORA_PUBLIC_URL"
+    )
+    studio_agent_commands: NonEmptyString = Field(
+        default="off", validation_alias="STUDIO_AGENT_COMMANDS"
+    )
+    studio_command_timeout: int = Field(
+        default=120, ge=5, le=3600, validation_alias="STUDIO_COMMAND_TIMEOUT"
+    )
+    studio_teacher_enabled: bool = Field(
+        default=False, validation_alias="STUDIO_TEACHER_ENABLED"
+    )
+    studio_teacher_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_TEACHER_MODEL"
+    )
+    studio_student_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_STUDENT_MODEL"
+    )
+    studio_class_pass_mark: float = Field(
+        default=0.7, ge=0.0, le=1.0, validation_alias="STUDIO_CLASS_PASS_MARK"
+    )
+    studio_obsidian_vault: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_OBSIDIAN_VAULT"
+    )
+    studio_obsidian_folder: NonEmptyString = Field(
+        default="FCC Studio", validation_alias="STUDIO_OBSIDIAN_FOLDER"
+    )
+    studio_obsidian_auto_sync: bool = Field(
+        default=False, validation_alias="STUDIO_OBSIDIAN_AUTO_SYNC"
+    )
+    studio_shared_memory: bool = Field(
+        default=True, validation_alias="STUDIO_SHARED_MEMORY"
+    )
+    studio_main_agent_name: NonEmptyString = Field(
+        default="Jarvis", validation_alias="STUDIO_MAIN_AGENT_NAME"
+    )
+    studio_main_agent_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_MAIN_AGENT_MODEL"
+    )
+    studio_ui_theme: NonEmptyString = Field(
+        default="classic", validation_alias="STUDIO_UI_THEME"
+    )
+    studio_voice_engine: NonEmptyString = Field(
+        default="auto", validation_alias="STUDIO_VOICE_ENGINE"
+    )
+    studio_voice_quality: NonEmptyString = Field(
+        default="high", validation_alias="STUDIO_VOICE_QUALITY"
+    )
+    studio_voice_effect: NonEmptyString = Field(
+        default="jarvis", validation_alias="STUDIO_VOICE_EFFECT"
+    )
+    studio_voice_speed: float = Field(
+        default=1.12, ge=0.6, le=1.6, validation_alias="STUDIO_VOICE_SPEED"
+    )
+    studio_voice_ears: NonEmptyString = Field(
+        default="base.en", validation_alias="STUDIO_VOICE_EARS"
+    )
+    studio_voice_speak_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VOICE_SPEAK_URL"
+    )
+    studio_voice_speak_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VOICE_SPEAK_KEY"
+    )
+    studio_voice_speak_model: NonEmptyString = Field(
+        default="kokoro", validation_alias="STUDIO_VOICE_SPEAK_MODEL"
+    )
+    studio_voice_name: NonEmptyString = Field(
+        default="jarvis", validation_alias="STUDIO_VOICE_NAME"
+    )
+    studio_voice_listen_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VOICE_LISTEN_URL"
+    )
+    studio_voice_listen_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VOICE_LISTEN_KEY"
+    )
+    studio_voice_listen_model: NonEmptyString = Field(
+        default="whisper-1", validation_alias="STUDIO_VOICE_LISTEN_MODEL"
+    )
+    studio_voice_language: OptionalNonEmptyString = Field(
+        default="en", validation_alias="STUDIO_VOICE_LANGUAGE"
+    )
+    studio_helper_pipeline: bool = Field(
+        default=True, validation_alias="STUDIO_HELPER_PIPELINE"
+    )
+    studio_local_fast_replies: bool = Field(
+        default=True, validation_alias="STUDIO_LOCAL_FAST_REPLIES"
+    )
+    studio_local_model_turns: bool = Field(
+        default=True, validation_alias="STUDIO_LOCAL_MODEL_TURNS"
+    )
+    studio_low_power: bool = Field(default=False, validation_alias="STUDIO_LOW_POWER")
+    studio_cpu_throttle: int = Field(
+        default=85, ge=30, le=100, validation_alias="STUDIO_CPU_THROTTLE"
+    )
+    studio_private_memory: bool = Field(
+        default=True, validation_alias="STUDIO_PRIVATE_MEMORY"
+    )
+    studio_all_tools: bool = Field(default=True, validation_alias="STUDIO_ALL_TOOLS")
+    studio_mcp_server: bool = Field(default=True, validation_alias="STUDIO_MCP_SERVER")
+    studio_local_control: bool = Field(
+        default=True, validation_alias="STUDIO_LOCAL_CONTROL"
+    )
+    studio_main_own_memory: bool = Field(
+        default=True, validation_alias="STUDIO_MAIN_OWN_MEMORY"
+    )
+    studio_jarvis_playbook: bool = Field(
+        default=True, validation_alias="STUDIO_JARVIS_PLAYBOOK"
+    )
+    studio_engine: bool = Field(default=False, validation_alias="STUDIO_ENGINE")
+    studio_engine_port: int = Field(
+        default=39281, ge=1024, le=65535, validation_alias="STUDIO_ENGINE_PORT"
+    )
+    studio_engine_build: NonEmptyString = Field(
+        default="vulkan", validation_alias="STUDIO_ENGINE_BUILD"
+    )
+    studio_engine_path: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_ENGINE_PATH"
+    )
+    studio_engine_folders: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_ENGINE_FOLDERS"
+    )
+    studio_engine_gpu_gb: float = Field(
+        default=8.0, ge=0.0, le=512.0, validation_alias="STUDIO_ENGINE_GPU_GB"
+    )
+    studio_engine_models_at_once: int = Field(
+        default=1, ge=1, le=16, validation_alias="STUDIO_ENGINE_MODELS_AT_ONCE"
+    )
+    studio_agent_temperature: float = Field(
+        default=0.2, ge=0.0, le=2.0, validation_alias="STUDIO_AGENT_TEMPERATURE"
+    )
+    studio_web_access: NonEmptyString = Field(
+        default="all", validation_alias="STUDIO_WEB_ACCESS"
+    )
+    studio_desk_browser: NonEmptyString = Field(
+        default="auto", validation_alias="STUDIO_DESK_BROWSER"
+    )
+    studio_desk_visible: bool = Field(
+        default=True, validation_alias="STUDIO_DESK_VISIBLE"
+    )
+    studio_watch_max_minutes: int = Field(
+        default=120, ge=5, le=600, validation_alias="STUDIO_WATCH_MAX_MINUTES"
+    )
+    studio_search_provider: NonEmptyString = Field(
+        default="auto", validation_alias="STUDIO_SEARCH_PROVIDER"
+    )
+    studio_search_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_SEARCH_API_KEY"
+    )
+    studio_search_order: NonEmptyString = Field(
+        default="api_first", validation_alias="STUDIO_SEARCH_ORDER"
+    )
+    studio_search_daily_limit: int = Field(
+        default=0, ge=0, le=100_000, validation_alias="STUDIO_SEARCH_DAILY_LIMIT"
+    )
+    studio_search_backup_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_SEARCH_BACKUP_API_KEY"
+    )
+    studio_search_base_url: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_SEARCH_BASE_URL"
+    )
+    studio_youtube_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_YOUTUBE_API_KEY"
+    )
+    studio_reddit_client_id: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_REDDIT_CLIENT_ID"
+    )
+    studio_reddit_client_secret: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_REDDIT_CLIENT_SECRET"
+    )
+    studio_research_sources: int = Field(
+        default=10, ge=3, le=25, validation_alias="STUDIO_RESEARCH_SOURCES"
+    )
+    studio_research_web: int = Field(
+        default=3, ge=0, le=10, validation_alias="STUDIO_RESEARCH_WEB"
+    )
+    studio_research_reddit: int = Field(
+        default=2, ge=0, le=6, validation_alias="STUDIO_RESEARCH_REDDIT"
+    )
+    studio_research_youtube: int = Field(
+        default=2, ge=0, le=6, validation_alias="STUDIO_RESEARCH_YOUTUBE"
     )
 
     # ==================== Debug / diagnostic logging (avoid sensitive content) ====================
@@ -725,6 +1019,154 @@ class Settings(BaseModel):
         if v == "" or v is None:
             return None
         return v
+
+    @field_validator("studio_agent_commands")
+    @classmethod
+    def validate_studio_agent_commands(cls, value: str) -> str:
+        if value not in ("off", "ask", "auto"):
+            raise ValueError(
+                f"STUDIO_AGENT_COMMANDS must be 'off', 'ask', or 'auto', got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_voice_engine")
+    @classmethod
+    def validate_studio_voice_engine(cls, value: str) -> str:
+        if value not in ("auto", "builtin", "server", "browser"):
+            raise ValueError(
+                "STUDIO_VOICE_ENGINE must be auto, builtin, server, or browser, "
+                f"got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_farm_video_size")
+    @classmethod
+    def validate_studio_farm_video_size(cls, value: str) -> str:
+        if value not in ("720p", "1080p"):
+            raise ValueError(
+                f"STUDIO_FARM_VIDEO_SIZE must be 720p or 1080p, got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_voice_quality")
+    @classmethod
+    def validate_studio_voice_quality(cls, value: str) -> str:
+        if value not in ("high", "compact"):
+            raise ValueError(
+                f"STUDIO_VOICE_QUALITY must be high or compact, got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_voice_effect")
+    @classmethod
+    def validate_studio_voice_effect(cls, value: str) -> str:
+        if value not in ("jarvis", "none"):
+            raise ValueError(
+                f"STUDIO_VOICE_EFFECT must be jarvis or none, got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_voice_ears")
+    @classmethod
+    def validate_studio_voice_ears(cls, value: str) -> str:
+        if value not in ("tiny.en", "base.en", "small.en", "medium.en"):
+            raise ValueError(
+                "STUDIO_VOICE_EARS must be tiny.en, base.en, small.en, or "
+                f"medium.en, got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_cartoon_art")
+    @classmethod
+    def validate_studio_cartoon_art(cls, value: str) -> str:
+        if value not in ("auto", "painted", "drawn"):
+            raise ValueError("STUDIO_CARTOON_ART must be auto, painted, or drawn.")
+        return value
+
+    @field_validator("studio_image_source")
+    @classmethod
+    def validate_studio_image_source(cls, value: str) -> str:
+        if value not in ("pc", "cloud"):
+            raise ValueError("STUDIO_IMAGE_SOURCE must be pc or cloud.")
+        return value
+
+    @field_validator("studio_image_build")
+    @classmethod
+    def validate_studio_image_build(cls, value: str) -> str:
+        if value not in ("vulkan", "cpu"):
+            raise ValueError("STUDIO_IMAGE_BUILD must be vulkan or cpu.")
+        return value
+
+    @field_validator("studio_image_style")
+    @classmethod
+    def validate_studio_image_style(cls, value: str) -> str:
+        if value not in IMAGE_STYLES:
+            raise ValueError(
+                f"STUDIO_IMAGE_STYLE must be one of {', '.join(IMAGE_STYLES)}."
+            )
+        return value
+
+    @field_validator("studio_engine_build")
+    @classmethod
+    def validate_studio_engine_build(cls, value: str) -> str:
+        if value not in ("vulkan", "cpu"):
+            raise ValueError("STUDIO_ENGINE_BUILD must be vulkan or cpu.")
+        return value
+
+    @field_validator("studio_desk_browser")
+    @classmethod
+    def validate_studio_desk_browser(cls, value: str) -> str:
+        if value not in ("auto", "edge", "chrome", "chromium"):
+            raise ValueError(
+                "STUDIO_DESK_BROWSER must be 'auto', 'edge', 'chrome', or "
+                f"'chromium', got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_web_access")
+    @classmethod
+    def validate_studio_web_access(cls, value: str) -> str:
+        if value not in ("all", "listed", "off"):
+            raise ValueError(
+                f"STUDIO_WEB_ACCESS must be 'all', 'listed', or 'off', got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_search_order")
+    @classmethod
+    def validate_studio_search_order(cls, value: str) -> str:
+        if value not in ("api_first", "free_first"):
+            raise ValueError("STUDIO_SEARCH_ORDER must be api_first or free_first")
+        return value
+
+    @field_validator("studio_search_provider")
+    @classmethod
+    def validate_studio_search_provider(cls, value: str) -> str:
+        allowed = ("auto", "duckduckgo", "brave", "tavily", "serper", "searxng")
+        if value not in allowed:
+            raise ValueError(
+                f"STUDIO_SEARCH_PROVIDER must be one of {', '.join(allowed)}, "
+                f"got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_ui_theme")
+    @classmethod
+    def validate_studio_ui_theme(cls, value: str) -> str:
+        if value not in ("classic", "hud"):
+            raise ValueError(
+                f"STUDIO_UI_THEME must be 'classic' or 'hud', got {value!r}"
+            )
+        return value
+
+    @field_validator("studio_tuning_backend")
+    @classmethod
+    def validate_studio_tuning_backend(cls, value: str) -> str:
+        if value not in ("local_light", "cloud"):
+            raise ValueError(
+                f"STUDIO_TUNING_BACKEND must be 'local_light' or 'cloud', got {value!r}"
+            )
+        return value
 
     @field_validator("log_level")
     @classmethod

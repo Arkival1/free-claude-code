@@ -1,0 +1,7768 @@
+/* FCC Studio — a touch-first client for agents, models, tuning, and classes. */
+(() => {
+  "use strict";
+
+  const TOKEN_KEY = "fcc.studio.token";
+  const TAB_ROUTES = ["home", "chats", "hq", "agents", "lab", "farm", "trade", "learn", "more"];
+  const POLL_MS = 2500;
+  const HIDDEN_POLL_MS = 10000;
+
+  const view = document.getElementById("view");
+  const title = document.getElementById("view-title");
+  const backButton = document.getElementById("back-button");
+  const guideButton = document.getElementById("guide-button");
+  const sheet = document.getElementById("sheet");
+  const sheetTitle = document.getElementById("sheet-title");
+  const sheetBody = document.getElementById("sheet-body");
+  const toast = document.getElementById("toast");
+
+  let poller = null;
+  let renderGeneration = 0;
+  let toastTimer = null;
+
+  /* ------------------------------------------------------------------ utils */
+
+  const el = (tag, props = {}, children = []) => {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "class") node.className = value;
+      else if (key === "text") node.textContent = value;
+      else if (key === "html") node.innerHTML = value;
+      else if (key.startsWith("on") && typeof value === "function") {
+        node.addEventListener(key.slice(2).toLowerCase(), value);
+      } else if (value === true) node.setAttribute(key, "");
+      else if (value !== false && value != null) node.setAttribute(key, value);
+    }
+    for (const child of [].concat(children)) {
+      if (child == null) continue;
+      node.append(child instanceof Node ? child : document.createTextNode(child));
+    }
+    return node;
+  };
+
+  const token = () => {
+    const fromUrl = new URLSearchParams(location.search).get("token");
+    if (fromUrl) localStorage.setItem(TOKEN_KEY, fromUrl);
+    try {
+      return localStorage.getItem(TOKEN_KEY) || "";
+    } catch {
+      return "";
+    }
+  };
+
+  const notify = (message) => {
+    toast.textContent = message;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      toast.hidden = true;
+    }, 3200);
+  };
+
+  class OfflineError extends Error {}
+
+  async function api(path, options = {}) {
+    const headers = { "content-type": "application/json", ...(options.headers || {}) };
+    const key = token();
+    if (key) headers["x-api-key"] = key;
+    let response;
+    try {
+      response = await fetch(path, { ...options, headers });
+    } catch {
+      throw new OfflineError("Can't reach your Studio server.");
+    }
+    if (response.status === 401) {
+      askForToken();
+      throw new Error("Studio needs the proxy token.");
+    }
+    const text = await response.text();
+    const body = text ? JSON.parse(text) : {};
+    if (!response.ok) throw new Error(body.detail || `Request failed (${response.status})`);
+    return body;
+  }
+
+  const post = (path, payload) =>
+    api(path, { method: "POST", body: JSON.stringify(payload || {}) });
+  const patch = (path, payload) =>
+    api(path, { method: "PATCH", body: JSON.stringify(payload || {}) });
+  const put = (path, payload) =>
+    api(path, { method: "PUT", body: JSON.stringify(payload || {}) });
+  const remove = (path) => api(path, { method: "DELETE" });
+
+  const percent = (value) => `${Math.round((value || 0) * 100)}%`;
+  const bytes = (value) => {
+    if (!value) return "—";
+    const units = ["B", "KB", "MB", "GB"];
+    let size = value;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit += 1;
+    }
+    return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+  };
+  const when = (ms) => (ms ? new Date(ms).toLocaleString() : "");
+
+  const meter = (value) =>
+    el("div", { class: "meter" }, [el("i", { style: `width:${percent(value)}` })]);
+
+  const statusPill = (status) => {
+    const good = ["ready", "succeeded", "passed"];
+    const bad = ["failed", "cancelled"];
+    const tone = good.includes(status) ? "good" : bad.includes(status) ? "bad" : "warn";
+    return el("span", { class: `pill ${tone}`, text: status });
+  };
+
+  const empty = (message) => el("p", { class: "empty", text: message });
+
+  const card = (heading, children, sub) =>
+    el("section", { class: "card" }, [
+      heading ? el("h2", { text: heading }) : null,
+      sub ? el("p", { class: "muted", text: sub }) : null,
+      ...[].concat(children),
+    ]);
+
+  function openSheet(heading, nodes) {
+    sheetTitle.textContent = heading;
+    sheetBody.replaceChildren(...[].concat(nodes));
+    sheet.hidden = false;
+  }
+
+  function closeSheet() {
+    sheet.hidden = true;
+    sheetBody.replaceChildren();
+  }
+
+  sheet.addEventListener("click", (event) => {
+    if (event.target.hasAttribute("data-close-sheet")) closeSheet();
+  });
+
+  function askForToken() {
+    openSheet("Proxy token", [
+      el("p", {
+        class: "muted",
+        text: "This server has proxy authentication on. Paste the token to use Studio from this device.",
+      }),
+      el("input", { type: "text", id: "token-input", placeholder: "token" }),
+      el("button", {
+        class: "primary",
+        text: "Save token",
+        onclick: () => {
+          const value = document.getElementById("token-input").value.trim();
+          if (!value) return;
+          localStorage.setItem(TOKEN_KEY, value);
+          closeSheet();
+          render();
+        },
+      }),
+    ]);
+  }
+
+  /* ----------------------------------------------------------------- router */
+
+  const route = () => {
+    const raw = location.hash.replace(/^#/, "") || "home";
+    const [name, ...rest] = raw.split("/");
+    return { name, id: rest.join("/") };
+  };
+
+  // A key typed into Settings is only kept after Apply; leaving first would
+  // quietly drop it, so ask.
+  const settingsUnsaved = () => {
+    try {
+      const doc = document.querySelector(".settings-frame")?.contentDocument;
+      return /unsaved/i.test(doc?.querySelector("#dirtyState")?.textContent || "");
+    } catch {
+      return false;
+    }
+  };
+  const mayLeave = () =>
+    !settingsUnsaved() ||
+    !confirm("You have settings that aren't saved yet (like a key you typed).\n\nOK: stay here, then press Apply at the bottom.\nCancel: leave without saving.");
+
+  const go = (hash) => {
+    if (!mayLeave()) return;
+    location.hash = hash;
+  };
+
+  function setChrome(name, heading) {
+    title.textContent = heading;
+    backButton.hidden = TAB_ROUTES.includes(name);
+    for (const tab of document.querySelectorAll(".tab")) {
+      const active = tab.dataset.route === name;
+      if (active) tab.setAttribute("aria-current", "page");
+      else tab.removeAttribute("aria-current");
+    }
+  }
+
+  for (const tab of document.querySelectorAll(".tab")) {
+    tab.addEventListener("click", () => go(tab.dataset.route));
+  }
+  backButton.addEventListener("click", () => {
+    if (mayLeave()) history.back();
+  });
+  guideButton.addEventListener("click", openGuide);
+  // "?" opens the guide from anywhere, unless you are typing.
+  document.addEventListener("keydown", (event) => {
+    const typing = event.target.closest && event.target.closest("input, textarea, select, [contenteditable]");
+    if (event.key === "?" && !typing && !event.ctrlKey && !event.metaKey && sheet.hidden) {
+      event.preventDefault();
+      openGuide();
+    }
+  });
+  window.addEventListener("hashchange", navigate);
+
+  // Pages cross-fade where the browser can (View Transitions); a page that
+  // takes longer than a moment to load finishes after the fade. Elsewhere
+  // the new page fades in, and with reduced motion nothing moves.
+  function navigate() {
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) return render();
+    if (!document.startViewTransition) {
+      return render().then(() => {
+        view.classList.remove("view-enter");
+        void view.offsetWidth;
+        view.classList.add("view-enter");
+      });
+    }
+    document.startViewTransition(() =>
+      Promise.race([render(), new Promise((resolve) => setTimeout(resolve, 280))])
+    );
+  }
+
+  function startPolling(job) {
+    stopPolling();
+    poller = setInterval(job, POLL_MS);
+  }
+
+  // Pages that update themselves (Model Control, downloads, running jobs)
+  // repaint in place: the scroll position and open sections stay as they
+  // were, and nothing repaints while the user is changing a field, so an
+  // update never throws them back to the top or wipes what they typed.
+  let pageEdited = false;
+  view.addEventListener("input", () => {
+    pageEdited = true;
+  });
+  view.addEventListener("change", () => {
+    pageEdited = true;
+  });
+
+  function userIsEditing() {
+    const active = document.activeElement;
+    const typing =
+      active && view.contains(active) && active.matches("input:not([type=checkbox]):not([type=radio]), select, textarea");
+    return pageEdited || Boolean(typing);
+  }
+
+  async function repaintInPlace(paint) {
+    if (userIsEditing()) return false;
+    const top = window.scrollY;
+    const open = [...view.querySelectorAll("details")].map((section) => section.open);
+    await paint();
+    [...view.querySelectorAll("details")].forEach((section, index) => {
+      if (open[index] !== undefined) section.open = open[index];
+    });
+    window.scrollTo(0, top);
+    return true;
+  }
+
+  function pollPage(paint) {
+    startPolling(() => repaintInPlace(paint).catch(() => stopPolling()));
+  }
+
+  function stopPolling() {
+    if (poller) clearInterval(poller);
+    poller = null;
+  }
+
+  /* ------------------------------------------------------------------ guide */
+
+  // The guide knows every page and button, and what is wrong right now.
+  // Answers come with Open buttons for the pages they mention and a few
+  // follow-up questions to tap.
+  const guideText = (text) => {
+    const nodes = [];
+    for (const [index, piece] of text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/).entries()) {
+      if (!piece) continue;
+      if (index % 2 === 0) nodes.push(piece);
+      else if (piece.startsWith("**")) nodes.push(el("strong", { text: piece.slice(2, -2) }));
+      else nodes.push(el("em", { text: piece.slice(1, -1) }));
+    }
+    return nodes;
+  };
+
+  async function openGuide() {
+    const log = el("div", { class: "transcript guide-log" });
+    const history = [];
+    const input = el("input", {
+      type: "text",
+      "aria-label": "Ask the guide",
+      placeholder: "Ask anything about Studio…",
+    });
+    const openRoute = (route) => {
+      closeSheet();
+      go(route.replace("/studio#", ""));
+    };
+    const openButtons = (links) =>
+      links.length
+        ? el(
+            "div",
+            { class: "chips guide-links" },
+            links.map((link) =>
+              el("button", {
+                class: "secondary",
+                type: "button",
+                text: `Open ${link.label}`,
+                onclick: () => openRoute(link.route),
+              })
+            )
+          )
+        : null;
+    const suggest = (questions) =>
+      questions.length
+        ? el(
+            "div",
+            { class: "chips guide-suggest" },
+            questions.map((question) =>
+              el("button", { class: "chip", type: "button", text: question, onclick: () => ask(question) })
+            )
+          )
+        : null;
+    const intro = el("div", { class: "guide-intro" }, [
+      el("p", { class: "muted", text: "I know every page and button in Studio, and I check this PC for problems." }),
+    ]);
+    async function ask(asked) {
+      const question = (asked || input.value).trim();
+      if (!question) return;
+      input.value = "";
+      for (const old of log.querySelectorAll(".guide-suggest")) old.remove();
+      log.append(el("div", { class: "bubble user", text: question }));
+      const waiting = el("div", { class: "bubble assistant muted", text: "Thinking…" });
+      log.append(waiting);
+      waiting.scrollIntoView({ block: "end" });
+      try {
+        const answer = await post("/studio/api/guide/ask", { question, history: history.slice(-8) });
+        history.push({ role: "user", text: question }, { role: "assistant", text: answer.text });
+        const links = answer.links && answer.links.length
+          ? answer.links
+          : answer.route
+            ? [{ label: answer.route.replace("/studio#", ""), route: answer.route }]
+            : [];
+        waiting.replaceWith(
+          el("div", { class: "bubble assistant" }, [
+            el("span", { class: "who", text: answer.offline ? "Guide (built-in help)" : "Guide" }),
+            ...guideText(answer.text),
+          ])
+        );
+        const extras = [openButtons(links), suggest(answer.suggestions || [])].filter(Boolean);
+        log.append(...extras);
+        (extras[extras.length - 1] || log.lastChild).scrollIntoView({ block: "end" });
+      } catch (error) {
+        waiting.remove();
+        notify(error.message);
+      }
+    }
+    openSheet("Guide", [
+      intro,
+      log,
+      el("form", {
+        class: "row guide-ask",
+        onsubmit: (event) => {
+          event.preventDefault();
+          ask();
+        },
+      }, [
+        el("div", { class: "grow" }, [input]),
+        el("button", { class: "primary", type: "submit", text: "Ask" }),
+      ]),
+    ]);
+    input.focus();
+    let overview = null;
+    try {
+      overview = await api("/studio/api/guide");
+    } catch {
+      return;
+    }
+    if (!intro.isConnected) return;
+    const parts = [
+      el("p", {
+        class: "muted",
+        text: overview.offline
+          ? "No model is running for me yet, so I answer from built-in help. Load a model in LM Studio and I answer in my own words."
+          : `I know every page and button in Studio, and I check this PC for problems. Answering with ${overview.model}.`,
+      }),
+    ];
+    if (overview.problems.length) {
+      parts.push(
+        el("div", { class: "guide-problems", role: "status" }, [
+          el("strong", { text: "Needs attention right now" }),
+          ...overview.problems.map((problem) =>
+            el("div", { class: "guide-problem" }, [
+              el("span", { class: "grow" }, [el("strong", { text: problem.title }), el("br"), problem.fix]),
+              problem.route
+                ? el("button", { class: "secondary", type: "button", text: `Open ${problem.page}`, onclick: () => openRoute(problem.route) })
+                : null,
+            ])
+          ),
+        ])
+      );
+    } else {
+      parts.push(el("p", { class: "guide-ok", text: "All systems look good." }));
+    }
+    parts.push(suggest(overview.starters));
+    parts.push(
+      el("details", { class: "guide-map" }, [
+        el("summary", { text: "Where everything is" }),
+        ...overview.topics.map((topic) =>
+          el("div", { class: "guide-place" }, [
+            el("span", { class: "grow" }, [el("strong", { text: topic.title }), el("br"), topic.where]),
+            topic.route
+              ? el("button", { class: "secondary", type: "button", text: `Open ${topic.page}`, onclick: () => openRoute(topic.route) })
+              : el("button", { class: "secondary", type: "button", text: "Ask", onclick: () => ask(`Tell me about ${topic.title}`) }),
+          ])
+        ),
+      ])
+    );
+    intro.replaceChildren(...parts.filter(Boolean));
+  }
+
+  /* ------------------------------------------------------------------ views */
+
+  // Every Free Claude Code setting, inside the app. The settings page only
+  // answers on the PC running Studio, so a phone gets directions instead.
+  async function renderSettings() {
+    const generation = renderGeneration;
+    let here = false;
+    try {
+      here = (await fetch("/admin/api/status", { cache: "no-store" })).ok;
+    } catch {
+      here = false;
+    }
+    if (generation !== renderGeneration) return;
+    if (!here) {
+      view.replaceChildren(
+        card("Settings", [
+          el("p", {
+            class: "muted",
+            text: "Settings change on the PC running Studio: open the FCC Studio app there and choose Settings. They are kept off other devices so nobody else on your network can change them.",
+          }),
+        ])
+      );
+      return;
+    }
+    view.replaceChildren(
+      el("iframe", { class: "settings-frame", src: "/admin/studio", title: "Free Claude Code settings" })
+    );
+  }
+
+  async function renderChats() {
+    const generation = renderGeneration;
+    const [{ chats }, { agents }, { sites }] = await Promise.all([
+      api("/studio/api/chats"),
+      api("/studio/api/agents"),
+      api("/studio/api/sites"),
+    ]);
+    const picker = el(
+      "select",
+      { id: "chat-agent" },
+      agents.map((agent) =>
+        el("option", { value: agent.id, text: `${agent.name} · ${agent.model}` })
+      )
+    );
+    const nodes = [
+      roomCreator(agents, sites),
+      card("New chat", [
+        agents.length
+          ? picker
+          : el("p", { class: "muted", text: "Create an agent first." }),
+        el("button", {
+          class: "primary",
+          text: "Start chat",
+          onclick: async () => {
+            if (!agents.length) return go("agents");
+            const chat = await post("/studio/api/chats", {
+              agent_id: picker.value,
+            });
+            go(`chat/${chat.id}`);
+          },
+        }),
+      ]),
+      card(
+        "All chats",
+        chats.length
+          ? chats.map((chat) =>
+              el("button", {
+                class: "list-item",
+                onclick: () => go(chat.kind === "room" ? `room/${chat.id}` : `chat/${chat.id}`),
+              }, [
+                el("span", { class: "grow" }, [
+                  el("strong", { text: chat.title }),
+                  el("span", { text: `${chat.kind} · ${when(chat.updated_at)}` }),
+                ]),
+                chat.settings && chat.settings.light_tuning
+                  ? el("span", { class: "pill good", text: "tuned" })
+                  : null,
+              ])
+            )
+          : empty("No chats yet.")
+      ),
+    ];
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(...nodes);
+  }
+
+  const modelBadge = (model) =>
+    el("span", {
+      class: `pill ${String(model).startsWith("local/") ? "good" : ""}`,
+      text: String(model).startsWith("local/") ? "local" : "server",
+    });
+
+  function roomCreator(agents, sites = []) {
+    const members = agents.filter((agent) => agent.role !== "guide");
+    const title = el("input", { type: "text", placeholder: "Room name (optional)" });
+    const project = el("select", {}, [
+      el("option", { value: "", text: "No project (just talk)" }),
+      el("option", { value: "__new__", text: "New project for this room" }),
+      ...sites.map((site) => el("option", { value: site.id, text: site.name })),
+    ]);
+    const boxes = members.map((agent) => {
+      const box = el("input", { type: "checkbox", value: agent.id });
+      box.checked = true;
+      return el("label", { class: "switch" }, [
+        el("span", { class: "row" }, [agent.name, modelBadge(agent.model)]),
+        box,
+      ]);
+    });
+    return card(
+      "Agent room",
+      [
+        el("p", {
+          class: "muted",
+          text: "Talk to several agents at once. They answer each other, hand work off with @Name, and finish tasks together. Mix local and server models.",
+        }),
+        title,
+        el("label", {}, ["Project the agents build in", project]),
+        ...(members.length ? boxes : [empty("Create an agent first.")]),
+        el("button", {
+          class: "primary",
+          text: "Open room",
+          onclick: async () => {
+            const memberIds = boxes
+              .map((label) => label.querySelector("input"))
+              .filter((box) => box.checked)
+              .map((box) => box.value);
+            if (!memberIds.length) return notify("Pick at least one agent.");
+            let siteId = project.value || null;
+            if (siteId === "__new__") {
+              const site = await post("/studio/api/sites", {
+                name: title.value.trim() || "Team project",
+              });
+              siteId = site.id;
+            }
+            const room = await post("/studio/api/rooms", {
+              title: title.value.trim(),
+              member_ids: memberIds,
+              site_id: siteId,
+            });
+            go(`room/${room.id}`);
+          },
+        }),
+      ]
+    );
+  }
+
+  async function renderRoom(roomId) {
+    const generation = renderGeneration;
+    const [data] = await Promise.all([api(`/studio/api/rooms/${roomId}`), refreshPending()]);
+    setChrome("room", data.room.title);
+    const status = el("div", { class: "row-between" });
+    const log = el("div", { class: "transcript" });
+    let lastSequence = 0;
+
+    const paint = (detail) => {
+      const settings = detail.room.settings || {};
+      const taskStatus = settings.task_status || "idle";
+      status.replaceChildren(
+        el("span", { class: "grow" }, [
+          el("strong", { text: settings.goal ? `Task: ${settings.goal}` : "No task yet" }),
+          settings.summary
+            ? el("p", { class: "muted", text: settings.summary })
+            : null,
+        ]),
+        detail.running
+          ? el("span", { class: "pill warn", text: "agents talking…" })
+          : statusPill(taskStatus === "idle" ? "ready" : taskStatus === "done" ? "succeeded" : taskStatus)
+      );
+      for (const message of detail.messages) {
+        if (message.sequence > lastSequence) {
+          log.append(messageBubble(message));
+          lastSequence = message.sequence;
+        }
+      }
+    };
+
+    const refresh = async () => {
+      await refreshPending();
+      const detail = await api(`/studio/api/rooms/${roomId}?after=${lastSequence}`);
+      paint(detail);
+      if (!detail.running) stopPolling();
+      return detail;
+    };
+
+    const watch = () => startPolling(() => refresh().catch(() => stopPolling()));
+
+    const goal = el("input", { type: "text", placeholder: "Build a landing page for my bakery" });
+    const input = el("textarea", { placeholder: "Message the room — @Name to ask one agent", rows: "1" });
+
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      ...(data.room.site_id
+        ? [el("button", {
+            class: "secondary",
+            text: "Open the room's project",
+            onclick: () => go(`site/${data.room.site_id}`),
+          })]
+        : []),
+      card("Members", [
+        el(
+          "div",
+          { class: "row" },
+          data.members.map((agent) =>
+            el("span", { class: "pill" }, [`@${agent.name} `, modelBadge(agent.model)])
+          )
+        ),
+      ]),
+      card("Task", [
+        status,
+        goal,
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "primary",
+            text: "Start task",
+            onclick: async () => {
+              if (!goal.value.trim()) return notify("Describe the task.");
+              await post(`/studio/api/rooms/${roomId}/task`, { goal: goal.value.trim() });
+              goal.value = "";
+              await refresh();
+              watch();
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "Continue",
+            onclick: async () => {
+              await post(`/studio/api/rooms/${roomId}/continue`);
+              watch();
+            },
+          }),
+          el("button", {
+            class: "danger",
+            text: "Stop",
+            onclick: async () => {
+              await post(`/studio/api/rooms/${roomId}/stop`);
+              notify("The agents will stop after this turn.");
+            },
+          }),
+        ]),
+      ]),
+      log,
+      el("div", { class: "composer" }, [
+        el("div", { class: "grow" }, [input]),
+        el("button", {
+          class: "primary",
+          text: "Send",
+          onclick: async () => {
+            const text = input.value.trim();
+            if (!text) return;
+            input.value = "";
+            await post(`/studio/api/rooms/${roomId}/messages`, { text });
+            await refresh();
+            watch();
+          },
+        }),
+      ])
+    );
+    paint(data);
+    log.lastElementChild?.scrollIntoView({ block: "end" });
+    if (data.running) watch();
+  }
+
+  async function renderChat(chatId) {
+    const generation = renderGeneration;
+    const [data] = await Promise.all([api(`/studio/api/chats/${chatId}`), refreshPending()]);
+    const chat = data.chat;
+    setChrome("chat", chat.title);
+    const log = el(
+      "div",
+      { class: "transcript" },
+      data.messages.map(messageBubble)
+    );
+    const input = el("textarea", { placeholder: "Message", rows: "1" });
+    const send = el("button", { class: "primary", text: "Send" });
+    const tray = attachmentTray();
+    send.addEventListener("click", async () => {
+      const typed = input.value.trim();
+      const attached = tray.names();
+      const text = tray.take(typed);
+      if (!text) return;
+      input.value = "";
+      log.append(
+        el("div", {
+          class: "bubble user",
+          text: attached.length ? `${typed}\n📎 ${attached.join(", ")}`.trim() : text,
+        })
+      );
+      send.disabled = true;
+      send.textContent = "…";
+      // Show tool steps and approval requests while the agent is still working.
+      let seen = data.messages.length ? data.messages[data.messages.length - 1].sequence : 0;
+      let sentShown = false;
+      const live = setInterval(async () => {
+        try {
+          await refreshPending();
+          const fresh = await api(`/studio/api/chats/${chatId}?after=${seen}`);
+          for (const message of fresh.messages) {
+            seen = message.sequence;
+            if (message.role === "user" && !sentShown) {
+              sentShown = true;
+              continue;
+            }
+            log.append(messageBubble(message));
+            log.lastElementChild?.scrollIntoView({ block: "end" });
+          }
+        } catch {
+          /* the final reply below repaints everything */
+        }
+      }, 1500);
+      try {
+        const reply = await post(`/studio/api/chats/${chatId}/messages`, { text });
+        await refreshPending();
+        log.replaceChildren(...reply.messages.map(messageBubble));
+        log.lastElementChild?.scrollIntoView({ block: "end" });
+      } catch (error) {
+        notify(error.message);
+      } finally {
+        clearInterval(live);
+        send.disabled = false;
+        send.textContent = "Send";
+      }
+    });
+
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      el("div", { class: "row-between" }, [
+        el("span", { class: "pill", text: chat.kind }),
+        el("button", {
+          class: "secondary",
+          text: "Chat settings",
+          onclick: () => openChatSettings(chat),
+        }),
+      ]),
+      log,
+      tray.chips,
+      el("div", { class: "composer" }, [
+        tray.button,
+        tray.input,
+        el("div", { class: "grow" }, [input]),
+        send,
+      ])
+    );
+    log.lastElementChild?.scrollIntoView({ block: "end" });
+  }
+
+  let pendingCommands = new Set();
+
+  async function refreshPending() {
+    try {
+      const data = await api("/studio/api/commands/pending");
+      pendingCommands = new Set(data.pending.map((item) => item.id));
+      return data;
+    } catch {
+      return { pending: [], policy: "off" };
+    }
+  }
+
+  function approvalButtons(requestId, holder) {
+    const decide = (approve) => async () => {
+      try {
+        await post(`/studio/api/commands/${requestId}/${approve ? "approve" : "deny"}`);
+        pendingCommands.delete(requestId);
+        holder.replaceChildren(
+          el("span", { class: `pill ${approve ? "good" : "bad"}`, text: approve ? "approved, running" : "denied" })
+        );
+      } catch (error) {
+        notify(error.message);
+      }
+    };
+    return [
+      el("button", { class: "primary", text: "Run it", onclick: decide(true) }),
+      el("button", { class: "danger", text: "Deny", onclick: decide(false) }),
+    ];
+  }
+
+  // A finished app, handed over like a file: download it as a .zip (with
+  // everything it needs, minus node_modules and caches), open it, or see its files.
+  function appDownloadCard(data, hud = false) {
+    const key = token();
+    const withKey = (url) => `${url}${key ? `?token=${encodeURIComponent(key)}` : ""}`;
+    const bytes = Number(data.bytes || 0);
+    const size = bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    const files = Number(data.files || 0);
+    return el("div", { class: hud ? "hud-line download-card" : "bubble download-card" }, [
+      el("span", { class: "download-icon", text: "📦", "aria-hidden": "true" }),
+      el("div", { class: "grow" }, [
+        el("strong", { text: data.name || "App" }),
+        el("p", { class: "muted small", text: `${data.file_name || "app.zip"} · ${files} file${files === 1 ? "" : "s"} · ${size}` }),
+      ]),
+      el("div", { class: "row download-actions" }, [
+        el("a", {
+          class: "button-link primary",
+          href: withKey(data.url),
+          download: data.file_name || "app.zip",
+          text: "Download",
+          "aria-label": `Download ${data.name || "the app"}`,
+        }),
+        data.preview
+          ? el("a", { class: "button-link secondary", href: withKey(data.preview), target: "_blank", rel: "noreferrer", text: "Open" })
+          : null,
+        el("button", { class: "secondary", type: "button", text: "Files", onclick: () => go(`site/${data.site_id}`) }),
+      ]),
+    ]);
+  }
+
+  function messageBubble(message) {
+    const role = ["user", "assistant", "tool", "event"].includes(message.role)
+      ? message.role
+      : "event";
+    if (message.data && message.data.kind === "download") return appDownloadCard(message.data);
+    if (message.data && message.data.kind === "approval") {
+      const requestId = message.data.request_id;
+      const actions = el("div", { class: "row" });
+      if (pendingCommands.has(requestId)) {
+        actions.append(...approvalButtons(requestId, actions));
+      } else {
+        actions.append(el("span", { class: "pill", text: "decided" }));
+      }
+      return el("div", { class: "bubble event approval" }, [
+        el("span", { class: "who", text: "Command approval" }),
+        el("code", { class: "command", text: message.data.command || message.text }),
+        actions,
+      ]);
+    }
+    const links = (message.data && message.data.links) || [];
+    return el("div", { class: `bubble ${role}` }, [
+      message.author && role !== "user"
+        ? el("span", { class: "who", text: message.author })
+        : null,
+      ...(links.length ? guideText(message.text) : [message.text]),
+      links.length
+        ? el(
+            "div",
+            { class: "chips guide-links" },
+            links.map((link) =>
+              el("button", {
+                class: "secondary",
+                type: "button",
+                text: `Open ${link.label}`,
+                onclick: () => go(link.route.replace("/studio#", "")),
+              })
+            )
+          )
+        : null,
+    ]);
+  }
+
+  function openChatSettings(chat) {
+    const settings = chat.settings || {};
+    const toggle = (key, label, hint) => {
+      const input = el("input", { type: "checkbox" });
+      input.checked = Boolean(settings[key]);
+      input.addEventListener("change", async () => {
+        try {
+          const result = await post(`/studio/api/chats/${chat.id}/settings`, {
+            settings: { [key]: input.checked },
+          });
+          if (result.note) notify(result.note);
+          if (result.opened_chat) {
+            closeSheet();
+            go(`chat/${result.opened_chat.id}`);
+          }
+        } catch (error) {
+          input.checked = !input.checked;
+          notify(error.message);
+        }
+      });
+      return el("div", {}, [
+        el("label", { class: "switch" }, [label, input]),
+        el("p", { class: "muted", text: hint }),
+      ]);
+    };
+    openSheet("Chat settings", [
+      toggle(
+        "light_tuning",
+        "Very light tuning",
+        "Turning this on opens a fresh chat bound to a tune pack for this agent."
+      ),
+      toggle(
+        "teacher_mode",
+        "AI teacher",
+        "Opens a classroom where the teacher agent teaches and then tests the student agent."
+      ),
+      el("button", {
+        class: "secondary",
+        text: "Save this chat to Obsidian",
+        onclick: async () => {
+          try {
+            const result = await post("/studio/api/obsidian/sync", {
+              chat_id: chat.id,
+            });
+            notify(`Wrote ${result.note}`);
+          } catch (error) {
+            notify(error.message);
+          }
+        },
+      }),
+      el("button", {
+        class: "danger",
+        text: "Delete chat",
+        onclick: async () => {
+          await remove(`/studio/api/chats/${chat.id}`);
+          closeSheet();
+          go("chats");
+        },
+      }),
+    ]);
+  }
+
+  // Deleting an agent: one confirm, then it is gone with its chats and memories.
+  const PERMANENT_ROLES = ["main", "guide"];
+  function confirmDeleteAgent(agent, onDone) {
+    const status = el("p", { class: "muted", role: "status" });
+    const yes = el("button", {
+      class: "danger",
+      type: "button",
+      text: `Delete ${agent.name}`,
+      onclick: async () => {
+        yes.disabled = true;
+        try {
+          const result = await remove(`/studio/api/agents/${agent.id}`);
+          closeSheet();
+          notify(`${result.name} deleted${result.chats ? ` with ${result.chats} chat${result.chats === 1 ? "" : "s"}` : ""}.`);
+          if (onDone) onDone();
+        } catch (error) {
+          status.textContent = error.message;
+          yes.disabled = false;
+        }
+      },
+    });
+    openSheet(`Delete ${agent.name}?`, [
+      el("p", { text: `${agent.name} stops any work it is doing, and its chats, classes, tasks, and memories are deleted. It leaves any rooms it was in. Projects it built stay, and so does what it saved to the team's shared memory.` }),
+      el("div", { class: "row" }, [
+        yes,
+        el("button", { class: "secondary", type: "button", text: "Keep it", onclick: () => closeSheet() }),
+      ]),
+      status,
+    ]);
+  }
+
+  // Subagents: helpers with a role that join fitting tasks on their own.
+  function subagentsCard(agents) {
+    const box = el("div", { class: "subagents" }, [el("p", { class: "muted", text: "Loading…" })]);
+    // The model list can be slow (LM Studio off), so it fills in afterwards.
+    const models = api("/studio/api/team-models").catch(() => ({ server: [], local: { models: [] } }));
+    api("/studio/api/subagents")
+      .then((data) => paintSubagents(box, data, models, agents))
+      .catch((error) => box.replaceChildren(el("p", { class: "muted", text: error.message })));
+    return card("Subagents", [
+      el("p", {
+        class: "muted",
+        text: "Helpers you add, each with a role and its own model. When any agent starts a task that fits a subagent's role (or, for agents from GitHub repos, the skills its description names), it joins in by itself: developers, coders, builders, and researchers help while the work runs; testers and reviewers check it when it's done. They show in the HQ like the rest of the team. Switch one off to keep it out.",
+      }),
+      box,
+    ]);
+  }
+
+  function paintSubagents(box, data, models, agents) {
+    const name = el("input", { type: "text", maxlength: "60", placeholder: "Name, e.g. Dev-1", "aria-label": "Subagent name" });
+    const model = el("select", { "aria-label": "Subagent model" }, [
+      el("option", { value: "", text: "Model: the server default" }),
+    ]);
+    models.then((found) => {
+      const choices = [
+        ...(found.server || []).map((id) => [id, `${id} (server)`]),
+        ...((found.local && found.local.models) || []).map((id) => [id, `${id} (this PC)`]),
+      ].filter(([id]) => id);
+      model.append(...choices.map(([id, label]) => el("option", { value: id, text: label })));
+    });
+    const patchSub = async (agent, body) => {
+      try {
+        await api(`/studio/api/subagents/${agent.id}`, { method: "PATCH", body: JSON.stringify(body) });
+        render();
+      } catch (error) {
+        notify(error.message);
+      }
+    };
+    const others = (agents || []).filter(
+      (agent) => !agent.subagent && !agent.archived && !["main", "guide"].includes(agent.role)
+    );
+    const existing = el(
+      "select",
+      { "aria-label": "Agent to make a subagent" },
+      others.map((agent) => el("option", { value: agent.id, text: `${agent.name} (${agent.role})` }))
+    );
+    const role = el(
+      "select",
+      { "aria-label": "Subagent role" },
+      data.roles.map((item) =>
+        el("option", { value: item.role, text: `${item.title} (${item.when === "after" ? "checks after" : "helps during"})` })
+      )
+    );
+    const rows = data.subagents.map((agent) =>
+      el("div", { class: "subagent-row" }, [
+        el("button", { class: "list-item grow", onclick: () => go(`agent/${agent.id}`) }, [
+          el("span", { class: "grow" }, [
+            el("strong", { text: agent.name }),
+            el("span", { text: `${agent.role} · ${agent.model}` }),
+          ]),
+          el("span", { class: `pill ${agent.active ? "good" : "warn"}`, text: agent.active ? "on" : "off" }),
+        ]),
+        el("label", { class: "switch-row" }, [
+          el("input", {
+            type: "checkbox",
+            checked: agent.active,
+            "aria-label": `${agent.name} on`,
+            onchange: async (event) => {
+              try {
+                await api(`/studio/api/subagents/${agent.id}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ active: event.target.checked }),
+                });
+                render();
+              } catch (error) {
+                notify(error.message);
+                event.target.checked = !event.target.checked;
+              }
+            },
+          }),
+          " On",
+        ]),
+        el("button", {
+          class: "secondary small",
+          type: "button",
+          text: "Back to team",
+          title: `${agent.name} stops helping on its own and stays on the team`,
+          onclick: () => patchSub(agent, { subagent: false }),
+        }),
+        el("button", {
+          class: "danger icon-button",
+          type: "button",
+          text: "🗑",
+          title: `Delete ${agent.name}`,
+          "aria-label": `Delete ${agent.name}`,
+          onclick: () => confirmDeleteAgent(agent, () => render()),
+        }),
+      ])
+    );
+    box.replaceChildren(
+      ...(rows.length ? rows : [empty("No subagents yet.")]),
+      el("div", { class: "subagent-add" }, [
+        name,
+        role,
+        model,
+        el("button", {
+          class: "primary",
+          type: "button",
+          text: "Add subagent",
+          onclick: async () => {
+            if (!name.value.trim()) return notify("Give the subagent a name.");
+            try {
+              await post("/studio/api/subagents", { name: name.value.trim(), role: role.value, model: model.value });
+              notify(`${name.value.trim()} joined as a subagent.`);
+              render();
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+      ]),
+      others.length
+        ? el("div", { class: "subagent-add" }, [
+            existing,
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Make subagent",
+              title: "Any agent, including ones added from a GitHub repo",
+              onclick: () => patchSub({ id: existing.value }, { subagent: true }),
+            }),
+          ])
+        : null
+    );
+  }
+
+  async function renderAgents() {
+    const generation = renderGeneration;
+    const [{ agents }, { sites }, { runs }, { photos }] = await Promise.all([
+      api("/studio/api/agents"),
+      api("/studio/api/sites"),
+      api("/studio/api/tasks"),
+      api("/studio/api/photos"),
+    ]);
+    const nodes = [
+      card("Run an agent task", [
+        el("p", {
+          class: "muted",
+          text: "The agent searches the web, writes a whole website or app into a project, runs commands if you allow it, checks its work, then reports back.",
+        }),
+        ...taskForm(agents, sites),
+      ]),
+      card(
+        "Agents",
+        agents.length
+          ? agents.map((agent) =>
+              el("div", { class: "agent-row" }, [
+                el(
+                  "button",
+                  { class: "list-item grow", onclick: () => go(`agent/${agent.id}`) },
+                  [
+                    el("span", { class: "grow" }, [
+                      el("strong", { text: agent.name }),
+                      el("span", { text: `${agent.role} · ${agent.model}` }),
+                    ]),
+                    agent.tune_pack_id
+                      ? el("span", { class: "pill good", text: "tuned" })
+                      : null,
+                    agent.subagent
+                      ? el("span", { class: "pill", text: agent.active ? "subagent" : "subagent · off" })
+                      : null,
+                  ]
+                ),
+                PERMANENT_ROLES.includes(agent.role)
+                  ? null
+                  : el("button", {
+                      class: "danger icon-button",
+                      type: "button",
+                      text: "🗑",
+                      title: `Delete ${agent.name}`,
+                      "aria-label": `Delete ${agent.name}`,
+                      onclick: () => confirmDeleteAgent(agent, () => render()),
+                    }),
+              ])
+            )
+          : empty("No agents yet.")
+      ),
+      subagentsCard(agents),
+      card("Team brains", [
+        el("p", {
+          class: "muted",
+          text: "Give each agent its own AI model: a coding model for the Builder, a bigger one for the Researcher, a quick one for Jarvis.",
+        }),
+        el("button", { class: "primary", type: "button", text: "Choose each agent's model", onclick: () => openTeamBrains(() => render()) }),
+      ]),
+      card("Who gets every tool", [
+        el("p", {
+          class: "muted",
+          text: "An agent with every tool can do anything Studio can, but the tool list rides on every message it sends. Untick the ones that don't need it to use fewer tokens.",
+        }),
+        ...agents
+          .filter((agent) => !agent.archived)
+          .map((agent) =>
+            el("div", { class: "every-tool-row" }, [
+              el("span", { class: "grow" }, [
+                el("strong", { text: agent.name }),
+                agent.private ? el("span", { class: "pill", text: "server AI · own memory" }) : null,
+              ]),
+              everyToolSwitch(agent, () => render()),
+              el("button", {
+                class: "secondary small",
+                type: "button",
+                text: "Choose tools",
+                "aria-label": `Choose tools for ${agent.name}`,
+                onclick: () => go(`agent/${agent.id}`),
+              }),
+            ])
+          ),
+        el("p", {
+          class: "muted",
+          text: `Right now: about ${agents
+            .filter((agent) => !agent.archived)
+            .reduce((sum, agent) => sum + agent.tool_tokens, 0)
+            .toLocaleString()} tokens of tools across the team. Jarvis can change these too: "give the Tester every tool", "Helper only its own tools".`,
+        }),
+      ]),
+      card("Add an agent", [
+        el("p", {
+          class: "muted",
+          text: "Give it a name, a role, a model, and the tools it may use: building, running code, the internet, deep research, or asking the Researcher for help.",
+        }),
+        el("button", { class: "primary", text: "+ New agent", onclick: () => openAddAgent() }),
+      ]),
+      card(
+        "Recent tasks",
+        runs.length
+          ? runs
+              .slice(0, 8)
+              .map((run) =>
+                el("button", { class: "list-item", onclick: () => go(`task/${run.id}`) }, [
+                  el("span", { class: "grow" }, [
+                    el("strong", { text: run.goal }),
+                    el("span", { text: when(run.created_at) }),
+                  ]),
+                  statusPill(run.status),
+                ])
+              )
+          : empty("No agent tasks yet.")
+      ),
+      card(
+        "Projects",
+        sites.length
+          ? sites.map((site) =>
+              el("button", { class: "list-item", onclick: () => go(`site/${site.id}`) }, [
+                el("span", { class: "grow" }, [
+                  el("strong", { text: site.name }),
+                  el("span", { text: `${site.file_count} files` }),
+                ]),
+                el("span", { class: "pill", text: "open" }),
+              ])
+            )
+          : empty("No projects yet. Create one when you start a build task.")
+      ),
+      photosCard(photos, () => render()),
+    ];
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      ...nodes,
+      el("button", { class: "fab", "aria-label": "Add an agent", text: "+", onclick: () => openAddAgent() })
+    );
+  }
+
+  // The user's business photos, each with the note the agents read.
+  function photosCard(photos, refresh) {
+    const input = el("input", { type: "file", accept: "image/*", multiple: true, class: "visually-hidden", "aria-label": "Add business photos" });
+    const note = el("textarea", { rows: 2, placeholder: "What they show, and anything to know: prices, hours, the story…", "aria-label": "Note for new photos" });
+    const status = el("p", { class: "muted", role: "status" });
+    input.addEventListener("change", async () => {
+      const chosen = [...input.files];
+      input.value = "";
+      let added = 0;
+      for (const [index, file] of chosen.entries()) {
+        status.textContent = `Adding ${index + 1} of ${chosen.length}: ${file.name}…`;
+        try {
+          await uploadPhoto(file, note.value.trim());
+          added += 1;
+        } catch (error) {
+          notify(error.message);
+        }
+      }
+      status.textContent = added ? `Added ${added} photo${added === 1 ? "" : "s"}.` : "";
+      if (added) refresh();
+    });
+    return card("Business photos", [
+      el("p", {
+        class: "muted",
+        text: "Photos of your real business (the shop, team, food, work) with notes. The Builder uses them on your sites, before any stock photos, and reads your notes as facts. You can also attach photos to any message.",
+      }),
+      note,
+      el("div", { class: "row" }, [
+        input,
+        el("button", { class: "primary", type: "button", text: "Add photos", onclick: () => input.click() }),
+      ]),
+      status,
+      photos.length
+        ? el(
+            "div",
+            { class: "photo-grid" },
+            photos.map((photo) => {
+              const text = el("textarea", { rows: 3, "aria-label": `Note for ${photo.name}`, placeholder: "Add a note" });
+              text.value = photo.note || "";
+              text.addEventListener("change", async () => {
+                try {
+                  await api(`/studio/api/photos/${photo.id}`, { method: "PATCH", body: JSON.stringify({ note: text.value }) });
+                  notify("Note saved.");
+                } catch (error) {
+                  notify(error.message);
+                }
+              });
+              return el("figure", { class: "photo-tile" }, [
+                el("img", { src: photo.url, alt: photo.note || photo.name, loading: "lazy", width: String(photo.width), height: String(photo.height) }),
+                el("figcaption", {}, [
+                  el("strong", { text: photo.name }),
+                  el("small", { class: "muted", text: `${photo.width}×${photo.height}` }),
+                  text,
+                  el("button", {
+                    class: "danger small",
+                    type: "button",
+                    text: "Delete",
+                    "aria-label": `Delete ${photo.name}`,
+                    onclick: async () => {
+                      if (!confirm(`Delete ${photo.name}? Sites that already use it keep their copy.`)) return;
+                      await api(`/studio/api/photos/${photo.id}`, { method: "DELETE" });
+                      refresh();
+                    },
+                  }),
+                ]),
+              ]);
+            })
+          )
+        : empty("No photos yet."),
+    ]);
+  }
+
+  // Pick the model the main AI (or every agent) thinks with, from the models
+  // on this PC, or from a .gguf file chosen in a normal file window.
+  function openBrainPicker(mainName, onDone) {
+    const who = mainName || "the main AI";
+    const everyone = el("input", { type: "checkbox" });
+    const status = el("p", { class: "muted", role: "status" });
+    const list = el("div", { class: "stack" });
+    const use = async (model) => {
+      const name = model.replace(/^local\//, "");
+      status.textContent = `Switching to ${name}…`;
+      try {
+        await post("/studio/api/models/use", { model, everyone: everyone.checked });
+      } catch (error) {
+        status.textContent = error.message;
+        return;
+      }
+      closeSheet();
+      notify(everyone.checked ? `Every agent now thinks with ${name}.` : `${who} now thinks with ${name}.`);
+      if (onDone) onDone();
+    };
+    const load = async () => {
+      list.replaceChildren(el("p", { class: "muted", text: "Looking for models on this PC…" }));
+      let local;
+      try {
+        local = (await api("/studio/api/models/available")).local;
+      } catch (error) {
+        list.replaceChildren(el("p", { class: "muted", text: error.message }));
+        return;
+      }
+      const models = local.models.filter((model) => !/embed/i.test(model));
+      if (!local.reachable) {
+        list.replaceChildren(
+          el("p", {
+            class: "muted",
+            text: "LM Studio isn't answering. In LM Studio open Developer and set Status to Running, then press Refresh.",
+          })
+        );
+      } else if (!models.length) {
+        list.replaceChildren(
+          el("p", { class: "muted", text: "No models in LM Studio yet. Use “Find a model file on this PC” below." })
+        );
+      } else {
+        list.replaceChildren(
+          ...models.map((model) =>
+            el("div", { class: "list-item" }, [
+              el("span", { class: "grow" }, [el("strong", { text: model.replace(/^local\//, "") })]),
+              el("button", {
+                class: "primary",
+                type: "button",
+                text: "Use",
+                "aria-label": `Use ${model.replace(/^local\//, "")}`,
+                onclick: () => use(model),
+              }),
+            ])
+          )
+        );
+      }
+    };
+    const find = el("button", {
+      class: "secondary",
+      type: "button",
+      text: "Find a model file on this PC…",
+      onclick: async () => {
+        find.disabled = true;
+        status.textContent = "A file window opened on the PC running Studio. Choose a .gguf model file.";
+        try {
+          const body = await post("/studio/api/models/pick-file");
+          if (!body.picked) status.textContent = "No file chosen.";
+          else if (body.model) {
+            status.textContent = `Added ${body.path}`;
+            await use(body.model);
+          } else {
+            status.textContent = body.note;
+            await load();
+          }
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          find.disabled = false;
+        }
+      },
+    });
+    openSheet(`Choose ${who}'s brain`, [
+      el("p", {
+        class: "muted",
+        text: "Pick a model on this PC. It runs in LM Studio, so nothing leaves your computer.",
+      }),
+      list,
+      el("label", { class: "check" }, [everyone, "Use it for every agent too"]),
+      el("div", { class: "row" }, [
+        find,
+        el("button", { class: "secondary", type: "button", text: "Refresh", onclick: () => load() }),
+      ]),
+      el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Give each agent its own brain…",
+        onclick: () => openTeamBrains(onDone),
+      }),
+      status,
+    ]);
+    load();
+  }
+
+  // Team brains: a different model for each agent.
+  async function openTeamBrains(onDone) {
+    let data;
+    try {
+      data = await api("/studio/api/team-models");
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+    const localModels = (data.local.models || []).filter((model) => !/embed/i.test(model));
+    const serverModels = data.server || [];
+    const label = (model) => model.replace(/^local\//, "");
+    const pickers = new Map();
+    const status = el("p", { class: "muted", role: "status" });
+    const picker = (row) => {
+      const known = new Set([...localModels, ...serverModels]);
+      // Server models grouped by provider (NVIDIA NIM, OpenRouter, …), so a
+      // list of 80 models from one key is easy to scan.
+      const byProvider = new Map();
+      for (const model of serverModels) {
+        const provider = model.split("/")[0];
+        if (!byProvider.has(provider)) byProvider.set(provider, []);
+        byProvider.get(provider).push(model);
+      }
+      const groups = [
+        el("optgroup", { label: "On this PC (LM Studio)" }, localModels.map((model) => el("option", { value: model, text: label(model) }))),
+        ...[...byProvider.entries()].map(([provider, models]) =>
+          el("optgroup", { label: `Server: ${provider} (${models.length})` }, models.map((model) => el("option", { value: model, text: model.slice(provider.length + 1) })))
+        ),
+      ];
+      if (!known.has(row.model)) groups.unshift(el("option", { value: row.model, text: `${label(row.model)} (not found)` }));
+      const select = el("select", { "aria-label": `Model for ${row.name}` }, groups);
+      select.value = row.model;
+      pickers.set(row.id, select);
+      return select;
+    };
+    // Test: one tiny message to the chosen model, so a model the provider
+    // lists but won't run for this key shows up before an agent needs it.
+    const tester = (row) => {
+      const result = el("span", { class: "muted brain-test", role: "status" });
+      const button = el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Test",
+        "aria-label": `Test ${row.name}'s brain`,
+        onclick: async () => {
+          const model = pickers.get(row.id).value;
+          button.disabled = true;
+          result.textContent = "Testing…";
+          try {
+            const body = await post("/studio/api/team-models/test", { model });
+            const warned = body.ok && body.message !== "Works.";
+            // Test only tries the pick; it isn't kept until Save.
+            const unsaved = body.ok && model !== row.model ? ` · press Save below to give it to ${row.name}` : "";
+            result.textContent = body.ok ? (warned ? `⚠ ${body.message}${unsaved}` : `✓ Works${unsaved}`) : `✗ ${body.message}`;
+            result.className = `brain-test ${body.ok && !warned ? "good" : "bad"}`;
+          } catch (error) {
+            result.textContent = `✗ ${error.message}`;
+            result.className = "brain-test bad";
+          } finally {
+            button.disabled = false;
+          }
+        },
+      });
+      return el("div", { class: "row brain-test-row" }, [button, result]);
+    };
+    const rows = data.agents.map((row) =>
+      el("div", { class: "brain-row" }, [
+        el("div", { class: "brain-who" }, [
+          el("strong", { text: row.name }),
+          el("span", { class: "muted", text: row.role }),
+        ]),
+        picker(row),
+        tester(row),
+        row.note ? el("p", { class: "muted brain-note", text: row.note }) : null,
+        row.private
+          ? el("p", { class: "muted brain-note brain-private", text: "Server AI: can't see your memory or Obsidian. Jarvis briefs it when you give it a job." })
+          : null,
+      ])
+    );
+    const distinct = () =>
+      new Set([...pickers.values()].map((select) => select.value).filter((model) => model.startsWith("local/"))).size;
+    const advice = el("p", { class: "muted brain-advice" });
+    const explain = () => {
+      const count = distinct();
+      advice.textContent = !data.local.reachable
+        ? "LM Studio isn't answering, so only server models can be picked. In LM Studio open Developer and set Status to Running."
+        : localModels.length <= 1
+        ? "LM Studio lists only one model. To give agents different ones, download more in LM Studio and turn on Just-in-Time model loading (Developer → Settings); then every downloaded model shows here."
+        : count > 1
+          ? `${count} different models on this PC. ${data.turns ? "They take turns (one works at a time) so an 8 GB card isn't swapping models on every step." : "Local Models Take Turns is off, so they may all try to load at once."} In LM Studio, turn on Just-in-Time model loading (Developer → Settings) so it can load whichever one an agent asks for.`
+          : "Pick a model for each agent. Coding models suit the Builder and Tester; a bigger model suits the Researcher; a quick one suits Jarvis.";
+    };
+    for (const select of pickers.values()) select.addEventListener("change", explain);
+    explain();
+    const suggest = el("button", {
+      class: "secondary",
+      type: "button",
+      text: "Suggest a mix",
+      onclick: async () => {
+        try {
+          const { assignments } = await api("/studio/api/team-models/suggest");
+          const entries = Object.entries(assignments);
+          if (!entries.length) {
+            status.textContent = "No models on this PC to suggest from. Download some in LM Studio first.";
+            return;
+          }
+          for (const [agentId, model] of entries) {
+            const select = pickers.get(agentId);
+            if (select) select.value = model;
+          }
+          explain();
+          status.textContent = "Suggested from the models on this PC. Change any, then Save.";
+        } catch (error) {
+          status.textContent = error.message;
+        }
+      },
+    });
+    const save = el("button", {
+      class: "primary",
+      type: "button",
+      text: "Save",
+      onclick: async () => {
+        const assignments = {};
+        for (const row of data.agents) {
+          const value = pickers.get(row.id).value;
+          if (value && value !== row.model) assignments[row.id] = value;
+        }
+        if (!Object.keys(assignments).length) {
+          closeSheet();
+          return;
+        }
+        save.disabled = true;
+        try {
+          const { changed } = await post("/studio/api/team-models", { assignments });
+          closeSheet();
+          notify(`${changed.length} agent${changed.length === 1 ? "" : "s"} switched model.`);
+          if (onDone) onDone();
+        } catch (error) {
+          status.textContent = error.message;
+          save.disabled = false;
+        }
+      },
+    });
+    openSheet("Team brains", [
+      el("p", { class: "muted", text: "Give each agent its own AI model, so they aren't all the same AI." }),
+      data.private_memory
+        ? el("p", { class: "muted", text: "Your memory stays on this PC: agents on server AIs can't read it. Jarvis writes them a briefing with only what the job needs." })
+        : null,
+      ...rows,
+      advice,
+      el("div", { class: "row" }, [suggest, save]),
+      status,
+    ]);
+  }
+
+  async function openAddAgent(onCreated) {
+    let options;
+    try {
+      options = await api("/studio/api/agent-options");
+    } catch (error) {
+      return notify(error.message);
+    }
+    modelList().catch(() => {});
+    const name = el("input", { type: "text", placeholder: "e.g. Pixel", "aria-label": "Name" });
+    const role = el(
+      "select",
+      { "aria-label": "Role" },
+      options.roles.map((row) => el("option", { value: row.role, text: row.role }))
+    );
+    const roleNote = el("p", { class: "muted" });
+    const model = el("input", {
+      type: "text",
+      list: "model-list",
+      "aria-label": "Model",
+      placeholder: "Leave empty for the default, or local/<model>",
+    });
+    const prompt = el("textarea", { "aria-label": "Instructions", placeholder: "What this agent is for and how it should work." });
+    const everyTool = el("input", { type: "checkbox", checked: true, "aria-label": "Give it every tool" });
+    const boxes = new Map();
+    const groups = options.tool_groups.map((group) =>
+      el("fieldset", { class: "tool-group" }, [
+        el("legend", { text: group.label }),
+        ...group.tools.filter((tool) => !tool.main_only).map((tool) => {
+          const box = el("input", { type: "checkbox", value: tool.name });
+          boxes.set(tool.name, box);
+          return el("label", { class: "check", title: tool.description }, [box, el("span", { text: tool.name.replace(/_/g, " ") })]);
+        }),
+      ])
+    );
+    const showNote = () => {
+      roleNote.textContent = (options.roles.find((row) => row.role === role.value) || {}).note || "";
+    };
+    role.addEventListener("change", showNote);
+    const presetButtons = el("div", { class: "chips" });
+    const applyPreset = (preset) => {
+      role.value = preset.role;
+      prompt.value = preset.prompt;
+      for (const [tool, box] of boxes) box.checked = preset.tools.includes(tool);
+      for (const chip of presetButtons.children) chip.setAttribute("aria-pressed", String(chip.dataset.name === preset.name));
+      showNote();
+    };
+    presetButtons.append(
+      ...options.presets.map((preset) =>
+        el("button", { class: "chip", type: "button", "data-name": preset.name, "aria-pressed": "false", text: preset.name, onclick: () => applyPreset(preset) })
+      )
+    );
+    applyPreset(options.presets[0]);
+    openSheet("New agent", [
+      el("p", { class: "muted", text: "Start from a preset, then change anything." }),
+      presetButtons,
+      el("label", {}, ["Name", name]),
+      el("label", {}, ["Role", role]),
+      roleNote,
+      el("label", {}, ["Model", model]),
+      el("label", {}, ["Instructions", prompt]),
+      options.all_tools
+        ? el("label", { class: "check all-tools-note" }, [
+            everyTool,
+            el("span", { text: "Give it every tool (uses more tokens on every message; the ticks below are its own tools)" }),
+          ])
+        : null,
+      ...groups,
+      el("button", {
+        class: "primary",
+        text: "Create agent",
+        onclick: async () => {
+          if (!name.value.trim()) return notify("Name the agent.");
+          const tools = [...boxes].filter(([, box]) => box.checked).map(([tool]) => tool);
+          try {
+            const agent = await post("/studio/api/agents", {
+              name: name.value.trim(),
+              role: role.value,
+              model: model.value.trim(),
+              system_prompt: prompt.value.trim(),
+              tools: [...tools, "finish"],
+              all_tools: options.all_tools ? everyTool.checked : true,
+            });
+            closeSheet();
+            notify(`${agent.name} joined the team.`);
+            if (onCreated) onCreated(agent);
+            else go(`agent/${agent.id}`);
+          } catch (error) {
+            notify(error.message);
+          }
+        },
+      }),
+    ]);
+  }
+
+  function taskForm(agents, sites) {
+    const agentPicker = el(
+      "select",
+      {},
+      agents
+        .filter((agent) => agent.role !== "guide")
+        .map((agent) => el("option", { value: agent.id, text: agent.name }))
+    );
+    const sitePicker = el("select", {}, [
+      el("option", { value: "", text: "No project" }),
+      el("option", { value: "__new__", text: "Create a new project" }),
+      ...sites.map((site) => el("option", { value: site.id, text: site.name })),
+    ]);
+    const goal = el("textarea", {
+      placeholder: "Build a to-do app with a Python backend and a clean web UI.",
+    });
+    return [
+      el("label", {}, ["Agent", agentPicker]),
+      el("label", {}, ["Project", sitePicker]),
+      goal,
+      el("button", {
+        class: "primary",
+        text: "Start task",
+        onclick: async () => {
+          if (!goal.value.trim()) return notify("Give the agent a goal.");
+          let siteId = sitePicker.value;
+          if (siteId === "__new__") {
+            const site = await post("/studio/api/sites", {
+              name: goal.value.trim().slice(0, 32) || "New site",
+            });
+            siteId = site.id;
+          }
+          const run = await post("/studio/api/tasks", {
+            agent_id: agentPicker.value,
+            goal: goal.value.trim(),
+            site_id: siteId || null,
+          });
+          go(`task/${run.id}`);
+        },
+      }),
+    ];
+  }
+
+  // Who gets every tool: one switch per agent, with what it costs in tokens.
+  function everyToolSwitch(agent, onChange) {
+    const box = el("input", {
+      type: "checkbox",
+      checked: agent.all_tools,
+      disabled: !agent.every_tool_allowed,
+      "aria-label": `Every tool for ${agent.name}`,
+    });
+    const cost = el("small", {
+      class: "muted",
+      text: agent.every_tool_allowed
+        ? `About ${agent.tool_tokens.toLocaleString()} tokens of tools on every message (${agent.every_tool_tokens.toLocaleString()} with every tool, ${agent.own_tool_tokens.toLocaleString()} with its own).`
+        : agent.role === "guide"
+          ? "The Guide keeps its few tools: it runs on the smallest model."
+          : "Every Agent Gets Every Tool is off in Settings, Studio.",
+    });
+    box.addEventListener("change", async () => {
+      box.disabled = true;
+      try {
+        await patch(`/studio/api/agents/${agent.id}`, { updates: { all_tools: box.checked } });
+        notify(box.checked ? `${agent.name} has every tool.` : `${agent.name} uses only its own tools.`);
+        if (onChange) onChange();
+      } catch (error) {
+        box.checked = !box.checked;
+        notify(error.message);
+      } finally {
+        box.disabled = !agent.every_tool_allowed;
+      }
+    });
+    return el("div", { class: "every-tool" }, [
+      el("label", { class: "check" }, [box, el("span", { text: "Every tool" })]),
+      cost,
+    ]);
+  }
+
+  // Every tool, or its own tools one by one: each box saves as you tick it.
+  function toolsCard(agent, options) {
+    const own = new Set(agent.tools);
+    const every = agent.all_tools;
+    const status = el("p", { class: "muted", role: "status" });
+    const count = el("p", { class: "tool-count" });
+    const boxes = [];
+    const listed = new Set();
+    const blocked = (tool) => agent.private && tool.private;
+    const forAll = (tool) =>
+      options.web_for_all && agent.role !== "guide" && ["web_search", "web_fetch"].includes(tool.name);
+    const showCount = () => {
+      const ticked = boxes.filter(([, box]) => box.checked);
+      const tokens = ticked.reduce((sum, [tool]) => sum + tool.tokens, 0);
+      count.textContent = every
+        ? `Every tool: about ${agent.tool_tokens.toLocaleString()} tokens of tools on every message.`
+        : `${ticked.length} tools: about ${tokens.toLocaleString()} tokens of tools on every message.`;
+    };
+    const save = async () => {
+      const chosen = boxes.filter(([, box]) => box.checked && !box.disabled).map(([tool]) => tool.name);
+      // Keep what the boxes can't show: tools a server AI can't use right now.
+      const kept = [...own].filter((name) => !listed.has(name) || boxes.some(([tool, box]) => tool.name === name && box.disabled));
+      showCount();
+      status.textContent = "Saving…";
+      try {
+        await patch(`/studio/api/agents/${agent.id}`, { updates: { tools: [...new Set([...chosen, ...kept])] } });
+        status.textContent = "Saved.";
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+    const groups = options.tool_groups.map((group) => {
+      const rows = group.tools
+        .filter((tool) => !tool.main_only || agent.role === "main")
+        .map((tool) => {
+          listed.add(tool.name);
+          const off = blocked(tool);
+          const always = forAll(tool);
+          const box = el("input", {
+            type: "checkbox",
+            value: tool.name,
+            checked: off ? false : every || always || own.has(tool.name),
+            disabled: every || off || always,
+            "aria-label": `${tool.name} for ${agent.name}`,
+          });
+          box.addEventListener("change", save);
+          boxes.push([tool, box]);
+          const note = off
+            ? "not on server AIs"
+            : always
+              ? "on for every agent (Web Access)"
+              : tool.name === "run_command" && !options.commands_enabled
+              ? "needs Agent Commands in Settings"
+              : `~${tool.tokens} tokens`;
+          return el("label", { class: "check tool-check", title: tool.description }, [
+            box,
+            el("span", { text: tool.name.replace(/_/g, " ") }),
+            el("small", { class: "muted", text: note }),
+          ]);
+        });
+      return rows.length ? el("fieldset", { class: "tool-group" }, [el("legend", { text: group.label }), ...rows]) : null;
+    });
+    const pick = (on) => {
+      for (const [tool, box] of boxes) if (!box.disabled) box.checked = on && !blocked(tool);
+      save();
+    };
+    showCount();
+    return card("Tools", [
+      everyToolSwitch(agent, () => render()),
+      el("p", {
+        class: "muted",
+        text: every
+          ? "Every tool is on, so it can use all of these. Turn Every tool off to choose them one by one; your ticks are kept."
+          : "Tick the tools this agent may use. Fewer tools means fewer tokens on every message it sends.",
+      }),
+      every
+        ? null
+        : el("div", { class: "row" }, [
+            el("button", { class: "secondary", type: "button", text: "Tick all", onclick: () => pick(true) }),
+            el("button", { class: "secondary", type: "button", text: "Untick all", onclick: () => pick(false) }),
+          ]),
+      ...groups,
+      count,
+      status,
+    ]);
+  }
+
+  function memoryAreaCard(agent, entries) {
+    const input = el("input", { type: "text", placeholder: "Add a note to its own memory", "aria-label": "Note for its memory area" });
+    return card(`${agent.name}'s own memory area`, [
+      el("p", {
+        class: "muted",
+        text: `${agent.name} thinks on a server AI, so it never sees your memory, Obsidian, or earlier chats. It keeps what it learns here instead, and only here. Jarvis can read, add to, and clear it too.`,
+      }),
+      el("div", { class: "row" }, [
+        el("div", { class: "grow" }, [input]),
+        el("button", {
+          class: "secondary",
+          text: "Add",
+          onclick: async () => {
+            if (!input.value.trim()) return;
+            await post(`/studio/api/memory/${encodeURIComponent(agent.memory_area)}`, { text: input.value.trim() });
+            render();
+          },
+        }),
+      ]),
+      ...(entries.length
+        ? entries.map((entry) =>
+            el("div", { class: "list-item" }, [
+              el("span", { class: "grow" }, [
+                el("strong", { text: entry.text }),
+                el("span", { text: `${entry.scope}${entry.author ? ` · from ${entry.author}` : ""}` }),
+              ]),
+              el("button", {
+                class: "danger",
+                text: "✕",
+                "aria-label": "Forget this",
+                onclick: async () => {
+                  await remove(`/studio/api/memory/entry/${entry.id}`);
+                  render();
+                },
+              }),
+            ])
+          )
+        : [empty("Nothing in its memory area yet.")]),
+      entries.length
+        ? el("button", {
+            class: "danger",
+            type: "button",
+            text: "Clear its memory area",
+            onclick: async () => {
+              const done = await remove(`/studio/api/agents/${agent.id}/memory-area`);
+              notify(`Cleared ${done.removed} memories.`);
+              render();
+            },
+          })
+        : null,
+    ]);
+  }
+
+  async function renderAgent(agentId) {
+    const generation = renderGeneration;
+    const [{ agents }, { memories }, { skills }, options] = await Promise.all([
+      api("/studio/api/agents"),
+      api(`/studio/api/memory/${agentId}`),
+      api(`/studio/api/agents/${agentId}/skills`),
+      api("/studio/api/agent-options"),
+    ]);
+    const agent = agents.find((item) => item.id === agentId);
+    if (!agent) return go("agents");
+    const area = agent.private
+      ? (await api(`/studio/api/memory/${encodeURIComponent(agent.memory_area)}`)).memories
+      : null;
+    setChrome("agent", agent.name);
+    const memoryInput = el("input", { type: "text", placeholder: "Teach it a fact" });
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      card(agent.name, [
+        el("div", { class: "kv" }, [
+          el("span", { text: "Role" }),
+          el("span", { text: agent.role }),
+          el("span", { text: "Model" }),
+          el("span", { text: agent.model }),
+          el("span", { text: "Tools" }),
+          el("span", {}, [
+            el("strong", {
+              text: agent.all_tools
+                ? `Every tool Studio has (${agent.tools_in_use.length})`
+                : `${agent.tools_in_use.length} of its own`,
+            }),
+            el("small", { class: "muted tool-list", text: agent.tools_in_use.join(", ") }),
+          ]),
+          el("span", { text: "Memory" }),
+          el("span", {
+            text: agent.private
+              ? "its own memory area (it runs on a server AI)"
+              : agent.own_memory
+                ? "its own memory, which only it reads; it also reads every agent's and adds to the team's"
+                : agent.memory_enabled
+                  ? "on"
+                  : "off",
+          }),
+          el("span", { text: "Team" }),
+          el("span", { text: `${agent.private ? "Server AI" : "This PC"} · ${agent.command}` }),
+        ]),
+        modelEditor(agent),
+        PERMANENT_ROLES.includes(agent.role)
+          ? null
+          : el("button", {
+              class: "danger",
+              type: "button",
+              text: "Delete this agent",
+              onclick: () => confirmDeleteAgent(agent, () => go("agents")),
+            }),
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "primary",
+            text: "Chat",
+            onclick: async () => {
+              const chat = await post("/studio/api/chats", { agent_id: agent.id });
+              go(`chat/${chat.id}`);
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "Tune",
+            onclick: () => go(`tune/${agent.id}`),
+          }),
+          el("button", {
+            class: "secondary",
+            text: "To Obsidian",
+            onclick: async () => {
+              const result = await post("/studio/api/obsidian/sync", {
+                agent_id: agent.id,
+              });
+              notify(`Wrote ${result.note}`);
+            },
+          }),
+        ]),
+      ]),
+      toolsCard(agent, options),
+      teachCard(agent, skills),
+      ...(area ? [memoryAreaCard(agent, area)] : []),
+      card(
+        agent.private ? "Memory from when it ran on this PC" : "Memory",
+        [
+          el("div", { class: "row" }, [
+            el("div", { class: "grow" }, [memoryInput]),
+            el("button", {
+              class: "secondary",
+              text: "Add",
+              onclick: async () => {
+                if (!memoryInput.value.trim()) return;
+                await post(`/studio/api/memory/${agent.id}`, {
+                  text: memoryInput.value.trim(),
+                });
+                memoryInput.value = "";
+                render();
+              },
+            }),
+          ]),
+          ...(memories.length
+            ? memories.map((entry) =>
+                el("div", { class: "list-item" }, [
+                  el("span", { class: "grow" }, [
+                    el("strong", { text: entry.text }),
+                    el("span", { text: `${entry.scope} · ${entry.hits} recalls` }),
+                  ]),
+                  el("button", {
+                    class: "danger",
+                    text: "✕",
+                    onclick: async () => {
+                      await remove(`/studio/api/memory/entry/${entry.id}`);
+                      render();
+                    },
+                  }),
+                ])
+              )
+            : [empty("Nothing remembered yet.")]),
+        ]
+      )
+    );
+  }
+
+  function teachCard(agent, skills) {
+    const link = el("input", {
+      type: "url",
+      placeholder: "https://… docs page, Reddit thread, or YouTube video",
+    });
+    const notes = el("textarea", {
+      placeholder: "Or write it out: a tool, a command, a code pattern, how you like things done.",
+    });
+    const button = el("button", {
+      class: "primary",
+      text: "Teach",
+      onclick: async () => {
+        if (!link.value.trim() && !notes.value.trim()) return notify("Add a link or some notes.");
+        button.disabled = true;
+        button.textContent = "Learning…";
+        try {
+          await post(`/studio/api/agents/${agent.id}/teach`, { url: link.value.trim(), text: notes.value.trim() });
+          notify(`${agent.name} learned it.`);
+          render();
+        } catch (error) {
+          notify(error.message);
+          button.disabled = false;
+          button.textContent = "Teach";
+        }
+      },
+    });
+    return card(
+      "Teach a skill",
+      [
+        el("label", {}, ["Link", link]),
+        el("label", {}, ["Notes", notes]),
+        button,
+        ...(skills.length
+          ? skills.map((skill) =>
+              el("div", { class: "list-item" }, [
+                el("span", { class: "grow" }, [
+                  el("strong", { text: skill.text.split("\n")[0] }),
+                  el("span", { class: "pre", text: skill.text.split("\n").slice(1).join("\n") }),
+                ]),
+                el("button", {
+                  class: "danger",
+                  "aria-label": "Forget this skill",
+                  text: "✕",
+                  onclick: async () => {
+                    await remove(`/studio/api/memory/entry/${skill.id}`);
+                    render();
+                  },
+                }),
+              ])
+            )
+          : [empty("No skills yet.")]),
+      ],
+      `${agent.name} reads the link, keeps a short how-to, and follows it whenever it fits. Reddit threads and YouTube videos work too.`
+    );
+  }
+
+  async function renderTask(runId) {
+    const generation = renderGeneration;
+    const [data] = await Promise.all([api(`/studio/api/tasks/${runId}`), refreshPending()]);
+    setChrome("task", "Agent task");
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      card(data.run.goal, [
+        el("div", { class: "row-between" }, [
+          statusPill(data.run.status),
+          el("span", {
+            class: "pill",
+            text: `${data.run.step}/${data.run.max_steps} steps`,
+          }),
+        ]),
+        meter(data.run.step / Math.max(1, data.run.max_steps)),
+        data.run.site_id
+          ? el("button", {
+              class: "secondary",
+              text: "Open the site",
+              onclick: () => go(`site/${data.run.site_id}`),
+            })
+          : null,
+      ]),
+      el("div", { class: "transcript" }, data.messages.map(messageBubble))
+    );
+    if (["queued", "running"].includes(data.run.status)) {
+      pollPage(() => renderTask(runId));
+    } else {
+      stopPolling();
+    }
+  }
+
+  async function renderSite(siteId) {
+    const generation = renderGeneration;
+    const data = await api(`/studio/api/sites/${siteId}/files`);
+    setChrome("site", data.site.name);
+    const key = token();
+    const preview = `/studio/sites/${siteId}/index.html${key ? `?token=${encodeURIComponent(key)}` : ""}`;
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      card("Preview", [
+        el("iframe", { class: "preview-frame", src: preview, title: "Site preview" }),
+        el("div", { class: "row" }, [
+          el("a", {
+            class: "pill",
+            href: preview,
+            target: "_blank",
+            rel: "noreferrer",
+            text: "Open full screen",
+          }),
+          el("a", {
+            class: "pill",
+            href: `/studio/api/sites/${siteId}/archive${key ? `?token=${encodeURIComponent(key)}` : ""}`,
+            text: "Download .zip",
+          }),
+        ]),
+      ]),
+      card(
+        "Files",
+        data.files.length
+          ? data.files.map((file) =>
+              el("div", { class: "list-item" }, [
+                el("span", { class: "grow" }, [
+                  el("strong", { text: file.path }),
+                  el("span", { text: bytes(file.size) }),
+                ]),
+                el("button", {
+                  class: "secondary",
+                  text: "Edit",
+                  onclick: () => editSiteFile(siteId, file.path),
+                }),
+              ])
+            )
+          : empty("The agent has not written any files yet.")
+      )
+    );
+  }
+
+  async function editSiteFile(siteId, path) {
+    const preview = await fetch(
+      `/studio/sites/${siteId}/${path}${token() ? `?token=${encodeURIComponent(token())}` : ""}`
+    );
+    const body = await preview.text();
+    const editor = el("textarea", { rows: "14" });
+    editor.value = body;
+    openSheet(path, [
+      editor,
+      el("button", {
+        class: "primary",
+        text: "Save",
+        onclick: async () => {
+          await put(`/studio/api/sites/${siteId}/files`, {
+            path,
+            content: editor.value,
+          });
+          closeSheet();
+          notify("Saved.");
+          render();
+        },
+      }),
+    ]);
+  }
+
+  async function renderLearn() {
+    const generation = renderGeneration;
+    const [data, { agents }] = await Promise.all([
+      api("/studio/api/school/courses"),
+      api("/studio/api/agents"),
+    ]);
+    const candidates = agents.filter((agent) => agent.role !== "guide");
+    const isLocal = (agent) => agent.model.startsWith("local/");
+    const first = (test, exclude) =>
+      candidates.find((agent) => agent.id !== exclude && test(agent));
+    // Prefer a server teacher and a local student: the server teaches the local model.
+    const teacherDefault =
+      first((agent) => agent.role === "teacher") ||
+      first((agent) => !isLocal(agent)) ||
+      candidates[0];
+    const teacherId = teacherDefault ? teacherDefault.id : "";
+    const studentDefault =
+      first((agent) => agent.role === "student", teacherId) ||
+      first(isLocal, teacherId) ||
+      first(() => true, teacherId);
+    const agentPicker = (chosen) =>
+      el(
+        "select",
+        {},
+        candidates.map((agent) =>
+          el("option", {
+            value: agent.id,
+            text: `${agent.name} · ${isLocal(agent) ? "local" : "server"} · ${agent.model}`,
+            selected: chosen !== undefined && agent.id === chosen.id,
+          })
+        )
+      );
+    const teacherPicker = agentPicker(teacherDefault);
+    const studentPicker = agentPicker(studentDefault);
+    const topic = el("input", {
+      type: "text",
+      placeholder: "Tide prediction for beginners",
+    });
+    const count = el("input", { type: "number", value: "3", min: "2", max: "6" });
+    const nodes = [
+      card(
+        "Maths tutor",
+        [
+          el("p", {
+            class: "muted",
+            text: "For you, not the agents: the maths on the path to an electrician's licence in NSW, from entry tests to the licence assessment. Questions are marked in code; the AI explains.",
+          }),
+          el("button", { class: "primary", text: "Open the maths tutor", onclick: () => go("tutor") }),
+        ]
+      ),
+      card(
+        "Open a class",
+        [
+          el("p", {
+            class: "muted",
+            text: "The teacher agent plans lessons, teaches the student agent in a shared chat, then tests it and grades every answer.",
+          }),
+          el("label", {}, ["Topic", topic]),
+          el("label", {}, ["Teacher", teacherPicker]),
+          el("label", {}, ["Student", studentPicker]),
+          el("p", {
+            class: "muted",
+            text: "A server model teaching a local model works best: the teacher plans, explains, writes the test, and grades; what the student learns goes into its memory.",
+          }),
+          el("label", {}, ["Lessons", count]),
+          el("button", {
+            class: "primary",
+            text: "Start class",
+            onclick: async () => {
+              if (!topic.value.trim()) return notify("Pick a topic.");
+              const course = await post("/studio/api/school/courses", {
+                topic: topic.value.trim(),
+                lesson_count: Number(count.value) || 3,
+                start: true,
+                teacher_id: teacherPicker.value,
+                student_id: studentPicker.value,
+              });
+              go(`class/${course.id}`);
+            },
+          }),
+          data.enabled
+            ? null
+            : el("p", {
+                class: "muted",
+                text: "Tip: turn on AI teacher in Studio settings to show the classroom on the home screen.",
+              }),
+        ]
+      ),
+      card(
+        "Classes",
+        data.courses.length
+          ? data.courses.map((course) =>
+              el("button", { class: "list-item", onclick: () => go(`class/${course.id}`) }, [
+                el("span", { class: "grow" }, [
+                  el("strong", { text: course.topic }),
+                  el("span", {
+                    text:
+                      course.score != null
+                        ? `${percent(course.score)} · ${course.lesson_done}/${course.lesson_total} lessons`
+                        : `${course.lesson_done}/${course.lesson_total} lessons`,
+                  }),
+                ]),
+                statusPill(course.status),
+              ])
+            )
+          : empty("No classes yet.")
+      ),
+    ];
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(...nodes);
+  }
+
+  async function renderClass(courseId) {
+    const generation = renderGeneration;
+    const data = await api(`/studio/api/school/courses/${courseId}`);
+    const course = data.course;
+    setChrome("class", course.topic);
+    const questions = data.questions || [];
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      card("Progress", [
+        el("div", { class: "row-between" }, [
+          statusPill(course.status),
+          el("span", {
+            class: "pill",
+            text: `${course.lesson_done}/${course.lesson_total} lessons`,
+          }),
+        ]),
+        meter(data.progress || 0),
+        course.score != null
+          ? el("p", {
+              class: "muted",
+              text: `Test score ${percent(course.score)} — ${course.passed ? "passed" : "below the pass mark"}.`,
+            })
+          : null,
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "secondary",
+            text: "Run again",
+            onclick: async () => {
+              await post(`/studio/api/school/courses/${courseId}/start`);
+              notify("Class started.");
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "To Obsidian",
+            onclick: async () => {
+              const result = await post("/studio/api/obsidian/sync", {
+                course_id: courseId,
+              });
+              notify(`Wrote ${result.note}`);
+            },
+          }),
+        ]),
+      ]),
+      card(
+        "Lessons",
+        (data.lessons || []).length
+          ? data.lessons.map((lesson) =>
+              el("div", { class: "list-item" }, [
+                el("span", { class: "grow" }, [
+                  el("strong", { text: `${lesson.ordinal}. ${lesson.topic}` }),
+                  el("span", { text: lesson.notes || lesson.objective }),
+                ]),
+                statusPill(lesson.status),
+              ])
+            )
+          : empty("The teacher is still planning.")
+      ),
+      questions.length
+        ? card(
+            "Test",
+            questions.map((question) =>
+              el("div", { class: "card" }, [
+                el("div", { class: "row-between" }, [
+                  el("strong", { text: `Q${question.ordinal}` }),
+                  el("span", {
+                    class: `pill ${question.score >= course.pass_mark ? "good" : "bad"}`,
+                    text: question.score == null ? "—" : percent(question.score),
+                  }),
+                ]),
+                el("p", { class: "muted", text: question.prompt }),
+                el("p", { text: question.answer }),
+                question.feedback
+                  ? el("p", { class: "muted", text: question.feedback })
+                  : null,
+              ])
+            )
+          )
+        : null,
+      card(
+        "Classroom",
+        el("div", { class: "transcript" }, (data.messages || []).map(messageBubble))
+      )
+    );
+    if (["planning", "teaching", "examining"].includes(course.status)) {
+      pollPage(() => renderClass(courseId));
+    } else {
+      stopPolling();
+    }
+  }
+
+  // Model Control: the built-in engine, like LM Studio inside Studio.
+  const CONTEXT_STEPS = [2048, 4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 131072];
+  let engineTimer = 0;
+  let engineFilter = "all";
+  const CAPABILITIES = [
+    ["tools", "Tools", "Trained to call tools, so it follows an agent's tool steps better."],
+    ["vision", "Vision", "Can look at images (its image part, an mmproj file, is beside it)."],
+    ["reasoning", "Reasoning", "Thinks before answering. Fast Local Replies skips the thinking for speed."],
+  ];
+
+  // Send a file's raw bytes, reporting upload progress (fetch can't).
+  function sendFile(path, body, onProgress) {
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open("POST", path);
+      const key = token();
+      if (key) request.setRequestHeader("x-api-key", key);
+      request.setRequestHeader("content-type", "application/octet-stream");
+      if (onProgress) request.upload.onprogress = (event) => onProgress(event.loaded, event.total);
+      request.onload = () => {
+        let parsed = {};
+        try {
+          parsed = request.responseText ? JSON.parse(request.responseText) : {};
+        } catch {
+          parsed = {};
+        }
+        if (request.status === 401) askForToken();
+        if (request.status >= 400) reject(new Error(parsed.detail || `Upload failed (${request.status})`));
+        else resolve(parsed);
+      };
+      request.onerror = () => reject(new OfflineError("Can't reach your Studio server."));
+      request.send(body);
+    });
+  }
+
+  // Business photos: shrunk here (upright, at most 2000px) so sites load fast,
+  // then kept on this PC with the user's note for the agents.
+  const PHOTO_FILE = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
+  const isPhoto = (file) => (file.type || "").startsWith("image/") || PHOTO_FILE.test(file.name);
+
+  async function shrinkPhoto(file) {
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(file);
+    } catch {
+      throw new Error(`${file.name} can't be opened here. Save it as a JPEG (on an iPhone: Settings → Camera → Formats → Most Compatible) or send it from FCC Phone.`);
+    }
+    const keepPng = file.type === "image/png" && file.size < 3 * 1024 * 1024;
+    const scale = Math.min(1, 2000 / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && (keepPng || (file.type === "image/jpeg" && file.size < 1.5 * 1024 * 1024))) {
+      bitmap.close();
+      return file;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return await new Promise((resolve) => canvas.toBlob(resolve, keepPng ? "image/png" : "image/jpeg", 0.86));
+  }
+
+  async function uploadPhoto(file, note = "") {
+    const body = await shrinkPhoto(file);
+    const query = new URLSearchParams({ name: file.name, note });
+    return await sendFile(`/studio/api/photos?${query}`, body);
+  }
+
+  function photoLine(photo) {
+    return `[Business photo: ${photo.name} (${photo.width}x${photo.height}, id ${photo.id}), kept in Business photos with the note in this message. Builders put it on a site with use_photo.]`;
+  }
+
+  // Attach files to a message: Studio reads them and the agent gets the text.
+  // Photos go to Business photos, with the message as their note.
+  function attachmentTray() {
+    const files = [];
+    const chips = el("div", { class: "chips attach-chips" });
+    const input = el("input", { type: "file", multiple: true, class: "visually-hidden", "aria-label": "Attach files or photos" });
+    const button = el("button", {
+      class: "attach-button",
+      type: "button",
+      text: "📎",
+      title: "Attach a file",
+      "aria-label": "Attach a file",
+      onclick: () => input.click(),
+    });
+    const redraw = () =>
+      chips.replaceChildren(
+        ...files.map((file, index) =>
+          el("span", { class: "pill attach" }, [
+            file.photo ? `🖼 ${file.name}` : `📎 ${file.name}${file.truncated ? " (first part)" : ""}`,
+            el("button", {
+              type: "button",
+              class: "attach-remove",
+              "aria-label": `Remove ${file.name}`,
+              text: "✕",
+              onclick: () => {
+                files.splice(index, 1);
+                redraw();
+              },
+            }),
+          ])
+        )
+      );
+    input.addEventListener("change", async () => {
+      for (const file of input.files) {
+        try {
+          if (isPhoto(file)) {
+            const photo = await uploadPhoto(file);
+            files.push({ name: photo.name, photo });
+            continue;
+          }
+          const read = await sendFile(`/studio/api/files/read?name=${encodeURIComponent(file.name)}`, file);
+          if (!read.text) {
+            notify(read.message || `${file.name} has no text to read.`);
+            continue;
+          }
+          files.push({ name: file.name, text: read.text, truncated: read.truncated });
+        } catch (error) {
+          notify(error.message);
+        }
+      }
+      input.value = "";
+      redraw();
+    });
+    return {
+      button,
+      input,
+      chips,
+      names: () => files.map((file) => file.name),
+      take(typed) {
+        if (!files.length) return typed;
+        const photos = files.filter((file) => file.photo);
+        // What the user wrote with the photos is kept as their note.
+        for (const file of photos) {
+          if (typed) api(`/studio/api/photos/${file.photo.id}`, { method: "PATCH", body: JSON.stringify({ note: typed }) }).catch(() => {});
+        }
+        const block = files
+          .map((file) =>
+            file.photo
+              ? photoLine(file.photo)
+              : `[Attached file: ${file.name}${file.truncated ? " (first part)" : ""}]\n\`\`\`\n${file.text}\n\`\`\``
+          )
+          .join("\n\n");
+        const onlyPhotos = photos.length === files.length;
+        files.length = 0;
+        redraw();
+        const opening = typed || (onlyPhotos ? "Here are photos of my business." : "Here is a file for you.");
+        return `${opening}\n\n${block}`;
+      },
+    };
+  }
+
+  function showModelReport(report) {
+    if (!report.is_model) {
+      openSheet(`${report.label}: ${report.file}`, [el("p", { text: report.message })]);
+      return;
+    }
+    openSheet(`What ${report.name} can do`, [
+      el("div", { class: "chips" }, [
+        report.params ? el("span", { class: "pill", text: report.params }) : null,
+        el("span", { class: "pill", text: `${report.size_gb} GB` }),
+        report.context_max ? el("span", { class: "pill", text: `up to ${report.context_max.toLocaleString()} tokens` }) : null,
+        report.architecture ? el("span", { class: "pill", text: report.architecture }) : null,
+      ]),
+      ...report.can.map((item) =>
+        el("div", { class: `can-row ${item.yes ? "yes" : "no"}` }, [
+          el("span", { class: "can-mark", "aria-hidden": "true", text: item.yes ? "✓" : "✕" }),
+          el("div", {}, [
+            el("strong", { text: `${item.what}: ${item.yes ? "yes" : "no"}` }),
+            el("p", { class: "muted", text: item.about }),
+          ]),
+        ])
+      ),
+      el("p", {}, [el("strong", { text: "Best for: " }), report.best_for.join(", ")]),
+      el("div", { class: "row" }, [
+        el("button", { class: "primary", type: "button", text: "Give it to an agent", onclick: () => openTeamBrains(() => render()) }),
+        el("button", { class: "secondary", type: "button", text: "Close", onclick: () => closeSheet() }),
+      ]),
+    ]);
+  }
+
+  async function addModelFile(file, status, bar) {
+    status.textContent = `Checking ${file.name}…`;
+    const head = await file.slice(0, 64).arrayBuffer();
+    const found = await sendFile(`/studio/api/engine/identify?name=${encodeURIComponent(file.name)}`, head);
+    if (found.engine) {
+      bar.hidden = false;
+      const done = await sendFile(`/studio/api/engine/install-file?name=${encodeURIComponent(file.name)}`, file, (sent, total) => {
+        bar.firstChild.style.width = percent(total ? sent / total : 0);
+        status.textContent = `Installing the engine: ${bytes(sent)} of ${bytes(total)}`;
+      });
+      bar.hidden = true;
+      status.textContent = "";
+      notify(`Engine ${done.version} installed.`);
+      await render();
+      return;
+    }
+    if (!found.is_model) {
+      status.textContent = "";
+      showModelReport(found);
+      return;
+    }
+    bar.hidden = false;
+    const report = await sendFile(`/studio/api/engine/upload?name=${encodeURIComponent(file.name)}`, file, (done, total) => {
+      bar.firstChild.style.width = percent(total ? done / total : 0);
+      status.textContent = `Adding ${file.name}: ${bytes(done)} of ${bytes(total)}`;
+    });
+    bar.hidden = true;
+    status.textContent = "";
+    // Refresh the list first: a refresh closes any open sheet.
+    if (report.is_model) await render();
+    showModelReport(report);
+  }
+
+  function addModelPanel() {
+    const status = el("p", { class: "muted", role: "status" });
+    const bar = el("div", { class: "meter", hidden: true }, [el("i")]);
+    const input = el("input", { type: "file", class: "visually-hidden", "aria-label": "Choose a file to add" });
+    const take = async (file) => {
+      if (!file) return;
+      try {
+        await addModelFile(file, status, bar);
+      } catch (error) {
+        bar.hidden = true;
+        status.textContent = error.message;
+      }
+    };
+    input.addEventListener("change", () => take(input.files[0]));
+    const zone = el("label", { class: "engine-drop" }, [
+      input,
+      el("strong", { text: "Drop a file here, or tap to choose one" }),
+      el("small", { class: "muted", text: "Any file: Studio says what it is, and for a model (.gguf) what it can do on your PC. A llama.cpp release .zip dropped here installs the engine." }),
+    ]);
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("over");
+    });
+    zone.addEventListener("dragleave", () => zone.classList.remove("over"));
+    zone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      zone.classList.remove("over");
+      take(event.dataTransfer.files[0]);
+    });
+    const pick = el("button", {
+      class: "secondary",
+      type: "button",
+      text: "Find a model on this PC…",
+      onclick: async () => {
+        pick.disabled = true;
+        status.textContent = "A file window opened on the PC running Studio.";
+        try {
+          const result = await post("/studio/api/engine/pick-file");
+          status.textContent = "";
+          if (result.picked) {
+            if (result.is_model) await render();
+            showModelReport(result);
+          }
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          pick.disabled = false;
+        }
+      },
+    });
+    return el("div", { class: "engine-add" }, [zone, el("div", { class: "row" }, [pick]), bar, status]);
+  }
+
+  async function renderEngine() {
+    const generation = renderGeneration;
+    clearTimeout(engineTimer);
+    const data = await api("/studio/api/engine");
+    if (generation !== renderGeneration) return;
+    const status = el("p", { class: "muted", role: "status" });
+    const act = async (label, work) => {
+      status.textContent = `${label}…`;
+      try {
+        await work();
+        status.textContent = "";
+        render();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+    const install = data.install;
+    const installing = ["checking", "downloading", "unpacking"].includes(install.state);
+    const use = el("input", { type: "checkbox", checked: data.on, "aria-label": "Use the built-in engine" });
+    use.addEventListener("change", () =>
+      act(use.checked ? "Switching to the built-in engine" : "Going back to LM Studio", () =>
+        post("/studio/api/engine/use", { on: use.checked })
+      )
+    );
+    const state = !data.installed
+      ? "Not installed"
+      : data.running
+      ? `Running · llama.cpp ${data.version || ""} · ${data.url}`
+      : `Stopped · llama.cpp ${data.version || ""}`;
+    const card0 = data.gpu[0];
+    const gpuLine = card0
+      ? `Graphics card: ${card0.description} · ${card0.total_gb} GB (${card0.free_gb} GB free)`
+      : data.gpu_checked
+      ? "No graphics card found by the engine"
+      : "";
+    const engineCard = card("Engine", [
+      el("p", { class: "engine-state" }, [
+        el("span", { class: `hud-dot${data.running ? " on" : ""}`, "aria-hidden": "true" }),
+        el("strong", { text: state }),
+      ]),
+      gpuLine ? el("p", { class: `engine-gpu${card0 ? "" : " bad"}`, text: gpuLine }) : null,
+      el("label", { class: "check" }, [use, "Use the built-in engine for local models (instead of LM Studio)"]),
+      installing
+        ? el("div", {}, [
+            el("p", { class: "muted", text: `${install.state === "downloading" ? `Downloading llama.cpp ${install.version}` : install.state === "unpacking" ? "Unpacking" : "Finding the latest llama.cpp"}… ${install.total ? `${bytes(install.done)} of ${bytes(install.total)}` : ""}` }),
+            meter(install.total ? install.done / install.total : 0),
+          ])
+        : null,
+      install.state === "failed" ? el("p", { class: "engine-failed", role: "alert", text: `Download failed: ${install.error}` }) : null,
+      el("div", { class: "row" }, [
+        data.version === "your own build" ? null : el("button", {
+          class: data.installed ? "secondary" : "primary",
+          type: "button",
+          text: data.installed ? "Update engine" : "Install engine",
+          disabled: installing,
+          onclick: () => act("Starting the download", () => post("/studio/api/engine/install")),
+        }),
+        data.installed
+          ? el("button", {
+              class: data.running ? "secondary" : "primary",
+              type: "button",
+              text: data.running ? "Stop" : "Start",
+              onclick: () =>
+                act(data.running ? "Stopping" : "Starting the engine", () =>
+                  post(`/studio/api/engine/${data.running ? "stop" : "start"}`)
+                ),
+            })
+          : null,
+        el("button", { class: "secondary", type: "button", text: "Team brains", onclick: () => openTeamBrains(() => render()) }),
+      ]),
+      status,
+    ], `Studio runs your models itself with llama.cpp (${data.build === "cpu" ? "processor build" : "graphics card build, Vulkan"}). Models load when an agent needs them; ${data.models_at_once} at a time.`);
+
+    const has = (model, key) => Boolean(model.capabilities && model.capabilities[key]);
+    const shown = data.models.filter((model) => engineFilter === "all" || has(model, engineFilter));
+    const filters = el(
+      "div",
+      { class: "chips engine-filters", role: "group", "aria-label": "Show models that can" },
+      [["all", "All", ""], ...CAPABILITIES].map(([key, label]) => {
+        const count = key === "all" ? data.models.length : data.models.filter((model) => has(model, key)).length;
+        return el("button", {
+          class: `chip${key === "all" ? "" : ` cap-${key}`}`,
+          type: "button",
+          "aria-pressed": String(engineFilter === key),
+          text: `${label} (${count})`,
+          onclick: () => {
+            engineFilter = key;
+            render();
+          },
+        });
+      })
+    );
+    const models = data.models.length
+      ? [
+          filters,
+          ...(shown.length
+            ? shown.map((model) => engineModelRow(model, data, act))
+            : [empty("No model here can do that yet.")]),
+        ]
+      : [empty("No .gguf models found. Download some in LM Studio or on the Models page, or add a folder in Settings (Extra Model Folders).")];
+    const folders = card(
+      "Model folders",
+      data.folders.map((folder) =>
+        el("div", { class: "list-item" }, [
+          el("span", { class: "grow engine-folder" }, [el("strong", { text: folder.source }), el("br"), el("span", { class: "muted", text: folder.path })]),
+          el("span", { class: `pill ${folder.exists ? "good" : "warn"}`, text: folder.exists ? "found" : "missing" }),
+        ])
+      ),
+      "Studio finds models in these folders. Add more in Settings: Extra Model Folders."
+    );
+    const log = el("pre", { class: "engine-log", text: "" });
+    const logs = el("details", { class: "card engine-logs" }, [
+      el("summary", { text: "Engine log" }),
+      log,
+    ]);
+    logs.addEventListener("toggle", async () => {
+      if (!logs.open) return;
+      try {
+        const { lines } = await api("/studio/api/engine/logs");
+        log.textContent = lines.join("\n") || "Nothing yet.";
+        log.scrollTop = log.scrollHeight;
+      } catch (error) {
+        log.textContent = error.message;
+      }
+    });
+    const icons = { ok: "✓", warn: "!", error: "✕" };
+    const health = data.diagnostics.length
+      ? card(
+          "Health check",
+          data.diagnostics.map((item) =>
+            el("p", { class: `engine-note ${item.level}` }, [
+              el("span", { class: "engine-note-icon", "aria-hidden": "true", text: icons[item.level] || "•" }),
+              el("span", { text: item.text }),
+            ])
+          )
+        )
+      : null;
+    const tuneAll = el("button", {
+      class: "primary",
+      type: "button",
+      text: "Tune all for my PC",
+      onclick: () => act("Fitting every model to your graphics card", () => post("/studio/api/engine/tune", {})),
+    });
+    view.replaceChildren(
+      ...(health ? [health] : []),
+      engineCard,
+      card(
+        "Models on this PC",
+        [addModelPanel(), data.models.length ? el("div", { class: "row" }, [tuneAll]) : null, ...models],
+        `Graphics memory: ${data.gpu_budget_gb} GB${card0 ? " (found on your card)" : " (set in Settings)"}. New models are fitted to your PC automatically; Tune for my PC saves the best settings.`
+      ),
+      folders,
+      logs
+    );
+    const busy =
+      installing ||
+      data.models.some((model) => model.state === "loading" || (model.speed_hunt && model.speed_hunt.state === "running"));
+    // Updates in place (not a full reload), so the page keeps its place and
+    // a model's open Settings, and waits while you change something.
+    const again = () => {
+      engineTimer = setTimeout(async () => {
+        if (generation !== renderGeneration || location.hash !== "#engine") return;
+        try {
+          if (!(await repaintInPlace(renderEngine))) again();
+        } catch {
+          again();
+        }
+      }, busy ? 1500 : 6000);
+    };
+    again();
+  }
+
+  // The same estimate the server makes (gguf_info.estimate_memory), redone
+  // live as settings change, so the bar moves before anything is saved.
+  const KV_BYTES = { f16: 2, q8_0: 34 / 32, q4_0: 18 / 32 };
+  function estimateMemory(shape, context, gpuLayers, kvCache) {
+    const layers = shape.layers || 32;
+    const onGpu = gpuLayers < 0 ? layers : Math.min(gpuLayers, layers);
+    const share = onGpu / layers;
+    const heads = shape.heads || 32;
+    const headSize = shape.embedding ? Math.floor(shape.embedding / heads) : 128;
+    const key = shape.key_length || headSize;
+    const value = shape.value_length || key;
+    const kv = layers * context * (shape.kv_heads || heads) * (key + value) * (KV_BYTES[kvCache] || 2);
+    const overhead = 0.3e9 + context * Math.max(shape.embedding, 2048) * 4 * 1.5;
+    const gb = 1024 ** 3;
+    const round = (value) => Math.round((value / gb) * 100) / 100;
+    return {
+      gpu_gb: round(shape.size * share + kv * share + (onGpu ? overhead : 0)),
+      cpu_gb: round(shape.size * (1 - share) + kv * (1 - share)),
+      kv_gb: round(kv),
+      weights_gb: round(shape.size),
+    };
+  }
+
+  function engineModelRow(model, data, act) {
+    const settings = model.settings;
+    const estimate = model.estimate;
+    const loaded = model.state === "loaded";
+    const tone = { loaded: "good", loading: "warn", failed: "bad" }[model.state] || "";
+    const speed = model.speed && model.speed.predicted_per_second
+      ? `${model.speed.predicted_per_second.toFixed(1)} tokens/s writing · ${Math.round(model.speed.prompt_per_second || 0)} tokens/s reading`
+      : "";
+    const context = el("select", { "aria-label": `Context for ${model.name}` },
+      CONTEXT_STEPS.filter((size) => !model.context_max || size <= model.context_max || size === settings.context).map((size) =>
+        el("option", { value: String(size), text: `${size.toLocaleString()} tokens`, selected: size === settings.context })
+      )
+    );
+    const allLayers = model.layers || 99;
+    const layers = el("input", {
+      type: "range",
+      min: "0",
+      max: String(allLayers),
+      value: String(settings.gpu_layers < 0 ? allLayers : settings.gpu_layers),
+      "aria-label": `Layers on the graphics card for ${model.name}`,
+    });
+    const layersLabel = el("span", { class: "muted" });
+    const showLayers = () => {
+      layersLabel.textContent = Number(layers.value) >= allLayers ? `All ${allLayers} on the graphics card` : `${layers.value} of ${allLayers} on the graphics card`;
+    };
+    layers.addEventListener("input", showLayers);
+    showLayers();
+    const flash = el("select", { "aria-label": `Flash attention for ${model.name}` }, [
+      ["auto", "Auto"], ["on", "On (faster, less memory)"], ["off", "Off"],
+    ].map(([value, text]) => el("option", { value, text, selected: settings.flash_attention === value })));
+    const kv = el("select", { "aria-label": `Memory for context for ${model.name}` }, [
+      ["f16", "Full quality"], ["q8_0", "Half the memory (q8)"], ["q4_0", "Quarter memory (q4)"],
+    ].map(([value, text]) => el("option", { value, text, selected: settings.kv_cache === value })));
+    const threads = el("input", { type: "number", min: "0", max: "256", value: String(settings.threads), "aria-label": `CPU threads for ${model.name}` });
+    const batch = el("select", { "aria-label": `Reading batch for ${model.name}` }, [256, 512, 1024, 2048].map((size) =>
+      el("option", { value: String(size), text: size === 512 ? "512 (standard)" : String(size), selected: (settings.batch || 512) === size })
+    ));
+    const save = el("button", {
+      class: "primary",
+      type: "button",
+      text: loaded ? "Save and reload" : "Save",
+      onclick: () =>
+        act(`Saving ${model.name}`, () =>
+          put(`/studio/api/engine/models/${encodeURIComponent(model.name)}`, {
+            context: Number(context.value),
+            gpu_layers: Number(layers.value) >= allLayers ? -1 : Number(layers.value),
+            flash_attention: flash.value,
+            kv_cache: kv.value,
+            threads: Number(threads.value) || 0,
+            batch: Number(batch.value),
+          })
+        ),
+    });
+    const memoryBar = el("div", { class: "meter" }, [el("i")]);
+    const memoryText = el("small");
+    const memory = el("div", { class: "engine-memory" }, [memoryBar, memoryText]);
+    const showMemory = (shown) => {
+      const fits = shown.gpu_gb <= data.gpu_budget_gb;
+      memory.classList.toggle("over", !fits);
+      memoryBar.firstChild.style.width = percent(Math.min(1, shown.gpu_gb / Math.max(0.1, data.gpu_budget_gb)));
+      memoryText.textContent = `Needs about ${shown.gpu_gb} GB of ${data.gpu_budget_gb} GB graphics memory (${shown.weights_gb} GB model + ${shown.kv_gb} GB context)${shown.cpu_gb ? `, ${shown.cpu_gb} GB in system memory` : ""}.${fits ? "" : " Too big: lower the context, use q8 memory for context, or put fewer layers on the card."}`;
+    };
+    const liveEstimate = () =>
+      model.shape
+        ? estimateMemory(
+            model.shape,
+            Number(context.value),
+            Number(layers.value) >= allLayers ? -1 : Number(layers.value),
+            kv.value
+          )
+        : estimate;
+    for (const input of [context, layers, kv]) input.addEventListener("input", () => showMemory(liveEstimate()));
+    showMemory(estimate);
+    return el("article", { class: `engine-model${loaded ? " loaded" : ""}` }, [
+      el("div", { class: "engine-model-head" }, [
+        el("div", { class: "grow" }, [
+          el("strong", { text: model.name }),
+          el(
+            "div",
+            { class: "chips engine-caps" },
+            CAPABILITIES.filter(([key]) => model.capabilities && model.capabilities[key]).map(([key, label, about]) =>
+              el("span", { class: `pill cap cap-${key}`, text: label, title: about })
+            )
+          ),
+          el("div", { class: "chips" }, [
+            model.auto ? el("span", { class: "pill good", text: "fitted to your PC" }) : null,
+            model.params ? el("span", { class: "pill", text: model.params }) : null,
+            model.quant ? el("span", { class: "pill", text: model.quant }) : null,
+            el("span", { class: "pill", text: `${model.size_gb} GB` }),
+            el("span", { class: "pill", text: model.source }),
+            el("span", { class: `pill ${tone}`, text: model.state }),
+          ]),
+        ]),
+        el("button", {
+          class: loaded ? "secondary" : "primary",
+          type: "button",
+          text: loaded ? "Unload" : model.state === "loading" ? "Loading…" : "Load",
+          disabled: model.state === "loading",
+          "aria-label": `${loaded ? "Unload" : "Load"} ${model.name}`,
+          onclick: () =>
+            act(loaded ? `Unloading ${model.name}` : `Loading ${model.name}`, () =>
+              post(`/studio/api/engine/models/${encodeURIComponent(model.name)}/${loaded ? "unload" : "load"}`)
+            ),
+        }),
+      ]),
+      memory,
+      speed ? el("small", { class: "muted", text: `Last reply: ${speed}` }) : null,
+      model.benchmark && model.benchmark.predicted_per_second
+        ? el("small", {
+            class: "engine-bench",
+            text: `Speed test: ${model.benchmark.predicted_per_second} tokens/s writing · ${Math.round(model.benchmark.prompt_per_second || 0)} tokens/s reading · ${model.benchmark.seconds}s for a short answer`,
+          })
+        : null,
+      model.advice ? el("small", { class: "muted", text: `Best for your PC: ${model.advice}` }) : null,
+      speedHuntView(model.speed_hunt),
+      el("div", { class: "row" }, [
+        el("button", {
+          class: "primary",
+          type: "button",
+          text: "⚡ Make it fastest",
+          "aria-label": `Make ${model.name} run as fast as it can`,
+          disabled: !data.installed || (model.speed_hunt && model.speed_hunt.state === "running"),
+          onclick: () =>
+            act(`Finding the fastest settings for ${model.name}`, () =>
+              post(`/studio/api/engine/models/${encodeURIComponent(model.name)}/fastest`)
+            ),
+        }),
+        el("button", {
+          class: "secondary",
+          type: "button",
+          text: "What can it do?",
+          "aria-label": `What can ${model.name} do?`,
+          onclick: async () => {
+            try {
+              showModelReport(await api(`/studio/api/engine/models/${encodeURIComponent(model.name)}/report`));
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+        el("button", {
+          class: "secondary",
+          type: "button",
+          text: "Tune for my PC",
+          "aria-label": `Tune ${model.name} for my PC`,
+          onclick: () =>
+            act(`Fitting ${model.name} to your graphics card`, () =>
+              post("/studio/api/engine/tune", { name: model.name })
+            ),
+        }),
+        el("button", {
+          class: "secondary",
+          type: "button",
+          text: "Test speed",
+          "aria-label": `Test the speed of ${model.name}`,
+          disabled: !data.installed,
+          onclick: () =>
+            act(`Testing ${model.name} (it loads first, then writes a short answer)`, () =>
+              post(`/studio/api/engine/models/${encodeURIComponent(model.name)}/benchmark`)
+            ),
+        }),
+      ]),
+      el("details", { class: "engine-settings" }, [
+        el("summary", { text: "Settings" }),
+        el("label", {}, ["Context (how much it remembers at once)", context]),
+        el("label", {}, ["Graphics card layers", layers, layersLabel]),
+        el("label", {}, ["Flash attention", flash]),
+        el("label", {}, ["Memory for context", kv]),
+        el("label", {}, ["CPU threads (0 = automatic)", threads]),
+        el("label", {}, ["Reading batch (bigger reads long prompts faster, uses a little more memory)", batch]),
+        save,
+      ]),
+    ]);
+  }
+
+  // "Make it fastest": each setting tried on this card, and what won.
+  function speedHuntView(hunt) {
+    if (!hunt) return null;
+    const writing = (trial) => (trial && trial.predicted_per_second ? `${trial.predicted_per_second} tokens/s` : "—");
+    if (hunt.state === "running") {
+      return el("div", { class: "speed-hunt", role: "status" }, [
+        el("strong", { text: `Finding the fastest settings… ${hunt.done} of ${hunt.total}` }),
+        meter(hunt.total ? hunt.done / hunt.total : 0),
+        el("small", { class: "muted", text: `Trying: ${hunt.step}. Agents using this model wait a few seconds while it reloads.` }),
+      ]);
+    }
+    if (hunt.state === "failed") {
+      return el("div", { class: "speed-hunt bad", role: "status" }, [el("strong", { text: "Couldn't time it" }), el("small", { text: hunt.error })]);
+    }
+    const best = hunt.best || {};
+    const before = hunt.before || {};
+    const gain = before.predicted_per_second && best.predicted_per_second
+      ? Math.round((best.predicted_per_second / before.predicted_per_second - 1) * 100)
+      : 0;
+    return el("div", { class: "speed-hunt good", role: "status" }, [
+      el("strong", {
+        text: `Fastest on your card: ${writing(best)} writing, ${Math.round(best.prompt_per_second || 0)} tokens/s reading${gain > 0 ? ` (${gain}% faster writing than before)` : ""}. Saved.`,
+      }),
+      el("details", {}, [
+        el("summary", { text: "What it tried" }),
+        el("ul", { class: "speed-trials" }, hunt.trials.map((trial) =>
+          el("li", { class: trial === hunt.best || trial.label === best.label ? "won" : "" }, [
+            el("span", { text: trial.label }),
+            el("span", { class: "muted", text: trial.failed ? ` — didn't load: ${trial.failed}` : ` — ${writing(trial)} writing · ${Math.round(trial.prompt_per_second || 0)} reading · ${trial.turn_seconds}s per turn` }),
+          ])
+        )),
+      ]),
+      ...hunt.advice.map((text) => el("small", { class: "speed-advice", text: `Faster still: ${text}` })),
+    ]);
+  }
+
+  async function renderModels() {
+    const generation = renderGeneration;
+    const [data, available] = await Promise.all([
+      api("/studio/api/models"),
+      api("/studio/api/models/available"),
+    ]);
+    setChrome("models", "Local models");
+    const local = available.local;
+    const served = card("Served by your local runtime", [
+      el("p", {
+        class: "muted",
+        text: local.reachable
+          ? `${local.base_url} is serving ${local.models.length} model(s). Use these as an agent's model to run it locally.`
+          : `Nothing answered at ${local.base_url}. Start LM Studio, llama-server, or Ollama, or change Local Model Server in settings.`,
+      }),
+      el("button", {
+        class: "primary",
+        type: "button",
+        text: "Choose a model from this PC",
+        onclick: () => openBrainPicker("", () => render()),
+      }),
+      el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Give each agent its own model",
+        onclick: () => openTeamBrains(() => render()),
+      }),
+      el("button", {
+        class: "secondary",
+        type: "button",
+        text: "Open Model Control",
+        onclick: () => go("engine"),
+      }),
+      ...local.models.map((model) =>
+        el("div", { class: "list-item" }, [
+          el("span", { class: "grow" }, [el("strong", { text: model })]),
+          el("span", { class: "pill good", text: "local" }),
+        ])
+      ),
+    ]);
+    const url = el("input", { type: "url", placeholder: "https://…/model.gguf" });
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      served,
+      card("Curated small models", [
+        el("p", {
+          class: "muted",
+          text: `Files land in ${data.models_dir}. Point your local runtime at that folder, then use local/<model id> as an agent model.`,
+        }),
+        ...data.catalog.map((entry) =>
+          el("div", { class: "list-item" }, [
+            el("span", { class: "grow" }, [
+              el("strong", { text: entry.name }),
+              el("span", {
+                text: `${entry.parameters} · ${entry.quantization} · ~${bytes(entry.approx_bytes)} — ${entry.note}`,
+              }),
+            ]),
+            el("button", {
+              class: "primary",
+              text: "Get",
+              onclick: async () => {
+                await post("/studio/api/models/download", { catalog_id: entry.id });
+                notify("Download started.");
+                render();
+              },
+            }),
+          ])
+        ),
+      ]),
+      card("Download any model file", [
+        el("p", {
+          class: "muted",
+          text: "Direct http(s) links only. Zip and tar archives are unpacked after the download finishes.",
+        }),
+        url,
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "primary",
+            text: "Download",
+            onclick: async () => {
+              if (!url.value.trim()) return notify("Paste a download URL.");
+              await post("/studio/api/models/download", { url: url.value.trim() });
+              url.value = "";
+              notify("Download started.");
+              render();
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "Scan folder",
+            onclick: async () => {
+              const result = await post("/studio/api/models/scan");
+              notify(`Adopted ${result.adopted.length} file(s).`);
+              render();
+            },
+          }),
+        ]),
+      ]),
+      card(
+        "Downloads",
+        data.assets.length
+          ? data.assets.map((asset) =>
+              el("div", { class: "card" }, [
+                el("div", { class: "row-between" }, [
+                  el("strong", { text: asset.name }),
+                  statusPill(asset.status),
+                ]),
+                meter(asset.progress),
+                el("p", {
+                  class: "muted",
+                  text: `${bytes(asset.bytes_done)} of ${bytes(asset.bytes_total)}${asset.error ? ` — ${asset.error}` : ""}`,
+                }),
+                el("div", { class: "row" }, [
+                  ["queued", "downloading"].includes(asset.status)
+                    ? el("button", {
+                        class: "secondary",
+                        text: "Pause",
+                        onclick: async () => {
+                          await post(`/studio/api/models/${asset.id}/cancel`);
+                          render();
+                        },
+                      })
+                    : null,
+                  ["cancelled", "failed"].includes(asset.status)
+                    ? el("button", {
+                        class: "primary",
+                        text: "Resume",
+                        onclick: async () => {
+                          await post("/studio/api/models/download", {
+                            url: asset.source_url,
+                            name: asset.name,
+                          });
+                          render();
+                        },
+                      })
+                    : null,
+                  el("button", {
+                    class: "danger",
+                    text: "Delete",
+                    onclick: async () => {
+                      await remove(`/studio/api/models/${asset.id}`);
+                      render();
+                    },
+                  }),
+                ]),
+              ])
+            )
+          : empty("No downloads yet.")
+      )
+    );
+    if (data.assets.some((asset) => ["queued", "downloading", "extracting"].includes(asset.status))) {
+      pollPage(() => renderModels());
+    } else {
+      stopPolling();
+    }
+  }
+
+  async function renderTuning(agentId) {
+    const generation = renderGeneration;
+    const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : "";
+    const [data, { agents }, lora] = await Promise.all([
+      api(`/studio/api/tuning${query}`),
+      api("/studio/api/agents"),
+      api("/studio/api/lora"),
+    ]);
+    setChrome("tune", "Tuning");
+    const coach = el("input", { type: "text", list: "model-list", placeholder: "none" });
+    modelList().catch(() => {});
+    const picker = el(
+      "select",
+      {},
+      agents.map((agent) =>
+        el("option", {
+          value: agent.id,
+          text: agent.name,
+          selected: agent.id === agentId,
+        })
+      )
+    );
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      loraCard(agents, lora),
+      card("Two ways to tune", [
+        el("div", { class: "list-item" }, [
+          el("span", { class: "grow" }, [
+            el("strong", { text: "Local (very light)" }),
+            el("span", { text: data.options.local.note }),
+          ]),
+          el("span", {
+            class: `pill ${data.options.local.enabled ? "good" : ""}`,
+            text: data.options.local.enabled ? "on" : "per chat",
+          }),
+        ]),
+        el("div", { class: "list-item" }, [
+          el("span", { class: "grow" }, [
+            el("strong", { text: "Server (weights)" }),
+            el("span", { text: data.options.server.note }),
+          ]),
+          el("span", {
+            class: `pill ${data.options.server.enabled ? "good" : "bad"}`,
+            text: data.options.server.enabled ? "ready" : "no trainer set",
+          }),
+        ]),
+        el("p", {
+          class: "muted",
+          text: "Local tuning searches for the shortest instruction pack and scores it on held-out examples. Give it a coach model and a server model writes the candidates while your local model is scored — server teaching local.",
+        }),
+      ]),
+      card("Make a tune pack", [
+        el("label", {}, ["Agent", picker]),
+        el("label", {}, ["Coach model (optional, e.g. a server model)", coach]),
+        el("button", {
+          class: "primary",
+          text: "Create pack",
+          onclick: async () => {
+            const pack = await post("/studio/api/tuning/packs", {
+              agent_id: picker.value,
+              teacher_model: coach.value.trim() || null,
+            });
+            notify(`Created ${pack.name}`);
+            go(`tune/${picker.value}`);
+          },
+        }),
+      ]),
+      card(
+        "Packs",
+        data.packs.length
+          ? data.packs.map((pack) =>
+              el("div", { class: "card" }, [
+                el("div", { class: "row-between" }, [
+                  el("strong", { text: pack.name }),
+                  pack.active
+                    ? el("span", { class: "pill good", text: "active" })
+                    : el("span", { class: "pill", text: `v${pack.version}` }),
+                ]),
+                pack.metrics && pack.metrics.score != null
+                  ? el("p", {
+                      class: "muted",
+                      text: `Held-out score ${pack.metrics.baseline_score} → ${pack.metrics.score} over ${pack.metrics.eval_samples} examples.`,
+                    })
+                  : el("p", { class: "muted", text: "Not tuned yet." }),
+                el("div", { class: "row" }, [
+                  el("button", {
+                    class: "secondary",
+                    text: "Add examples",
+                    onclick: () => openSampleSheet(pack),
+                  }),
+                  tuneButton(pack, "local_light", "Tune locally", data.options.local.enabled || pack.opted_in),
+                  tuneButton(pack, "cloud", "Tune on server", data.options.server.enabled),
+                  pack.teacher_model
+                    ? el("span", { class: "pill", text: `coach: ${pack.teacher_model}` })
+                    : null,
+                ]),
+              ])
+            )
+          : empty("No packs yet.")
+      ),
+      card(
+        "Runs",
+        data.jobs.length
+          ? data.jobs.map((job) =>
+              el("button", { class: "list-item", onclick: () => go(`job/${job.id}`) }, [
+                el("span", { class: "grow" }, [
+                  el("strong", { text: job.message || job.backend }),
+                  el("span", { text: when(job.created_at) }),
+                ]),
+                statusPill(job.status),
+              ])
+            )
+          : empty("No tuning runs yet.")
+      )
+    );
+  }
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const svg = (tag, attrs = {}, children = []) => {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+    for (const child of children) node.append(child);
+    return node;
+  };
+
+  const niceCeil = (value) => {
+    if (value <= 0) return 1;
+    const magnitude = 10 ** Math.floor(Math.log10(value));
+    const step = [1, 2, 2.5, 5, 10].find((n) => n * magnitude >= value) || 10;
+    return step * magnitude;
+  };
+
+  // Training loss per step: one series, so no legend; the card title names it.
+  function lossChart(curve) {
+    if (!curve || curve.length < 2) {
+      return el("p", { class: "muted", text: "The loss curve appears after the first training steps." });
+    }
+    const width = 340, height = 170;
+    const pad = { left: 34, right: 46, top: 12, bottom: 26 };
+    const steps = curve.map((point) => point[0]);
+    const losses = curve.map((point) => point[1]);
+    const top = niceCeil(Math.max(...losses));
+    const x0 = steps[0], x1 = steps[steps.length - 1] || x0 + 1;
+    const x = (step) => pad.left + ((step - x0) / Math.max(1, x1 - x0)) * (width - pad.left - pad.right);
+    const y = (loss) => pad.top + (1 - loss / top) * (height - pad.top - pad.bottom);
+    const grid = [0, top / 2, top].map((tick) =>
+      svg("g", {}, [
+        svg("line", { x1: pad.left, x2: width - pad.right, y1: y(tick), y2: y(tick), class: "chart-grid" }),
+        svg("text", { x: pad.left - 6, y: y(tick) + 4, "text-anchor": "end", class: "chart-tick" }, [
+          document.createTextNode(String(Number(tick.toPrecision(3)))),
+        ]),
+      ])
+    );
+    const path = curve
+      .map((point, index) => `${index ? "L" : "M"}${x(point[0]).toFixed(1)},${y(point[1]).toFixed(1)}`)
+      .join(" ");
+    const last = curve[curve.length - 1];
+    const crosshair = svg("line", { y1: pad.top, y2: height - pad.bottom, class: "chart-crosshair", visibility: "hidden" });
+    const focus = svg("circle", { r: 4, class: "chart-dot", visibility: "hidden" });
+    const plot = svg("svg", {
+      viewBox: `0 0 ${width} ${height}`,
+      class: "chart",
+      role: "img",
+      "aria-label": `Training loss fell from ${losses[0]} to ${last[1]} over ${last[0]} steps`,
+    }, [
+      ...grid,
+      svg("text", { x: pad.left, y: height - 6, class: "chart-tick" }, [document.createTextNode(`step ${x0}`)]),
+      svg("text", { x: width - pad.right, y: height - 6, "text-anchor": "end", class: "chart-tick" }, [
+        document.createTextNode(`step ${x1}`),
+      ]),
+      svg("path", { d: path, class: "chart-line" }),
+      svg("circle", { cx: x(last[0]), cy: y(last[1]), r: 4, class: "chart-dot" }),
+      svg("text", { x: x(last[0]) + 8, y: y(last[1]) + 4, class: "chart-label" }, [
+        document.createTextNode(String(last[1])),
+      ]),
+      crosshair,
+      focus,
+    ]);
+    const tip = el("div", { class: "chart-tip", hidden: true });
+    const wrap = el("div", { class: "chart-wrap" }, [plot, tip]);
+    const hide = () => {
+      crosshair.setAttribute("visibility", "hidden");
+      focus.setAttribute("visibility", "hidden");
+      tip.hidden = true;
+    };
+    plot.addEventListener("pointermove", (event) => {
+      const box = plot.getBoundingClientRect();
+      const px = ((event.clientX - box.left) / box.width) * width;
+      let nearest = curve[0];
+      for (const point of curve) {
+        if (Math.abs(x(point[0]) - px) < Math.abs(x(nearest[0]) - px)) nearest = point;
+      }
+      const cx = x(nearest[0]);
+      crosshair.setAttribute("x1", cx);
+      crosshair.setAttribute("x2", cx);
+      crosshair.setAttribute("visibility", "visible");
+      focus.setAttribute("cx", cx);
+      focus.setAttribute("cy", y(nearest[1]));
+      focus.setAttribute("visibility", "visible");
+      tip.replaceChildren(el("strong", { text: String(nearest[1]) }), ` loss · step ${nearest[0]}`);
+      tip.style.left = `${(cx / width) * 100}%`;
+      tip.hidden = false;
+    });
+    plot.addEventListener("pointerleave", hide);
+    const table = el("details", { class: "chart-table" }, [
+      el("summary", { text: "Show as table" }),
+      el("table", {}, [
+        el("thead", {}, [el("tr", {}, [el("th", { text: "Step" }), el("th", { text: "Loss" })])]),
+        el("tbody", {}, curve.map((point) =>
+          el("tr", {}, [el("td", { text: String(point[0]) }), el("td", { text: String(point[1]) })])
+        )),
+      ]),
+    ]);
+    return el("div", {}, [wrap, table]);
+  }
+
+  function figure(label, value) {
+    return el("div", { class: "figure" }, [
+      el("span", { class: "figure-label", text: label }),
+      el("strong", { class: "figure-value", text: value == null ? "—" : Number(value).toFixed(3) }),
+    ]);
+  }
+
+  function loraCard(agents, lora) {
+    const students = agents.filter((agent) => agent.role !== "guide");
+    const student = el(
+      "select",
+      {},
+      students.map((agent) =>
+        el("option", {
+          value: agent.id,
+          text: `${agent.name} · ${agent.model}`,
+          selected: agent.role === "student",
+        })
+      )
+    );
+    const base = el("select", {}, [
+      ...lora.bases.map((item) =>
+        el("option", { value: item.repo, text: `${item.size} · ${item.repo} → ${item.ollama}` })
+      ),
+      el("option", { value: "__other__", text: "Another Hugging Face model…" }),
+    ]);
+    const note = el("p", { class: "muted", text: lora.bases[0] ? lora.bases[0].note : "" });
+    const otherRepo = el("input", { type: "text", placeholder: "org/model on Hugging Face", hidden: true });
+    const otherOllama = el("input", { type: "text", placeholder: "matching Ollama tag, e.g. mistral:7b", hidden: true });
+    base.addEventListener("change", () => {
+      const other = base.value === "__other__";
+      otherRepo.hidden = !other;
+      otherOllama.hidden = !other;
+      const known = lora.bases.find((item) => item.repo === base.value);
+      note.textContent = known ? known.note : "Pick the Ollama build of the same weights so the result can run locally.";
+    });
+    const where = el("select", {}, [
+      el("option", { value: "local", text: "This computer" }),
+      el("option", { value: "remote", text: "Rented GPU or VPS (run a worker there)" }),
+    ]);
+    const exportKind = el("select", {}, [
+      el("option", { value: "merged", text: "A full model with the new weights (LM Studio or Ollama)" }),
+      el("option", { value: "adapter", text: "A small adapter on top of the base model (Ollama only)" }),
+    ]);
+    const quant = el("select", {}, [
+      el("option", { value: "Q4_K_M", text: "Q4_K_M: smallest, fits 8 GB GPUs like the RX 580 (recommended)" }),
+      el("option", { value: "Q5_K_M", text: "Q5_K_M: a little sharper, needs about 6 GB" }),
+      el("option", { value: "Q8_0", text: "Q8_0: near-original quality, about 8 GB for a 7B model" }),
+    ]);
+    const quantRow = el("label", {}, ["Model file size", quant]);
+    exportKind.addEventListener("change", () => {
+      quantRow.hidden = exportKind.value !== "merged";
+    });
+    const rentGuide = el("details", { class: "guide", open: true }, [
+      el("summary", { text: "How training on a rented GPU works" }),
+      el("ol", {}, [
+        el("li", { text: "Install Tailscale (free) on this PC and sign in. Copy this PC's Tailscale address, like 100.x.y.z." }),
+        el("li", { text: "In admin settings → Studio, set Address For Remote Trainers to http://100.x.y.z:8082 (your Tailscale address)." }),
+        el("li", { text: "Rent a GPU with 24 GB or more (for example an RTX 4090 or A5000 on RunPod or Vast.ai) using a PyTorch template. A 7B model trains in well under an hour." }),
+        el("li", { text: "Press Start below. The job page shows commands: open the rented machine's terminal and paste them. On RunPod or Vast, run the Tailscale block first with an auth key from the Tailscale admin page." }),
+        el("li", { text: "Watch the loss drop here. When it finishes, the new model downloads to this PC, installs into LM Studio and Ollama, and the student switches to it." }),
+        el("li", { text: "Stop the rented machine so it stops billing." }),
+      ]),
+    ]);
+    const syncGuide = () => {
+      rentGuide.hidden = where.value !== "remote";
+    };
+    where.addEventListener("change", syncGuide);
+    const env = el("p", { class: "muted", text: "Checking what this computer can train with…" });
+    api("/studio/api/lora/environment")
+      .then((info) => {
+        const trains = info.ready
+          ? `This computer can train: ${info.accelerator}.`
+          : "This computer can't train yet (no torch/transformers/peft). Install the training extra, or use a rented GPU.";
+        const serves = info.ollama ? "Ollama found: results install automatically." : "Ollama not found: install it to run results locally.";
+        const gguf = info.llama_cpp_ready ? "" : " Set the llama.cpp folder in settings to make Ollama-ready files.";
+        env.textContent = `${trains} ${serves}${gguf}`;
+        if (!info.ready) where.value = "remote";
+        syncGuide();
+      })
+      .catch(() => {
+        env.textContent = "Could not check this computer.";
+      });
+    const source = (value, label, checked) => {
+      const box = el("input", { type: "checkbox", value });
+      box.checked = checked;
+      return { box, row: el("label", { class: "switch" }, [label, box]) };
+    };
+    const sources = [
+      source("topics", "Teacher writes lessons on topics", true),
+      source("tools", "Tool-use lessons (files, web, memory)", true),
+      source("classes", "Everything from this agent's classes", true),
+      source("examples", "Examples from its tune packs", true),
+    ];
+    const topics = el("textarea", {
+      rows: "4",
+      placeholder: "Python web apps\nReact and TypeScript UI\nHTML and CSS layout\nDebugging and tests",
+    });
+    const perTopic = el("input", { type: "number", value: "12", min: "1", max: "50" });
+    const teacher = el("input", { type: "text", list: "model-list", placeholder: "default teacher (a server model)" });
+    modelList().catch(() => {});
+    const epochs = el("input", { type: "number", value: "2", min: "1", max: "10" });
+    const rank = el("input", { type: "number", value: "16", min: "4", max: "128" });
+    const maxLen = el("input", { type: "number", value: "1024", min: "256", max: "8192" });
+    return card(
+      "LoRA: train the weights",
+      [
+        el("p", {
+          class: "muted",
+          text: "Real training that changes the model's weights: server teachers write lessons, a LoRA is trained on them, then merged into the model. Train here if this computer has an NVIDIA GPU, or on a rented GPU. The new model installs into LM Studio and Ollama, and the student switches to it.",
+        }),
+        env,
+        el("label", {}, ["Student", student]),
+        el("label", {}, ["Model to train (Hugging Face)", base]),
+        note,
+        otherRepo,
+        otherOllama,
+        el("label", {}, ["Where to train", where]),
+        rentGuide,
+        el("label", {}, ["What to make", exportKind]),
+        quantRow,
+        ...sources.map((item) => item.row),
+        el("label", {}, ["Topics, one per line", topics]),
+        el("label", {}, ["Lessons per topic", perTopic]),
+        el("label", {}, ["Teacher model", teacher]),
+        el("details", {}, [
+          el("summary", { text: "Advanced" }),
+          el("label", {}, ["Epochs", epochs]),
+          el("label", {}, ["LoRA rank", rank]),
+          el("label", {}, ["Max tokens per example", maxLen]),
+        ]),
+        el("button", {
+          class: "primary",
+          text: "Start LoRA training",
+          onclick: async () => {
+            const chosen = sources.filter((item) => item.box.checked).map((item) => item.box.value);
+            const topicList = topics.value.split("\n").map((line) => line.trim()).filter(Boolean);
+            const other = base.value === "__other__";
+            try {
+              const job = await post("/studio/api/lora/jobs", {
+                agent_id: student.value,
+                base_model: other ? otherRepo.value.trim() : base.value,
+                ollama_base: other ? otherOllama.value.trim() : "",
+                runner: where.value,
+                export: exportKind.value,
+                gguf_quant: quant.value,
+                sources: chosen,
+                topics: topicList,
+                examples_per_topic: Number(perTopic.value) || 12,
+                teacher_model: teacher.value.trim() || null,
+                epochs: Number(epochs.value) || 2,
+                rank: Number(rank.value) || 16,
+                max_seq_len: Number(maxLen.value) || 1024,
+              });
+              go(`lora/${job.id}`);
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+        ...(lora.jobs.length
+          ? [
+              el("h3", { text: "LoRA runs" }),
+              ...lora.jobs.slice(0, 8).map((job) =>
+                el("button", { class: "list-item", onclick: () => go(`lora/${job.id}`) }, [
+                  el("span", { class: "grow" }, [
+                    el("strong", { text: job.base_model }),
+                    el("span", { text: `${job.runner === "local" ? "this computer" : "remote worker"} · ${when(job.created_at)}` }),
+                  ]),
+                  statusPill(job.status),
+                ])
+              ),
+            ]
+          : []),
+      ]
+    );
+  }
+
+  async function renderLoraJob(jobId) {
+    const generation = renderGeneration;
+    const job = await api(`/studio/api/lora/jobs/${jobId}`);
+    setChrome("lora", "LoRA training");
+    const active = ["queued", "running"].includes(job.status);
+    const busy = /^(Trained\. Installing|Downloading the base|Creating the (tuned )?model|Adding the model)/.test(job.message);
+    const nodes = [
+      card(job.base_model, [
+        el("div", { class: "row-between" }, [
+          statusPill(job.status),
+          el("span", { class: "pill", text: `${job.step}/${job.total_steps || "?"} steps` }),
+        ]),
+        meter(job.progress),
+        el("p", { class: "muted", text: job.message }),
+        job.error ? el("p", { class: "error-text", text: job.error }) : null,
+        el("div", { class: "figures" }, [
+          figure("Held-out loss before", job.eval_loss_before),
+          figure("Held-out loss after", job.eval_loss_after),
+        ]),
+        el("p", {
+          class: "muted",
+          text: `${job.train_examples} training examples, ${job.eval_examples} held out · ${job.runner === "local" ? "this computer" : "remote worker"}${job.metrics.device ? ` · ${job.metrics.device}` : ""}`,
+        }),
+      ]),
+      card("Training loss per step", [lossChart(job.metrics.loss_curve)]),
+    ];
+    if (job.commands && job.runner === "remote") {
+      const block = (label, text) =>
+        el("div", {}, [
+          el("div", { class: "row-between" }, [
+            el("strong", { text: label }),
+            el("button", {
+              class: "secondary",
+              text: "Copy",
+              onclick: async () => {
+                try {
+                  await navigator.clipboard.writeText(text);
+                  notify("Copied.");
+                } catch {
+                  notify("Select the text and copy it.");
+                }
+              },
+            }),
+          ]),
+          el("pre", { class: "command-block", text }),
+        ]);
+      nodes.push(
+        card("Run it on a rented GPU or VPS", [
+          el("p", {
+            class: "muted",
+            text: `On the GPU machine, run these. It must be able to reach ${job.commands.studio_url} (Tailscale on both machines is the easy way). For gated models, set HF_TOKEN there first.`,
+          }),
+          job.commands.warning ? el("p", { class: "error-text", text: job.commands.warning }) : null,
+          block("Linux (RunPod, Vast.ai, most rented GPUs)", job.commands.bash),
+          el("p", {
+            class: "muted",
+            text: "Rented containers can't reach your PC directly. Run this first, after setting TS_AUTHKEY to a key from login.tailscale.com (Settings, Keys; tick Ephemeral):",
+          }),
+          block("Tailscale for containers (run first)", job.commands.tailscale),
+          block("Windows PowerShell", job.commands.powershell),
+        ])
+      );
+    }
+    if (job.status === "succeeded") {
+      const hasModel = job.files.includes("model.gguf");
+      const quantUsed = job.metrics.model_quant || job.gguf_quant;
+      const rows = [
+        el("p", {
+          text: hasModel
+            ? `model.gguf: ${job.base_model} with the training merged into its weights (${quantUsed}${job.metrics.model_gb ? `, ${job.metrics.model_gb} GB` : ""}).`
+            : "This run made an adapter, not a full model.",
+        }),
+        job.metrics.model_error
+          ? el("p", { class: "error-text", text: `The full model couldn't be made: ${job.metrics.model_error}` })
+          : null,
+        job.lmstudio_path ? el("p", { class: "muted", text: `In LM Studio: ${job.lmstudio_path}` }) : null,
+        job.served_model ? el("p", { class: "muted", text: `In Ollama as: ${job.served_model}` }) : null,
+        el("p", {
+          class: "muted",
+          text: job.agent_model ? `${job.agent_name} runs ${job.agent_model} right now.` : "",
+        }),
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "primary",
+            text: `Switch ${job.agent_name || "the student"} to it`,
+            onclick: async () => {
+              try {
+                const updated = await post(`/studio/api/lora/jobs/${jobId}/switch`);
+                notify(updated.message);
+                render();
+              } catch (error) {
+                notify(error.message);
+              }
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "Install again",
+            onclick: async () => {
+              await post(`/studio/api/lora/jobs/${jobId}/install`);
+              render();
+            },
+          }),
+        ]),
+        el("p", {
+          class: "muted",
+          text: "To use it by hand: in LM Studio open My Models and load it; in Ollama run the model named above. Any agent can use it: set its model to local/ plus the name LM Studio or Ollama shows.",
+        }),
+      ];
+      nodes.splice(1, 0, card(job.in_use ? "Your new model (in use)" : "Your new model", rows));
+    }
+    const actions = [];
+    if (active) {
+      actions.push(el("button", {
+        class: "danger",
+        text: "Stop",
+        onclick: async () => {
+          await post(`/studio/api/lora/jobs/${jobId}/cancel`);
+          render();
+        },
+      }));
+    }
+    if (job.previous_model) {
+      actions.push(el("button", {
+        class: "secondary",
+        text: `Switch the student back to ${job.previous_model}`,
+        onclick: async () => {
+          await post(`/studio/api/lora/jobs/${jobId}/revert`);
+          render();
+        },
+      }));
+    }
+    const key = token();
+    const suffix = key ? `?token=${encodeURIComponent(key)}` : "";
+    nodes.push(
+      card("Files", [
+        ...(job.files.length
+          ? job.files.map((name) =>
+              el("a", { class: "list-item", href: `/studio/api/lora/jobs/${jobId}/files/${name}${suffix}` }, [
+                el("span", { class: "grow" }, [el("strong", { text: name })]),
+                el("span", { class: "pill", text: "download" }),
+              ])
+            )
+          : [empty("Files appear here as the job runs.")]),
+        actions.length ? el("div", { class: "row" }, actions) : null,
+      ])
+    );
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(...nodes);
+    if (active || busy) {
+      pollPage(() => renderLoraJob(jobId));
+    } else {
+      stopPolling();
+    }
+  }
+
+  function tuneButton(pack, backend, label, available) {
+    return el("button", {
+      class: backend === "cloud" ? "secondary" : "primary",
+      text: label,
+      disabled: !available,
+      title: available ? "" : "Not set up yet",
+      onclick: async () => {
+        try {
+          const job = await post(`/studio/api/tuning/packs/${pack.id}/start`, { backend });
+          notify(backend === "cloud" ? "Sent to the trainer." : "Tuning started.");
+          go(`job/${job.id}`);
+        } catch (error) {
+          notify(error.message);
+        }
+      },
+    });
+  }
+
+  function openSampleSheet(pack) {
+    const prompt = el("textarea", { placeholder: "Example request" });
+    const completion = el("textarea", { placeholder: "The answer you want" });
+    openSheet(`Examples · ${pack.name}`, [
+      el("p", {
+        class: "muted",
+        text: "Two examples are enough to start. The last few become a held-out set the tune is scored on.",
+      }),
+      prompt,
+      completion,
+      el("button", {
+        class: "primary",
+        text: "Add example",
+        onclick: async () => {
+          if (!prompt.value.trim() || !completion.value.trim()) {
+            return notify("Fill both boxes.");
+          }
+          const result = await post(
+            `/studio/api/tuning/packs/${pack.id}/samples`,
+            { pairs: [[prompt.value.trim(), completion.value.trim()]] }
+          );
+          prompt.value = "";
+          completion.value = "";
+          notify(`${result.total} examples in this pack.`);
+        },
+      }),
+    ]);
+  }
+
+  async function renderJob(jobId) {
+    const generation = renderGeneration;
+    const job = await api(`/studio/api/tuning/jobs/${jobId}`);
+    setChrome("job", "Tuning run");
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(
+      card(job.message || "Tuning", [
+        el("div", { class: "row-between" }, [
+          statusPill(job.status),
+          el("span", { class: "pill", text: `${job.step}/${job.total_steps}` }),
+        ]),
+        meter(job.progress),
+        el("div", { class: "kv" }, [
+          el("span", { text: "Backend" }),
+          el("span", { text: job.backend }),
+          el("span", { text: "Baseline" }),
+          el("span", { text: job.baseline_score == null ? "—" : job.baseline_score }),
+          el("span", { text: "Tuned" }),
+          el("span", { text: job.score == null ? "—" : job.score }),
+        ]),
+        job.error ? el("p", { class: "muted", text: job.error }) : null,
+        job.backend === "cloud" && ["queued", "running"].includes(job.status)
+          ? el("button", {
+              class: "secondary",
+              text: "Check the trainer now",
+              onclick: async () => {
+                await post(`/studio/api/tuning/jobs/${jobId}/refresh`);
+                render();
+              },
+            })
+          : null,
+        ["queued", "running"].includes(job.status)
+          ? el("button", {
+              class: "danger",
+              text: "Stop",
+              onclick: async () => {
+                await post(`/studio/api/tuning/jobs/${jobId}/cancel`);
+                render();
+              },
+            })
+          : null,
+      ])
+    );
+    if (["queued", "running"].includes(job.status)) {
+      pollPage(() => renderJob(jobId));
+    } else {
+      stopPolling();
+    }
+  }
+
+  // Learn mode: Jarvis teaches himself a subject, lesson by lesson.
+  function learningCard(studies) {
+    const topic = el("input", { type: "text", placeholder: "What should Jarvis learn? (e.g. electrical engineering)", "aria-label": "Topic to learn" });
+    const focus = el("input", { type: "text", placeholder: "Focus (optional, e.g. circuits for home projects)", "aria-label": "Focus" });
+    const depth = el("select", { "aria-label": "Depth" }, [
+      el("option", { value: "quick", text: "Quick: 4 lessons" }),
+      el("option", { value: "normal", text: "Normal: 7 lessons", selected: true }),
+      el("option", { value: "deep", text: "Deep: 10 lessons" }),
+    ]);
+    const status = el("p", { class: "muted", hidden: true });
+    const form = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!topic.value.trim()) return;
+        try {
+          await post("/studio/api/studies", { topic: topic.value.trim(), focus: focus.value.trim(), depth: depth.value });
+          render();
+        } catch (error) {
+          status.hidden = false;
+          status.textContent = error.message;
+        }
+      },
+    }, [topic, focus, el("div", { class: "row" }, [depth, el("button", { class: "primary", type: "submit", text: "Start learning" })]), status]);
+    const rows = studies.length
+      ? studies.map((study) =>
+          el("div", { class: "list-item study-row" }, [
+            el("span", { class: "grow" }, [
+              el("strong", { text: study.topic }),
+              el("br"),
+              el("span", { class: "muted", text: `${study.status} · ${study.done}/${study.plan.length || "?"} lessons${study.understanding != null ? ` · understanding ${Math.round(study.understanding * 100)}%` : ""}` }),
+              meter(study.progress),
+            ]),
+            el("button", { class: "secondary", type: "button", text: "Open", onclick: () => openStudy(study.id) }),
+          ])
+        )
+      : [empty("Nothing learned yet. Tell Jarvis \"learn electrical engineering\", or start one here.")];
+    return card(
+      "Learning",
+      [form, ...rows],
+      "Jarvis plans a course, researches each lesson on the web, Reddit, and YouTube, writes his own notes, and quizzes himself. Everything he learns goes into memory for the whole team."
+    );
+  }
+
+  async function openStudy(studyId) {
+    let data;
+    try {
+      data = await api(`/studio/api/studies/${studyId}`);
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+    const { study, lessons } = data;
+    const running = study.status === "planning" || study.status === "learning";
+    openSheet(`Learning: ${study.topic}`, [
+      el("p", { class: "muted", text: `${study.status} · ${Math.round(study.progress * 100)}% · ${study.step}` }),
+      meter(study.progress),
+      study.summary ? el("pre", { class: "conversation-notes", text: study.summary }) : null,
+      study.plan.length
+        ? el("ol", { class: "study-plan" }, study.plan.map((title, index) =>
+            el("li", { class: index < study.done ? "done" : "", text: title })
+          ))
+        : null,
+      ...lessons.map((lesson) =>
+        el("details", { class: "video-details" }, [
+          el("summary", { text: `Lesson ${lesson.ordinal + 1}: ${lesson.title} · self-check ${Math.round(lesson.score * 100)}%` }),
+          el("pre", { class: "conversation-notes", text: lesson.notes }),
+          lesson.quiz.length
+            ? el("div", { class: "study-quiz" }, lesson.quiz.map(([question, answer]) =>
+                el("p", {}, [el("strong", { text: `Q: ${question}` }), el("br"), `A: ${answer}`])
+              ))
+            : null,
+          lesson.sources.length
+            ? el("ul", { class: "study-sources" }, lesson.sources.map((line) => el("li", { text: line })))
+            : null,
+        ])
+      ),
+      el("div", { class: "row" }, [
+        running
+          ? el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Stop learning",
+              onclick: async () => {
+                try {
+                  await post(`/studio/api/studies/${study.id}/stop`);
+                  closeSheet();
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            })
+          : null,
+        el("button", {
+          class: "danger",
+          type: "button",
+          text: "Forget this study",
+          onclick: async () => {
+            try {
+              await remove(`/studio/api/studies/${study.id}`);
+              closeSheet();
+              render();
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+      ]),
+    ]);
+  }
+
+  // The user's to-do list. Jarvis and the Helper add to it too, and Jarvis
+  // announces reminders on the HUD when they are due.
+  function extensionsCard(list, starters = []) {
+    const status = el("p", { class: "muted", hidden: true });
+    const say = (text) => {
+      status.hidden = false;
+      status.textContent = text;
+    };
+    const link = el("input", { type: "url", placeholder: "https://github.com/owner/repo", "aria-label": "GitHub link" });
+    const addForm = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!link.value.trim()) return;
+        say("Fetching the repo…");
+        try {
+          const added = await post("/studio/api/extensions", { url: link.value.trim() });
+          notify(`Added ${added.name}: ${added.skills.length} skill(s), ${added.agents.length} agent(s), ${added.servers.length} MCP server(s).`);
+          render();
+        } catch (error) {
+          say(error.message);
+        }
+      },
+    }, [link, el("div", { class: "row" }, [el("button", { class: "primary", type: "submit", text: "Add from GitHub" })])]);
+    // A repo zip from this PC (GitHub's "Download ZIP", or a folder zipped by
+    // hand). Studio only reads it, and keeps it in the repo vault.
+    const zipInput = el("input", {
+      type: "file",
+      accept: ".zip,application/zip",
+      class: "visually-hidden",
+      "aria-label": "Repo zip file",
+      onchange: async () => {
+        const file = zipInput.files[0];
+        zipInput.value = "";
+        if (!file) return;
+        say(`Adding ${file.name}…`);
+        try {
+          const added = await sendFile(`/studio/api/extensions/upload?name=${encodeURIComponent(file.name)}`, file, (done, total) => say(`Uploading ${file.name}… ${Math.round((100 * done) / (total || 1))}%`));
+          notify(`Added ${added.name}: ${added.skills.length} skill(s), ${added.agents.length} agent(s), ${added.servers.length} MCP server(s).`);
+          render();
+        } catch (error) {
+          say(error.message);
+        }
+      },
+    });
+    const uploadButton = el("button", { class: "secondary", type: "button", text: "Upload a repo zip", onclick: () => zipInput.click() });
+    const startersList = starters.length
+      ? el("details", { class: "starter-repos" }, [
+          el("summary", { text: `Repos that come with FCC (${starters.filter((item) => item.extension_id).length} of ${starters.length} added)` }),
+          el("p", {
+            class: "muted small",
+            text: "These are added on first load and work offline: FCC keeps a checked copy of each one, so they keep working if the original repo is deleted. Their MCP servers stay off until you turn them on, and their agents join the team only when you add them.",
+          }),
+          ...starters.map((item) =>
+            el("div", { class: "row starter-row" }, [
+              el("div", { class: "grow" }, [
+                el("strong", { text: item.name }),
+                el("p", { class: "muted small", text: `${item.about} · ${item.licence}${item.extension_id ? ` · ${item.skills} skill(s)` : ""}` }),
+                item.left_out ? el("p", { class: "muted small", text: item.left_out }) : null,
+              ]),
+              item.extension_id
+                ? el("span", { class: "pill good", text: "Added" })
+                : el("button", {
+                    class: "secondary",
+                    type: "button",
+                    text: item.left_out ? "Add from GitHub" : "Add again",
+                    "aria-label": `Add ${item.name} again`,
+                    onclick: async () => {
+                      say(`Adding ${item.name}…`);
+                      try {
+                        await post("/studio/api/starters/add", { url: item.name });
+                        render();
+                      } catch (error) {
+                        say(error.message);
+                      }
+                    },
+                  }),
+            ])
+          ),
+        ])
+      : null;
+    const serverName = el("input", { type: "text", placeholder: "Name, e.g. files", "aria-label": "Server name" });
+    const serverCommand = el("input", { type: "text", placeholder: "Command, e.g. npx -y @modelcontextprotocol/server-filesystem C:\\Users\\me\\Documents", "aria-label": "Server command" });
+    const serverUrl = el("input", { type: "url", placeholder: "…or a web address for an HTTP server", "aria-label": "Server address" });
+    const serverForm = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        try {
+          await post("/studio/api/extensions/servers", {
+            name: serverName.value.trim(),
+            command: serverCommand.value.trim(),
+            url: serverUrl.value.trim(),
+          });
+          notify("Server added and switched on.");
+          render();
+        } catch (error) {
+          say(error.message);
+        }
+      },
+    }, [serverName, serverCommand, serverUrl, el("div", { class: "row" }, [el("button", { class: "secondary", type: "submit", text: "Add MCP server" })])]);
+    const base = (item) => `/studio/api/extensions/${encodeURIComponent(item.id)}`;
+    const rows = list.map((item) =>
+      el("div", { class: "list-item extension-row" }, [
+        el("div", { class: "grow" }, [
+          el("div", { class: "row" }, [
+            el("strong", { class: "grow", text: item.name }),
+            el("span", { class: item.enabled ? "pill good" : "pill", text: item.enabled ? "on" : "off" }),
+            el("button", {
+              class: item.enabled ? "secondary" : "primary",
+              type: "button",
+              text: item.enabled ? "Turn off" : "Turn on",
+              "aria-label": `${item.enabled ? "Turn off" : "Turn on"} the repo ${item.name}`,
+              onclick: async () => {
+                try {
+                  await post(`${base(item)}/switch`, { on: !item.enabled });
+                  notify(item.enabled ? `${item.name} is off: none of it runs.` : `${item.name} is on: its skills and agents can join your jobs.`);
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ]),
+          el("p", {
+            class: "muted",
+            text: [
+              item.plugins.length ? `Plugin: ${item.plugins.join(", ")}` : "",
+              `${item.skills.length} skill(s)`,
+              `${item.agents.length} agent(s)`,
+              `${item.servers.length} MCP server(s)`,
+            ].filter(Boolean).join(" · "),
+          }),
+          item.description ? el("p", { class: "muted", text: item.description }) : null,
+          item.skills.length
+            ? el("details", {}, [
+                el("summary", { text: "Skills and commands" }),
+                el("ul", {}, [
+                  ...item.skills.slice(0, 150).map((skill) => el("li", { text: `${skill.name}: ${skill.description || "(no description)"}` })),
+                  item.skills.length > 150 ? el("li", { class: "muted", text: `…and ${item.skills.length - 150} more. Agents find the right one with the skill tool's search.` }) : null,
+                ]),
+              ])
+            : null,
+          ...item.agents.map((agent) =>
+            el("div", { class: "row" }, [
+              el("span", { class: "grow", text: `Agent ${agent.name}: ${agent.description || ""}` }),
+              el("button", {
+                class: "secondary",
+                type: "button",
+                text: "Add to team",
+                "aria-label": `Add ${agent.name} to the team`,
+                onclick: async () => {
+                  try {
+                    await post(`${base(item)}/agents/${encodeURIComponent(agent.name)}`);
+                    notify(`${agent.name} joined the team.`);
+                  } catch (error) {
+                    notify(error.message);
+                  }
+                },
+              }),
+            ])
+          ),
+          ...item.servers.map((server) =>
+            el("div", { class: "row" }, [
+              el("span", { class: "grow" }, [
+                el("strong", { text: `MCP ${server.name}` }),
+                el("code", { text: ` ${server.shown}` }),
+                el("span", { class: server.enabled ? "pill good" : "pill", text: server.enabled ? "on" : "off" }),
+              ]),
+              el("button", {
+                class: server.enabled ? "secondary" : "primary",
+                type: "button",
+                text: server.enabled ? "Turn off" : "Turn on",
+                "aria-label": `${server.enabled ? "Turn off" : "Turn on"} ${server.name}`,
+                onclick: async () => {
+                  if (!server.enabled && !confirm(`Turning this on lets your agents run:\n\n${server.shown}\n\nOnly turn on servers you trust.`)) return;
+                  try {
+                    await post(`${base(item)}/servers/${encodeURIComponent(server.name)}`, { on: !server.enabled });
+                    render();
+                  } catch (error) {
+                    notify(error.message);
+                  }
+                },
+              }),
+              server.enabled
+                ? el("button", {
+                    class: "secondary",
+                    type: "button",
+                    text: "Check",
+                    "aria-label": `Check ${server.name}`,
+                    onclick: async () => {
+                      say(`Starting ${server.name}… (the first start can take a minute)`);
+                      try {
+                        const result = await post(`${base(item)}/servers/${encodeURIComponent(server.name)}/check`);
+                        say(`${server.name} works: ${result.tools.map((tool) => tool.name).join(", ") || "no tools"}.`);
+                      } catch (error) {
+                        say(error.message);
+                      }
+                    },
+                  })
+                : null,
+            ])
+          ),
+          el("div", { class: "row" }, [
+            item.source && item.source.startsWith("https://") ? el("a", { class: "pill", href: item.source, target: "_blank", rel: "noopener", text: "GitHub" }) : null,
+            item.vaulted && item.origin !== "upload" ? el("span", { class: "pill", title: "GitHub no longer had it, so this came from the repo vault", text: "From the vault" }) : null,
+            item.origin === "bundled" ? el("span", { class: "pill good", title: "FCC keeps a checked copy of this repo, so it works even if GitHub loses it", text: "Comes with FCC" }) : null,
+            item.origin === "upload" ? el("span", { class: "pill", title: "Added from a zip on this PC; the zip is kept in the repo vault", text: "Uploaded" }) : null,
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Remove",
+              "aria-label": `Remove ${item.name}`,
+              onclick: async () => {
+                if (!confirm(`Remove ${item.name}? Its skills and servers go; agents you added stay.`)) return;
+                try {
+                  await remove(base(item));
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ]),
+        ]),
+      ])
+    );
+    return card("Add from GitHub", [
+      el("p", {
+        class: "muted",
+        text: "Paste a GitHub link (or upload a repo zip) and the team gets what the repo holds: skills (SKILL.md), Claude Code plugins (agents, commands, MCP servers), guides and lists. Agents search and read them with the skill tool and use switched-on MCP servers with the mcp tool. Every repo is kept in the repo vault, so it still works if it's deleted from GitHub.",
+      }),
+      addForm,
+      el("div", { class: "row" }, [uploadButton, zipInput]),
+      startersList,
+      el("details", {}, [el("summary", { text: "Add an MCP server by hand" }), serverForm]),
+      status,
+      ...(rows.length > 6
+        ? [el("details", { class: "added-repos" }, [el("summary", { text: `Added repos (${rows.length}) — ${list.reduce((n, item) => n + item.skills.length, 0)} skills` }), ...rows])]
+        : rows.length
+          ? rows
+          : [el("p", { class: "muted", text: "Nothing added yet." })]),
+    ]);
+  }
+
+  /* ------------------------------------------------------------ ideas board */
+
+  // The user's references for the team: notes, photos, videos, and links of
+  // what they want. Agents search it before they design or build.
+  const IDEA_CATEGORIES = [
+    ["website", "Websites"],
+    ["app", "Apps"],
+    ["lab", "Lab"],
+    ["general", "General"],
+  ];
+
+  async function renderIdeas(search = "", tag = "", category = "") {
+    const generation = renderGeneration;
+    const query = new URLSearchParams({ q: search, tag, category });
+    const data = await api(`/studio/api/ideas?${query}`);
+    if (generation !== renderGeneration) return;
+    const title = el("input", { type: "text", maxlength: "120", placeholder: "Title, e.g. Clean bakery homepage", "aria-label": "Idea title" });
+    const notes = el("textarea", { rows: 3, maxlength: "4000", placeholder: "What you like about it, or what you want: colours, layout, feel, features…", "aria-label": "Idea notes" });
+    const link = el("input", { type: "url", placeholder: "Link (optional): a site, an app, a video", "aria-label": "Idea link" });
+    const tags = el("input", { type: "text", placeholder: "Tags, e.g. ui, website, colours", "aria-label": "Idea tags" });
+    const project = el("input", { type: "text", maxlength: "80", placeholder: "For which project (optional)", "aria-label": "Idea project" });
+    const kindOfWork = el(
+      "select",
+      { "aria-label": "Idea category" },
+      IDEA_CATEGORIES.map(([value, label]) => el("option", { value, text: label, selected: value === (category || "general") }))
+    );
+    const status = el("p", { class: "muted small", role: "status" });
+    const files = el("input", { type: "file", accept: "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime", multiple: true, hidden: true, "aria-label": "Photos or videos for the ideas board" });
+    const clear = () => {
+      for (const field of [title, notes, link, tags]) field.value = "";
+    };
+    const addText = async () => {
+      if (!notes.value.trim() && !link.value.trim()) return notify("Write the idea or add a link.");
+      try {
+        await post("/studio/api/ideas", { title: title.value, text: notes.value, url: link.value, tags: tags.value, project: project.value, category: kindOfWork.value });
+        clear();
+        notify("Added to the ideas board.");
+        renderIdeas(search, tag, category);
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+    files.addEventListener("change", async () => {
+      let added = 0;
+      for (const file of files.files) {
+        status.textContent = `Adding ${file.name}…`;
+        try {
+          const body = file.type.startsWith("image/") ? await shrinkPhoto(file) : file;
+          const params = new URLSearchParams({ name: file.name, title: title.value, text: notes.value, tags: tags.value, project: project.value, category: kindOfWork.value });
+          await sendFile(`/studio/api/ideas/upload?${params}`, body, (sent, total) => {
+            status.textContent = `Adding ${file.name}… ${Math.round((sent / Math.max(total, 1)) * 100)}%`;
+          });
+          added += 1;
+        } catch (error) {
+          notify(error.message);
+        }
+      }
+      files.value = "";
+      status.textContent = added ? `Added ${added} to the ideas board.` : "";
+      if (added) {
+        clear();
+        renderIdeas(search, tag, category);
+      }
+    });
+    const finder = el("input", { type: "search", value: search, placeholder: "Search ideas", "aria-label": "Search ideas" });
+    finder.addEventListener("change", () => renderIdeas(finder.value, tag, category));
+    view.replaceChildren(
+      card("Ideas board", [
+        el("p", {
+          class: "muted",
+          text: "Your references for the team: a website or app UI you like, a layout, colours, a logo, a video of how something should feel. Say what you like about each. The agents search this board before they design or build, go in that direction, and make their own business-level work, not a copy.",
+        }),
+        title,
+        notes,
+        link,
+        el("div", { class: "row" }, [kindOfWork, tags, project]),
+        el("div", { class: "row" }, [
+          el("button", { class: "primary", type: "button", text: "Add note or link", onclick: addText }),
+          el("button", { class: "secondary", type: "button", text: "Add photos or videos", onclick: () => files.click() }),
+          files,
+        ]),
+        status,
+      ]),
+      card(`On the board (${data.ideas.length})`, [
+        el("div", { class: "chips idea-categories", role: "group", "aria-label": "Category" }, [
+          el("button", { class: `chip${category ? "" : " active"}`, type: "button", text: "Everything", onclick: () => renderIdeas(finder.value, tag, "") }),
+          ...IDEA_CATEGORIES.map(([value, label]) =>
+            el("button", { class: `chip${value === category ? " active" : ""}`, type: "button", text: `${label} (${data.categories?.[value] ?? 0})`, onclick: () => renderIdeas(finder.value, tag, value) })
+          ),
+        ]),
+        el("div", { class: "row" }, [
+          finder,
+          ...(data.tags.length
+            ? [
+                el("div", { class: "chips" }, [
+                  el("button", { class: `chip${tag ? "" : " active"}`, type: "button", text: "all", onclick: () => renderIdeas(finder.value, "", category) }),
+                  ...data.tags.map((name) => el("button", { class: `chip${name === tag ? " active" : ""}`, type: "button", text: name, onclick: () => renderIdeas(finder.value, name, category) })),
+                ]),
+              ]
+            : []),
+        ]),
+        data.ideas.length
+          ? el("div", { class: "photo-grid idea-grid" }, data.ideas.map((idea) => ideaTile(idea, () => renderIdeas(search, tag, category))))
+          : empty(search || tag || category ? "No ideas match." : "Nothing on the board yet. Add what you'd like the team to aim for."),
+      ])
+    );
+  }
+
+  function ideaTile(idea, refresh) {
+    const text = el("textarea", { rows: 3, "aria-label": `Notes for ${idea.title}`, placeholder: "What you like about it" });
+    text.value = idea.text || "";
+    text.addEventListener("change", async () => {
+      try {
+        await patch(`/studio/api/ideas/${idea.id}`, { text: text.value });
+        notify("Saved.");
+      } catch (error) {
+        notify(error.message);
+      }
+    });
+    const media =
+      idea.kind === "photo"
+        ? el("img", { src: idea.file_url, alt: idea.text || idea.title, loading: "lazy", width: String(idea.width), height: String(idea.height) })
+        : idea.kind === "video"
+          ? el("video", { src: idea.file_url, controls: true, preload: "metadata", "aria-label": idea.title })
+          : el("div", { class: "idea-note", text: idea.kind === "link" ? "🔗" : "✎" });
+    return el("figure", { class: `photo-tile idea-tile ${idea.kind}`, "data-idea": idea.id }, [
+      media,
+      el("figcaption", {}, [
+        el("strong", { text: idea.title }),
+        el("small", { class: "muted", text: [...new Set([idea.kind, IDEA_CATEGORIES.find(([value]) => value === idea.category)?.[1], idea.project, ...(idea.tags || [])])].filter(Boolean).join(" · ") }),
+        idea.url ? el("a", { href: idea.url, target: "_blank", rel: "noopener noreferrer", text: idea.url }) : null,
+        text,
+        el("button", {
+          class: "danger small",
+          type: "button",
+          text: "Delete",
+          "aria-label": `Delete ${idea.title}`,
+          onclick: async () => {
+            if (!confirm(`Delete ${idea.title} from the ideas board?`)) return;
+            await remove(`/studio/api/ideas/${idea.id}`);
+            refresh();
+          },
+        }),
+      ]),
+    ]);
+  }
+
+  /* ------------------------------------------------------------- connectors */
+
+  // Outside services the team can use, email drafts waiting for a yes, and how
+  // other AI tools (Claude Code, Codex, Cursor, ...) use LCC.
+  async function renderConnectors() {
+    const generation = renderGeneration;
+    const data = await api("/studio/api/connectors");
+    if (generation !== renderGeneration) return;
+    const live = data.connectors.filter((item) => item.connected).length;
+    view.replaceChildren(
+      ...(data.drafts.length ? [draftsCard(data.drafts)] : []),
+      card("Connectors", [
+        el("p", {
+          class: "muted",
+          text: `Give the team outside services: they use them with the mcp tool, like "check my inbox" or "post in Discord when the site is done". Tokens stay in a file on this PC that only you can read, and never come back to this page. ${live} connected.`,
+        }),
+      ]),
+      ...data.connectors.map(connectorCard),
+      harnessCard()
+    );
+  }
+
+  function draftsCard(drafts) {
+    return card(
+      "Emails waiting for your yes",
+      drafts.map((draft) =>
+        el("div", { class: "stack connector-draft" }, [
+          el("strong", { text: `To ${draft.to}: ${draft.subject || "(no subject)"}` }),
+          el("pre", { class: "command-block", text: draft.body }),
+          el("div", { class: "row" }, [
+            el("button", {
+              class: "primary",
+              type: "button",
+              text: "Send",
+              onclick: async (event) => {
+                event.target.disabled = true;
+                try {
+                  const sent = await post(`/studio/api/connectors/drafts/${draft.id}/send`);
+                  notify(sent.message);
+                } catch (error) {
+                  notify(error.message);
+                }
+                render();
+              },
+            }),
+            el("button", {
+              class: "ghost-button",
+              type: "button",
+              text: "Discard",
+              onclick: async () => {
+                try {
+                  await remove(`/studio/api/connectors/drafts/${draft.id}`);
+                  notify("Draft thrown away.");
+                } catch (error) {
+                  notify(error.message);
+                }
+                render();
+              },
+            }),
+          ]),
+        ])
+      ),
+      "An agent wrote these with your email connector. Nothing is sent until you say so."
+    );
+  }
+
+  function connectorCard(item) {
+    const inputs = {};
+    const fields = item.fields.map((field) => {
+      const label = `${field.label}${field.optional ? " (optional)" : ""}`;
+      const input = field.choices.length
+        ? el(
+            "select",
+            { "aria-label": field.label },
+            field.choices.map((choice) =>
+              el("option", { value: choice, text: choice, selected: (field.value || field.choices[0]) === choice })
+            )
+          )
+        : el("input", {
+            type: field.secret ? "password" : "text",
+            autocomplete: "off",
+            spellcheck: "false",
+            placeholder: field.secret && field.value ? "set (leave as is to keep it)" : field.placeholder,
+            value: field.value,
+          });
+      inputs[field.key] = input;
+      return el("label", {}, [label, input]);
+    });
+    const result = el("p", { class: "muted small", hidden: true });
+    const say = (text) => {
+      result.textContent = text;
+      result.hidden = false;
+    };
+    const values = () =>
+      Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value]));
+    const buttons = [
+      el("button", {
+        class: "primary",
+        type: "button",
+        text: item.connected ? "Save" : item.fields.length ? "Connect" : "Switch on",
+        onclick: async () => {
+          try {
+            await put(`/studio/api/connectors/${item.id}`, { values: values() });
+            notify(`${item.name} is connected.`);
+            render();
+          } catch (error) {
+            say(error.message);
+          }
+        },
+      }),
+      item.connected
+        ? el("button", {
+            class: "secondary",
+            type: "button",
+            text: "Test",
+            onclick: async () => {
+              say("Trying it…");
+              try {
+                const tried = await post(`/studio/api/connectors/${item.id}/test`);
+                say(tried.message);
+              } catch (error) {
+                say(error.message);
+              }
+            },
+          })
+        : null,
+      item.connected
+        ? el("button", {
+            class: "ghost-button",
+            type: "button",
+            text: "Disconnect",
+            onclick: async () => {
+              try {
+                await remove(`/studio/api/connectors/${item.id}`);
+                notify(`${item.name} is disconnected and its token is gone.`);
+                render();
+              } catch (error) {
+                say(error.message);
+              }
+            },
+          })
+        : null,
+    ];
+    return el("section", { class: "card connector", "data-connector": item.id }, [
+      el("div", { class: "row-between" }, [
+        el("h2", { text: item.name }),
+        el("span", { class: `pill ${item.connected ? "good" : "warn"}`, text: item.connected ? "connected" : "not connected" }),
+      ]),
+      el("p", { text: item.what }),
+      el("p", { class: "muted small", text: item.get_it }),
+      ...fields,
+      el("div", { class: "row" }, buttons),
+      result,
+    ]);
+  }
+
+  // How other AI tools use LCC: its models through the OpenAI and Anthropic
+  // APIs, and its team as an MCP server.
+  function harnessCard() {
+    const base = location.origin;
+    const block = (label, text) =>
+      el("div", {}, [
+        el("div", { class: "row-between" }, [
+          el("strong", { text: label }),
+          el("button", {
+            class: "secondary small",
+            type: "button",
+            text: "Copy",
+            onclick: async () => {
+              try {
+                await navigator.clipboard.writeText(text);
+                notify("Copied.");
+              } catch {
+                notify("Select the text and copy it.");
+              }
+            },
+          }),
+        ]),
+        el("pre", { class: "command-block", text }),
+      ]);
+    const mcpJson = JSON.stringify({ mcpServers: { lcc: { url: `${base}/mcp` } } }, null, 2);
+    return card("Use LCC from other AI tools", [
+      el("p", {
+        class: "muted",
+        text: "Any AI app or coding agent can use LCC two ways. As a model: point it at the address below with any API key (or your proxy token, if you set one in Admin). The model name picks the model: a provider/model name like llamacpp/qwen3-4b uses that one, anything else uses your default. As a team: add LCC as an MCP server and that tool can ask your agents for work, run team plans, check on them, and read the projects they make.",
+      }),
+      el("div", { class: "kv" }, [
+        el("span", { text: "OpenAI API" }),
+        el("span", { text: `${base}/v1 (chat/completions, responses, models)` }),
+        el("span", { text: "Anthropic API" }),
+        el("span", { text: `${base} (v1/messages)` }),
+        el("span", { text: "MCP server" }),
+        el("span", { text: `${base}/mcp` }),
+      ]),
+      block("Claude Code: the team as tools", `claude mcp add --transport http lcc ${base}/mcp`),
+      block("Codex: ~/.codex/config.toml", `[mcp_servers.lcc]\nurl = "${base}/mcp"`),
+      block("Cursor: ~/.cursor/mcp.json (and other apps with an mcpServers list)", mcpJson),
+      block("Gemini CLI: ~/.gemini/settings.json", JSON.stringify({ mcpServers: { lcc: { httpUrl: `${base}/mcp` } } }, null, 2)),
+      block("VS Code: .vscode/mcp.json", JSON.stringify({ servers: { lcc: { type: "http", url: `${base}/mcp` } } }, null, 2)),
+      block("Cline, Continue, Open WebUI, LibreChat, and other OpenAI-compatible apps", `Provider: OpenAI Compatible\nBase URL: ${base}/v1\nAPI key: any (or your proxy token)\nModel: llamacpp/qwen3-4b (or any name for your default)`),
+      block("Aider", `aider --openai-api-base ${base}/v1 --openai-api-key any --model openai/llamacpp/qwen3-4b`),
+      block("Python (openai package)", `from openai import OpenAI\nclient = OpenAI(base_url="${base}/v1", api_key="any")\nreply = client.chat.completions.create(\n    model="llamacpp/qwen3-4b",\n    messages=[{"role": "user", "content": "Hello"}],\n)\nprint(reply.choices[0].message.content)`),
+      el("p", {
+        class: "muted small",
+        text: "Claude Code, Codex, Pi, OpenCode, Cline, Hermes, DeepSeek Harness, Grok Build, Muse Code and Aider also have ready-made launchers (fcc-claude, fcc-codex, ...) that use your FCC models with nothing to set up. Web pages in your browser can't use the MCP server; set a proxy token in Admin before you open FCC to other computers.",
+      }),
+    ]);
+  }
+
+  function vaultCard(vault) {
+    const items = vault.items || [];
+    const size = (bytes) => (bytes > 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+    const rows = items.map((item) =>
+      el("div", { class: "row vault-row" }, [
+        el("div", { class: "grow" }, [
+          el("strong", { text: item.full_name }),
+          el("p", { class: "muted small", text: `${item.kind === "release" ? "Release" : "Repo files"} · ${item.name} · ${size(item.size)} · kept ${new Date(item.saved_at).toLocaleDateString()} · SHA-256 ${item.sha256.slice(0, 12)}…` }),
+        ]),
+        el("a", { class: "ghost-button small", href: item.file_url, download: item.name, text: "Download" }),
+        item.kind === "source"
+          ? el("button", {
+              class: "ghost-button small",
+              type: "button",
+              text: "Restore",
+              onclick: async () => {
+                try {
+                  const added = await post(`/studio/api/vault/${item.id}/restore`, {});
+                  notify(`Added ${added.name} again from the vault copy.`);
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            })
+          : null,
+      ].filter(Boolean))
+    );
+    return card("Repo vault", [
+      el("p", {
+        class: "muted",
+        text: `Every repo and release Studio downloads is kept here, byte for byte, with its checksum. If the original is deleted from GitHub, adding it again uses this copy, and you can restore or download any copy. ${items.length} kept, ${size(vault.bytes || 0)} in all.`,
+      }),
+      ...(rows.length ? rows : [el("p", { class: "muted", text: "Nothing kept yet: add a repo from GitHub and its copy appears here." })]),
+    ]);
+  }
+
+  function playbookCard(book) {
+    const notes = book.notes || [];
+    const learned = notes.reduce((sum, note) => sum + (note.learned || 0), 0);
+    const picker = el(
+      "select",
+      { "aria-label": "Playbook note" },
+      notes.map((note) =>
+        el("option", {
+          value: note.tool,
+          text: note.tool === "rules" ? "Rules (every reply)" : `${note.tool}${note.learned ? ` · ${note.learned} learned` : ""}`,
+        })
+      )
+    );
+    const editor = el("textarea", { rows: 14, spellcheck: "false", "aria-label": "Playbook note text" });
+    const show = () => {
+      const note = notes.find((item) => item.tool === picker.value);
+      editor.value = note ? note.text : "";
+    };
+    picker.addEventListener("change", show);
+    show();
+    const replace = (saved) => {
+      const index = notes.findIndex((item) => item.tool === saved.tool);
+      if (index >= 0) notes[index] = saved;
+      editor.value = saved.text;
+    };
+    return card("Jarvis's playbook", [
+      el("p", {
+        class: "muted",
+        text: "Notes that teach Jarvis when and how to use each tool, with examples. Before each reply Studio adds the Rules and the notes that match your message; when a tool call works, your words and the call are added to that note's Learned list. Edit a note to change how he does it.",
+      }),
+      el("div", { class: "kv" }, [
+        el("span", { text: "Folder" }),
+        el("span", { text: book.folder }),
+        el("span", { text: "Notes" }),
+        el("span", { text: `${notes.length} (${learned} learned example${learned === 1 ? "" : "s"})` }),
+        el("span", { text: "In Obsidian" }),
+        el("span", { text: book.in_vault ? "yes" : "not yet — moves into the vault's Playbook folder once a vault is set" }),
+      ]),
+      book.enabled ? null : el("p", { class: "muted", text: "The playbook is off. Turn on Jarvis's Playbook in settings." }),
+      notes.length ? picker : null,
+      notes.length ? editor : null,
+      notes.length
+        ? el("div", { class: "row" }, [
+            el("button", {
+              class: "primary",
+              type: "button",
+              text: "Save note",
+              onclick: async () => {
+                try {
+                  replace(await put(`/studio/api/playbook/${encodeURIComponent(picker.value)}`, { text: editor.value }));
+                  notify("Saved. Jarvis uses it from his next reply.");
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Reset to starting note",
+              onclick: async () => {
+                if (!confirm(`Put Studio's starting note back for ${picker.value}? Your edits and its learned examples go.`)) return;
+                try {
+                  replace(await post(`/studio/api/playbook/${encodeURIComponent(picker.value)}/reset`));
+                  notify("Starting note restored.");
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ])
+        : null,
+    ]);
+  }
+
+  function todoCard(items) {
+    const text = el("input", { type: "text", placeholder: "Add a to-do", "aria-label": "New to-do" });
+    const due = el("input", { type: "text", placeholder: "Remind me… (in 20 minutes, tomorrow 9am)", "aria-label": "Reminder time" });
+    const status = el("p", { class: "muted", hidden: true });
+    const form = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!text.value.trim()) return;
+        try {
+          await post("/studio/api/todos", { text: text.value.trim(), due: due.value.trim() });
+          render();
+        } catch (error) {
+          status.hidden = false;
+          status.textContent = error.message;
+        }
+      },
+    }, [text, due, el("div", { class: "row" }, [el("button", { class: "primary", type: "submit", text: "Add" })]), status]);
+    const when = (ms) => {
+      const date = new Date(ms);
+      const today = new Date();
+      const sameDay = date.toDateString() === today.toDateString();
+      const clock = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return sameDay ? `today ${clock}` : `${date.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} ${clock}`;
+    };
+    const rows = items.length
+      ? items.map((item) =>
+          el("div", { class: "list-item todo-row" }, [
+            el("input", {
+              type: "checkbox",
+              "aria-label": `Done: ${item.text}`,
+              onchange: async () => {
+                try {
+                  await post(`/studio/api/todos/${item.id}/done`);
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+            el("span", { class: "grow" }, [
+              item.text,
+              item.due_at
+                ? el("span", { class: `muted todo-due${item.due_at < Date.now() ? " overdue" : ""}`, text: ` · ${when(item.due_at)}` })
+                : null,
+            ]),
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Remove",
+              "aria-label": `Remove ${item.text}`,
+              onclick: async () => {
+                try {
+                  await remove(`/studio/api/todos/${item.id}`);
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ])
+        )
+      : [empty("Nothing to do. Add something here, or tell Jarvis \"remind me to call Sam at 5pm\".")];
+    return card(
+      "To-dos and reminders",
+      [form, ...rows],
+      "Jarvis and the Helper add to this list too. Reminders are announced on the HUD when they are due."
+    );
+  }
+
+  // Videos the Researcher turned into notes for the team. Paste a link (or
+  // a video file's path on this PC) to watch one; open a note to read it and
+  // jump to any moment of the video.
+  function videoCard(videos) {
+    const link = el("input", {
+      type: "text",
+      placeholder: "Paste a video link, or a video file's path on this PC",
+      "aria-label": "Video link or file",
+    });
+    const focus = el("input", { type: "text", placeholder: "What should the team learn from it? (optional)", "aria-label": "Focus" });
+    const show = el("input", { type: "checkbox", "aria-label": "Play it in the desktop browser" });
+    const status = el("p", { class: "muted", hidden: true });
+    const study = el("button", {
+      class: "primary",
+      type: "submit",
+      text: "Watch it",
+    });
+    const form = el("form", {
+      class: "video-study",
+      onsubmit: async (event) => {
+        event.preventDefault();
+        if (!link.value.trim()) return;
+        study.disabled = true;
+        status.hidden = false;
+        status.textContent =
+          "Watching: reading its captions, or listening to it on this PC when it has none, then writing notes… a long video can take a few minutes.";
+        try {
+          const note = await post("/studio/api/videos", {
+            url: link.value.trim(),
+            focus: focus.value.trim(),
+            show: show.checked,
+          });
+          link.value = "";
+          focus.value = "";
+          status.hidden = true;
+          await render();
+          openVideo(note);
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          study.disabled = false;
+        }
+      },
+    }, [
+      link,
+      focus,
+      el("label", { class: "check-row" }, [show, el("span", { text: "Play it in the desktop browser so I can watch along" })]),
+      el("div", { class: "row" }, [study]),
+      status,
+    ]);
+    const rows = videos.length
+      ? videos.map((video) =>
+          el("div", { class: "list-item video-row" }, [
+            el("span", { class: "grow" }, [
+              el("strong", { text: video.title }),
+              el("br"),
+              el("span", { class: "muted", text: `${video.length ? `${video.length} · ` : ""}${video.source === "research" ? "from research" : video.source === "user" ? "from you" : "studied by an agent"}` }),
+              video.summary ? el("p", { class: "muted video-summary", text: video.summary }) : null,
+            ]),
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Open",
+              onclick: async () => {
+                try {
+                  openVideo(await api(`/studio/api/videos/${video.id}`));
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+          ])
+        )
+      : [empty("No videos yet. Research saves every video it reads here, or paste one above.")];
+    return card(
+      "Video notes",
+      [form, ...rows],
+      "Videos turned into notes the agents use: summary, key points, steps, and the transcript with times. YouTube, other sites, and video files on this PC (in File Explorer, Shift + right-click a video, Copy as path). Videos with no captions are listened to on this PC. Every note is also in the team's memory."
+    );
+  }
+
+  // The image engine: paints cartoon places and characters on this PC
+  // (stable-diffusion.cpp with a cartoon style), or with an online service.
+  function gigabytes(bytes) {
+    return `${(bytes / 1e9).toFixed(1)} GB`;
+  }
+
+  function imageCard(info) {
+    const status = el("p", { class: "muted", role: "status", hidden: true });
+    const say = (text) => {
+      status.hidden = !text;
+      status.textContent = text || "";
+    };
+    const install = info.install || {};
+    const setup = info.setup || {};
+    const sample = info.sample || {};
+    const downloading = ["checking", "downloading", "unpacking"].includes(install.state) || setup.state === "downloading";
+    const painting = info.busy || sample.state === "painting";
+    const cloud = info.source === "cloud";
+    let state;
+    if (cloud) {
+      state = info.cloud_ready ? "Painting with your online image service." : "Add the online image service's address and key in Settings.";
+    } else if (downloading) {
+      const part = install.state && install.state !== "ready" && install.state !== "idle" && install.state !== "failed" ? install : setup;
+      const share = part.total ? ` ${Math.round((part.done / part.total) * 100)}% of ${gigabytes(part.total)}` : "";
+      state = `Downloading${part === install ? " the engine" : " the style"}…${share}`;
+    } else if (install.state === "failed") {
+      state = `The engine download stopped: ${install.error}`;
+    } else if (setup.state === "failed") {
+      state = `The style download stopped: ${setup.error}`;
+    } else if (info.ready) {
+      state = `Ready: ${info.style_label} (engine ${info.version || "installed"}).`;
+    } else {
+      state = `Not set up yet. Set up downloads the engine and the style (about ${gigabytes(info.style_size || 0)}), once.`;
+    }
+    const words = el("input", { type: "text", placeholder: "Who or where to paint, e.g. a teen hero with spiky hair", "aria-label": "What to paint" });
+    const kind = el("select", { "aria-label": "Character or place" }, [
+      el("option", { value: "character", text: "Character" }),
+      el("option", { value: "place", text: "Place" }),
+    ]);
+    const art = { auto: "painted once the engine is set up", painted: "painted", drawn: "drawn by Studio" }[info.cartoon_art] || info.cartoon_art;
+    const node = card(
+      "Image engine",
+      [
+        el("p", { class: install.state === "failed" || setup.state === "failed" ? "warn" : "", text: state }),
+        el("p", { class: "muted", text: `Cartoons are ${art}. Change it in Settings (Cartoon Art, Image Engine, Image Style).` }),
+        !cloud && !info.ready
+          ? el("div", { class: "row" }, [
+              el("button", {
+                class: "primary",
+                type: "button",
+                text: "Set up the image engine",
+                disabled: downloading,
+                onclick: async () => {
+                  try {
+                    await post("/studio/api/image-engine/install", {});
+                    render();
+                  } catch (error) {
+                    say(error.message);
+                  }
+                },
+              }),
+            ])
+          : null,
+        info.painting_ready
+          ? el("form", {
+              class: "row",
+              onsubmit: async (event) => {
+                event.preventDefault();
+                try {
+                  await post("/studio/api/image-engine/sample", { prompt: words.value.trim(), kind: kind.value });
+                  render();
+                } catch (error) {
+                  say(error.message);
+                }
+              },
+            }, [words, kind, el("button", { class: "secondary", type: "submit", text: "Paint a test", disabled: painting })])
+          : null,
+        painting ? el("p", { class: "muted", text: info.steps ? `Painting… step ${info.step} of ${info.steps}` : "Painting…" }) : null,
+        sample.state === "failed" ? el("p", { class: "warn", text: `The test stopped: ${sample.error}` }) : null,
+        sample.state === "ready"
+          ? el("img", { class: "image-sample", src: `/studio/api/image-engine/sample.png?made=${sample.made}`, alt: "The test picture" })
+          : null,
+        status,
+      ],
+      "Paints every place and character in a cartoon in the early-2000s superhero cartoon style (Teen Titans, Ben 10: Alien Force) with stable-diffusion.cpp on your graphics card, free and offline. Each character is painted once and reused, so they look the same in every video. The engine and the style are kept in the Repo vault, so they still install if they leave GitHub or Hugging Face."
+    );
+    if (downloading || painting) {
+      setTimeout(async () => {
+        if (!document.body.contains(node)) return;
+        try {
+          node.replaceWith(imageCard(await api("/studio/api/image-engine")));
+        } catch {
+          /* the next page load shows it */
+        }
+      }, 2500);
+    }
+    return node;
+  }
+
+  // Claw Code: built on this PC from FCC's own copy of its source, and
+  // opened in a terminal connected to FCC (so it uses FCC's models).
+  function clawCard(claw) {
+    const folder = el("input", { type: "text", placeholder: "Folder to work in (empty: your home folder)", "aria-label": "Claw Code folder" });
+    const status = el("p", { class: "muted", role: "status", hidden: true });
+    const log = el("pre", { class: "engine-log claw-log", text: (claw.log || []).join("\n") });
+    const say = (text) => {
+      status.hidden = !text;
+      status.textContent = text || "";
+    };
+    const building = claw.state === "building";
+    const state = !claw.bundled
+      ? "FCC's copy of Claw Code is missing: reinstall FCC."
+      : building
+        ? "Building… the first build takes a few minutes."
+        : claw.built
+          ? `Built and ready (${claw.commit}).`
+          : claw.state === "failed"
+            ? `The build stopped: ${claw.error}`
+            : claw.rust
+              ? "Not built yet. Press Build Claw Code."
+              : claw.rust_help;
+    const node = card(
+      "Claw Code",
+      [
+        el("p", { class: claw.state === "failed" ? "warn" : "", text: state }),
+        el("div", { class: "row" }, [
+          el("button", {
+            class: claw.built ? "secondary" : "primary",
+            type: "button",
+            text: claw.built ? "Build again" : "Build Claw Code",
+            disabled: building || !claw.bundled,
+            onclick: async () => {
+              try {
+                await post("/studio/api/claw/build", {});
+                render();
+              } catch (error) {
+                say(error.message);
+              }
+            },
+          }),
+          !claw.rust
+            ? el("a", { class: "button-link secondary", href: "https://rustup.rs", target: "_blank", rel: "noopener", text: "Get Rust" })
+            : null,
+        ]),
+        claw.built
+          ? el("form", {
+              class: "row",
+              onsubmit: async (event) => {
+                event.preventDefault();
+                try {
+                  const opened = await post("/studio/api/claw/open", { folder: folder.value.trim() });
+                  say(`Opened in ${opened.opened_in}.`);
+                } catch (error) {
+                  say(error.message);
+                }
+              },
+            }, [folder, el("button", { class: "primary", type: "submit", text: "Open Claw Code" })])
+          : null,
+        status,
+        claw.log && claw.log.length ? el("details", { open: building || claw.state === "failed" }, [el("summary", { text: "Build log" }), log]) : null,
+      ],
+      "Claw Code is an open coding agent for the terminal, like Claude Code. FCC keeps its source, so it works even if its GitHub repo is deleted: Studio builds it on this PC (Rust needed) and opens it connected to FCC, so it thinks with your models, local ones included. In a terminal, fcc-claw does the same."
+    );
+    if (building) {
+      setTimeout(async () => {
+        if (!document.body.contains(node)) return;
+        try {
+          node.replaceWith(clawCard(await api("/studio/api/claw")));
+        } catch {
+          /* the next page load shows it */
+        }
+      }, 3000);
+    }
+    return node;
+  }
+
+  // The browser window on the desktop the agents drive to research and to
+  // play videos while the user watches.
+  function deskCard(desk) {
+    const address = el("input", { type: "text", placeholder: "A page to open, e.g. youtube.com", "aria-label": "Page to open" });
+    const status = el("p", { class: "muted", hidden: true });
+    const run = async (path, payload) => {
+      status.hidden = false;
+      status.textContent = "Working…";
+      try {
+        await post(path, payload);
+        status.hidden = true;
+        render();
+      } catch (error) {
+        status.textContent = error.message;
+      }
+    };
+    const state = !desk.installed
+      ? el("p", {
+          class: "muted",
+          text: "Not installed yet: run the Windows installer again (it adds it), or run uv sync --extra studio_desk.",
+        })
+      : desk.open
+        ? el("p", {}, [
+            el("strong", { text: "Open: " }),
+            el("span", { text: desk.title || desk.url || "a blank page" }),
+            desk.used_by ? el("span", { class: "muted", text: ` · last used by ${desk.used_by}` }) : null,
+          ])
+        : el("p", { class: "muted", text: "Closed. It opens by itself when an agent needs it." });
+    return card(
+      "Desktop browser",
+      [
+        state,
+        el("form", {
+          class: "row",
+          onsubmit: (event) => {
+            event.preventDefault();
+            if (address.value.trim()) run("/studio/api/desk/open", { url: address.value.trim() });
+          },
+        }, [
+          address,
+          el("button", { class: "secondary", type: "submit", text: "Open", disabled: !desk.installed }),
+          desk.open
+            ? el("button", { class: "danger", type: "button", text: "Close it", onclick: () => run("/studio/api/desk/close", {}) })
+            : null,
+        ]),
+        desk.listening
+          ? null
+          : el("p", { class: "muted", text: "Listening to videos with no captions needs speech recognition: set up the voice in Voice below." }),
+        status,
+      ],
+      "A real Edge or Chrome window on your desktop that Jarvis and the Researcher drive while you watch: they search, read pages, click links, scroll, and play videos, then turn them into notes. It has its own Studio profile, so it never sees your passwords, cookies, or tabs, and agents never type, sign in, or buy. Say \"open YouTube and watch a video about …\" in the chat."
+    );
+  }
+
+  function openVideo(note) {
+    const list = (label, items, numbered) =>
+      items && items.length
+        ? [
+            el("h3", { text: label }),
+            el(numbered ? "ol" : "ul", {}, items.map((item) => el("li", { text: item }))),
+          ]
+        : [];
+    const youtube = /youtube\.com\/watch|youtu\.be\//.test(note.url);
+    const web = /^https?:\/\//.test(note.url);
+    const moment = (line) =>
+      el("div", { class: "video-line" }, [
+        youtube
+          ? el("a", {
+              class: "pill",
+              href: `${note.url}&t=${line.seconds}s`,
+              target: "_blank",
+              rel: "noopener",
+              text: line.at,
+            })
+          : el("span", { class: "pill", text: line.at }),
+        el("span", { text: line.text }),
+      ]);
+    const find = el("input", { type: "search", placeholder: "Find in the transcript", "aria-label": "Find in the transcript" });
+    const lines = el("div", { class: "video-transcript" }, (note.transcript || []).map(moment));
+    find.addEventListener("input", () => {
+      const query = find.value.trim().toLowerCase();
+      for (const row of lines.children) {
+        row.hidden = Boolean(query) && !row.textContent.toLowerCase().includes(query);
+      }
+    });
+    openSheet(note.title, [
+      el("p", { class: "row" }, [
+        web ? el("a", { href: note.url, target: "_blank", rel: "noopener", text: youtube ? "Watch on YouTube" : "Open the video" }) : el("span", { class: "muted", text: note.url }),
+        el("button", {
+          class: "secondary",
+          type: "button",
+          text: "Play in the desktop browser",
+          onclick: async () => {
+            try {
+              await post("/studio/api/desk/play", { url: note.url });
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+      ]),
+      note.focus ? el("p", { class: "muted", text: `Studied for: ${note.focus}` }) : null,
+      note.summary ? el("p", { text: note.summary }) : null,
+      ...list("Key points", note.points),
+      ...list("Steps", note.steps, true),
+      ...list("Names", note.names),
+      ...list("Watch out", note.cautions),
+      el("details", { class: "video-details" }, [
+        el("summary", { text: `Transcript (${note.lines} lines${note.length ? `, ${note.length}` : ""})` }),
+        find,
+        lines,
+      ]),
+      el("button", {
+        class: "danger",
+        type: "button",
+        text: "Forget this video",
+        onclick: async () => {
+          try {
+            await remove(`/studio/api/videos/${note.id}`);
+            closeSheet();
+            render();
+          } catch (error) {
+            notify(error.message);
+          }
+        },
+      }),
+    ]);
+  }
+
+  async function renderMore() {
+    const generation = renderGeneration;
+    const [overview, vault, { agents }, connect, voiceInfo, videos, todos, studies, book, added, repoVault, starterRepos, desk, claw, imageInfo] = await Promise.all([
+      api("/studio/api/overview"),
+      api("/studio/api/obsidian"),
+      api("/studio/api/agents"),
+      api("/studio/api/connect"),
+      api("/studio/api/voice"),
+      api("/studio/api/videos").catch(() => ({ videos: [] })),
+      api("/studio/api/todos").catch(() => ({ todos: [] })),
+      api("/studio/api/studies").catch(() => ({ studies: [] })),
+      api("/studio/api/playbook").catch(() => null),
+      api("/studio/api/extensions").catch(() => ({ extensions: [] })),
+      api("/studio/api/vault").catch(() => ({ items: [], bytes: 0 })),
+      api("/studio/api/starters").catch(() => ({ starters: [] })),
+      api("/studio/api/desk").catch(() => ({ installed: false, open: false })),
+      api("/studio/api/claw").catch(() => null),
+      api("/studio/api/image-engine").catch(() => null),
+    ]);
+    const picker = el("select", {}, [
+      overview.settings.shared_memory
+        ? el("option", { value: "shared", text: "Team memory (shared)" })
+        : null,
+      ...agents.map((agent) => el("option", { value: agent.id, text: agent.name })),
+    ]);
+    if (generation !== renderGeneration) return;
+    const finder = el("input", {
+      type: "search",
+      class: "page-search",
+      autocomplete: "off",
+      "aria-label": "Search settings",
+      placeholder: "Search settings…",
+    });
+    const nothing = el("p", { class: "muted", hidden: true, text: "Nothing here matches. Admin settings on the PC have the rest." });
+    finder.addEventListener("input", () => {
+      const query = finder.value.trim().toLowerCase();
+      let shown = 0;
+      for (const node of view.querySelectorAll(":scope > .card")) {
+        const hit = !query || node.textContent.toLowerCase().includes(query);
+        node.hidden = !hit;
+        if (hit) shown += 1;
+      }
+      nothing.hidden = shown > 0;
+    });
+    view.replaceChildren(
+      finder,
+      nothing,
+      card("Settings", [
+        el("p", {
+          class: "muted",
+          text: "Every Free Claude Code option: providers and keys, models, messaging, Studio, and voice.",
+        }),
+        el("button", { class: "primary", type: "button", text: "Open settings", onclick: () => go("settings") }),
+      ]),
+      card("Connectors and other AI tools", [
+        el("p", {
+          class: "muted",
+          text: "Give the team Gmail, GitHub, Discord, Zapier and more, approve emails agents wrote, and use LCC from Claude Code, Codex, Cursor, or any OpenAI-compatible app.",
+        }),
+        el("button", { class: "primary", type: "button", text: "Open connectors", onclick: () => go("connectors") }),
+      ]),
+      learningCard(studies.studies || []),
+      ...(book ? [playbookCard(book)] : []),
+      extensionsCard(added.extensions || [], starterRepos.starters || []),
+      vaultCard(repoVault),
+      todoCard(todos.todos || []),
+      videoCard(videos.videos || []),
+      deskCard(desk),
+      ...(imageInfo ? [imageCard(imageInfo)] : []),
+      ...(claw ? [clawCard(claw)] : []),
+      voiceCard(voiceInfo),
+      webCard(overview.settings.web),
+      connectCard(connect),
+      phoneCard(),
+      card("Tuning", [
+        el("p", { class: "muted", text: "Very light tuning, on device or in the cloud." }),
+        el("button", {
+          class: "primary",
+          text: "Open tuning",
+          onclick: () => go("tune"),
+        }),
+      ]),
+      card("Local models", [
+        el("p", {
+          class: "muted",
+          text: `${overview.assets.length} tracked download(s).`,
+        }),
+        el("button", {
+          class: "primary",
+          text: "Open models",
+          onclick: () => go("models"),
+        }),
+      ]),
+      card("Obsidian", [
+        el("div", { class: "kv" }, [
+          el("span", { text: "Vault" }),
+          el("span", { text: vault.path || "not configured" }),
+          el("span", { text: "Folder" }),
+          el("span", { text: vault.folder }),
+          el("span", { text: "Writable" }),
+          el("span", { text: vault.writable ? "yes" : "no" }),
+          el("span", { text: "Notes" }),
+          el("span", { text: String(vault.note_count) }),
+        ]),
+        vault.path
+          ? null
+          : vault.candidates.length
+            ? el("p", {
+                class: "muted",
+                text: `Vaults found on this device: ${vault.candidates.join(", ")}. Put one in Settings, Obsidian Vault.`,
+              })
+            : el("p", {
+                class: "muted",
+                text: "Set Obsidian Vault in Settings to your vault's folder. On iOS that is usually in iCloud Drive under iCloud~md~obsidian.",
+              }),
+        el("p", {
+          class: "muted",
+          text: vault.memory_sync
+            ? "Memory mirroring is on: every agent's memory is kept in the vault as linked notes, one per memory. Edit a note or move it between the Working and Long-term folders, then sync to bring the change back."
+            : "Mirror every agent's memory into the vault as linked notes — one per memory, grouped by agent and by working vs long-term. Turn on Mirror Memory Into Obsidian in settings to keep it updated automatically.",
+        }),
+        el("div", { class: "row" }, [
+          el("button", {
+            class: "primary",
+            text: "Sync memory",
+            onclick: async () => {
+              try {
+                const result = await post("/studio/api/obsidian/memory/sync");
+                notify(`Pulled ${result.pulled} edit(s), wrote ${result.written} note(s).`);
+                render();
+              } catch (error) {
+                notify(error.message);
+              }
+            },
+          }),
+          el("button", {
+            class: "secondary",
+            text: "Pull edits only",
+            onclick: async () => {
+              try {
+                const result = await post("/studio/api/obsidian/memory/pull");
+                notify(`Pulled ${result.pulled} edit(s) from Obsidian.`);
+                render();
+              } catch (error) {
+                notify(error.message);
+              }
+            },
+          }),
+        ]),
+        el("label", {}, ["Import Inbox notes into", picker]),
+        el("button", {
+          class: "secondary",
+          text: "Import notes to memory",
+          onclick: async () => {
+            try {
+              const result = await post("/studio/api/obsidian/import", {
+                agent_id: picker.value,
+              });
+              notify(`Imported ${result.imported} note lines.`);
+            } catch (error) {
+              notify(error.message);
+            }
+          },
+        }),
+      ]),
+      card("Settings", [
+        el("p", {
+          class: "muted",
+          text: "Models, tuning backend, teacher, and Obsidian all live in the Studio section of the admin settings.",
+        }),
+        el("a", { class: "pill", href: "/admin", text: "Open admin settings" }),
+      ])
+    );
+  }
+
+  /* -------------------------------------------------------------------- hud */
+
+  const VOICE_KEY = "fcc.studio.voice";
+  /* A living gold core: a sphere of glowing filaments that breathes, swirls,
+     and answers to voice. Pure canvas, so it runs on phones and old GPUs. */
+  const ORB_STATES = {
+    idle: { spin: 0.14, swirl: 0.0, heat: 0.75, spread: 0.02, streak: 0.25 },
+    thinking: { spin: 0.55, swirl: 0.9, heat: 1.0, spread: 0.04, streak: 0.8 },
+    listening: { spin: 0.2, swirl: 0.15, heat: 0.95, spread: 0.1, streak: 0.35 },
+    hearing: { spin: 0.4, swirl: 0.5, heat: 1.05, spread: 0.06, streak: 0.6 },
+    speaking: { spin: 0.28, swirl: 0.25, heat: 1.1, spread: 0.12, streak: 0.55 },
+    offline: { spin: 0.04, swirl: 0.0, heat: 0.3, spread: 0.0, streak: 0.05 },
+  };
+
+  function createCoreOrb(canvas) {
+    const ctx = canvas.getContext("2d");
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const small = Math.min(window.innerWidth, window.innerHeight) < 700;
+    // Fewer particles and 30 frames a second on phones and older PCs keep
+    // the core smooth and leave the processor for the AI.
+    const modest = small || (navigator.hardwareConcurrency || 4) <= 4;
+    const frameGap = modest ? 1000 / 30 : 0;
+    let lastFrame = 0;
+    const count = small ? 900 : modest ? 1400 : 2200;
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    const points = Array.from({ length: count }, (_, i) => {
+      const y = 1 - (i / (count - 1)) * 2;
+      const r = Math.sqrt(1 - y * y);
+      const theta = golden * i;
+      const shell = Math.random() < 0.22 ? 0.25 + Math.random() * 0.6 : 0.86 + Math.random() * 0.18;
+      return {
+        x: Math.cos(theta) * r,
+        y,
+        z: Math.sin(theta) * r,
+        shell,
+        size: 0.6 + Math.random() * 1.5,
+        phase: Math.random() * Math.PI * 2,
+        streak: Math.random() < 0.22,
+      };
+    });
+    const rings = [0.35, -0.6, 1.1].map((tilt, index) => ({
+      tilt,
+      speed: 0.25 + index * 0.18,
+      radius: 1.08 + index * 0.07,
+      dots: Array.from({ length: small ? 60 : 110 }, (_, i) => ({
+        angle: (i / (small ? 60 : 110)) * Math.PI * 2,
+        jitter: Math.random() * 0.05,
+      })),
+    }));
+    // Filaments: glowing strands wrapped around the sphere on tilted circles.
+    const filaments = Array.from({ length: small ? 16 : 28 }, () => ({
+      tilt: Math.random() * Math.PI,
+      turn: Math.random() * Math.PI * 2,
+      radius: 0.55 + Math.random() * 0.5,
+      length: 0.8 + Math.random() * 2.2,
+      offset: Math.random() * Math.PI * 2,
+      speed: (Math.random() - 0.5) * 0.9,
+    }));
+    const state = { name: "idle", current: { ...ORB_STATES.idle }, level: 0, burst: 0, tiltX: 0, tiltY: 0, targetX: 0, targetY: 0 };
+    let width = 0;
+    let height = 0;
+    let frame = 0;
+    let last = performance.now();
+    let spin = 0;
+    let visible = true;
+
+    const resize = () => {
+      const box = canvas.getBoundingClientRect();
+      const dpr = Math.min(modest ? 1.25 : 2, window.devicePixelRatio || 1);
+      width = Math.max(1, box.width);
+      height = Math.max(1, box.height);
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (still) draw(0);
+    };
+    const sizer = new ResizeObserver(resize);
+    sizer.observe(canvas);
+    const watcher = new IntersectionObserver((entries) => {
+      visible = entries.some((entry) => entry.isIntersecting);
+    });
+    watcher.observe(canvas);
+    const onPointer = (event) => {
+      const box = canvas.getBoundingClientRect();
+      state.targetX = ((event.clientY - box.top) / box.height - 0.5) * 0.6;
+      state.targetY = ((event.clientX - box.left) / box.width - 0.5) * 0.6;
+    };
+    canvas.addEventListener("pointermove", onPointer);
+
+    function project(x, y, z, radius, cx, cy) {
+      // Rotate around Y (spin + pointer) then X (tilt), then perspective.
+      const ay = spin + state.tiltY;
+      const cosY = Math.cos(ay);
+      const sinY = Math.sin(ay);
+      const x1 = x * cosY + z * sinY;
+      const z1 = -x * sinY + z * cosY;
+      const ax = 0.35 + state.tiltX;
+      const cosX = Math.cos(ax);
+      const sinX = Math.sin(ax);
+      const y2 = y * cosX - z1 * sinX;
+      const z2 = y * sinX + z1 * cosX;
+      const scale = 2.6 / (2.6 + z2);
+      return { px: cx + x1 * radius * scale, py: cy + y2 * radius * scale, depth: z2, scale };
+    }
+
+    function draw(time) {
+      const t = time / 1000;
+      const goal = ORB_STATES[state.name] || ORB_STATES.idle;
+      for (const key of Object.keys(goal)) {
+        state.current[key] += (goal[key] - state.current[key]) * 0.05;
+      }
+      const c = state.current;
+      const speakPulse = state.name === "speaking" ? 0.35 + 0.35 * Math.abs(Math.sin(t * 8.5)) * (0.6 + 0.4 * Math.sin(t * 2.3)) : 0;
+      const level = Math.max(state.level, speakPulse);
+      state.burst *= 0.93;
+      state.tiltX += (state.targetX - state.tiltX) * 0.04;
+      state.tiltY += (state.targetY - state.tiltY) * 0.04;
+      // The core drifts a little, like it is floating, and leans toward you.
+      const cx = width / 2 + Math.sin(t * 0.37) * width * 0.035 + state.tiltY * width * 0.05;
+      const cy = height / 2 + Math.cos(t * 0.29) * height * 0.03 + state.tiltX * height * 0.05;
+      const base = Math.min(width, height) * 0.34;
+      const breathe = 1 + 0.025 * Math.sin(t * 1.3) + level * 0.18 + state.burst * 0.25;
+      const radius = base * breathe;
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.globalCompositeOperation = "lighter";
+
+      // Halo and core glow.
+      const halo = ctx.createRadialGradient(cx, cy, radius * 0.6, cx, cy, radius * 1.7);
+      halo.addColorStop(0, `rgba(255, 170, 60, ${0.1 * c.heat})`);
+      halo.addColorStop(1, "rgba(255, 140, 20, 0)");
+      ctx.fillStyle = halo;
+      ctx.fillRect(0, 0, width, height);
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * (0.8 + level * 0.3));
+      glow.addColorStop(0, `rgba(255, 250, 230, ${0.85 * c.heat})`);
+      glow.addColorStop(0.12, `rgba(255, 214, 130, ${0.6 * c.heat})`);
+      glow.addColorStop(0.45, `rgba(230, 140, 40, ${0.2 * c.heat})`);
+      glow.addColorStop(1, "rgba(120, 50, 0, 0)");
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, width, height);
+
+      // Energy filaments.
+      for (const f of filaments) {
+        f.offset += f.speed * 0.012 * (1 + c.swirl * 3);
+        const steps = 26;
+        const cosT = Math.cos(f.tilt);
+        const sinT = Math.sin(f.tilt);
+        let previous = null;
+        for (let i = 0; i <= steps; i += 1) {
+          const a = f.offset + (i / steps) * f.length;
+          const wave = 1 + 0.05 * Math.sin(a * 5 + t * 2) + level * 0.1;
+          const x0 = Math.cos(a) * f.radius * wave;
+          const y0 = Math.sin(a) * f.radius * wave;
+          const x = x0 * Math.cos(f.turn) - y0 * sinT * Math.sin(f.turn);
+          const y = y0 * cosT;
+          const z = x0 * Math.sin(f.turn) + y0 * sinT * Math.cos(f.turn);
+          const q = project(x, y, z, radius, cx, cy);
+          if (previous) {
+            const near = (1 - q.depth) / 2;
+            const fade = Math.sin((i / steps) * Math.PI);
+            ctx.strokeStyle = `rgba(255, ${180 + Math.round(near * 60)}, 90, ${(0.05 + near * 0.3) * fade * c.heat + level * 0.1})`;
+            ctx.lineWidth = 0.6 + near * 0.9;
+            ctx.beginPath();
+            ctx.moveTo(previous.px, previous.py);
+            ctx.lineTo(q.px, q.py);
+            ctx.stroke();
+          }
+          previous = q;
+        }
+      }
+
+      // Shell particles.
+      for (const p of points) {
+        const wobble = 1 + c.spread * Math.sin(t * 3 + p.phase) + level * 0.12 * Math.sin(t * 11 + p.phase * 3);
+        const swirl = c.swirl * Math.sin(t * 0.8 + p.y * 3) * 0.6;
+        const cs = Math.cos(swirl);
+        const sn = Math.sin(swirl);
+        const x = (p.x * cs - p.z * sn) * p.shell * wobble;
+        const z = (p.x * sn + p.z * cs) * p.shell * wobble;
+        const q = project(x, p.y * p.shell * wobble, z, radius, cx, cy);
+        const near = (1 - q.depth) / 2;
+        const flicker = 0.55 + 0.45 * Math.sin(t * 2.2 + p.phase);
+        const alpha = Math.min(1, (0.2 + near * 0.85) * flicker * c.heat);
+        const size = p.size * q.scale * (1 + level * 0.6);
+        ctx.fillStyle = `rgba(255, ${170 + Math.round(near * 70)}, ${60 + Math.round(near * 90)}, ${alpha})`;
+        if (p.streak && c.streak > 0.1) {
+          const tail = project(x * 0.94, p.y * p.shell * wobble * 0.94, z * 0.94, radius, cx, cy);
+          ctx.strokeStyle = ctx.fillStyle;
+          ctx.lineWidth = size * 0.7;
+          ctx.beginPath();
+          ctx.moveTo(q.px, q.py);
+          ctx.lineTo(q.px + (q.px - tail.px) * c.streak * 3, q.py + (q.py - tail.py) * c.streak * 3);
+          ctx.stroke();
+        } else {
+          ctx.fillRect(q.px - size / 2, q.py - size / 2, size, size);
+        }
+      }
+
+      // Orbital rings.
+      for (const ring of rings) {
+        const turn = t * ring.speed * (1 + c.swirl);
+        for (const dot of ring.dots) {
+          const a = dot.angle + turn;
+          const rx = Math.cos(a) * ring.radius;
+          const rz = Math.sin(a) * ring.radius;
+          const ry = rz * Math.sin(ring.tilt);
+          const q = project(rx, ry + dot.jitter, rz * Math.cos(ring.tilt), radius, cx, cy);
+          const near = (1 - q.depth) / 2;
+          ctx.fillStyle = `rgba(255, 200, 110, ${(0.08 + near * 0.35) * c.heat})`;
+          ctx.fillRect(q.px, q.py, 1.4 * q.scale, 1.4 * q.scale);
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+    }
+
+    function loop(now) {
+      frame = requestAnimationFrame(loop);
+      if (!visible || document.hidden) return;
+      if (frameGap && now - lastFrame < frameGap) return;
+      lastFrame = now;
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      spin += dt * (state.current.spin + state.burst * 2);
+      draw(now);
+    }
+    resize();
+    if (!still) frame = requestAnimationFrame(loop);
+
+    return {
+      setState(name) {
+        if (state.name === name) return;
+        state.name = name;
+        if (still) draw(performance.now());
+      },
+      setLevel(value) {
+        state.level = Math.max(0, Math.min(1, value || 0));
+      },
+      burst() {
+        state.burst = 1;
+        if (still) draw(performance.now());
+      },
+      destroy() {
+        cancelAnimationFrame(frame);
+        sizer.disconnect();
+        watcher.disconnect();
+        canvas.removeEventListener("pointermove", onPointer);
+      },
+    };
+  }
+
+  const hud = {
+    lastSeq: 0,
+    spokenSeq: 0,
+    chatId: null,
+    name: "Jarvis",
+    thinking: false,
+    speaking: false,
+    listening: false,
+    offline: false,
+    unlocked: false,
+    recognizer: null,
+    optimistic: null,
+    keys: {},
+    orb: null,
+    clockTimer: null,
+    roomId: null,
+  };
+
+  const storedGet = (key) => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const storedSet = (key, value) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* private mode: the choice lasts for this visit only */
+    }
+  };
+
+  const voiceOn = () => storedGet(VOICE_KEY) !== "off";
+  const speechSupported = () => "speechSynthesis" in window;
+  const Recognition = () => window.SpeechRecognition || window.webkitSpeechRecognition;
+  const SILENT_WAV =
+    "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+  const SPOKEN_CHUNK = 220;
+  const FIRST_SPOKEN = 90;
+  const TURN_SILENCE_SECONDS = 1.1;
+  const TURN_MAX_SECONDS = 20;
+  const TURN_WAIT_SECONDS = 8;
+  const voice = {
+    status: null,
+    audio: null,
+    unlocked: false,
+    token: 0,
+    talk: false,
+    stream: null,
+    ctx: null,
+    stopRecording: null,
+    setupRequested: false,
+  };
+
+  function authHeaders(extra = {}) {
+    const headers = { ...extra };
+    const key = token();
+    if (key) headers["x-api-key"] = key;
+    return headers;
+  }
+
+  function voiceStatus() {
+    return voice.status || { speak: "browser", listen: "browser", speak_ready: false, listen_ready: false };
+  }
+
+  const renderedVoice = () => {
+    const status = voiceStatus();
+    return status.speak !== "browser" && status.speak_ready;
+  };
+
+  const recordedEars = () => {
+    const status = voiceStatus();
+    return (
+      status.listen !== "browser" &&
+      status.listen_ready &&
+      window.isSecureContext &&
+      Boolean(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)
+    );
+  };
+
+  function pickVoice() {
+    const voices = speechSynthesis.getVoices();
+    const english = voices.filter((item) => /^en[-_]GB/i.test(item.lang));
+    return (
+      english.find((item) => /daniel|arthur|george|ryan|male/i.test(item.name)) ||
+      english[0] ||
+      voices.find((item) => /^en/i.test(item.lang)) ||
+      null
+    );
+  }
+
+  function unlockSpeech() {
+    // iOS only lets a page make sound after a tap has started some once.
+    if (!voice.audio) voice.audio = new Audio();
+    if (voice.unlocked) return;
+    voice.unlocked = true;
+    voice.audio.src = SILENT_WAV;
+    voice.audio.play().catch(() => {});
+    if (speechSupported()) {
+      const silent = new SpeechSynthesisUtterance(" ");
+      silent.volume = 0;
+      speechSynthesis.speak(silent);
+    }
+  }
+
+  function spokenParts(text) {
+    const clean = text
+      .replace(/```[\s\S]*?(```|$)/g, " I've put the code on screen. ")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/https?:\/\/\S+/g, "the link on screen")
+      .replace(/\s*\[\d+\]/g, "")
+      .replace(/[*_#>|`~]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const sentences = clean.match(/[^.!?]+[.!?]+["')\]]*|[^.!?]+$/g) || [];
+    const parts = [];
+    let current = "";
+    // The first piece is one short sentence (or its first clause), so the
+    // voice starts as soon as possible; later pieces are longer and flow.
+    const pieces = sentences.map((item) => item.trim()).filter(Boolean);
+    if (pieces.length) {
+      const first = pieces[0];
+      const comma = first.length > FIRST_SPOKEN ? first.slice(0, FIRST_SPOKEN).lastIndexOf(", ") : -1;
+      if (comma > 20) pieces.splice(0, 1, first.slice(0, comma + 1), first.slice(comma + 2));
+      parts.push(pieces.shift());
+    }
+    for (const sentence of pieces) {
+      if (current && `${current} ${sentence}`.length > SPOKEN_CHUNK) {
+        parts.push(current);
+        current = sentence;
+      } else {
+        current = current ? `${current} ${sentence}` : sentence;
+      }
+    }
+    if (current) parts.push(current);
+    return parts.slice(0, 14);
+  }
+
+  function setSpeaking(on, refs) {
+    hud.speaking = on;
+    if (refs) hudState(refs);
+  }
+
+  function stopSpeaking(refs) {
+    voice.token += 1;
+    voice.speech = null;
+    if (voice.audio && voice.unlocked) voice.audio.pause();
+    if (speechSupported()) speechSynthesis.cancel();
+    setSpeaking(false, refs);
+  }
+
+  function playBlob(blob, turn) {
+    return new Promise((resolve) => {
+      const audio = voice.audio || (voice.audio = new Audio());
+      const url = URL.createObjectURL(blob);
+      let watch = null;
+      const finish = () => {
+        audio.onended = audio.onerror = null;
+        clearInterval(watch);
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      watch = setInterval(() => {
+        if (turn !== voice.token) {
+          audio.pause();
+          finish();
+        }
+      }, 100);
+      audio.onended = finish;
+      audio.onerror = finish;
+      audio.src = url;
+      audio.play().catch(finish);
+    });
+  }
+
+  function speakWithBrowser(text, refs, done) {
+    if (!speechSupported() || !voice.unlocked) return done?.();
+    const turn = voice.token;
+    const parts = spokenParts(text);
+    if (!parts.length) return done?.();
+    setSpeaking(true, refs);
+    parts.forEach((part, index) => {
+      const utterance = new SpeechSynthesisUtterance(part);
+      const chosen = pickVoice();
+      if (chosen) utterance.voice = chosen;
+      utterance.rate = 1.1;
+      utterance.pitch = 0.95;
+      if (index === parts.length - 1) {
+        utterance.onend = utterance.onerror = () => {
+          if (turn !== voice.token) return;
+          setSpeaking(false, refs);
+          done?.();
+        };
+      }
+      speechSynthesis.speak(utterance);
+    });
+  }
+
+  const renderSpeech = (part) =>
+    fetch("/studio/api/voice/speak", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ text: part }),
+    }).then((response) => (response.ok ? response.blob() : Promise.reject(new Error(`voice ${response.status}`))));
+
+  function speakBrowserPart(part, turn) {
+    return new Promise((resolve) => {
+      if (!speechSupported() || !voice.unlocked || turn !== voice.token) return resolve();
+      const utterance = new SpeechSynthesisUtterance(part);
+      const chosen = pickVoice();
+      if (chosen) utterance.voice = chosen;
+      utterance.rate = 1.1;
+      utterance.pitch = 0.95;
+      utterance.onend = utterance.onerror = () => resolve();
+      speechSynthesis.speak(utterance);
+    });
+  }
+
+  // Speak a reply while it is still being written: each finished sentence is
+  // voiced as soon as it appears (rendering the next while one plays), and
+  // finishSpeaking adds the rest once the reply is complete.
+  function speakAhead(text, refs) {
+    if (!voiceOn() || !text.trim()) return;
+    let stream = voice.speech;
+    if (!stream || stream.turn !== voice.token) {
+      stopSpeaking(refs);
+      stream = voice.speech = { turn: voice.token, chain: Promise.resolve() };
+      setSpeaking(true, refs);
+    }
+    const turn = stream.turn;
+    for (const part of spokenParts(text)) {
+      if (renderedVoice() && voice.unlocked) {
+        // Voice one piece at a time, in order: the first piece gets the whole
+        // voice engine instead of sharing it with every later sentence.
+        const blob = (stream.rendering || Promise.resolve())
+          .catch(() => {})
+          .then(() => (turn === voice.token ? renderSpeech(part) : Promise.reject(new Error("stopped"))));
+        stream.rendering = blob;
+        blob.catch(() => {});
+        stream.chain = stream.chain.then(async () => {
+          if (turn !== voice.token) return;
+          try {
+            await playBlob(await blob, turn);
+          } catch {
+            await speakBrowserPart(part, turn);
+          }
+        });
+      } else {
+        stream.chain = stream.chain.then(() => speakBrowserPart(part, turn));
+      }
+    }
+  }
+
+  function finishSpeaking(refs, done) {
+    const stream = voice.speech;
+    voice.speech = null;
+    if (!stream) return done?.();
+    stream.chain.then(() => {
+      if (stream.turn !== voice.token) return;
+      setSpeaking(false, refs);
+      done?.();
+    });
+  }
+
+  // Where the last whole sentence of a reply being written ends (0 if none).
+  function sentenceCut(text) {
+    let cut = 0;
+    for (const match of text.matchAll(/[.!?]["')\]]*\s/g)) cut = match.index + match[0].length;
+    const fences = text.slice(0, cut).split("```").length - 1;
+    if (fences % 2 === 1) cut = text.slice(0, cut).lastIndexOf("```");
+    return Math.max(0, cut);
+  }
+
+  async function sayAloud(text, refs, done) {
+    if (!voiceOn() || !text) return done?.();
+    stopSpeaking(refs);
+    if (!renderedVoice() || !voice.unlocked) return speakWithBrowser(text, refs, done);
+    const turn = voice.token;
+    const parts = spokenParts(text);
+    if (!parts.length) return done?.();
+    const render = renderSpeech;
+    setSpeaking(true, refs);
+    // Render the next sentence while this one plays, so speech flows.
+    let next = render(parts[0]);
+    for (let index = 0; index < parts.length; index += 1) {
+      let blob;
+      try {
+        blob = await next;
+      } catch {
+        if (turn !== voice.token) return;
+        setSpeaking(false, refs);
+        return speakWithBrowser(parts.slice(index).join(" "), refs, done);
+      }
+      if (turn !== voice.token) return;
+      next = index + 1 < parts.length ? render(parts[index + 1]) : null;
+      next?.catch(() => {});
+      await playBlob(blob, turn);
+      if (turn !== voice.token) return;
+    }
+    setSpeaking(false, refs);
+    done?.();
+  }
+
+  function encodeWav(chunks, rate, target = 16000) {
+    const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const input = new Float32Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      input.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const ratio = rate / target;
+    const count = Math.floor(length / ratio);
+    const view = new DataView(new ArrayBuffer(44 + count * 2));
+    const text = (at, value) => [...value].forEach((ch, i) => view.setUint8(at + i, ch.charCodeAt(0)));
+    text(0, "RIFF");
+    view.setUint32(4, 36 + count * 2, true);
+    text(8, "WAVE");
+    text(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, target, true);
+    view.setUint32(28, target * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    text(36, "data");
+    view.setUint32(40, count * 2, true);
+    for (let i = 0; i < count; i += 1) {
+      const start = Math.floor(i * ratio);
+      const end = Math.min(length, Math.floor((i + 1) * ratio));
+      let sum = 0;
+      for (let j = start; j < end; j += 1) sum += input[j];
+      const sample = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
+      view.setInt16(44 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    }
+    return new Blob([view], { type: "audio/wav" });
+  }
+
+  async function recordTurn(refs) {
+    if (!voice.stream) {
+      voice.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    }
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!voice.ctx) voice.ctx = new Context();
+    if (voice.ctx.state === "suspended") await voice.ctx.resume();
+    const ctx = voice.ctx;
+    const source = ctx.createMediaStreamSource(voice.stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    const chunks = [];
+    let heard = false;
+    let silence = 0;
+    let elapsed = 0;
+    let floor = 0.004;
+    return new Promise((resolve) => {
+      const finish = (keep) => {
+        processor.onaudioprocess = null;
+        source.disconnect();
+        processor.disconnect();
+        voice.stopRecording = null;
+        refs.root.style.setProperty("--level", "0");
+        hud.orb?.setLevel(0);
+        resolve(keep && heard ? encodeWav(chunks, ctx.sampleRate) : null);
+      };
+      voice.stopRecording = finish;
+      processor.onaudioprocess = (event) => {
+        const data = event.inputBuffer.getChannelData(0);
+        chunks.push(new Float32Array(data));
+        let power = 0;
+        for (let i = 0; i < data.length; i += 1) power += data[i] * data[i];
+        const level = Math.sqrt(power / data.length);
+        const seconds = data.length / ctx.sampleRate;
+        elapsed += seconds;
+        if (elapsed < 0.3) floor = Math.max(floor, level);
+        refs.root.style.setProperty("--level", Math.min(1, level * 12).toFixed(2));
+        hud.orb?.setLevel(Math.min(1, level * 12));
+        if (level > Math.max(0.015, floor * 3)) {
+          heard = true;
+          silence = 0;
+        } else if (heard) {
+          silence += seconds;
+        }
+        if ((heard && silence > TURN_SILENCE_SECONDS) || elapsed > TURN_MAX_SECONDS) finish(true);
+        else if (!heard && elapsed > TURN_WAIT_SECONDS) finish(false);
+      };
+      source.connect(processor);
+      processor.connect(ctx.destination);
+    });
+  }
+
+  function releaseMicrophone() {
+    voice.stream?.getTracks().forEach((track) => track.stop());
+    voice.stream = null;
+  }
+
+  function stopListening() {
+    if (hud.recognizer) {
+      try {
+        hud.recognizer.abort();
+      } catch {
+        /* already stopped */
+      }
+    }
+    hud.recognizer = null;
+    voice.stopRecording?.(false);
+    hud.listening = false;
+  }
+
+  function voiceHelp() {
+    openSheet("Talking to your main AI", [
+      el("p", {
+        text: "Browsers only share the microphone with secure pages. On this PC, open Studio at http://localhost:8082/studio and the microphone works.",
+      }),
+      el("p", {
+        text: "On your iPhone, Studio needs an https:// address. The easy way is Tailscale, which is free:",
+      }),
+      el("ol", {}, [
+        el("li", { text: "Install Tailscale on the PC and on the iPhone, and sign in to both with the same account." }),
+        el("li", { text: "On the PC, in a terminal, run: tailscale serve --bg 8082" }),
+        el("li", { text: "It prints an address like https://your-pc.tail1234.ts.net. Open that plus /studio on the iPhone and add it to the Home Screen." }),
+      ]),
+      el("p", {
+        class: "muted",
+        text: "Only your own devices on your Tailscale account can open that address.",
+      }),
+    ]);
+  }
+
+  async function transcribeTurn(blob) {
+    const response = await fetch("/studio/api/voice/transcribe", {
+      method: "POST",
+      headers: authHeaders({ "content-type": "audio/wav" }),
+      body: blob,
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || `Could not hear that (${response.status})`);
+    return (body.text || "").trim();
+  }
+
+  function hudState(refs) {
+    const state = hud.offline
+      ? "offline"
+      : hud.listening
+        ? "listening"
+        : hud.hearing
+          ? "hearing"
+          : hud.speaking
+            ? "speaking"
+            : hud.thinking
+              ? "thinking"
+              : "idle";
+    refs.root.dataset.state = state;
+    refs.root.dataset.talk = voice.talk ? "on" : "off";
+    hud.orb?.setState(state);
+    if (refs.voiceState) {
+      refs.voiceState.textContent = {
+        offline: "Link lost",
+        listening: "Listening…",
+        hearing: "Understanding you",
+        speaking: "Speaking",
+        thinking: "Thinking",
+        idle: voice.talk ? "Talk mode on" : "Tap the core to talk",
+      }[state];
+    }
+    refs.status.textContent = {
+      offline: "LINK LOST — RETRYING",
+      listening: voice.talk ? "LISTENING · TALK MODE" : "LISTENING",
+      hearing: "HEARING YOU",
+      speaking: "SPEAKING",
+      thinking: "WORKING",
+      idle: voice.talk ? "TALK MODE · STANDING BY" : "STANDING BY",
+    }[state];
+    if (refs.talk) {
+      refs.talk.textContent = voice.talk ? "END TALK" : "TALK";
+      refs.talk.setAttribute("aria-pressed", String(voice.talk));
+    }
+  }
+
+  const shortModel = (model) => (model || "").replace(/^local\//, "").split("/").pop();
+
+  function hudTag(text) {
+    return el("span", { class: "hud-tag", text });
+  }
+
+  function hudLine(message) {
+    const data = message.data || {};
+    if (data.kind === "download") return appDownloadCard(data, true);
+    if (data.kind === "approval") {
+      const actions = el("div", { class: "row" });
+      if (pendingCommands.has(data.request_id)) {
+        actions.append(...approvalButtons(data.request_id, actions));
+      }
+      return el("div", { class: "hud-line approval" }, [
+        hudTag("APPROVE?"),
+        el("code", { text: data.command || message.text }),
+        actions,
+      ]);
+    }
+    if (message.role === "user") {
+      return el("div", { class: "hud-line you" }, [hudTag("YOU"), message.text]);
+    }
+    if (message.role === "assistant") {
+      return el("div", { class: `hud-line ai${data.partial ? " partial" : ""}` }, [
+        hudTag((message.author || hud.name).toUpperCase()),
+        message.text,
+      ]);
+    }
+    if (message.role === "tool") {
+      const team = data.tool === "team_task";
+      const target = team && data.room_id ? `room/${data.room_id}` : data.chat_id ? `chat/${data.chat_id}` : "";
+      const summary = message.text.split("\n")[0].slice(0, 220);
+      if ((data.tool === "ask_agent" || team) && target) {
+        return el(
+          "button",
+          { class: `hud-line handoff ${data.failed ? "bad" : "good"}`, onclick: () => go(target) },
+          [hudTag(team ? "TEAM" : "AGENT"), summary]
+        );
+      }
+      return el("div", { class: `hud-line tool${data.failed ? " bad" : ""}` }, [
+        hudTag((message.author || "tool").toUpperCase()),
+        summary,
+      ]);
+    }
+    return el("div", { class: "hud-line event" }, [hudTag("SYS"), message.text]);
+  }
+
+  function voicePillKey(status) {
+    const setup = status.setup || {};
+    return [status.speak, status.speak_ready, status.listen_ready, setup.phase, Math.round((setup.progress || 0) * 20)];
+  }
+
+  function voicePill(status) {
+    const setup = status.setup || {};
+    if (setup.phase === "running") {
+      return el("span", { class: "hud-pill warn", title: setup.message || "" }, [
+        `VOICE ${Math.round((setup.progress || 0) * 100)}%`,
+      ]);
+    }
+    if (setup.phase === "failed" && !status.speak_ready) {
+      return el("span", { class: "hud-pill bad", title: setup.message || "" }, ["VOICE SETUP FAILED"]);
+    }
+    if (status.speak === "browser" || !status.speak_ready) {
+      return el("span", { class: "hud-pill", title: "Using the browser's voice" }, ["VOICE BROWSER"]);
+    }
+    const where = status.speak === "builtin" ? "OFFLINE" : "SERVER";
+    return el("span", { class: "hud-pill good", title: `Ears: ${status.listen}` }, [`VOICE ${where}`]);
+  }
+
+  function webPill(web) {
+    if (web.access === "off") return el("span", { class: "hud-pill bad" }, ["WEB OFF"]);
+    if (web.online === false) {
+      return el("span", { class: "hud-pill warn", title: "No internet: agents work from memory until it is back" }, [
+        "WEB OFFLINE",
+      ]);
+    }
+    const name = (web.provider || "web").toUpperCase();
+    if (web.problem) return el("span", { class: "hud-pill warn", title: web.problem }, [`WEB ${name}?`]);
+    return el("span", { class: `hud-pill ${web.provider === "duckduckgo" ? "" : "good"}`, title: web.label || "" }, [
+      `WEB ${name}`,
+    ]);
+  }
+
+  function webCard(web) {
+    const query = el("input", {
+      type: "text",
+      "aria-label": "Test search",
+      placeholder: "Try a search, e.g. weather in London",
+    });
+    const results = el("div", { class: "stack" });
+    const access = {
+      all: "Every agent can search the web and read pages, local models included. Studio does the browsing for them.",
+      listed: "Only agents that have web_search or web_fetch in their tools can use the internet.",
+      off: "No agent can use the internet.",
+    }[web.access];
+    const connection =
+      web.online === false
+        ? "This PC is offline right now, so web tools are paused and agents work from memory and project files. They come back on their own when the internet does."
+        : "This PC is online. If the internet drops, agents switch to memory and project files until it is back.";
+    const backup = web.backup_label
+      ? ` Backup: ${web.backup_label}, used when the first one fails or runs out.`
+      : web.backup_problem
+        ? ` ${web.backup_problem}`
+        : "";
+    const service =
+      (web.provider === "duckduckgo"
+        ? web.backup_label
+          ? `${web.backup_label} (the backup key), then DuckDuckGo.`
+          : "DuckDuckGo, no key needed. It often blocks automated searches, so a key is more reliable."
+        : web.problem
+          ? `${web.label}: ${web.problem} Searches use DuckDuckGo until it is set.`
+          : `${web.label}${web.keyed ? ", key set" : ""}. If it fails, searches fall back to DuckDuckGo.`) +
+      (web.provider === "duckduckgo" ? "" : backup);
+    return card(
+      "Internet access",
+      [
+        el("p", {}, [el("strong", { text: "Agents: " }), access]),
+        el("p", {}, [el("strong", { text: "Connection: " }), connection]),
+        el("p", {}, [el("strong", { text: "Search: " }), service]),
+        el("p", {}, [
+          el("strong", { text: "API use today: " }),
+          `${web.api_today ?? 0}${web.api_limit ? ` of ${web.api_limit}` : ""} searches${(web.used_up || []).length ? `; used up until tomorrow: ${web.used_up.join(", ")} (free search takes over)` : ""}. ${web.order === "free_first" ? "Free search goes first; a key is used only when free search finds too little." : "Your API key goes first; free search takes over when it runs out."} Repeating a search within six hours reuses the results.`,
+        ]),
+        el("p", {}, [
+          el("strong", { text: "Research: " }),
+          `${web.sources} sources per question. Every run reads at least ${(web.mix || {}).web ?? 3} web pages, ${(web.mix || {}).reddit ?? 2} Reddit threads that are on topic and have real replies (${web.reddit}), and ${(web.mix || {}).youtube ?? 2} YouTube videos whose transcripts could be read (${web.youtube}), each with its link. Coding questions add Stack Overflow, GitHub, MDN, and dev.to. Ask for a different mix any time, like "research this with no YouTube".`,
+        ]),
+        el("p", {
+          class: "muted",
+          text: "Keys go in admin settings on the computer running Studio, under Studio. Web Search API Key: Brave Search (starts with BSA), Tavily (tvly-), or Serper for Google results; Backup Web Search API Key takes a second one, like Tavily beside Brave. YouTube API Key (optional): from Google Cloud; without it research uses YouTube's own search page. Reddit App ID and Secret: from reddit.com/prefs/apps, a free 'script' app, so Reddit doesn't block research.",
+        }),
+        el("div", { class: "row" }, [
+          el("div", { class: "grow" }, [query]),
+          el("button", {
+            class: "secondary",
+            text: "Test search",
+            onclick: async () => {
+              results.replaceChildren(el("p", { class: "muted", text: "Searching…" }));
+              try {
+                const body = await post("/studio/api/web/test", { query: query.value });
+                if (!body.ok) {
+                  results.replaceChildren(el("p", { class: "muted", text: body.error }));
+                  return;
+                }
+                results.replaceChildren(
+                  el("p", {
+                    class: "muted",
+                    text: `${body.results.length} result(s) from ${body.used}.${body.note ? ` ${body.note}` : ""}`,
+                  }),
+                  ...body.results.map((hit) =>
+                    el("div", { class: "list-item" }, [
+                      el("span", { class: "grow" }, [
+                        el("strong", { text: hit.title }),
+                        el("span", { text: hit.snippet || hit.url }),
+                      ]),
+                    ])
+                  )
+                );
+              } catch (error) {
+                results.replaceChildren(el("p", { class: "muted", text: error.message }));
+              }
+            },
+          }),
+        ]),
+        results,
+      ],
+      "How your agents reach the web."
+    );
+  }
+
+  function hudPanel(heading, body, extra) {
+    return el("section", { class: "hud-panel" }, [
+      el("header", {}, [el("h2", { text: heading }), extra || null]),
+      body,
+    ]);
+  }
+
+  function changed(key, value) {
+    const serial = JSON.stringify(value);
+    if (hud.keys[key] === serial) return false;
+    hud.keys[key] = serial;
+    return true;
+  }
+
+  const NAV_ITEMS = [
+    ["Command Center", "home", "◈"],
+    ["HQ (team at work)", "hq", "▦"],
+    ["Agents", "agents", "◎"],
+    ["Ideas board", "ideas", "✧"],
+    ["Chats", "chats", "◌"],
+    ["Lab", "lab", "⚗"],
+    ["Content Farm", "farm", "🌾"],
+    ["Trading Bank", "trade", "📈"],
+    ["Ops (what the PC is doing)", "ops", "◉"],
+    ["Classroom", "learn", "✎"],
+    ["Maths tutor (electrician)", "tutor", "∑"],
+    ["The Changer (change FCC)", "changer", "⟳"],
+    ["Models", "models", "▣"],
+    ["Model Control", "engine", "⚡"],
+    ["Tuning & LoRA", "tune", "⟁"],
+    ["Connectors", "connectors", "⇄"],
+    ["Knowledge & Memory", "more", "✦"],
+    ["Settings", "settings", "⚙"],
+  ];
+
+  function ringGauge(label, value, detail) {
+    const known = typeof value === "number";
+    const pct = known ? Math.max(0, Math.min(100, value)) : 0;
+    const circumference = 2 * Math.PI * 34;
+    const tone = pct > 85 ? "hot" : pct > 65 ? "warm" : "cool";
+    return el("div", { class: `hud-gauge ${tone}`, role: "img", "aria-label": `${label} ${known ? `${Math.round(pct)}%` : "unknown"}` }, [
+      el("div", {
+        class: "hud-gauge-ring",
+        html: `<svg viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="34" class="track"/><circle cx="40" cy="40" r="34" class="fill" stroke-dasharray="${(circumference * pct) / 100} ${circumference}" transform="rotate(-90 40 40)"/></svg>`,
+      }),
+      el("strong", { text: known ? `${Math.round(pct)}%` : "—" }),
+      el("span", { text: label }),
+      detail ? el("small", { text: detail }) : null,
+    ]);
+  }
+
+  function agentGlyph(role) {
+    return { builder: "⌘", researcher: "⌕", helper: "✧", teacher: "✎", student: "◌", guide: "?", assistant: "◇" }[role] || "◆";
+  }
+
+  function timeAgo(ms) {
+    const seconds = Math.max(0, (Date.now() - ms) / 1000);
+    if (seconds < 60) return "now";
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    return `${Math.floor(seconds / 86400)}d`;
+  }
+
+  function updateHud(refs, data) {
+    hud.name = data.agent.name;
+    hud.thinking = Boolean(data.thinking);
+    hud.offline = false;
+    refs.name.textContent = data.agent.name.toUpperCase();
+    refs.coreName.textContent = data.agent.name.toUpperCase();
+
+    const local = data.systems.local || {};
+    const web = data.systems.web || {};
+    voice.status = data.systems.voice || voice.status;
+    const spoken = voiceStatus();
+    if (
+      spoken.speak === "builtin" &&
+      !spoken.speak_ready &&
+      spoken.setup &&
+      spoken.setup.phase === "idle" &&
+      !voice.setupRequested
+    ) {
+      voice.setupRequested = true;
+      post("/studio/api/voice/setup").catch(() => {});
+    }
+    const healthy = local.reachable !== false && !data.error;
+    refs.health.textContent = healthy ? "OPTIMAL" : local.reachable === false ? "LOCAL MODELS OFFLINE" : "ATTENTION";
+    refs.health.className = `hud-health ${healthy ? "good" : "warn"}`;
+    if (changed("pills", [local.reachable, data.systems.main_model, data.memory, data.approvals.length, data.systems.commands, web, voicePillKey(spoken)])) {
+      refs.pills.replaceChildren(
+        voicePill(spoken),
+        webPill(web),
+        el("span", { class: `hud-pill ${local.reachable ? "good" : "bad"}`, title: local.base_url || "" }, [
+          `LOCAL ${local.reachable ? `ONLINE · ${(local.models || []).length}` : "OFFLINE"}`,
+        ]),
+        el("span", { class: "hud-pill", title: data.systems.main_model }, [`CORE ${shortModel(data.systems.main_model)}`]),
+        el("span", { class: `hud-pill ${data.memory.enabled ? "good" : ""}` }, [
+          data.memory.enabled ? `SHARED MEM ${data.memory.count}` : "SHARED MEM OFF",
+        ]),
+        data.approvals.length
+          ? el("span", { class: "hud-pill warn" }, [`APPROVALS ${data.approvals.length}`])
+          : el("span", { class: "hud-pill" }, [`CMD ${data.systems.commands.toUpperCase()}`])
+      );
+    }
+
+    // AI core overview.
+    const busy = data.team.filter((member) => member.busy).length;
+    const insights = data.insights || {};
+    if (changed("overview", [data.systems.main_model, insights.memories, spoken.speak, spoken.speak_ready, busy, local.reachable, healthy])) {
+      const row = (label, value, tone) =>
+        el("div", { class: `hud-overview-row ${tone || ""}` }, [el("span", { text: label }), el("strong", { text: value })]);
+      refs.overview.replaceChildren(
+        row("AI Core", shortModel(data.systems.main_model) || "—", "good"),
+        row("Memory", `${insights.memories ?? 0} stored`, "good"),
+        row("Voice", spoken.speak_ready ? (spoken.speak === "builtin" ? "Offline voice" : "Online") : "Browser", spoken.speak_ready ? "good" : ""),
+        row("Agents", `${busy} running · ${data.team.length} total`, busy ? "warn" : "good"),
+        row("Local brain", local.reachable ? `${(local.models || []).length} models` : "Offline", local.reachable ? "good" : "bad"),
+        row("System", healthy ? "Optimal" : "Check", healthy ? "good" : "warn")
+      );
+    }
+
+    // Conversation.
+    if (data.chat.id !== hud.chatId) {
+      hud.chatId = data.chat.id;
+      hud.lastSeq = 0;
+      refs.log.replaceChildren();
+    }
+    const fresh = data.messages.filter((message) => message.sequence > hud.lastSeq);
+    if (fresh.length) {
+      if (hud.optimistic && fresh.some((message) => message.role === "user")) {
+        hud.optimistic.remove();
+        hud.optimistic = null;
+      }
+      refs.log.querySelector(".hud-empty")?.remove();
+      refs.log.append(...fresh.map(hudLine));
+      hud.lastSeq = fresh[fresh.length - 1].sequence;
+      refs.log.scrollTop = refs.log.scrollHeight;
+      for (const message of fresh) {
+        const meta = message.data || {};
+        const fromMain = message.role === "assistant" && !meta.partial && message.author === hud.name;
+        const finishedWork = message.role === "event" && meta.kind === "background_done";
+        if (finishedWork) hud.orb?.burst();
+        // A finished job is spoken by the main AI's follow-up, in its own words.
+        if (fromMain && message.sequence > hud.spokenSeq) {
+          hud.spokenSeq = message.sequence;
+          hud.orb?.burst();
+          const said = hud.liveSpoken;
+          hud.liveSpoken = "";
+          if (fromMain && said && voice.speech && message.text.startsWith(said)) {
+            speakAhead(message.text.slice(said.length), refs);
+            finishSpeaking(refs, () => hud.afterReply?.());
+          } else {
+            sayAloud(message.text, refs, () => hud.afterReply?.());
+          }
+        }
+      }
+    }
+    // The reply being written right now, word by word.
+    const live = (data.live || "").trim();
+    if (live) {
+      if (!refs.live) {
+        refs.live = el("div", { class: "hud-line ai live" }, [hudTag(hud.name.toUpperCase()), el("span")]);
+      }
+      refs.live.lastChild.textContent = live;
+      // Start talking at the first finished sentence instead of the last.
+      if (!live.startsWith(hud.liveSpoken)) hud.liveSpoken = "";
+      const cut = sentenceCut(live);
+      if (cut > hud.liveSpoken.length) {
+        const piece = live.slice(hud.liveSpoken.length, cut);
+        hud.liveSpoken = live.slice(0, cut);
+        speakAhead(piece, refs);
+      }
+      refs.log.querySelector(".hud-empty")?.remove();
+      if (refs.log.lastElementChild !== refs.live) refs.log.append(refs.live);
+      refs.log.scrollTop = refs.log.scrollHeight;
+    } else if (refs.live) {
+      refs.live.remove();
+      refs.live = null;
+    }
+    if (!refs.log.childElementCount) {
+      refs.log.append(
+        el("p", {
+          class: "hud-empty",
+          text: `${data.agent.name} is online. Ask a question, or give the team a job: “Have Builder make a landing page for my bakery.”`,
+        })
+      );
+    }
+
+    // Agents at work: pick one to watch its steps. Until you pick, the
+    // first agent that starts working is shown.
+    if (!hud.watch && hud.watchAuto) {
+      const working = data.team.find((member) => member.busy);
+      if (working) refs.watchAgent(working.id, true);
+    }
+    if (changed("team", [data.team, hud.watch])) {
+      refs.team.replaceChildren(
+        ...(data.team.length
+          ? data.team.map((member) =>
+              el(
+                "button",
+                {
+                  class: `hud-agent${member.busy ? " busy" : ""}${member.id === hud.watch ? " watched" : ""}`,
+                  "aria-pressed": String(member.id === hud.watch),
+                  "data-agent-id": member.id,
+                  onclick: () => refs.watchAgent(member.id),
+                },
+                [
+                el("span", { class: "hud-agent-icon", "aria-hidden": "true", text: agentGlyph(member.role) }),
+                el("span", { class: "grow" }, [
+                  el("strong", { text: member.name }),
+                  el("small", {
+                    text: `${member.role} · ${member.local ? "local" : member.private ? "server · no memory" : "server"} · ${shortModel(member.using || member.model)}`,
+                    title: member.using && member.using !== member.model ? `Set to ${member.model}; using ${member.using} because it isn't available` : member.model,
+                  }),
+                ]),
+                el("span", { class: "hud-agent-state" }, [el("span", { class: "hud-dot" }), member.busy ? "ACTIVE" : "READY"]),
+                ]
+              )
+            )
+          : [el("p", { class: "hud-empty", text: "No agents yet." })])
+      );
+    }
+
+    // Learning: what Jarvis is teaching himself, and how far along he is.
+    const learning = data.learning || [];
+    if (changed("learning", learning.map((s) => [s.id, s.status, Math.round(s.progress * 1000), s.step]))) {
+      refs.learning.replaceChildren(
+        ...learning.map((study) =>
+          el("button", { class: `hud-study ${study.status}`, type: "button", onclick: () => openStudy(study.id) }, [
+            el("span", { class: "hud-study-head" }, [
+              el("strong", { text: `LEARNING · ${study.topic.toUpperCase()}` }),
+              el("span", { text: `${Math.round(study.progress * 100)}%` }),
+            ]),
+            el("span", { class: "hud-study-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(Math.round(study.progress * 100)) }, [
+              el("i", { style: `width:${Math.round(study.progress * 100)}%` }),
+            ]),
+            el("small", {
+              text:
+                study.status === "done"
+                  ? `Finished ${study.lessons} lessons · understanding ${Math.round((study.understanding || 0) * 100)}%`
+                  : study.status === "cancelled"
+                    ? "Stopped"
+                    : `${study.step}${study.understanding != null ? ` · understanding ${Math.round(study.understanding * 100)}%` : ""}`,
+            }),
+          ])
+        )
+      );
+    }
+
+    // Mission timeline.
+    const timeline = data.timeline || [];
+    if (changed("timeline", timeline.map((item) => [item.title, item.status, Math.floor(item.at / 60000)]))) {
+      refs.timeline.replaceChildren(
+        ...(timeline.length
+          ? timeline.map((item) =>
+              el("button", { class: `hud-mission ${item.status}`, onclick: () => go(item.route) }, [
+                el("time", { text: timeAgo(item.at) }),
+                el("span", { class: "hud-mission-bar", "aria-hidden": "true" }),
+                el("span", { class: "grow" }, [el("strong", { text: item.title }), el("small", { text: `${item.who} · ${item.status}` })]),
+              ])
+            )
+          : [el("p", { class: "hud-empty", text: "No missions yet. Give the team a job." })])
+      );
+    }
+
+    // System monitor.
+    const monitor = data.monitor || {};
+    if (changed("monitor", [monitor.cpu, monitor.memory, monitor.disk])) {
+      refs.monitor.replaceChildren(
+        ringGauge("CPU", monitor.cpu, monitor.cores ? `${monitor.cores} cores` : ""),
+        ringGauge("RAM", monitor.memory, monitor.memory_gb ? `${monitor.memory_gb} GB` : ""),
+        ringGauge("Disk", monitor.disk, monitor.disk_gb ? `${monitor.disk_gb} GB` : "")
+      );
+    }
+
+    // Memory insights.
+    if (changed("insights", insights)) {
+      const stat = (value, label) => el("div", { class: "hud-stat" }, [el("strong", { text: String(value ?? 0) }), el("span", { text: label })]);
+      refs.insights.replaceChildren(
+        el("div", { class: "hud-constellation", "aria-hidden": "true", html: constellation(insights.memories || 0) }),
+        el("div", { class: "hud-stats" }, [
+          stat(insights.memories, "memories"),
+          stat(insights.shared, "shared"),
+          stat(insights.skills, "skills"),
+          stat(insights.conversations, "conversations"),
+        ]),
+        el("button", { class: "hud-link", type: "button", text: "Open memory & Obsidian ›", onclick: () => go("more") })
+      );
+    }
+
+    // Model status.
+    const voiceInfo = spoken;
+    const llm = [
+      ["Local brain", local.reachable ? `${(local.models || []).length} models` : "offline", local.reachable],
+      ["Main core", shortModel(data.systems.main_model), true],
+      ["Server model", shortModel(data.systems.server_model), !String(data.systems.server_model || "").startsWith("local/")],
+      [
+        "Web search",
+        web.access === "off" ? "off" : web.online === false ? "offline · memory only" : web.label || "web",
+        web.access !== "off" && web.online !== false && !web.problem,
+      ],
+      ["Voice", voiceInfo.speak_ready ? voiceInfo.speak : "browser", Boolean(voiceInfo.speak_ready)],
+      ["Ears", voiceInfo.listen_ready ? voiceInfo.listen : "browser", Boolean(voiceInfo.listen_ready)],
+    ];
+    if (changed("llm", llm)) {
+      refs.llm.replaceChildren(
+        ...llm.map(([name, value, ok]) =>
+          el("div", { class: `hud-llm ${ok ? "good" : "idle"}` }, [el("span", { class: "hud-dot" }), el("strong", { text: name }), el("small", { text: value })])
+        )
+      );
+    }
+
+    // Agent chat room.
+    const room = data.room;
+    if (changed("room", room)) {
+      hud.roomId = room ? room.id : null;
+      refs.roomTitle.textContent = room ? room.title : "No room yet";
+      refs.roomMeta.textContent = room
+        ? `${room.members.join(", ")}${room.running ? " · talking" : ""}${room.task_status ? ` · ${room.task_status}` : ""}`
+        : "Start one and the agents can talk to you and to each other.";
+      refs.roomInput.disabled = !room;
+      refs.roomLog.replaceChildren(
+        ...(room && room.messages.length
+          ? room.messages.map((message) =>
+              el("div", { class: `hud-room-line ${message.role}` }, [
+                el("span", { class: "hud-tag", text: message.role === "user" ? "YOU" : (message.author || "").toUpperCase() }),
+                message.text,
+              ])
+            )
+          : [
+              room
+                ? el("p", { class: "hud-empty", text: "Quiet for now. Say something to the team." })
+                : el("button", { class: "hud-button", type: "button", text: "START TEAM ROOM", onclick: refs.startRoom }),
+            ])
+      );
+      refs.roomLog.scrollTop = refs.roomLog.scrollHeight;
+    }
+
+    // Live feed: approvals first, then recent jobs.
+    if (changed("activity", [data.runs, data.approvals])) {
+      pendingCommands = new Set(data.approvals.map((request) => request.id));
+      const names = Object.fromEntries(data.team.map((member) => [member.id, member.name]));
+      const rows = [
+        ...data.approvals.map((request) => {
+          const actions = el("div", { class: "row" });
+          actions.append(...approvalButtons(request.id, actions));
+          return el("div", { class: "hud-item approval" }, [
+            el("small", { text: `${request.agent_id ? names[request.agent_id] || "Agent" : "Agent"} wants to run` }),
+            el("code", { text: request.command }),
+            actions,
+          ]);
+        }),
+        ...data.runs.map((run) =>
+          el("button", { class: `hud-item run ${run.status}`, onclick: () => go(`task/${run.id}`) }, [
+            el("small", { text: `${names[run.agent_id] || "Agent"} · ${run.status}${run.status === "running" ? ` · step ${run.step}` : ""} · ${timeAgo(run.updated_at)}` }),
+            el("span", { text: run.goal.slice(0, 120) }),
+          ])
+        ),
+      ];
+      refs.activity.replaceChildren(...(rows.length ? rows : [el("p", { class: "hud-empty", text: "No jobs yet." })]));
+    }
+
+    if (changed("memory", data.memory)) {
+      refs.memory.replaceChildren(
+        ...(data.memory.recent.length
+          ? data.memory.recent.map((entry) =>
+              el("div", { class: "hud-item" }, [
+                el("span", { text: entry.text }),
+                entry.author ? el("small", { text: `— ${entry.author}` }) : null,
+              ])
+            )
+          : [
+              el("p", {
+                class: "hud-empty",
+                text: data.memory.enabled
+                  ? "Nothing shared yet. Agents add what they learn here."
+                  : "Shared memory is off in Studio settings.",
+              }),
+            ])
+      );
+    }
+    hudState(refs);
+  }
+
+  function processLine(step) {
+    const tool = (step.tool || "tool").replace(/_/g, " ").toUpperCase();
+    const [tag, kind] =
+      step.role === "user"
+        ? ["TASK", "task"]
+        : step.role === "tool"
+          ? [tool, step.failed ? "tool bad" : "tool"]
+          : step.role === "assistant"
+            ? step.partial
+              ? ["THINKING", "think"]
+              : ["REPORT", "done"]
+            : ["SYS", "event"];
+    const when = new Date(step.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const text = step.text.split("\n").slice(0, 8).join("\n");
+    return el("div", { class: `hud-step ${kind}` }, [
+      el("span", { class: "hud-step-meta" }, [el("span", { class: "hud-tag", text: tag }), el("time", { text: when })]),
+      text.length > 700 ? `${text.slice(0, 700)}…` : text,
+    ]);
+  }
+
+  function constellation(count) {
+    // A little star map whose size follows how much the team remembers.
+    const stars = Math.max(6, Math.min(26, 6 + Math.round(Math.sqrt(count) * 2)));
+    let seed = 7;
+    const rand = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    const points = Array.from({ length: stars }, () => [8 + rand() * 144, 8 + rand() * 64]);
+    const lines = points
+      .slice(1)
+      .map((point, index) => `<line x1="${points[index][0].toFixed(1)}" y1="${points[index][1].toFixed(1)}" x2="${point[0].toFixed(1)}" y2="${point[1].toFixed(1)}"/>`)
+      .join("");
+    const dots = points.map(([x, y], index) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${index % 5 === 0 ? 2.2 : 1.3}"/>`).join("");
+    return `<svg viewBox="0 0 160 80">${lines}${dots}</svg>`;
+  }
+
+  function teardownHud() {
+    hud.orb?.destroy();
+    hud.orb = null;
+    clearInterval(hud.clockTimer);
+    hud.clockTimer = null;
+    clearInterval(hud.fastTimer);
+    hud.fastTimer = null;
+  }
+
+  const BRIEFING_PROMPT =
+    "Executive briefing, please: what the team is working on, what finished, what failed, anything that needs my approval, and what you suggest next.";
+
+  async function renderHud() {
+    const generation = renderGeneration;
+    const data = await api("/studio/api/main");
+    if (generation !== renderGeneration) return;
+    document.body.dataset.ui = "hud";
+    teardownHud();
+    hud.keys = {};
+    hud.chatId = null;
+    hud.optimistic = null;
+    hud.roomId = null;
+    hud.watch = null;
+    hud.watchAuto = true;
+    hud.liveSpoken = "";
+    hud.watchSeq = 0;
+    const last = data.messages[data.messages.length - 1];
+    hud.spokenSeq = last ? last.sequence : 0;
+
+    const hudTray = attachmentTray();
+    const input = el("input", {
+      type: "text",
+      id: "hud-input",
+      autocomplete: "off",
+      enterkeyhint: "send",
+      "aria-label": `Talk to ${data.agent.name}`,
+      placeholder: `Talk to ${data.agent.name}…`,
+    });
+    const roomInput = el("input", {
+      type: "text",
+      autocomplete: "off",
+      enterkeyhint: "send",
+      "aria-label": "Message the agent room",
+      placeholder: "Message the agents…",
+    });
+    const canvas = el("canvas", { class: "hud-orb-canvas", "aria-hidden": "true" });
+    const refs = {
+      talk: el("button", {
+        class: "hud-button hud-talk",
+        type: "button",
+        text: "TALK",
+        "aria-pressed": "false",
+        onclick: () => toggleTalk(),
+      }),
+      name: el("span", { class: "hud-name" }),
+      coreName: el("strong", { class: "hud-core-name" }),
+      health: el("button", {
+        class: "hud-health good",
+        type: "button",
+        text: "OPTIMAL",
+        title: "Ask the Guide what needs attention",
+        onclick: () => openGuide(),
+      }),
+      date: el("span", { class: "hud-date" }),
+      clock: el("span", { class: "hud-clock" }),
+      pills: el("div", { class: "hud-pills" }),
+      status: el("p", { class: "hud-status", role: "status" }),
+      voiceState: el("strong", { class: "hud-voice-state" }),
+      overview: el("div", { class: "hud-overview" }),
+      log: el("div", { class: "hud-log", "aria-live": "polite" }),
+      team: el("div", { class: "hud-agents" }),
+      processHead: el("div", { class: "hud-process-head" }),
+      processLog: el("div", { class: "hud-process-log", "aria-live": "polite" }),
+      timeline: el("div", { class: "hud-list" }),
+      learning: el("div", { class: "hud-learning", "aria-live": "polite" }),
+      monitor: el("div", { class: "hud-gauges" }),
+      insights: el("div", { class: "hud-insights" }),
+      llm: el("div", { class: "hud-llms" }),
+      roomTitle: el("strong", { class: "hud-room-title" }),
+      roomMeta: el("small", { class: "hud-room-meta" }),
+      roomInput,
+      roomLog: el("div", { class: "hud-room-log", "aria-live": "polite" }),
+      activity: el("div", { class: "hud-list" }),
+      memory: el("div", { class: "hud-list" }),
+    };
+
+    const tick = () => {
+      const now = new Date();
+      refs.date.textContent = now
+        .toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" })
+        .toUpperCase();
+      refs.clock.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    };
+    tick();
+    hud.clockTimer = setInterval(tick, 1000);
+
+    const watchWork = async () => {
+      const id = hud.watch;
+      if (!id) {
+        hud.watchBusy = false;
+        refs.processHead.replaceChildren(
+          el("p", { class: "hud-empty", text: "Pick an agent to watch its work live: each search, file, and step as it happens." })
+        );
+        refs.processLog.replaceChildren();
+        return;
+      }
+      let work;
+      try {
+        work = await api(`/studio/api/agents/${id}/activity?after=${hud.watchSeq}`);
+      } catch {
+        return;
+      }
+      if (generation !== renderGeneration || hud.watch !== id) return;
+      const who = work.agent;
+      const run = work.run;
+      hud.watchBusy = Boolean(who.busy);
+      const header = [
+        el("div", { class: `hud-process-title${who.busy ? " busy" : ""}` }, [
+          el("span", { class: "hud-agent-icon", "aria-hidden": "true", text: agentGlyph(who.role) }),
+          el("span", { class: "grow" }, [
+            el("strong", { text: who.name }),
+            el("small", { text: `${who.busy ? "WORKING NOW" : "IDLE"} · ${shortModel(who.model)}` }),
+          ]),
+          work.chat
+            ? el("button", { class: "hud-link", type: "button", text: "OPEN ›", onclick: () => go(`chat/${work.chat.id}`) })
+            : null,
+        ]),
+      ];
+      if (run) {
+        header.push(
+          el("p", { class: "hud-process-goal" }, [
+            el("small", { text: `TASK · ${run.status}${run.status === "running" ? ` · STEP ${run.step}` : ""}` }),
+            run.goal.slice(0, 240),
+          ])
+        );
+      }
+      refs.processHead.replaceChildren(...header);
+      const log = refs.processLog;
+      if (work.messages.length) {
+        log.querySelector(".hud-empty")?.remove();
+        log.append(...work.messages.map(processLine));
+        hud.watchSeq = work.messages[work.messages.length - 1].sequence;
+        while (log.childElementCount > 120) log.firstElementChild.remove();
+        log.scrollTop = log.scrollHeight;
+      }
+      const writing = (work.live || "").trim();
+      let liveStep = log.querySelector(".hud-step.live");
+      if (writing) {
+        if (!liveStep) {
+          liveStep = el("div", { class: "hud-step think live" }, [
+            el("span", { class: "hud-step-meta" }, [el("span", { class: "hud-tag", text: "WRITING" })]),
+            el("span"),
+          ]);
+        }
+        liveStep.lastChild.textContent = writing.length > 700 ? `…${writing.slice(-700)}` : writing;
+        if (log.lastElementChild !== liveStep) log.append(liveStep);
+        log.querySelector(".hud-empty")?.remove();
+        log.scrollTop = log.scrollHeight;
+      } else {
+        liveStep?.remove();
+      }
+      if (!log.childElementCount) {
+        log.append(el("p", { class: "hud-empty", text: `${who.name} hasn't worked on anything yet.` }));
+      }
+    };
+
+    refs.watchAgent = (id, automatic = false) => {
+      if (!automatic) hud.watchAuto = false;
+      if (hud.watch === id) return;
+      hud.watch = id;
+      hud.watchSeq = 0;
+      refs.processLog.replaceChildren();
+      hud.keys.team = "";
+      for (const button of refs.team.querySelectorAll(".hud-agent")) {
+        const picked = button.dataset.agentId === id;
+        button.classList.toggle("watched", picked);
+        button.setAttribute("aria-pressed", String(picked));
+      }
+      watchWork();
+    };
+
+    let polling = false;
+    const poll = async () => {
+      if (generation !== renderGeneration) return stopPolling();
+      if (polling) return;
+      polling = true;
+      try {
+        const next = await api(`/studio/api/main?after=${hud.lastSeq}`);
+        if (generation !== renderGeneration) return;
+        updateHud(refs, next);
+        await watchWork();
+      } catch {
+        if (generation !== renderGeneration) return;
+        hud.offline = true;
+        hudState(refs);
+      } finally {
+        polling = false;
+      }
+    };
+
+    const send = async (raw) => {
+      const typed = raw.trim();
+      const attached = hudTray.names();
+      const text = hudTray.take(typed);
+      if (!text) return;
+      input.value = "";
+      unlockSpeech();
+      stopSpeaking(refs);
+      hud.orb?.burst();
+      hud.optimistic?.remove();
+      hud.optimistic = el("div", { class: "hud-line you pending" }, [
+        hudTag("YOU"),
+        attached.length ? `${typed} 📎 ${attached.join(", ")}`.trim() : text,
+      ]);
+      refs.log.querySelector(".hud-empty")?.remove();
+      refs.log.append(hud.optimistic);
+      refs.log.scrollTop = refs.log.scrollHeight;
+      hud.thinking = true;
+      hudState(refs);
+      try {
+        await post("/studio/api/main/messages", { text });
+      } catch (error) {
+        hud.thinking = false;
+        hudState(refs);
+        notify(error.message);
+        return;
+      }
+      poll();
+    };
+
+    const hearWithBrowser = () => {
+      const Engine = Recognition();
+      const recognizer = new Engine();
+      let heard = "";
+      recognizer.lang = navigator.language || "en-US";
+      recognizer.interimResults = true;
+      recognizer.continuous = false;
+      recognizer.onresult = (event) => {
+        heard = Array.from(event.results)
+          .map((result) => result[0].transcript)
+          .join("");
+        input.value = heard;
+        hud.orb?.setLevel(0.6);
+      };
+      recognizer.onerror = (event) => {
+        if (event.error === "aborted" || event.error === "no-speech") return;
+        // Anything else would just fail again, so leave talk mode.
+        voice.talk = false;
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") voiceHelp();
+        else notify(`Microphone: ${event.error}`);
+      };
+      recognizer.onend = () => {
+        const finished = hud.recognizer === recognizer;
+        hud.recognizer = null;
+        hud.listening = false;
+        hud.orb?.setLevel(0);
+        hudState(refs);
+        if (finished && heard.trim()) send(heard);
+        else if (finished && voice.talk) setTimeout(() => voice.talk && hear(), 250);
+      };
+      hud.recognizer = recognizer;
+      hud.listening = true;
+      hudState(refs);
+      recognizer.start();
+    };
+
+    const hear = async () => {
+      if (generation !== renderGeneration) return;
+      if (hud.listening) {
+        stopListening();
+        hudState(refs);
+        return;
+      }
+      unlockSpeech();
+      stopSpeaking(refs);
+      if (recordedEars()) {
+        hud.listening = true;
+        hudState(refs);
+        let blob = null;
+        try {
+          blob = await recordTurn(refs);
+        } catch (error) {
+          hud.listening = false;
+          voice.talk = false;
+          hudState(refs);
+          if (error && error.name === "NotAllowedError") voiceHelp();
+          else notify(`Microphone: ${error.message || error}`);
+          return;
+        }
+        hud.listening = false;
+        hudState(refs);
+        if (generation !== renderGeneration) return;
+        if (!blob) {
+          if (voice.talk) setTimeout(() => voice.talk && hear(), 250);
+          return;
+        }
+        hud.hearing = true;
+        hudState(refs);
+        let text = "";
+        try {
+          text = await transcribeTurn(blob);
+        } catch (error) {
+          notify(error.message);
+        }
+        hud.hearing = false;
+        hudState(refs);
+        if (text) send(text);
+        else if (voice.talk) hear();
+        return;
+      }
+      if (Recognition() && window.isSecureContext) return hearWithBrowser();
+      voice.talk = false;
+      hudState(refs);
+      voiceHelp();
+    };
+
+    const toggleTalk = () => {
+      voice.talk = !voice.talk;
+      hud.orb?.burst();
+      if (voice.talk) {
+        storedSet(VOICE_KEY, "on");
+        voiceButton.textContent = "VOICE ON";
+        voiceButton.setAttribute("aria-pressed", "true");
+        hear();
+      } else {
+        stopListening();
+        stopSpeaking(refs);
+        releaseMicrophone();
+      }
+      hudState(refs);
+    };
+
+    // In talk mode, listen again once the reply has been spoken and the
+    // main AI has finished working.
+    hud.afterReply = () => {
+      const resume = () => {
+        if (generation !== renderGeneration || !voice.talk) return;
+        if (hud.thinking || hud.speaking || hud.listening || hud.hearing) {
+          setTimeout(resume, 300);
+          return;
+        }
+        hear();
+      };
+      resume();
+    };
+
+    const voiceButton = el("button", {
+      class: "hud-button",
+      type: "button",
+      text: voiceOn() ? "VOICE ON" : "VOICE OFF",
+      "aria-pressed": String(voiceOn()),
+      onclick: () => {
+        const next = !voiceOn();
+        storedSet(VOICE_KEY, next ? "on" : "off");
+        unlockSpeech();
+        if (!next) stopSpeaking(refs);
+        voiceButton.textContent = next ? "VOICE ON" : "VOICE OFF";
+        voiceButton.setAttribute("aria-pressed", String(next));
+      },
+    });
+
+    const memoryInput = el("input", {
+      type: "text",
+      autocomplete: "off",
+      "aria-label": "Tell the team to remember",
+      placeholder: "Tell the team to remember…",
+    });
+
+    const startRoom = async () => {
+      try {
+        await post("/studio/api/rooms", { title: "Team room" });
+        hud.keys.room = "";
+        poll();
+      } catch (error) {
+        notify(error.message);
+      }
+    };
+    refs.startRoom = startRoom;
+
+    const rethink = () => {
+      hud.keys = {};
+      poll();
+    };
+
+    const prefill = (text) => {
+      input.value = text;
+      input.focus();
+      input.setSelectionRange(text.length, text.length);
+    };
+
+    const quick = (label, detail, action) =>
+      el("button", { class: "hud-quick", type: "button", onclick: action }, [
+        el("strong", { text: label }),
+        el("small", { text: detail }),
+      ]);
+
+    const nav = el("nav", { class: "hud-nav", "aria-label": "Studio sections" }, [
+      el("div", { class: "hud-nav-brand", "aria-hidden": "true" }, [
+        el("span", { class: "hud-nav-mark", text: "◉" }),
+        el("span", { text: "STUDIO" }),
+      ]),
+      el(
+        "div",
+        { class: "hud-nav-items" },
+        NAV_ITEMS.map(([label, target, glyph]) =>
+          el(
+            "button",
+            {
+              class: `hud-nav-item${target === "home" ? " active" : ""}`,
+              type: "button",
+              "aria-current": target === "home" ? "page" : null,
+              onclick: () => (target === "home" ? render() : go(target)),
+            },
+            [el("span", { class: "hud-nav-glyph", "aria-hidden": "true", text: glyph }), label]
+          )
+        )
+      ),
+      el("div", { class: "hud-voice-box" }, [
+        el("small", { text: "VOICE STATUS" }),
+        refs.voiceState,
+        el(
+          "div",
+          { class: "hud-wave", "aria-hidden": "true" },
+          Array.from({ length: 14 }, (_, index) => el("span", { style: `--i:${index}` }))
+        ),
+      ]),
+      el("button", {
+        class: "hud-button",
+        type: "button",
+        text: "ASK THE GUIDE",
+        onclick: () => openGuide(),
+      }),
+    ]);
+
+    const root = el("div", { class: "hud", "data-state": "idle" }, [
+      nav,
+      el("header", { class: "hud-top" }, [
+        el("div", { class: "hud-brand" }, [refs.name, el("small", { text: "COMMAND CENTER" })]),
+        el("div", { class: "hud-sys" }, [el("small", { text: "SYSTEM STATUS" }), refs.health]),
+        el("div", { class: "hud-time" }, [refs.date, refs.clock]),
+        refs.pills,
+      ]),
+      el("div", { class: "hud-area-overview" }, [
+        hudPanel(
+          "AI CORE OVERVIEW",
+          refs.overview,
+          el("button", {
+            class: "hud-link",
+            type: "button",
+            text: "CHOOSE BRAIN",
+            onclick: () => openBrainPicker(hud.name, rethink),
+          })
+        ),
+      ]),
+      el("section", { class: "hud-core" }, [
+        el("button", {
+          class: "hud-orb",
+          type: "button",
+          "aria-label": "Talk mode: speak with your main AI",
+          onclick: () => toggleTalk(),
+        }, [canvas]),
+        el("div", { class: "hud-core-label" }, [refs.coreName, el("small", { text: "AI CORE" })]),
+        refs.status,
+      ]),
+      refs.log,
+      el(
+        "form",
+        {
+          class: "hud-command",
+          onsubmit: (event) => {
+            event.preventDefault();
+            send(input.value);
+          },
+        },
+        [
+          el("div", { class: "hud-command-row" }, [
+            el("button", {
+              class: "hud-mic",
+              type: "button",
+              "aria-label": "Speak one message",
+              text: "●",
+              onclick: () => hear(),
+            }),
+            hudTray.button,
+            hudTray.input,
+            input,
+            el("button", { class: "hud-send", type: "submit", text: "SEND" }),
+          ]),
+          hudTray.chips,
+          el("div", { class: "hud-foot" }, [
+            refs.talk,
+            voiceButton,
+            el("button", {
+              class: "hud-button",
+              type: "button",
+              text: "NEW TALK",
+              onclick: async () => {
+                try {
+                  await post("/studio/api/main/new");
+                  render();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            }),
+            el("button", {
+              class: "hud-button",
+              type: "button",
+              text: "NOTES",
+              title: "What Jarvis keeps from earlier in this conversation",
+              onclick: () => openConversationNotes(hud.chatId || data.chat.id),
+            }),
+            el("button", { class: "hud-button", type: "button", text: "MENU", onclick: () => go("more") }),
+          ]),
+        ]
+      ),
+      el("div", { class: "hud-area-room" }, [
+        el("section", { class: "hud-panel hud-room" }, [
+          el("header", {}, [
+            el("h2", { text: "AGENT CHAT ROOM" }),
+            el("button", {
+              class: "hud-link",
+              type: "button",
+              text: "OPEN ›",
+              onclick: () => (hud.roomId ? go(`room/${hud.roomId}`) : go("chats")),
+            }),
+          ]),
+          el("div", { class: "hud-room-head" }, [refs.roomTitle, refs.roomMeta]),
+          refs.roomLog,
+          el(
+            "form",
+            {
+              class: "hud-remember",
+              onsubmit: async (event) => {
+                event.preventDefault();
+                const text = roomInput.value.trim();
+                if (!text || !hud.roomId) return;
+                try {
+                  await post(`/studio/api/rooms/${hud.roomId}/messages`, { text });
+                  roomInput.value = "";
+                  hud.keys.room = "";
+                  poll();
+                } catch (error) {
+                  notify(error.message);
+                }
+              },
+            },
+            [roomInput, el("button", { class: "hud-button", type: "submit", text: "POST" })]
+          ),
+        ]),
+      ]),
+      el("div", { class: "hud-area-feed" }, [hudPanel("LIVE INTELLIGENCE FEED", refs.activity)]),
+      el("div", { class: "hud-area-team" }, [
+        hudPanel(
+          "AGENTS AT WORK",
+          el("div", { class: "hud-work" }, [
+            refs.team,
+            el("div", { class: "hud-process" }, [refs.processHead, refs.processLog]),
+          ]),
+          el("button", {
+            class: "hud-add",
+            type: "button",
+            "aria-label": "Add an agent",
+            text: "+",
+            onclick: () =>
+              openAddAgent(() => {
+                hud.keys.team = "";
+                poll();
+              }),
+          })
+        ),
+      ]),
+      el("div", { class: "hud-area-timeline" }, [
+        hudPanel("MISSION TIMELINE", el("div", {}, [refs.learning, refs.timeline])),
+      ]),
+      el("div", { class: "hud-area-commands" }, [
+        hudPanel(
+          "QUICK COMMANDS",
+          el("div", { class: "hud-quicks" }, [
+            quick("Voice chat", "Talk hands-free", () => toggleTalk()),
+            quick("Executive briefing", "What the team is up to", () => send(BRIEFING_PROMPT)),
+            quick("Build", "Give Builder a job", () => prefill("Have Builder ")),
+            quick("Research", "10+ sources, checked", () => prefill("Have Researcher look into ")),
+            quick("Brainstorm", "Helper turns it into a plan", () => prefill("Ask Helper for ideas on ")),
+            quick("Learn", "Jarvis teaches himself", () => prefill("Learn about ")),
+            quick("Team room", "All agents together", () =>
+              hud.roomId ? go(`room/${hud.roomId}`) : startRoom()
+            ),
+            quick("Choose brain", "A model on this PC", () => openBrainPicker(hud.name, rethink)),
+            quick("Team brains", "A model for each agent", () => openTeamBrains(rethink)),
+            quick("Team check", "Test every agent's brain", async () => {
+              notify("Testing every agent's brain… results go to the team room.");
+              try {
+                const { results } = await post("/studio/api/team-check");
+                const broken = results.filter((row) => !row.ok).map((row) => row.agent);
+                notify(broken.length ? `Not working: ${broken.join(", ")}. Details in the team room.` : "Every agent's brain works. Details in the team room.");
+              } catch (error) {
+                notify(error.message);
+              }
+              hud.keys.room = "";
+              poll();
+            }),
+            quick("Model control", "Load models, settings, speed", () => go("engine")),
+          ])
+        ),
+      ]),
+      el("div", { class: "hud-area-monitor" }, [hudPanel("SYSTEM MONITOR", refs.monitor)]),
+      el("div", { class: "hud-area-insights" }, [hudPanel("MEMORY INSIGHTS", refs.insights)]),
+      el("div", { class: "hud-area-llm" }, [hudPanel("BRAIN STATUS", refs.llm)]),
+      el("div", { class: "hud-area-memory" }, [
+        hudPanel(
+          "SHARED MEMORY",
+          el("div", {}, [
+            refs.memory,
+            el(
+              "form",
+              {
+                class: "hud-remember",
+                onsubmit: async (event) => {
+                  event.preventDefault();
+                  const text = memoryInput.value.trim();
+                  if (!text) return;
+                  try {
+                    await post("/studio/api/memory/shared", { text });
+                    memoryInput.value = "";
+                    notify("The team will remember that.");
+                    poll();
+                  } catch (error) {
+                    notify(error.message);
+                  }
+                },
+              },
+              [memoryInput, el("button", { class: "hud-button", type: "submit", text: "SAVE" })]
+            ),
+          ])
+        ),
+      ]),
+    ]);
+    refs.root = root;
+    view.replaceChildren(root);
+    hud.orb = createCoreOrb(canvas);
+    updateHud(refs, data);
+    watchWork();
+    // A hidden, idle window checks in less often, leaving the processor to
+    // the AI; talk mode and replies being written keep the usual pace.
+    const quiet = () => document.hidden && !voice.talk && !hud.thinking;
+    startPolling(() => {
+      if (quiet() && Date.now() - (hud.lastPoll || 0) < HIDDEN_POLL_MS) return;
+      hud.lastPoll = Date.now();
+      poll();
+    });
+    // While someone is working, check more often so replies appear as they
+    // are written instead of in jumps.
+    hud.fastTimer = setInterval(() => {
+      if (document.hidden && !voice.talk && !hud.thinking) return;
+      if (hud.thinking || hud.watchBusy || refs.live) poll();
+    }, 250);
+  }
+
+  // The running notes Studio keeps once a conversation outgrows the view.
+  async function openConversationNotes(chatId) {
+    let notes = { text: "", until: 0 };
+    try {
+      notes = await api(`/studio/api/chats/${chatId}/notes`);
+    } catch (error) {
+      notify(error.message);
+      return;
+    }
+    openSheet("Conversation notes", [
+      el("p", {
+        class: "muted",
+        text: "Every message is kept word for word. Whenever you speak, the earlier messages that match are handed to Jarvis exactly as they were said, and he can search or reread any message himself. These notes are his summary on top, with a timeline, updated every 20 or so messages.",
+      }),
+      notes.text
+        ? el("pre", { class: "conversation-notes", text: notes.text })
+        : el("p", { class: "empty", text: "No notes yet: the whole conversation still fits in view." }),
+    ]);
+  }
+
+  function voiceCard(status) {
+    const setup = status.setup || {};
+    const builtin = status.builtin || {};
+    const lines = [];
+    if (status.speak === "builtin") {
+      lines.push(
+        status.speak_ready
+          ? `Built-in voice ready: ${builtin.voice === "jarvis" ? "Jarvis (a blend of two British voices)" : builtin.voice}, ${builtin.effect === "jarvis" ? "with the AI-in-the-room effect" : "dry"}. It runs on this PC and works offline.`
+          : setup.phase === "running"
+            ? `Downloading the voice: ${Math.round((setup.progress || 0) * 100)}%. ${setup.message || ""}`
+            : `The built-in voice needs a one-time download (${Math.round((builtin.download_bytes || 0) / 1e6)} MB), then it works offline.`
+      );
+    } else if (status.speak === "server") {
+      lines.push(`Speaking through the voice server at ${status.server.speak_url}.`);
+    } else {
+      lines.push(
+        builtin.speech_package
+          ? "Using the browser's voice."
+          : "Using the browser's voice. For the built-in Jarvis voice, start Studio with the Windows launcher (it installs the voice), or install the studio_voice extra."
+      );
+    }
+    lines.push(
+      status.listen === "builtin"
+        ? status.listen_ready
+          ? `Your voice is understood on this PC (Whisper ${builtin.whisper}), offline.`
+          : "Speech recognition downloads with the voice."
+        : status.listen === "server"
+          ? "Your voice is understood by the speech-to-text server."
+          : "Your voice is understood by the browser's recognizer (needs internet)."
+    );
+    if (setup.phase === "failed") lines.push(`Last download failed: ${setup.message}`);
+    const hearButton = el("button", {
+      class: "primary",
+      text: "Hear him",
+      onclick: () => {
+        unlockSpeech();
+        voice.status = status;
+        sayAloud("Good evening. All systems are online, and the team is standing by.", null);
+      },
+    });
+    const setupButton = el("button", {
+      class: "secondary",
+      text: setup.phase === "running" ? "Downloading…" : "Download the voice",
+      disabled: setup.phase === "running",
+      onclick: async () => {
+        try {
+          await post("/studio/api/voice/setup");
+          notify("Downloading the voice in the background.");
+          render();
+        } catch (error) {
+          notify(error.message);
+        }
+      },
+    });
+    const needsSetup = status.speak === "builtin" && (!status.speak_ready || (status.listen === "builtin" && !status.listen_ready));
+    return card(
+      "Main AI voice",
+      [
+        ...lines.map((line) => el("p", { class: "muted", text: line })),
+        setup.phase === "running" ? meter(setup.progress || 0) : null,
+        el("div", { class: "row" }, [hearButton, needsSetup ? setupButton : null]),
+        el("button", { class: "secondary", text: "Using your voice on the iPhone", onclick: () => voiceHelp() }),
+      ],
+      "In the HUD, tap the orb or TALK to have a spoken conversation: you talk, he answers out loud, then he listens again."
+    );
+  }
+
+  /* ----------------------------------------------------------------- render */
+
+  async function render() {
+    renderGeneration += 1;
+    const generation = renderGeneration;
+    pageEdited = false;
+    stopPolling();
+    stopListening();
+    teardownHud();
+    if (!sheet.hidden) closeSheet();
+    const { name, id } = route();
+    const hudView = name === "hud" || name === "home";
+    if (!hudView) {
+      voice.talk = false;
+      releaseMicrophone();
+      stopSpeaking(null);
+    }
+    document.body.dataset.ui = hudView ? "hud" : "page";
+    document.body.dataset.page = name;
+    setChrome(name, headingFor(name));
+    if (generation !== renderGeneration) return;
+    view.replaceChildren(el("p", { class: "muted", text: "Loading…" }));
+    try {
+      switch (name) {
+        case "home":
+        case "hud": return await renderHud();
+        case "chats": return await renderChats();
+        case "chat": return await renderChat(id);
+        case "room": return await renderRoom(id);
+        case "agents": return await renderAgents();
+        case "agent": return await renderAgent(id);
+        case "task": return await renderTask(id);
+        case "site": return await renderSite(id);
+        case "learn": return await renderLearn();
+        case "class": return await renderClass(id);
+        case "models": return await renderModels();
+        case "engine": return await renderEngine();
+        case "tune": return await renderTuning(id);
+        case "job": return await renderJob(id);
+        case "lora": return await renderLoraJob(id);
+        case "lab": return await renderLab(generation);
+        case "farm": return await renderFarm(generation);
+        case "trade": return await renderTrade(generation);
+        case "tutor": return await renderTutor(generation);
+        case "changer": return await renderChanger(generation);
+        case "ops": return await renderOps(generation);
+        case "hq": return await renderHQ(generation);
+        case "connectors": return await renderConnectors();
+        case "ideas": return await renderIdeas();
+        case "more": return await renderMore();
+        case "settings": return await renderSettings();
+        default: return go("home");
+      }
+    } catch (error) {
+      if (generation !== renderGeneration) return;
+      view.replaceChildren(
+        error instanceof OfflineError ? offlineCard() : errorCard(error)
+      );
+    }
+  }
+
+  // The Lab lives in lab.js; it gets the same helpers as every page.
+  async function renderLab(generation) {
+    if (!window.FCCLab) throw new Error("The Lab didn't load. Reload the page.");
+    await window.FCCLab.render({
+      view,
+      el,
+      api,
+      post,
+      remove,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  // The HQ (the team as a pixel office) lives in hq.js.
+  async function renderHQ(generation) {
+    if (!window.FCCHQ) throw new Error("The HQ didn't load. Reload the page.");
+    await window.FCCHQ.render({
+      view,
+      el,
+      api,
+      post,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  // The Content Farm lives in farm.js, with the same helpers.
+  async function renderFarm(generation) {
+    if (!window.FCCFarm) throw new Error("The Content Farm didn't load. Reload the page.");
+    await window.FCCFarm.render({
+      view,
+      el,
+      api,
+      post,
+      patch,
+      remove,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  function connectCard(connect) {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true;
+    const rows = connect.urls.map((url) =>
+      el("div", { class: "list-item" }, [
+        el("span", { class: "grow" }, [
+          el("strong", { text: url }),
+          el("span", {
+            text: url.includes("localhost")
+              ? "this computer only"
+              : "use this one from your phone",
+          }),
+        ]),
+        el("button", {
+          class: "secondary",
+          text: "Copy",
+          onclick: async () => {
+            try {
+              await navigator.clipboard.writeText(url);
+              notify("Address copied.");
+            } catch {
+              notify(url);
+            }
+          },
+        }),
+      ])
+    );
+    return card("Install on your iPhone", [
+      el("p", {
+        class: "muted",
+        text: standalone
+          ? "Studio is installed on this device. These are the addresses it answers on."
+          : "On the iPhone, open one of these in Safari, tap Share, then Add to Home Screen. Studio then runs full screen with its own icon.",
+      }),
+      ...rows,
+      connect.loopback_only
+        ? el("p", {
+            class: "muted",
+            text: "The server is bound to localhost, so no other device can reach it. Set HOST to 0.0.0.0 in admin settings and restart to allow your phone in.",
+          })
+        : null,
+      connect.auth_required
+        ? el("p", {
+            class: "muted",
+            text: "Proxy authentication is on, so these addresses carry the token. Open one once on the phone and it is remembered there.",
+          })
+        : el("p", {
+            class: "muted",
+            text: "Anyone on this network can open Studio. On a shared network, turn on proxy authentication in admin settings.",
+          }),
+    ]);
+  }
+
+  // FCC Phone: a separate app on the phone that can pair with this PC.
+  const PHONE_APP_URL = "https://arkival1.github.io/free-claude-code/phone/";
+  function phoneCard() {
+    const list = el("div", {}, [empty("Loading…")]);
+    const codeBox = el("div", { class: "pair-code", hidden: true });
+    const address = el("p", { class: "muted" });
+    let timer = null;
+    const load = async () => {
+      try {
+        const { phones, tailscale } = await api("/studio/api/phones");
+        address.replaceChildren(
+          tailscale
+            ? el("span", {}, ["This PC's address for the phone: ", el("strong", { text: tailscale })])
+            : el("span", {
+                text: "The phone reaches this PC over HTTPS. Install Tailscale (free) on the PC and the phone, then run  tailscale serve --bg 8082  on the PC and use the https://…ts.net address it prints.",
+              })
+        );
+        list.replaceChildren(
+          ...(phones.length
+            ? phones.map((phone) =>
+                el("div", { class: "list-item" }, [
+                  el("span", { class: "grow" }, [
+                    el("strong", { text: phone.name }),
+                    el("span", {
+                      text: `${phone.memories_in} memories shared · ${phone.last_sync ? `last sync ${when(phone.last_sync)}` : "not synced yet"}`,
+                    }),
+                  ]),
+                  el("button", {
+                    class: "danger",
+                    type: "button",
+                    text: "Unlink",
+                    "aria-label": `Unlink ${phone.name}`,
+                    onclick: async () => {
+                      await remove(`/studio/api/phones/${phone.id}`);
+                      notify(`${phone.name} unlinked.`);
+                      load();
+                    },
+                  }),
+                ])
+              )
+            : [empty("No phone paired yet.")])
+        );
+      } catch (error) {
+        list.replaceChildren(empty(error.message));
+      }
+    };
+    load();
+    return card("FCC Phone", [
+      el("p", {
+        class: "muted",
+        text: "FCC Phone is Studio for your iPhone: the Jarvis command center, the whole team, and AI models running on the phone itself (download one, or add a .gguf from Files). It works without this PC; pair it here to share memories both ways, lend it this PC's AI, and give it web search.",
+      }),
+      el("p", {}, ["Get it on the phone: open ", el("a", { href: PHONE_APP_URL, target: "_blank", rel: "noopener", text: PHONE_APP_URL }), " in Safari, then Share, Add to Home Screen."]),
+      address,
+      el("button", {
+        class: "primary",
+        type: "button",
+        text: "Make a pairing code",
+        onclick: async () => {
+          const { code, expires_in } = await post("/studio/api/phones/code");
+          let left = expires_in;
+          clearInterval(timer);
+          codeBox.hidden = false;
+          const draw = () => {
+            codeBox.replaceChildren(
+              el("strong", { text: code }),
+              el("span", {
+                class: "muted",
+                text: left > 0 ? `In FCC Phone: Connect to my PC, then type this code. It works once, for ${Math.ceil(left / 60)} more minute${left > 60 ? "s" : ""}.` : "This code has run out. Make a new one.",
+              })
+            );
+          };
+          draw();
+          timer = setInterval(() => {
+            left -= 15;
+            draw();
+            if (left <= 0) clearInterval(timer);
+            if (!document.body.contains(codeBox)) clearInterval(timer);
+          }, 15000);
+          setTimeout(load, 5000);
+        },
+      }),
+      codeBox,
+      el("h3", { class: "subhead", text: "Paired phones" }),
+      list,
+    ]);
+  }
+
+  function modelEditor(agent) {
+    const input = el("input", { type: "text", list: "model-list", value: agent.model });
+    modelList().catch(() => {});
+    return el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [el("label", {}, ["Model (server, or local/<id>)", input])]),
+      el("button", {
+        class: "secondary",
+        text: "Save",
+        onclick: async () => {
+          if (!input.value.trim()) return notify("Pick a model.");
+          await patch(`/studio/api/agents/${agent.id}`, { updates: { model: input.value.trim() } });
+          notify("Model updated.");
+          render();
+        },
+      }),
+    ]);
+  }
+
+  async function modelList() {
+    const data = await api("/studio/api/models/available");
+    const list = el("datalist", { id: "model-list" }, [
+      ...data.local.models.map((model) => el("option", { value: model, label: "local" })),
+      ...data.server.map((model) => el("option", { value: model, label: "server" })),
+    ]);
+    document.getElementById("model-list")?.remove();
+    document.body.append(list);
+    return data;
+  }
+
+  function errorCard(error) {
+    return card("Something went wrong", [
+      el("p", { class: "muted", text: error.message }),
+      el("button", { class: "primary", text: "Retry", onclick: render }),
+    ]);
+  }
+
+  function offlineCard() {
+    return card("Can't reach your Studio server", [
+      el("p", {
+        class: "muted",
+        text: `This app talks to the server at ${location.host}. Check that the computer running it is awake, on the same network, and still serving.`,
+      }),
+      el("button", { class: "primary", text: "Try again", onclick: render }),
+      el("p", {
+        class: "muted",
+        text: "Everything you have made is stored on that computer, so nothing is lost while it is offline.",
+      }),
+    ]);
+  }
+
+  function registerWorker() {
+    if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+    navigator.serviceWorker
+      .register("/studio/sw.js", { scope: "/studio" })
+      .catch(() => {});
+  }
+
+  // The Trading Bank lives in trade.js, with the same helpers.
+  async function renderTrade(generation) {
+    if (!window.FCCTrade) throw new Error("The Trading Bank didn't load. Reload the page.");
+    await window.FCCTrade.render({
+      view,
+      el,
+      api,
+      post,
+      remove,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  // The Changer (an AI that changes FCC itself, in a copy) lives in changer.js.
+  async function renderChanger(generation) {
+    if (!window.FCCChanger) throw new Error("The Changer didn't load. Reload the page.");
+    await window.FCCChanger.render({
+      view,
+      el,
+      api,
+      post,
+      notify,
+      go,
+      token,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  // The maths tutor (electrician's licence, NSW) lives in tutor.js.
+  async function renderTutor(generation) {
+    if (!window.FCCTutor) throw new Error("The maths tutor didn't load. Reload the page.");
+    await window.FCCTutor.render({
+      view,
+      el,
+      api,
+      post,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  // Ops (the PC's load, background lanes, busy agents) lives in ops.js.
+  async function renderOps(generation) {
+    if (!window.FCCOps) throw new Error("The Ops page didn't load. Reload the page.");
+    await window.FCCOps.render({
+      view,
+      el,
+      api,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
+  function headingFor(name) {
+    return (
+      {
+        home: "Studio",
+        hud: "HUD",
+        chats: "Chats",
+        chat: "Chat",
+        room: "Room",
+        agents: "Agents",
+        agent: "Agent",
+        task: "Agent task",
+        site: "Site",
+        learn: "Classroom",
+        class: "Class",
+        models: "Local models",
+        engine: "Model Control",
+        tune: "Tuning",
+        job: "Tuning run",
+        lora: "LoRA training",
+        lab: "Lab",
+        farm: "Content Farm",
+        trade: "Trading Bank",
+        tutor: "Maths tutor",
+        changer: "The Changer",
+        ops: "Ops",
+        hq: "HQ",
+        connectors: "Connectors",
+        ideas: "Ideas board",
+        more: "More",
+        settings: "Settings",
+      }[name] || "Studio"
+    );
+  }
+
+  registerWorker();
+  render();
+})();

@@ -1928,6 +1928,8 @@ def test_unavailable_feed_shows_reason_and_clears_it_on_recovery(
             None if available else "Code storage is unavailable"
         )
 
+    # Let startup finish first, or it marks the service available afterwards.
+    code_control.run(code_control.service.start())
     code_control.run(availability(False))
     page.goto(f"{admin_base_url}/admin/code")
     expect(page.locator("#codeNotice")).to_contain_text("Code storage is unavailable")

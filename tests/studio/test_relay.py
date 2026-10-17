@@ -1,0 +1,484 @@
+"""The relay: one job passed through LCC's agent and then each repo, one
+after another, each building on the last."""
+
+import asyncio
+
+import httpx
+import pytest
+
+from free_claude_code.studio.models import AgentRun, PlanStep, TeamPlan
+from free_claude_code.studio.relay import (
+    RelaySettings,
+    RelayStage,
+    RelayStore,
+    arranged,
+    job_kinds,
+)
+from free_claude_code.studio.starter import BUNDLE
+from free_claude_code.studio.teamplan import (
+    READ_ONLY_STAGE,
+    file_changes,
+    ready_steps,
+    skip_blocked,
+    step_brief,
+)
+from tests.api.support import create_test_app
+from tests.studio.conftest import tool_reply
+
+BAKERY = "make a website for my bakery"
+FIRST_FIVE = [
+    "VoltAgent/awesome-claude-code-subagents",
+    "OpenHands/software-agent-sdk",
+    "FoundationAgents/MetaGPT",
+    "AI4Finance-Foundation/FinRobot",
+    "crewAIInc/crewAI",
+]
+
+
+def finish_every_stage(seen: list[str] | None = None):
+    def respond(system: str, prompt: str):
+        if "You are stage" in prompt:
+            if seen is not None:
+                seen.append(prompt)
+            stage = prompt.split("You are stage ")[1].split(" ")[0]
+            return tool_reply("finish", {"summary": f"Stage {stage} improved it."})
+        return "ok"
+
+    return respond
+
+
+async def with_repos(make_studio, respond, **settings):
+    """A studio with every repo that comes with FCC added and turned on (they
+    start off until the user turns them on)."""
+    studio, model = make_studio(respond, **settings)
+    studio._starter_folder = BUNDLE
+    await studio.ensure_defaults()
+    for extension in await studio.ensure_starters():
+        await studio.switch_extension(extension.id, on=True)
+    return studio, model
+
+
+def test_a_message_says_what_kind_of_job_it_is():
+    assert job_kinds(BAKERY) == {"site"}
+    assert job_kinds("build a snake game") == {"game"}
+    assert job_kinds("make a todo list app") == {"app"}
+    assert job_kinds("write a blog post about sourdough") == {"writing"}
+    assert "security" in job_kinds("check my site for security problems")
+    assert job_kinds("what time is it") == set()
+
+
+def test_new_repos_join_the_relay_in_their_place(tmp_path):
+    installed = ["leonxlnx/taste-skill", *reversed(FIRST_FIVE), "usestrix/strix"]
+    fresh = arranged(RelaySettings(), installed)
+    assert [s.repo for s in fresh.stages][:5] == FIRST_FIVE
+    # Each repo joins only the jobs it has agents trained for.
+    assert {s.mode for s in fresh.stages} == {"fits"}
+
+    store = RelayStore(tmp_path / "relay.json")
+    store.save(
+        RelaySettings(
+            on=False,
+            first="Builder",
+            stages=[RelayStage("usestrix/strix", "off"), RelayStage("gone/repo")],
+        )
+    )
+    saved = arranged(store.load(), [*installed, "someone/new-repo"])
+    assert saved.on is False and saved.first == "Builder"
+    assert saved.stages[0] == RelayStage("usestrix/strix", "off")
+    assert "gone/repo" not in [s.repo for s in saved.stages]
+    assert saved.stages[-1] == RelayStage("someone/new-repo", "fits")
+
+    # Relays saved with one agent per repo keep it.
+    (tmp_path / "relay.json").write_text(
+        '{"stages": [{"repo": "crewAIInc/crewAI", "agent": "crewAI Content Editor"}]}'
+    )
+    assert store.load().stages == [
+        RelayStage("crewAIInc/crewAI", "fits", ["crewAI Content Editor"])
+    ]
+    assert store.load().check is True
+
+
+def test_a_failed_stage_hands_on_and_nothing_is_skipped():
+    steps = (
+        PlanStep(id="s1", agent="Builder", do="x", status="done", result="Made it."),
+        PlanStep(
+            id="s2", agent="frontend-developer", do="y", needs=("s1",), status="failed"
+        ),
+        PlanStep(id="s3", agent="OpenHands Engineer", do="z", needs=("s2",)),
+    )
+    relay = TeamPlan(goal=BAKERY, kind="relay", steps=steps)
+    assert [s.id for s in ready_steps(skip_blocked(relay))] == ["s3"]
+    brief = step_brief(relay, steps[2])
+    assert brief.startswith("You are stage 3 of 3 of a relay")
+    assert "- Builder [done]: Made it." in brief
+    assert "Don't start over" in brief
+
+    plan = relay.model_copy(update={"kind": "plan"})
+    assert skip_blocked(plan).steps[2].status == "skipped"
+
+    # An agent whose repo gave it only reading and research tools (VoltAgent's
+    # seo-specialist) hands exact changes on instead of being told to edit.
+    advice = step_brief(relay, steps[2], writes=False)
+    assert READ_ONLY_STAGE in advice and "edit_file" not in advice
+
+
+def test_a_relay_runs_one_stage_at_a_time_in_order():
+    # Resumed: stage 2 failed and runs again, stage 3 was done. Stage 4 needs
+    # only stage 3 but still waits for stage 2, so two never run at once.
+    steps = (
+        PlanStep(id="s1", agent="Builder", do="x", status="done"),
+        PlanStep(id="s2", agent="ui-designer", do="y", needs=("s1",)),
+        PlanStep(id="s3", agent="frontend-developer", do="z", status="done"),
+        PlanStep(id="s4", agent="seo-specialist", do="w", needs=("s3",)),
+    )
+    relay = TeamPlan(goal=BAKERY, kind="relay", steps=steps)
+    assert [s.id for s in ready_steps(relay)] == ["s2"]
+    running = relay.model_copy(
+        update={
+            "steps": (
+                *steps[:1],
+                steps[1].model_copy(update={"status": "running"}),
+                *steps[2:],
+            )
+        }
+    )
+    assert ready_steps(running) == []
+    over = relay.model_copy(
+        update={
+            "steps": (
+                *steps[:1],
+                steps[1].model_copy(update={"status": "failed"}),
+                *steps[2:],
+            )
+        }
+    )
+    assert [s.id for s in ready_steps(over)] == ["s4"]
+    # A team plan still starts every step whose needs are done.
+    plan = relay.model_copy(update={"kind": "plan"})
+    assert [s.id for s in ready_steps(plan)] == ["s2", "s4"]
+
+
+VOLT = "VoltAgent/awesome-claude-code-subagents"
+WEBSITE_STAGES = [
+    ("Builder", ""),
+    ("ui-designer", VOLT),
+    ("frontend-developer", VOLT),
+    ("seo-specialist", VOLT),
+    ("accessibility-tester", VOLT),
+    ("OpenHands Engineer", "OpenHands/software-agent-sdk"),
+    ("MetaGPT QA Engineer", "FoundationAgents/MetaGPT"),
+    ("crewAI Content Writer", "crewAIInc/crewAI"),
+    ("Builder", "leonxlnx/taste-skill"),
+    ("Builder", "OpenHands/openhands"),
+    ("Builder", "paperclipai/paperclip"),
+    ("Builder", ""),
+]
+
+
+def active(agents) -> list[str]:
+    return [a.name for a in agents if not a.archived]
+
+
+@pytest.mark.asyncio
+async def test_a_website_goes_through_lcc_then_each_trained_agent_in_turn(make_studio):
+    seen: list[str] = []
+    team_at_start: list[str] = []
+
+    async def respond(system: str, prompt: str):
+        if "You are stage 1 " in prompt:
+            team_at_start.extend(active(await studio.agents()))
+        return finish_every_stage(seen)(system, prompt)
+
+    studio, _ = await with_repos(make_studio, respond)
+
+    plan = await studio.start_relay(BAKERY, chat_id=(await studio.main_chat()).id)
+
+    assert plan.kind == "relay"
+    # Only agents trained for websites: no finance or security agent.
+    assert [(s.agent, s.source) for s in plan.steps] == WEBSITE_STAGES
+    assert [s.needs for s in plan.steps[1:]] == [(f"s{n}",) for n in range(1, 12)]
+    assert "high-end-visual-design" in plan.steps[8].do
+    assert plan.steps[-1].do.startswith("Final check of"), "LCC checks it last"
+    assert plan.site_id, "every stage works in one project"
+
+    await asyncio.wait_for(studio.wait_for_background(), timeout=60)
+    done = await studio.plan(plan.id)
+    assert done.status == "done"
+    assert [s.status for s in done.steps] == ["done"] * 12
+    # One at a time, in order, each told what the stage before it did.
+    assert [p.split("You are stage ")[1].split(" ")[0] for p in seen] == [
+        str(n) for n in range(1, 13)
+    ]
+    assert f"- ui-designer ({VOLT}) [done]: Stage 2 improved it." in seen[2]
+    assert "business level" in seen[0] and "a sentence or two" in seen[0]
+    starts = [s.started_at for s in done.steps]
+    finishes = [s.finished_at for s in done.steps]
+    assert all(starts[n + 1] >= finishes[n] for n in range(11))
+    runs = await studio.store.find(AgentRun)
+    assert {run.site_id for run in runs} == {plan.site_id}
+    assert (
+        "The relay 'make a website for my bakery' is done: 12 of 12 stage(s) done."
+        in done.summary
+    )
+
+    # The repo agents joined only when their stage started, after LCC's
+    # Builder had the job, and went back on the shelf when it ended.
+    assert "ui-designer" not in team_at_start
+    assert len(done.loaded) == 7
+    assert "ui-designer" not in active(await studio.agents())
+    shelved = next(a for a in await studio.agents() if a.name == "ui-designer")
+    again = await studio.start_relay("make a website for my gym")
+    await asyncio.wait_for(studio.wait_for_background(), timeout=60)
+    same = [a for a in await studio.agents() if a.name == "ui-designer"]
+    assert [a.id for a in same] == [shelved.id], "the same agent, off the shelf"
+    assert (await studio.plan(again.id)).status == "done"
+
+
+@pytest.mark.asyncio
+async def test_each_kind_of_job_gets_only_the_agents_trained_for_it(make_studio):
+    studio, _ = await with_repos(make_studio, finish_every_stage())
+    lab = await studio.start_relay("make shampoo in the lab")
+    assert [(s.agent, s.source) for s in lab.steps] == [
+        ("Lab", ""),
+        ("scientific-literature-researcher", VOLT),
+        ("data-scientist", VOLT),
+        ("Lab", "k-dense-ai/scientific-agent-skills"),
+    ]
+    await studio.stop_plan(lab.id)
+    blog = await studio.start_relay("write a blog post about sourdough")
+    assert [s.agent for s in blog.steps] == [
+        "Helper",
+        "content-marketer",
+        "content-quality-editor",
+        "crewAI Content Planner",
+        "crewAI Content Writer",
+        "crewAI Content Editor",
+    ]
+    await studio.stop_plan(blog.id)
+
+
+def test_a_stage_says_which_files_it_changed():
+    before = {"index.html": "a", "old.css": "b", "app.js": "c"}
+    after = {"index.html": "a2", "app.js": "c", "menu.html": "d"}
+    assert file_changes(before, after) == (
+        "Files changed: index.html (edited), menu.html (new), old.css (removed)."
+    )
+    assert file_changes(after, after) == "No project files changed."
+    many = {f"page{n}.html": "x" for n in range(15)}
+    assert file_changes({}, many).endswith("page11.html (new), and 3 more.")
+
+
+@pytest.mark.asyncio
+async def test_the_files_show_what_each_stage_really_did(make_studio):
+    # Stage 3 does nothing and copies stage 2's report; the files tell the
+    # next stages, the HQ, and the user that it changed nothing.
+    seen: list[str] = []
+
+    def respond(system: str, prompt: str):
+        if "You are stage" in prompt:
+            seen.append(prompt)
+            stage = prompt.split("You are stage ")[1].split(" ")[0]
+            if stage == "1":
+                page = {"path": "menu.html", "content": "<h1>Menu</h1>"}
+                return tool_reply("write_file", page)
+            if stage == "2":
+                page = {"path": "index.html", "content": "<h1>Rosie's</h1>"}
+                return tool_reply("write_file", page)
+        # The file is written: the stage is done.
+        return tool_reply("finish", {"summary": "Added a price list."})
+
+    studio, _ = await with_repos(make_studio, respond)
+    plan = await studio.start_relay(BAKERY)
+    await asyncio.wait_for(studio.wait_for_background(), timeout=60)
+    done = await studio.plan(plan.id)
+
+    changes = [s.changes for s in done.steps]
+    assert changes[:3] == [
+        "Files changed: menu.html (new).",
+        "Files changed: index.html (edited).",
+        "No project files changed.",
+    ]
+    assert "  Files changed: index.html (edited)." in seen[2]
+    assert "  No project files changed." in seen[3]
+    assert "don't copy the reports above" in seen[3]
+    assert "(No project files changed.)" in done.summary
+
+
+@pytest.mark.asyncio
+async def test_a_stage_that_fails_doesnt_stop_the_relay(make_studio):
+    def respond(system: str, prompt: str):
+        if "You are stage" in prompt and "OpenHands agent" in system:
+            raise RuntimeError("the model fell over")
+        return finish_every_stage()(system, prompt)
+
+    studio, _ = await with_repos(make_studio, respond)
+    plan = await studio.start_relay("make a todo list app")
+    await asyncio.wait_for(studio.wait_for_background(), timeout=60)
+    done = await studio.plan(plan.id)
+    statuses = {s.agent: s.status for s in done.steps}
+    assert statuses["OpenHands Engineer"] == "failed"
+    assert statuses["MetaGPT QA Engineer"] == "done"
+    assert done.steps[-1].status == "done"
+    assert done.steps[0].agent == "Coder" and done.steps[-1].agent == "Coder"
+
+
+@pytest.mark.asyncio
+async def test_only_websites_apps_and_games_get_the_final_check(make_studio):
+    studio, _ = await with_repos(make_studio, finish_every_stage())
+    plan = await studio.start_relay("write a blog post about sourdough")
+    assert not any(s.do.startswith("Final check") for s in plan.steps)
+    await studio.stop_plan(plan.id)
+
+
+@pytest.mark.asyncio
+async def test_the_relay_order_and_switches_are_kept(make_studio):
+    studio, _ = await with_repos(make_studio, finish_every_stage())
+    view = await studio.relay_view()
+    assert view["on"] is True and "Builder" in view["team"]
+    assert [s["repo"] for s in view["stages"]][:5] == FIRST_FIVE
+    volt = view["stages"][0]
+    assert len(volt["agents"]) >= 150 and volt["mode"] == "fits"
+
+    # The page sends the whole list: two repos first, the rest switched off.
+    front = [
+        {
+            "repo": "crewAIInc/crewAI",
+            "mode": "always",
+            "agent": "crewAI Content Editor",
+        },
+        {
+            "repo": "VoltAgent/awesome-claude-code-subagents",
+            "mode": "always",
+            "agent": "ui-designer",
+        },
+    ]
+    rest = [
+        {"repo": s["repo"], "mode": "off"}
+        for s in view["stages"]
+        if s["repo"] not in {f["repo"] for f in front}
+    ]
+    stages = front + rest
+    saved = await studio.save_relay({"stages": stages, "first": "Helper"})
+    assert [s["repo"] for s in saved["stages"]] == [s["repo"] for s in stages]
+    plan = await studio.start_relay(BAKERY)
+    assert [s.agent for s in plan.steps] == [
+        "Helper",
+        "crewAI Content Editor",
+        "ui-designer",
+        "Helper",
+    ]
+    await studio.stop_plan(plan.id)
+
+    # A repo can give several of its agents, each taking its own turn, and
+    # the final check can be switched off.
+    volt = "VoltAgent/awesome-claude-code-subagents"
+    several = [
+        {"repo": volt, "mode": "always", "use": ["ui-designer", "seo-specialist"]},
+        *[{**row, "mode": "off"} for row in front if row["repo"] != volt],
+        *rest,
+    ]
+    saved = await studio.save_relay({"stages": several, "check": False})
+    assert saved["check"] is False
+    assert saved["stages"][0]["use"] == ["ui-designer", "seo-specialist"]
+    plan = await studio.start_relay(BAKERY)
+    assert [(s.agent, s.source) for s in plan.steps] == [
+        ("Helper", ""),
+        ("ui-designer", volt),
+        ("seo-specialist", volt),
+    ]
+    await studio.stop_plan(plan.id)
+
+    with pytest.raises(Exception, match="has no agent or skill"):
+        await studio.save_relay(
+            {"stages": [{"repo": "crewAIInc/crewAI", "agent": "Wizard"}]}
+        )
+    with pytest.raises(Exception, match="No repo called"):
+        await studio.save_relay({"stages": [{"repo": "nobody/nothing"}]})
+    with pytest.raises(Exception, match="No LCC agent"):
+        await studio.save_relay({"first": "frontend-developer"})
+
+
+@pytest.mark.asyncio
+async def test_jarvis_sends_new_websites_through_the_relay_while_it_is_on(make_studio):
+    studio, _ = await with_repos(make_studio, finish_every_stage())
+
+    await studio.main_say(BAKERY, background=False)
+    relays = await studio.plans()
+    assert [p.kind for p in relays] == ["relay"] and relays[0].goal == BAKERY
+    await studio.stop_plan(relays[0].id)
+
+    await studio.save_relay({"on": False})
+    await studio.main_say("make a website for my gym", background=False)
+    assert len(await studio.plans()) == 1, "off: the Builder takes it the usual way"
+    await studio.main_say("relay: make a website for my gym", background=False)
+    newest = (await studio.plans())[0]
+    assert newest.kind == "relay" and newest.goal == "make a website for my gym"
+    await studio.stop_plan(newest.id)
+
+
+@pytest.mark.asyncio
+async def test_the_main_ai_answers_before_the_first_stage_starts(make_studio):
+    # On a model that answers one request at a time, the first stage must not
+    # keep Jarvis's reply waiting: it starts when the reply is done.
+    first_stage_while_replying: list[str] = []
+
+    async def respond(system: str, prompt: str):
+        if "You are stage" in prompt:
+            return tool_reply("finish", {"summary": "Done."})
+        if "the user's main AI" in system:
+            relays = await studio.plans()
+            if relays:
+                first_stage_while_replying.append(relays[0].steps[0].status)
+            return "The relay is on it."
+        return "ok"
+
+    studio, _ = await with_repos(make_studio, respond)
+    await studio.main_say(BAKERY, background=False)
+    assert first_stage_while_replying == ["waiting"]
+    await asyncio.wait_for(studio.wait_for_background(), timeout=60)
+    assert (await studio.plans())[0].status == "done"
+
+
+@pytest.mark.asyncio
+async def test_without_repos_a_website_goes_the_usual_way(make_studio):
+    studio, _ = make_studio(finish_every_stage())
+    await studio.ensure_defaults()
+    await studio.main_say(BAKERY, background=False)
+    assert await studio.plans() == ()
+    with pytest.raises(Exception, match="No repo in the relay"):
+        await studio.start_relay(BAKERY)
+
+
+@pytest.mark.asyncio
+async def test_the_relay_routes(make_studio):
+    studio, _ = await with_repos(make_studio, finish_every_stage())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_test_app(studio=studio)),
+        base_url="http://127.0.0.1",
+    ) as client:
+        view = (await client.get("/studio/api/relay")).json()
+        assert view["stages"][0]["repo"] == FIRST_FIVE[0]
+        off = await client.put("/studio/api/relay", json={"on": False})
+        assert off.status_code == 200 and off.json()["on"] is False
+        bad = await client.put("/studio/api/relay", json={"first": "Nobody"})
+        assert bad.status_code == 400
+        started = await client.post("/studio/api/relay", json={"goal": BAKERY})
+        assert started.status_code == 202
+        assert started.json()["kind"] == "relay" and len(started.json()["steps"]) == 12
+        await studio.stop_plan(started.json()["id"])
+
+        # Other AI tools start one through LCC's MCP server.
+        call = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "lcc_relay",
+                "arguments": {"goal": "build a snake game"},
+            },
+        }
+        answer = (await client.post("/mcp", json=call)).json()["result"]
+        text = answer["content"][0]["text"]
+        assert not answer["isError"] and "stage(s), in order:" in text
+        assert "1. Coder" in text and "game-developer (VoltAgent/" in text
+        await studio.stop_plan(text.split("Relay ")[1].split(" ")[0])
