@@ -2,6 +2,7 @@
 the debate, the risk period, cooling-off, the hard limits, the account check,
 and the order modes; plus exits, debriefs, the kill switch, and restarts."""
 
+import asyncio
 import csv
 import hashlib
 import io
@@ -1913,3 +1914,23 @@ async def test_practice_end_to_end_partial_fill_restart_exit_and_audit(
     kinds_seen = {line.kind for line in await store.find(TradeAudit)}
     assert {"order", "fill", "decision"} <= kinds_seen
     await again.close()
+
+
+@pytest.mark.asyncio
+async def test_two_sales_of_one_holding_at_once_sell_it_once(make_desk, store):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    position = await store.get(TradePosition, "paper:BTC")
+    assert position is not None
+    # The loop and the kill switch both try to sell it at the same moment.
+    await asyncio.gather(
+        desk._exit(position, "the stop-loss was hit", desk.config()),
+        desk._exit(position, "the kill switch", desk.config(), force=True),
+    )
+    assert await store.get(TradePosition, "paper:BTC") is None
+    sells = [o for o in await store.find(TradeOrder) if o.side == "sell"]
+    assert [o.status for o in sells] == ["filled"]
+    await desk.close()

@@ -258,6 +258,7 @@ class TradingDesk:
         self._heartbeat = 0.0
         self._last_learn = 0.0
         self._last_credentials = 0.0
+        self._exit_locks: dict[str, asyncio.Lock] = {}
         self._secrets: set[str] | None = None
         self.feed.redact = self._redact
         self._activity: JsonObject = {}
@@ -2874,7 +2875,30 @@ class TradingDesk:
     ) -> None:
         """Sell a whole holding. Stops, targets, and the kill switch go
         straight through (a tap could cost more than it saves); a Portfolio
-        Manager's sell waits for approval in approve mode."""
+        Manager's sell waits for approval in approve mode. One sale of a
+        holding at a time: a second caller (the loop and the kill switch at
+        once) waits, then finds it sold or its sale under way."""
+        recorded = await self._store.get(TradePosition, position.id) is not None
+        lock = self._exit_locks.setdefault(position.id, asyncio.Lock())
+        async with lock:
+            if recorded:
+                current = await self._store.get(TradePosition, position.id)
+                if current is None:
+                    return  # sold while this one waited
+                position = current
+            await self._exit_once(
+                position, reason, config, round_id=round_id, force=force
+            )
+
+    async def _exit_once(
+        self,
+        position: TradePosition,
+        reason: str,
+        config: DeskConfig,
+        *,
+        round_id: str,
+        force: bool,
+    ) -> None:
         open_sells = [
             order
             for order in await self._store.find(

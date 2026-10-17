@@ -11,6 +11,7 @@ profit and loss read like a real Australian account's. The ASX's minimum
 first parcel ($500) applies, and ASX shares trade in whole units.
 """
 
+import asyncio
 import json
 import os
 import time
@@ -30,6 +31,10 @@ from ..quality import bid_ask_source, profile_of
 from ..records import TradePosition
 from ..sessions import session
 from .base import Account, Holding, OrderRequest, OrderResult, Rules, rejected
+
+_LOCKS: dict[str, asyncio.Lock] = {}
+"""One writer at a time per practice account file (the loop's fills and an
+order placed at the same moment would otherwise lose one's update)."""
 
 ASX_MIN_PARCEL = 500.0
 MAX_KEPT_ORDERS = 500
@@ -172,7 +177,14 @@ class PaperBroker:
 
     # ------------------------------------------------------------ orders
 
+    def _lock(self) -> asyncio.Lock:
+        return _LOCKS.setdefault(str(self._path.resolve()), asyncio.Lock())
+
     async def place(self, order: OrderRequest) -> OrderResult:
+        async with self._lock():
+            return await self._place(order)
+
+    async def _place(self, order: OrderRequest) -> OrderResult:
         state = self._read()
         orders = _orders(state)
         if order.client_id in orders:
@@ -425,6 +437,10 @@ class PaperBroker:
     async def tick(self) -> list[OrderResult]:
         """Carry on with orders still filling: the rest of a partial fill as
         the market allows, a limit once its price is reached, and expiry."""
+        async with self._lock():
+            return await self._tick()
+
+    async def _tick(self) -> list[OrderResult]:
         state = self._read()
         changed: list[OrderResult] = []
         now = self._clock()
@@ -491,6 +507,10 @@ class PaperBroker:
         return _result(entry) if entry is not None else None
 
     async def cancel(self, broker_order_id: str) -> None:
+        async with self._lock():
+            self._cancel(broker_order_id)
+
+    def _cancel(self, broker_order_id: str) -> None:
         state = self._read()
         orders = _orders(state)
         for entry in orders.values():
