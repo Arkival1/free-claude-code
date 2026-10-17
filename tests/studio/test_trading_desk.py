@@ -1022,8 +1022,10 @@ async def test_after_a_restart_only_paper_trading_resumes(make_desk, fake_platfo
     await go_live(desk)
     desk._save(desk.config().model_copy(update={"running": True}))
     await desk.resume()
+    # Live trading stays paused until Start, but what is held is still
+    # watched (stops and targets keep working after a restart).
     assert desk.config().running is False
-    assert desk._loop_task is None
+    assert desk._loop_task is not None and not desk._loop_task.done()
     paper, _ = make_desk()
     await paper.update_config({"mode": "paper"}, on_pc=True)
     paper._save(paper.config().model_copy(update={"running": True}))
@@ -1282,4 +1284,141 @@ async def test_the_audit_trail_keeps_orders_settings_and_the_kill_switch(
     table = list(csv.reader(io.StringIO(await desk.audit_csv(kind="fill"))))
     assert table[0][:3] == ["time_utc", "kind", "symbol"] and len(table) >= 2
     assert all(row[1] == "fill" for row in table[1:])
+    await desk.close()
+
+
+# ------------------------------------------------------------ protection and modes
+
+
+async def closed_trade(store, pnl: float) -> None:
+    await store.put(
+        TradeDecision(
+            round_id=f"trd_{len(await store.find(TradeDecision))}",
+            symbol="BTC",
+            status="position_closed",
+            pnl=pnl,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_losing_streak_trips_the_breaker_until_the_cool_down(make_desk, store):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    for _ in range(3):
+        await closed_trade(store, -25.0)
+    await desk._protect(desk.config())
+    assert "circuit breaker" in desk._entry_block(desk.config())
+    # No new trade starts: the buy is stopped before the risk period.
+    await desk._consider(btc(), desk.config())
+    rounds = await store.find(TradeRound)
+    assert rounds[-1].status == "blocked" and "circuit breaker" in rounds[-1].note
+    assert await store.find(TradeOrder) == ()
+    assert "breaker" in {line.kind for line in await store.find(TradeAudit)}
+    # After the cool-down, with no new losses since it tripped, it clears.
+    later = time.time() + 61 * 60
+    desk._clock = lambda: later
+    desk._last_protect = 0.0
+    await desk._protect(desk.config())
+    assert desk._entry_block(desk.config()) == ""
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_a_burst_of_errors_trips_the_breaker_and_the_owner_can_reset_it(
+    make_desk, store
+):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    for number in range(5):
+        await desk.feed.emit("error", f"Broker answered 500 (#{number})")
+    await desk._protect(desk.config())
+    assert "errors" in desk._entry_block(desk.config())
+    with pytest.raises(TradingError):
+        await desk.reset_breaker(on_pc=False)
+    await desk.reset_breaker(on_pc=True)
+    assert desk._entry_block(desk.config()) == ""
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_stopping_the_desk_still_watches_stops_and_targets(make_desk, store):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    position = await store.get(TradePosition, "paper:BTC")
+    assert position is not None
+    await desk.stop()
+    await store.put(position.model_copy(update={"stop_loss": position.avg_price * 2}))
+    await desk.tick()
+    assert await store.get(TradePosition, "paper:BTC") is None
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_the_kill_switch_latches_and_needs_a_typed_phrase_to_close_all(
+    make_desk, store, fake_platform
+):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    assert await store.get(TradePosition, "paper:BTC") is not None
+    await desk.save_keys("fake", {"token": "secret-token"})
+    with pytest.raises(TradingError):
+        await desk.kill(flatten=True, confirm="yes")
+    await desk.kill(flatten=True, confirm="CLOSE EVERYTHING", reason="test")
+    # Every account with keys was covered, and the holding was sold.
+    assert await store.get(TradePosition, "paper:BTC") is None
+    [line] = await desk.audit_trail(kind="kill")
+    assert set(data(line["data"])["accounts"]) == {
+        "Paper account (practice)",
+        "Fake Broker",
+    }
+    # It stays on until released, and only from the PC.
+    with pytest.raises(TradingError):
+        await desk.start()
+    with pytest.raises(TradingError):
+        await desk.release_kill(on_pc=False)
+    await desk.release_kill(on_pc=True)
+    await desk.start()
+    assert desk.config().running
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_alert_only_analyses_and_alerts_but_never_orders(make_desk, store):
+    desk, _ = make_desk()
+    await crypto_only(desk, mode="alert_only")
+    desk._save(desk.config().model_copy(update={"running": True}))
+    assert not desk.config().live
+    await desk._consider(btc(), desk.config())
+    assert await store.find(TradeOrder) == ()
+    [round_] = await store.find(TradeRound)
+    assert round_.status == "alert"
+    assert "alert" in await kinds(store)
+    [record] = await store.find(TradeDecision)
+    assert record.status == "alert" and not record.order_submitted
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_each_market_can_trade_on_its_own_verified_account(
+    make_desk, fake_platform
+):
+    desk, _ = make_desk()
+    await go_live(desk)
+    config = desk.config()
+    assert config.broker_for("crypto") == "fake" and config.live_brokers() == ["fake"]
+    # A route to an account with no keys or no verification is refused.
+    with pytest.raises(TradingError):
+        await desk.update_config({"routes": {"us": "alpaca"}}, on_pc=True)
+    routed = config.model_copy(update={"routes": {"crypto": "fake"}})
+    assert routed.broker_for("crypto") == "fake"
+    assert routed.broker_for("us") == "fake"
+    assert config.model_copy(update={"mode": "paper"}).broker_for("crypto") == "paper"
     await desk.close()

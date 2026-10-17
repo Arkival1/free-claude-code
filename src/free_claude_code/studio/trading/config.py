@@ -161,6 +161,22 @@ class DataQualityLimits(BaseModel):
     is treated as closed (a holiday) or the symbol as halted."""
 
 
+class BreakerLimits(BaseModel):
+    """When the circuit breaker pauses new trades (positions are still
+    managed). Learning never changes these."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    consecutive_losses: int = Field(default=3, ge=1, le=20)
+    slippage_spike_times: float = Field(default=2.0, ge=1.0, le=20.0)
+    """A fill slipping this many times the slippage limit trips it."""
+    errors: int = Field(default=5, ge=2, le=100)
+    errors_minutes: int = Field(default=30, ge=5, le=1440)
+    stale_rounds: int = Field(default=5, ge=2, le=100)
+    """This many candidates in a row failing their data checks trips it."""
+    cooldown_minutes: int = Field(default=60, ge=5, le=1440)
+
+
 class DeskConfig(BaseModel):
     """Everything the owner sets on the Trading page."""
 
@@ -184,6 +200,10 @@ class DeskConfig(BaseModel):
     risk: RiskLimits = Field(default_factory=RiskLimits)
     assessment: AssessmentLimits = Field(default_factory=AssessmentLimits)
     data: DataQualityLimits = Field(default_factory=DataQualityLimits)
+    breaker: BreakerLimits = Field(default_factory=BreakerLimits)
+    routes: dict[str, str] = Field(default_factory=dict)
+    """With real money: the account each market trades on (coins, US shares,
+    ASX shares), several at once; a market not listed uses ``broker``."""
     approval_minutes: int = Field(default=10, ge=1, le=1440)
     crypto_debrief_hour_utc: int = Field(default=14, ge=0, le=23)
     """When the crypto session debrief runs (14:00 UTC is midnight in Sydney)."""
@@ -225,7 +245,26 @@ class DeskConfig(BaseModel):
 
     @property
     def live(self) -> bool:
-        return self.mode != "paper"
+        """Real money: orders go to a real account."""
+        return self.mode in {"live_approve", "live_auto"}
+
+    @property
+    def alert_only(self) -> bool:
+        return self.mode == "alert_only"
+
+    def broker_for(self, market: str) -> str:
+        """The account a market trades on: practice when not live."""
+        if not self.live:
+            return "paper"
+        key = "crypto" if market in {"crypto", "dex"} else market
+        return self.routes.get(key) or self.broker
+
+    def live_brokers(self) -> list[str]:
+        """Every real account in use (the main one and each route)."""
+        if not self.live:
+            return []
+        found = [self.broker, *self.routes.values()]
+        return [name for name in dict.fromkeys(found) if name and name != "paper"]
 
 
 class DeskConfigStore:

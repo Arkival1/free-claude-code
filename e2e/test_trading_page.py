@@ -9,7 +9,7 @@ def test_the_trading_bank_opens_on_paper_with_every_tab(
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{admin_base_url}/studio#trade")
     expect(page.locator("#view-title")).to_have_text("Trading Bank")
-    expect(page.locator(".mode-badge strong")).to_have_text("PAPER")
+    expect(page.locator(".mode-badge strong")).to_have_text("PRACTICE")
     expect(page.locator(".trade-strip")).to_contain_text("10,000.00")
     expect(page.locator(".tab[data-route='trade']")).to_have_attribute(
         "aria-current", "page"

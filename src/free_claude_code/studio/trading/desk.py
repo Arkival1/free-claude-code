@@ -89,6 +89,8 @@ from .ledger import build_ledger, tax_csv
 from .log import Feed, event_view
 from .news import judge
 from .precheck import pre_trade_check
+from .protection import FLATTEN_PHRASE, Health, Trip, may_clear, trip
+from .protection import check as breaker_check
 from .providers.news import NewsFeeds
 from .quality import (
     QualityCheck,
@@ -125,6 +127,8 @@ ASKED = "asked by you"
 FRESH = "fresh analysis after a stale decision"
 RECHECK_SECONDS = 2 * 3600.0
 """A symbol is analysed again after a stale decision at most this often."""
+PROTECT_SECONDS = 60.0
+"""How often the circuit breaker looks at the desk's health."""
 SCORE_SECONDS = 300.0
 ACCOUNT_SECONDS = 30.0
 DEBRIEF_LATE_HOURS = 12.0
@@ -202,6 +206,9 @@ class TradingDesk:
         self._rechecks: list[str] = []
         """Symbols whose decision went stale: analysed again from scratch."""
         self._rechecked: dict[str, float] = {}
+        self._last_protect = 0.0
+        self._reconcile_problem = ""
+        """Why FCC's records and an account's didn't match at the last check."""
         self._research = DeskResearch(search=search, read_page=read_page)
         self._news = NewsFeeds(self._web, wall=clock)
         self._debriefs = Debriefs(
@@ -260,7 +267,11 @@ class TradingDesk:
             wanted = DeskConfig.model_validate(merged)
         except ValueError as error:
             raise TradingError(f"Those settings aren't valid: {error}") from error
-        if wanted.mode != current.mode or wanted.broker != current.broker:
+        if (
+            wanted.mode != current.mode
+            or wanted.broker != current.broker
+            or wanted.routes != current.routes
+        ):
             wanted = self._check_mode(current, wanted, on_pc=on_pc, confirm=confirm)
         self._save(wanted)
         changed = sorted(key for key in values if key not in {"accounts", "running"})
@@ -290,10 +301,23 @@ class TradingDesk:
     def _check_mode(
         self, current: DeskConfig, wanted: DeskConfig, *, on_pc: bool, confirm: str
     ) -> DeskConfig:
-        if wanted.mode == "paper":
+        if not wanted.live:
+            # Practice and alert-only never touch real money.
             return wanted.model_copy(update={"live_auto_confirmed_at": 0})
         if not on_pc:
             raise TradingError("Live trading can only be switched on from the PC.")
+        for routed in wanted.routes.values():
+            if routed in {"", "paper"}:
+                continue
+            spec = BROKERS.get(routed)
+            if spec is None or spec.factory is None:
+                raise TradingError(f"FCC can't trade on {routed!r} yet.")
+            if not self._keys.values(routed):
+                raise TradingError(f"Add your {spec.name} keys first.")
+            if not current.accounts.get(routed):
+                raise TradingError(
+                    f"Verify your {spec.name} account first (Test, then Verify)."
+                )
         if wanted.broker == "paper":
             raise TradingError(
                 "Pick a live platform first; the paper account is practice only."
@@ -339,6 +363,11 @@ class TradingDesk:
         config = self.config()
         if config.live and not on_pc:
             raise TradingError("Live trading can only be started from the PC.")
+        killed = self._state().get("kill")
+        if isinstance(killed, dict):
+            raise TradingError(
+                "The kill switch is on. Release it on the PC first, then Start."
+            )
         self._save(config.model_copy(update={"running": True}))
         self._ensure_loop()
         await self.feed.emit(
@@ -348,15 +377,52 @@ class TradingDesk:
         return await self.status()
 
     async def stop(self) -> JsonObject:
+        """Nothing new is traded; open positions keep their stops and
+        targets watched, and orders already sent are still followed."""
         config = self.config()
         self._save(config.model_copy(update={"running": False}))
-        await self._cancel_tasks()
-        await self.feed.emit("info", "Desk stopped. Nothing new will be traded.")
+        if self._round_task is not None and not self._round_task.done():
+            self._round_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._round_task
+        self._round_task = None
+        self._activity = {}
+        cancelled = 0
+        for order in await self._store.find(TradeOrder, where={"status": "cooling"}):
+            await self._set(order, status="cancelled", reason="The desk was stopped.")
+            await self._round_status(order.round_id, "aborted", "The desk was stopped.")
+            cancelled += 1
+        self._ensure_loop()
+        await self.feed.emit(
+            "info",
+            "Desk stopped. Nothing new will be traded; open positions are still "
+            "watched"
+            + (
+                f"; {cancelled} order(s) in cooling-off cancelled."
+                if cancelled
+                else "."
+            ),
+        )
         return await self.status()
 
-    async def kill(self, *, flatten: bool = False) -> JsonObject:
-        """Stop everything: the loop, every waiting order, and (with flatten)
-        sell every holding at market."""
+    async def kill(
+        self, *, flatten: bool = False, confirm: str = "", reason: str = ""
+    ) -> JsonObject:
+        """The emergency stop, on every connected account: nothing new is
+        traded, every waiting order is cancelled, and the switch latches
+        until the owner releases it. Closing every position as well needs
+        the typed phrase (the second confirmation)."""
+        if flatten and confirm.strip() != FLATTEN_PHRASE:
+            raise TradingError(
+                f'To close every position as well, type "{FLATTEN_PHRASE}".'
+            )
+        state = self._state()
+        state["kill"] = {
+            "at": self._clock(),
+            "reason": reason or "the kill switch was pressed",
+            "flatten": flatten,
+        }
+        self._save_state(state)
         await self.stop()
         config = self.config()
         cancelled = 0
@@ -364,45 +430,91 @@ class TradingDesk:
             if order.status in {"cooling", "awaiting_approval", "approved"}:
                 await self._set(order, status="cancelled", reason="Kill switch.")
                 cancelled += 1
-        broker = self._broker(config)
-        try:
-            for result in await broker.open_orders():
-                with contextlib.suppress(ServiceError):
-                    await broker.cancel(result.broker_order_id)
-                    cancelled += 1
-        except ServiceError as error:
-            await self.feed.emit(
-                "error", f"Couldn't list open orders to cancel: {error}"
-            )
+        accounts: list[str] = []
+        problems: list[str] = []
+        for broker in self._brokers_with_keys(config):
+            accounts.append(broker.name)
+            try:
+                for result in await broker.open_orders():
+                    try:
+                        await broker.cancel(result.broker_order_id)
+                        cancelled += 1
+                    except ServiceError as error:
+                        problems.append(f"{broker.name}: {error}")
+            except ServiceError as error:
+                problems.append(f"{broker.name}: couldn't list open orders ({error})")
         sold = 0
         if flatten:
-            for holding in await self._holdings(broker):
-                position = await self._position_record(broker, holding)
-                await self._exit(position, "the kill switch", config, force=True)
-                sold += 1
+            for broker in self._brokers_with_keys(config):
+                for holding in await self._holdings(broker):
+                    position = await self._position_record(broker, holding)
+                    await self._exit(position, "the kill switch", config, force=True)
+                    sold += 1
+        state = self._state()
+        latch = state.get("kill")
+        if isinstance(latch, dict):
+            latch.update({"cancelled": cancelled, "sold": sold, "accounts": accounts})
+            state["kill"] = latch
+            self._save_state(state)
         await self.feed.emit(
             "kill",
-            f"Kill switch: {cancelled} orders cancelled"
+            f"Kill switch on {len(accounts)} account(s): {cancelled} orders cancelled"
             + (f", {sold} holdings sold" if flatten else "")
-            + ".",
-            data={"cancelled": cancelled, "sold": sold, "flatten": flatten},
+            + ". It stays on until you release it on the PC."
+            + (f" Problems: {'; '.join(problems)}." if problems else ""),
+            data={
+                "cancelled": cancelled,
+                "sold": sold,
+                "flatten": flatten,
+                "accounts": accounts,
+                "problems": problems,
+                "reason": reason,
+            },
         )
         return await self.status()
 
+    async def release_kill(self, *, on_pc: bool) -> JsonObject:
+        """Lift the kill switch's latch (the desk still needs Start)."""
+        if not on_pc:
+            raise TradingError("The kill switch can only be released from the PC.")
+        state = self._state()
+        if state.pop("kill", None) is None:
+            raise TradingError("The kill switch isn't on.")
+        self._save_state(state)
+        await self.feed.emit(
+            "kill", "Kill switch released. Press Start when you want to trade again."
+        )
+        return await self.status()
+
+    async def reset_breaker(self, *, on_pc: bool) -> JsonObject:
+        """Clear the circuit breaker by hand (the owner's call, on the PC)."""
+        if not on_pc:
+            raise TradingError("The circuit breaker can only be reset from the PC.")
+        state = self._state()
+        if state.pop("breaker", None) is None:
+            raise TradingError("The circuit breaker isn't on.")
+        state["breaker_since"] = self._clock()
+        self._save_state(state)
+        await self.feed.emit("breaker", "Circuit breaker reset by you on the PC.")
+        return await self.status()
+
     async def resume(self) -> None:
-        """At start-up: carry on paper trading; never resume live by itself."""
+        """At start-up: match FCC's records with every account first, keep
+        watching what is held, carry on paper trading, and never resume
+        live by itself."""
         config = self.config()
+        await self._reconcile()
+        self._ensure_loop()
         if not config.running:
             return
         if config.live:
             self._save(config.model_copy(update={"running": False}))
             await self.feed.emit(
                 "info",
-                "Live trading was paused when FCC restarted. Press Start to carry on.",
+                "Live trading was paused when FCC restarted (positions are still "
+                "watched). Press Start to carry on.",
             )
             return
-        await self._reconcile()
-        self._ensure_loop()
         await self.feed.emit("info", "Paper trading resumed after a restart.")
 
     async def close(self) -> None:
@@ -431,11 +543,13 @@ class TradingDesk:
         """Orders cut off mid-send when FCC closed: ask the platform what
         happened to each, by its own id."""
         config = self.config()
+        problems: list[str] = []
         for order in await self._store.find(TradeOrder, where={"status": "submitting"}):
-            broker = self._broker_for(order, config)
             try:
+                broker = self._broker_for(order, config)
                 found = await broker.find(order.client_id)
-            except ServiceError as error:
+            except (ServiceError, TradingError) as error:
+                problems.append(f"{order.symbol} order on {order.broker}: {error}")
                 await self.feed.emit(
                     "error", f"Couldn't check {order.symbol} order: {error}"
                 )
@@ -446,6 +560,13 @@ class TradingDesk:
                 )
             else:
                 await self._record(order, found, config)
+        # Orders FCC couldn't match with their account pause new trades (the
+        # circuit breaker) until a later check matches them.
+        self._reconcile_problem = (
+            "FCC couldn't match its orders with the account: " + "; ".join(problems)
+            if problems
+            else ""
+        )
 
     # ------------------------------------------------------------ the loop
 
@@ -475,10 +596,11 @@ class TradingDesk:
             self._offline = False
             await self.feed.emit("info", "Internet is back; the desk carries on.")
         for step in (
-            self._finish_cooling,
-            self._expire_approvals,
             self._sync_orders,
             self._watch_positions,
+            self._protect,
+            self._finish_cooling,
+            self._expire_approvals,
             self._score_forecasts,
             self._schedule_debriefs,
         ):
@@ -494,9 +616,10 @@ class TradingDesk:
         now = self._clock()
         due = now - self._last_scan >= config.scan_minutes * 60
         free = self._round_task is None or self._round_task.done()
-        waiting = self._requests or self._chores or (config.running and self._rechecks)
-        if free and (waiting or (config.running and due)):
-            if due and config.running:
+        entering = config.running and not self._entry_block(config)
+        waiting = self._requests or self._chores or (entering and self._rechecks)
+        if free and (waiting or (entering and due)):
+            if due and entering:
                 self._last_scan = now
             self._round_task = asyncio.ensure_future(self._round())
 
@@ -519,10 +642,12 @@ class TradingDesk:
                 if self._requests:
                     symbol = self._requests.pop(0)
                     await self._debate_symbol(symbol, config)
-                elif self._rechecks and config.running:
+                elif self._entry_block(config) or not config.running:
+                    pass
+                elif self._rechecks:
                     symbol = self._rechecks.pop(0)
                     await self._debate_symbol(symbol, config, tags=(FRESH,))
-                elif config.running:
+                else:
                     await self._scan_and_debate(config)
         except TimeoutError:
             await self.feed.emit("error", "A round ran too long and was stopped.")
@@ -550,9 +675,17 @@ class TradingDesk:
     def _is_open(self, market: str) -> bool:
         return session(market, datetime.fromtimestamp(self._clock(), tz=UTC)).open
 
+    def _markets(self, config: DeskConfig) -> frozenset[str]:
+        """The markets that have an account to trade on."""
+        found: set[str] = set()
+        for market in ("us", "asx", "crypto"):
+            with contextlib.suppress(TradingError):
+                if market in self._broker(config, market).markets():
+                    found.add(market)
+        return frozenset(found)
+
     async def _scan_and_debate(self, config: DeskConfig) -> None:
-        broker = self._broker(config)
-        markets = broker.markets()
+        markets = self._markets(config)
         instruments = [
             item
             for item in universe(config.markets, config.watchlist)
@@ -564,8 +697,9 @@ class TradingDesk:
                     found = parse_symbol(f"CRYPTO:{symbol}")
                     if found.symbol not in {item.symbol for item in instruments}:
                         instruments.append(found)
-        holdings = await self._holdings(broker)
-        held = {holding.symbol for holding in holdings}
+        held: set[str] = set()
+        for broker in self._brokers_in_use(config):
+            held |= {holding.symbol for holding in await self._holdings(broker)}
         for symbol in held - {item.symbol for item in instruments}:
             with contextlib.suppress(SymbolError):
                 instruments.append(parse_symbol(symbol))
@@ -614,7 +748,7 @@ class TradingDesk:
         except SymbolError as error:
             await self.feed.emit("error", str(error))
             return
-        broker = self._broker(config)
+        broker = self._broker(config, instrument.market)
         held = {holding.symbol for holding in await self._holdings(broker)}
         await self._consider(
             Candidate(instrument, 0.0, tags, held=instrument.symbol in held),
@@ -636,7 +770,7 @@ class TradingDesk:
             "round_id": record.id,
             "since": now_ms(),
         }
-        broker = self._broker(config)
+        broker = self._broker(config, instrument.market)
         position = await self._store.get(
             TradePosition, f"{broker.id}:{instrument.symbol}"
         )
@@ -878,6 +1012,117 @@ class TradingDesk:
             return f"the price moved {moved:.2f}% since the analysis (band {band:g}%)."
         return ""
 
+    def _entry_block(self, config: DeskConfig) -> str:
+        """Why no new trade may start now ("" when one may): the kill switch
+        or the circuit breaker."""
+        state = self._state()
+        if isinstance(state.get("kill"), dict):
+            return "the kill switch is on"
+        current = Trip.read(state.get("breaker"))
+        if current is not None:
+            return f"the circuit breaker is on ({current.reason})"
+        return ""
+
+    async def _protect(self, config: DeskConfig) -> None:
+        """The circuit breaker: trip on what has gone wrong, clear after the
+        cool-down once the cause is gone. Checked at most once a minute."""
+        now = self._clock()
+        if now - self._last_protect < PROTECT_SECONDS:
+            return
+        self._last_protect = now
+        state = self._state()
+        since = state.get("breaker_since")
+        health = await self._health(
+            config, since=float(since) if isinstance(since, int | float) else 0.0
+        )
+        current = Trip.read(state.get("breaker"))
+        limits = config.breaker
+        if current is not None:
+            if may_clear(current, health, limits, now):
+                state = self._state()
+                state.pop("breaker", None)
+                state["breaker_since"] = now
+                self._save_state(state)
+                await self.feed.emit(
+                    "breaker",
+                    f"Circuit breaker cleared ({current.reason} no longer holds): "
+                    "new trades may start again.",
+                    data={"cleared": current.view()},
+                )
+            return
+        found = breaker_check(health, limits)
+        if found is None:
+            return
+        tripped = trip(found, now=now, limits=limits)
+        state = self._state()
+        state["breaker"] = tripped.view()
+        state["breaker_since"] = now
+        self._save_state(state)
+        await self.feed.emit(
+            "breaker",
+            f"Circuit breaker: new trades are paused because {tripped.reason}. "
+            "Open positions are still managed. It clears after "
+            f"{limits.cooldown_minutes} min once the cause is gone, or reset it "
+            "on the PC.",
+            data={"trip": tripped.view()},
+        )
+
+    async def _health(self, config: DeskConfig, *, since: float) -> Health:
+        """What the circuit breaker looks at, counting only what happened
+        after it last cleared."""
+        broker = self._broker(config)
+        day_change: float | None = None
+        with contextlib.suppress(TradingError, ServiceError, MarketDataError):
+            equity, _, _ = await self._account_picture(broker, config)
+            _, day_change, _ = await self._day(broker, config, equity)
+        since_ms = int(since * 1000)
+        closed = await self._decisions.search(
+            status="position_closed",
+            since_ms=since_ms,
+            limit=config.breaker.consecutive_losses,
+        )
+        results = [item.pnl for item in closed if item.pnl is not None]
+        slippage: float | None = None
+        for order in await self._store.find(
+            TradeOrder, where={"status": "filled"}, order_by="updated_at DESC", limit=5
+        ):
+            if order.updated_at < since_ms:
+                break
+            if order.fill_price and order.entry_price > 0:
+                worse = (
+                    order.fill_price / order.entry_price - 1
+                    if order.side == "buy"
+                    else 1 - order.fill_price / order.entry_price
+                )
+                slippage = max(0.0, worse * 100)
+                break
+        window_ms = max(since_ms, now_ms() - config.breaker.errors_minutes * 60_000)
+        errors = await self._decisions.trail(
+            kind="error", since_ms=window_ms, limit=config.breaker.errors
+        )
+        streak = 0
+        for item in await self._store.find(
+            TradeRound, order_by="created_at DESC", limit=config.breaker.stale_rounds
+        ):
+            if item.created_at < since_ms:
+                break
+            if item.status == "blocked" and item.note.startswith(
+                "Data not good enough"
+            ):
+                streak += 1
+            else:
+                break
+        return Health(
+            day_change_pct=day_change,
+            max_daily_loss_pct=config.risk.max_daily_loss_pct,
+            recent_results=results,
+            last_slippage_pct=slippage,
+            slippage_limit_pct=config.risk.slippage_pct,
+            errors_recent=len(errors),
+            stale_streak=streak,
+            reconcile_failed=self._reconcile_problem,
+        )
+
     def _recheck(self, symbol: str) -> bool:
         now = self._clock()
         if now - self._rechecked.get(symbol, -RECHECK_SECONDS) < RECHECK_SECONDS:
@@ -898,8 +1143,8 @@ class TradingDesk:
         which news feeds couldn't be read; and the quote the order would be
         sized and priced from. If the checks themselves break, the report
         fails (no new buys) rather than the round."""
-        broker = self._broker(config)
-        live = config.mode != "paper" and broker.live
+        broker = self._broker(config, instrument.market)
+        live = config.live and broker.live
         news: list[NewsItem] = []
         missing: tuple[str, ...] = ()
         sizing = briefing.quote
@@ -1007,7 +1252,7 @@ class TradingDesk:
     ) -> EvidencePack:
         """Number everything the seats will read, keep it, and say so."""
         instrument = briefing.instrument
-        broker = self._broker(config)
+        broker = self._broker(config, instrument.market)
         portfolio = await self._portfolio_facts(broker, config)
         fx: tuple[str, float, float | None] | None = None
         if instrument.currency and instrument.currency != config.currency:
@@ -1342,7 +1587,7 @@ class TradingDesk:
     ) -> str:
         """The investment stress test on the plan the Guardian reviews: the
         same code the buy faces later, at the size the limits would give."""
-        broker = self._broker(config)
+        broker = self._broker(config, briefing.instrument.market)
         try:
             equity, exposures, _ = await self._account_picture(broker, config)
             rules = await broker.rules(briefing.instrument)
@@ -1529,7 +1774,17 @@ class TradingDesk:
         quality: QualityReport,
     ) -> None:
         instrument = briefing.instrument
-        broker = self._broker(config)
+        broker = self._broker(config, instrument.market)
+        blocked = self._entry_block(config)
+        if blocked:
+            await self._close_round(record, "blocked", f"Buy decided, but {blocked}.")
+            await self.feed.emit(
+                "risk_gate",
+                f"No new trade: {blocked}.",
+                round_id=record.id,
+                symbol=instrument.symbol,
+            )
+            return
         self._activity.update({"stage": "Risk period", "seat": 0, "since": now_ms()})
         try:
             equity, exposures, _ = await self._account_picture(broker, config)
@@ -1685,6 +1940,21 @@ class TradingDesk:
                 data={"assessment": assessment.view()},
             )
             return
+        if config.alert_only:
+            await self._close_round(
+                record, "alert", "Alert only: the desk never orders in this mode."
+            )
+            await self.feed.emit(
+                "alert",
+                f"Alert: buy {assessment.qty:g} {instrument.symbol} near "
+                f"{assessment.entry:g}, stop {assessment.stop:g}, target "
+                f"{assessment.target:g} (risk grade {assessment.grade}). Nothing was "
+                "ordered (alert-only mode).",
+                round_id=record.id,
+                symbol=instrument.symbol,
+                data={"assessment": assessment.view()},
+            )
+            return
         if not config.running:
             await self._close_round(
                 record, "advice", "The desk is stopped, so this stayed advice."
@@ -1742,7 +2012,14 @@ class TradingDesk:
     # ------------------------------------------------------------ orders
 
     async def _finish_cooling(self, config: DeskConfig) -> None:
+        blocked = self._entry_block(config) or (
+            "" if config.running else "the desk was stopped"
+        )
         for order in await self._store.find(TradeOrder, where={"status": "cooling"}):
+            if blocked and order.side == "buy":
+                await self._set(order, status="aborted", reason=blocked)
+                await self._round_status(order.round_id, "aborted", blocked)
+                continue
             if order.due_at > now_ms():
                 continue
             try:
@@ -2230,10 +2507,14 @@ class TradingDesk:
                 await self._record(order, found, config)
 
     async def _watch_positions(self, config: DeskConfig) -> None:
-        """Stops and targets the platform doesn't hold itself."""
-        broker = self._broker(config)
-        if not config.running:
-            return
+        """Stops and targets the platform doesn't hold itself, on every
+        account in use. This runs whether or not the desk is taking new
+        trades: stopping, the circuit breaker, and the kill switch never
+        leave a position unwatched."""
+        for broker in self._brokers_in_use(config):
+            await self._watch_on(broker, config)
+
+    async def _watch_on(self, broker: Broker, config: DeskConfig) -> None:
         for position in await self._store.find(
             TradePosition, where={"broker": broker.id}
         ):
@@ -2643,10 +2924,32 @@ class TradingDesk:
             min_fee=config.min_fee,
         )
 
-    def _broker(self, config: DeskConfig) -> Broker:
-        if config.mode == "paper" or config.broker == "paper":
+    def _broker(self, config: DeskConfig, market: str = "") -> Broker:
+        """The account a market trades on: practice (paper) unless real
+        money is switched on, then that market's own account."""
+        name = config.broker_for(market)
+        if name == "paper":
             return self._paper(config)
-        return self._live_broker(config.broker)
+        return self._live_broker(name)
+
+    def _brokers_in_use(self, config: DeskConfig) -> list[Broker]:
+        """Practice, plus every real account the markets are routed to."""
+        found: list[Broker] = [self._paper(config)]
+        for name in config.live_brokers():
+            with contextlib.suppress(TradingError):
+                found.append(self._live_broker(name))
+        return found
+
+    def _brokers_with_keys(self, config: DeskConfig) -> list[Broker]:
+        """Practice and every platform with saved keys (for the kill switch)."""
+        found: list[Broker] = [self._paper(config)]
+        for name in self._keys.all():
+            spec = BROKERS.get(name)
+            if spec is None or spec.factory is None:
+                continue
+            with contextlib.suppress(TradingError):
+                found.append(self._live_broker(name))
+        return found
 
     def _broker_for(self, order: TradeOrder, config: DeskConfig) -> Broker:
         if order.broker == "paper":
@@ -2898,8 +3201,16 @@ class TradingDesk:
         scored = await self._scored()
         seat_records = records(scored)
         now = datetime.fromtimestamp(self._clock(), tz=UTC)
+        state = self._state()
+        killed = state.get("kill")
+        breaker = Trip.read(state.get("breaker"))
         return {
             "running": config.running,
+            "live": config.live,
+            "alert_only": config.alert_only,
+            "kill": dict(killed) if isinstance(killed, dict) else None,
+            "breaker": breaker.view() if breaker is not None else None,
+            "routes": dict(config.routes),
             "looping": self._loop_task is not None and not self._loop_task.done(),
             "busy": self._round_task is not None and not self._round_task.done(),
             "activity": dict(self._activity),

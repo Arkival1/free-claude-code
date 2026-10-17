@@ -3262,6 +3262,8 @@ class TradingSymbolPayload(BaseModel):
 
 class TradingKillPayload(BaseModel):
     flatten: bool = False
+    confirm: str = Field(default="", max_length=100)
+    reason: str = Field(default="", max_length=300)
 
 
 class TradingKeysPayload(BaseModel):
@@ -3335,8 +3337,36 @@ async def trading_kill(
     studio: StudioService = Depends(get_studio),
     _: None = Access,
 ) -> JsonObject:
-    """Stop the desk and cancel every waiting order (and sell all, with flatten)."""
-    return await studio.trading.kill(flatten=payload.flatten)
+    """Stop the desk on every account, cancel every waiting order, and
+    latch; closing every position too needs the typed confirmation."""
+    try:
+        return await studio.trading.kill(
+            flatten=payload.flatten, confirm=payload.confirm, reason=payload.reason
+        )
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.post("/studio/api/trading/kill/release")
+async def trading_release_kill(
+    request: Request, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Lift the kill switch's latch (PC only; the desk still needs Start)."""
+    try:
+        return await studio.trading.release_kill(on_pc=_from_pc(request))
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.post("/studio/api/trading/breaker/reset")
+async def trading_reset_breaker(
+    request: Request, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Clear the circuit breaker by hand (PC only)."""
+    try:
+        return await studio.trading.reset_breaker(on_pc=_from_pc(request))
+    except TradingError as error:
+        raise _trading_failed(error) from error
 
 
 @router.get("/studio/api/trading/config")

@@ -33,7 +33,8 @@
   const POSITIONS_MS = 30000;
   const STANCE_COLOURS = { buy: "#4dffa6", hold: "#ffb547", sell: "#ff5d6c", avoid: "#ff5d6c" };
   const MODES = [
-    ["paper", "Paper", "Practice money on real prices; the desk trades on its own."],
+    ["paper", "Practice", "Fake money on real live prices; the desk trades on its own."],
+    ["alert_only", "Alert only", "The desk analyses and alerts you, but never places an order."],
     ["live_approve", "Live: I approve", "Real orders wait for your Approve (PC or phone), after a fresh account check."],
     ["live_auto", "Live: automatic", "Real orders go through on their own, still inside every hard limit."],
   ];
@@ -259,7 +260,7 @@
     const status = state.status;
     if (!strip || !status) return;
     const account = status.account || {};
-    const live = status.mode !== "paper";
+    const live = !!status.live;
     const startStop = el("button", {
       class: status.running ? "secondary" : "primary",
       text: status.running ? "Stop" : "Start",
@@ -281,7 +282,7 @@
     fill(
       strip,
       el("div", { class: `mode-badge ${status.mode}` }, [
-        el("strong", { text: live ? (status.mode === "live_auto" ? "LIVE · AUTO" : "LIVE · APPROVE") : "PAPER" }),
+        el("strong", { text: live ? (status.mode === "live_auto" ? "LIVE · AUTO" : "LIVE · APPROVE") : status.alert_only ? "ALERT ONLY" : "PRACTICE" }),
         el("span", { text: status.broker_name }),
       ]),
       stat("Equity", account.error ? "—" : money(account.equity_base, status.currency)),
@@ -289,6 +290,20 @@
       stat("Invested", account.error ? "—" : money(account.invested, status.currency)),
       stat("Trades today", account.error ? "—" : String(account.trades_today ?? 0)),
       el("div", { class: "strip-actions" }, [startStop, kill]),
+      status.kill
+        ? el("div", { class: "trade-error wide" }, [
+            el("strong", { text: "Kill switch is on. " }),
+            el("span", { text: `Since ${new Date(status.kill.at * 1000).toLocaleString()}: ${status.kill.reason || "pressed"}. Nothing new trades until you release it. ` }),
+            el("button", { class: "secondary", text: "Release kill switch", onclick: () => protection("kill/release", "Kill switch released. Press Start when ready.") }),
+          ])
+        : null,
+      status.breaker
+        ? el("div", { class: "trade-error wide" }, [
+            el("strong", { text: "Circuit breaker: new trades paused. " }),
+            el("span", { text: `${status.breaker.reason}. Open positions are still managed; it clears by itself after ${new Date(status.breaker.until * 1000).toLocaleTimeString()} once the cause is gone. ` }),
+            el("button", { class: "secondary", text: "Reset now", onclick: () => protection("breaker/reset", "Circuit breaker reset.") }),
+          ])
+        : null,
       account.error ? el("p", { class: "trade-error wide", text: `Account: ${account.error}` }) : null,
       status.running && status.next_scan_in != null
         ? el("p", { class: "muted wide", text: `${status.next_scan_in > 0 ? `Next scan in ${Math.ceil(status.next_scan_in / 60)} min` : "Scanning"} · ${sessionsLine(status.sessions)}` })
@@ -319,13 +334,24 @@
   }
 
   async function killSwitch() {
-    const flatten = window.confirm(
-      "Kill switch: stop the desk and cancel every waiting order.\n\nPress OK to ALSO sell every holding at market, or Cancel to keep holdings."
-    );
+    if (!window.confirm("Kill switch: stop the desk on every account and cancel every waiting order? It stays on until you release it.")) return;
+    // The second step: closing every position needs the typed phrase.
+    const phrase = window.prompt("Also close EVERY position at market? Type CLOSE EVERYTHING to sell all, or leave empty to keep holdings.", "") || "";
+    const flatten = phrase.trim() === "CLOSE EVERYTHING";
     try {
-      state.status = await ctx.post("/studio/api/trading/kill", { flatten });
+      state.status = await ctx.post("/studio/api/trading/kill", { flatten, confirm: phrase.trim(), reason: "pressed on the PC" });
       paintStrip();
-      ctx.notify(flatten ? "Stopped, orders cancelled, holdings being sold." : "Stopped and orders cancelled.");
+      ctx.notify(flatten ? "Stopped, orders cancelled, holdings being sold." : "Stopped and orders cancelled; holdings kept and still watched.");
+    } catch (error) {
+      ctx.notify(error.message);
+    }
+  }
+
+  async function protection(path, done) {
+    try {
+      state.status = await ctx.post(`/studio/api/trading/${path}`, {});
+      paintStrip();
+      ctx.notify(done);
     } catch (error) {
       ctx.notify(error.message);
     }

@@ -57,6 +57,8 @@ AUDIT_KINDS = frozenset(
         "mode",
         "settings",
         "stale",
+        "breaker",
+        "alert",
     }
 )
 """Feed kinds that also go to the audit trail."""
@@ -69,6 +71,7 @@ ROUND_TO_DECISION = {
     "aborted": "rejected",
     "discarded": "discarded",
     "pending": "approved",
+    "alert": "alert",
 }
 """A round's closing status as the decision's status (the order's own
 progress is recorded as it happens)."""

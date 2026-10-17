@@ -8,8 +8,11 @@ from free_claude_code.core.json_types import JsonObject
 
 from ..models import Record, new_id, now_ms
 
-type TradeMode = Literal["paper", "live_approve", "live_auto"]
-TRADE_MODES: tuple[str, ...] = ("paper", "live_approve", "live_auto")
+type TradeMode = Literal["paper", "alert_only", "live_approve", "live_auto"]
+TRADE_MODES: tuple[str, ...] = ("paper", "alert_only", "live_approve", "live_auto")
+"""paper: practice with fake money on real prices (the default);
+alert_only: analyse and alert, never order; live_approve: real orders after
+the owner's tap; live_auto: real orders on their own, inside every limit."""
 
 type OrderStatus = Literal[
     "cooling",

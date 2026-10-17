@@ -61,6 +61,8 @@ class AlpacaBroker:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._paper = values.get("account", "paper") != "live"
+        # Alpaca's paper account is practice: real market, fake money.
+        self.live = not self._paper
         self._base = PAPER_URL if self._paper else LIVE_URL
         self._headers = {
             "APCA-API-KEY-ID": values.get("key_id", ""),
