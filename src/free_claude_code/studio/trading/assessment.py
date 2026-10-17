@@ -95,6 +95,15 @@ class RiskAssessment:
     atr_pct: float | None = None
     titles: list[str] = field(default_factory=list)
     bound_by: str = ""
+    stress_test: JsonObject | None = None
+    """The investment stress test (stress.py), on top of the cases above."""
+    stress_text: str = ""
+    scorecard: JsonObject | None = None
+    scorecard_text: str = ""
+    rules: list[JsonObject] = field(default_factory=list)
+    """Every rule the decision engine checked, passed or not."""
+    confidence: float | None = None
+    """The confidence the order goes ahead with (never above the manager's)."""
 
     @property
     def passed(self) -> bool:
@@ -145,6 +154,10 @@ class RiskAssessment:
             "cooling_minutes": self.cooling_minutes,
             "atr_pct": _r(self.atr_pct, 3),
             "bound_by": self.bound_by,
+            "stress_test": self.stress_test,
+            "scorecard": self.scorecard,
+            "rules": self.rules,
+            "confidence": _r(self.confidence, 4),
         }
 
     def report(self, currency: str) -> str:
@@ -193,6 +206,10 @@ class RiskAssessment:
             rows.append("Meme-coin warnings: " + ", ".join(self.meme_warnings))
         if self.fx_note:
             rows.append(self.fx_note)
+        if self.stress_text:
+            rows.append("INVESTMENT STRESS TEST (code):\n" + self.stress_text)
+        if self.scorecard_text:
+            rows.append("SCORECARD (code):\n" + self.scorecard_text)
         if self.blockers or self.cautions:
             rows.append(
                 "The code's own findings: "
@@ -611,6 +628,31 @@ async def risk_round(
             f"Risk grade {assessment.grade} is worse than the {config.assessment.min_grade} minimum."
         )
     return assessment
+
+
+def shrink(
+    assessment: RiskAssessment,
+    factor: float,
+    rules: Rules | None,
+    fx: float,
+    equity: float,
+    why: str,
+) -> None:
+    """Make the order smaller by ``factor`` (never bigger), refit it to the
+    platform's rules, and say why; nothing left blocks it."""
+    if factor >= 0.999 or assessment.qty <= 0:
+        return
+    qty = assessment.qty * max(0.0, factor)
+    if rules is not None:
+        qty = rules.fit(qty)
+    unit_risk = max(0.0, (assessment.entry - assessment.stop) * fx)
+    assessment.qty = qty
+    assessment.value = qty * assessment.entry * fx
+    assessment.at_risk = qty * unit_risk
+    assessment.at_risk_pct = assessment.at_risk / equity * 100 if equity > 0 else 0.0
+    assessment.cautions.append(why)
+    if qty <= 0:
+        assessment.blockers.append(f"Nothing is left after: {why}")
 
 
 def resize(

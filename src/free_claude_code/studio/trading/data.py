@@ -404,6 +404,24 @@ class MarketData:
         Yahoo said (None when it didn't say)."""
         return self._fx_times.get((currency.upper(), base.upper()))
 
+    async def fx_bars(self, currency: str, base: str = "AUD") -> list[Bar]:
+        """Daily candles of one unit of ``currency`` priced in ``base`` (for
+        the currency stress case); empty when it's the same currency."""
+        currency, base = currency.upper(), base.upper()
+        if not currency or currency == base:
+            return []
+
+        async def load() -> list[Bar]:
+            try:
+                bars, _ = await self._yahoo.chart(f"{currency}{base}=X", "1d")
+            except ServiceError as error:
+                raise MarketDataError(
+                    f"No {currency}/{base} history: {error}"
+                ) from error
+            return bars
+
+        return await self._cached(("fx_bars", currency, base), BAR_SECONDS["1d"], load)
+
     async def venue_status(self, instrument: Instrument) -> VenueStatus | None:
         """Whether Coinbase trades the coin right now; None for anything
         that isn't a coin, or when Coinbase couldn't be asked (not kept, so

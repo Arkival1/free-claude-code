@@ -107,6 +107,12 @@ class AssessmentLimits(BaseModel):
     """How far the price may move during the cooling-off wait."""
     atr_spike_pct: float = Field(default=50.0, ge=10.0, le=500.0)
     """A jump in volatility (ATR %) this big during the wait aborts the trade."""
+    stress_trade_pct: float = Field(default=3.0, ge=0.5, le=20.0)
+    """The worst stressed loss one trade may cost, in % of the account."""
+    stress_account_pct: float = Field(default=12.0, ge=2.0, le=50.0)
+    """The worst stressed loss of the whole account with the trade, in %."""
+    min_stop_atr: float = Field(default=1.0, ge=0.25, le=5.0)
+    """A buy's stop must be at least this many ATRs below the entry."""
 
 
 class DataQualityLimits(BaseModel):

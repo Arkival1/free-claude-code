@@ -218,7 +218,7 @@ def pack_id(prompt: str) -> str:
     return found.group(1)
 
 
-def levels(prompt: str) -> dict[str, float]:
+def levels(prompt: str, *, stop_atr: float = 2.0) -> dict[str, float]:
     """A plan around the price in the prompt: stop 2 ATR below, target 5 ATR
     above (reward-to-risk 2.5)."""
     price = number_after("PRICE NOW", prompt)
@@ -226,7 +226,7 @@ def levels(prompt: str) -> dict[str, float]:
     return {
         "entry_low": round(price * 0.999, 6),
         "entry_high": round(price * 1.001, 6),
-        "stop_loss": round(price - 2 * atr_value, 6),
+        "stop_loss": round(price - stop_atr * atr_value, 6),
         "take_profit": round(price + 5 * atr_value, 6),
     }
 
@@ -266,11 +266,17 @@ class Seats:
     """Answers every stage by its task line, and records what each seat saw."""
 
     def __init__(
-        self, *, action: str = "buy", grade: str = "B", defer: bool = False
+        self,
+        *,
+        action: str = "buy",
+        grade: str = "B",
+        defer: bool = False,
+        stop_atr: float = 2.0,
     ) -> None:
         self.action = action
         self.grade = grade
         self.defer = defer
+        self.stop_atr = stop_atr
         self.calls: list[tuple[int, str]] = []
 
     async def __call__(
@@ -353,7 +359,7 @@ class Seats:
                     "prove_wrong": ["a daily close below the stop"],
                     "answers": [],
                     "data_timestamp": pack_id(prompt),
-                    **levels(prompt),
+                    **levels(prompt, stop_atr=self.stop_atr),
                 }
             )
         if "TASK: Evidence attack" in prompt:
@@ -738,6 +744,40 @@ async def test_a_paper_trade_goes_through_every_stage(make_desk, store):
     assert all(f.traded for f in await store.find(TradeForecast))
     status = data(await desk.status())
     assert status["mode"] == "paper" and status["account"]["equity_base"] > 9_900
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_the_decision_engine_checks_every_buy_and_records_it(make_desk, store):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    [order] = await store.find(TradeOrder)
+    assessment = data(order.data["assessment"])
+    rules = {rule["rule"]: rule for rule in assessment["rules"]}
+    assert rules["Stop far enough from the entry"]["passed"]
+    assert all(rule["passed"] for rule in rules.values() if rule["blocking"])
+    # The investment stress test kept every original case.
+    names = {item["name"] for item in assessment["stress_test"]["scenarios"]}
+    assert {"1 ATR drop", "3 ATR drop", "15% flash crash", "Index falls 3%"} <= names
+    assert "Market crash across the whole account" in names
+    assert 0 < assessment["scorecard"]["confidence"] <= 1
+    # The order goes ahead with the lower confidence, never a higher one.
+    assert order.data["confidence"] <= order.data["manager_confidence"]
+    assert "engine" in await kinds(store)
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stop_inside_the_noise_is_blocked_in_code(make_desk, store):
+    desk, _ = make_desk(Seats(stop_atr=0.5))
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    assert await store.find(TradeOrder) == ()
+    [record] = await store.find(TradeRound)
+    assert record.status == "blocked" and "Stop far enough" in record.note
     await desk.close()
 
 

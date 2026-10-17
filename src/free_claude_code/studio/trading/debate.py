@@ -167,6 +167,8 @@ class DebateTools:
     look_up: LookUp | None = None
     latest: Callable[[], Awaitable[QuoteSnapshot | None]] | None = None
     keep_pack: Callable[[EvidencePack], Awaitable[None]] | None = None
+    stress: Callable[[PMDecision], Awaitable[str]] | None = None
+    """The investment stress test of a plan, as text for the review."""
     data: DataQualityLimits = field(default_factory=DataQualityLimits)
     profile: str = "crypto"
     """The rule set the symbol trades under: us, asx, crypto, or meme."""
@@ -1539,6 +1541,15 @@ class Debate:
         self, plan: PMDecision, info: InfoStress
     ) -> GuardianReview | None:
         simulated = await self._simulate_decision(plan)
+        stressed = ""
+        if self._tools.stress is not None:
+            try:
+                stressed = await self._tools.stress(plan)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.info("Trading: the stress preview failed: {}", error)
+                stressed = f"It couldn't be run ({type(error).__name__})."
         view = self._view()
         keys = REVIEW_KEYS.replace("PACK", view.id)
         prompt = self._prompt(
@@ -1553,6 +1564,9 @@ class Debate:
                 else "Not enough price history to simulate it."
             ),
             "INFORMATION STRESS TEST:\n" + info.lines(),
+            ("INVESTMENT STRESS TEST OF THIS PLAN (code):\n" + stressed)
+            if stressed
+            else "",
             task=(
                 "Risk review. Approve this exact plan, approve it smaller "
                 "(size_factor below 1), delay it, or reject it (a veto). Give "

@@ -25,7 +25,7 @@ import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -41,14 +41,24 @@ from ..resilience import ServiceError, Web, submit_once
 from ..search import StudioSearch
 from ..store import StudioStore
 from ..workers import WorkerPool
-from .assessment import Holdings, recheck, resize, risk_report, risk_round
+from .assessment import (
+    Holdings,
+    RiskAssessment,
+    recheck,
+    resize,
+    risk_report,
+    risk_round,
+    shrink,
+)
 from .breaks import Budget, Findings
 from .briefing import Briefing, build_briefing
-from .brokers.base import Broker, Holding, OrderRequest, OrderResult
+from .brokers.base import Broker, Holding, OrderRequest, OrderResult, Rules
 from .brokers.catalog import ensure_catalog
 from .brokers.paper import PaperBroker
 from .brokers.registry import BROKERS, BrokerSetupError, check_values, make_broker
 from .config import LIVE_AUTO_PHRASE, DeskConfig, DeskConfigStore
+from .conflicts import applied, data_conflicts, seat_conflicts
+from .contract import PMDecision
 from .data import (
     DATA_LIMITS,
     MarketData,
@@ -59,6 +69,8 @@ from .data import (
 )
 from .debate import Debate, DebateResult, DebateTools
 from .debrief import SUGGESTIBLE, Debriefs
+from .engine import BuyFacts, buy_rules
+from .engine import blockers as rule_blockers
 from .evidence import (
     EvidencePack,
     PortfolioFacts,
@@ -67,7 +79,7 @@ from .evidence import (
     reading_item,
 )
 from .forecasts import due_at, records, score
-from .indicators import true_ranges
+from .indicators import Bar, true_ranges
 from .information import PROVIDER_DELAY_MINUTES, InfoItem, NewsItem, QuoteSnapshot
 from .instruments import Instrument, SymbolError, parse_symbol, universe
 from .ledger import build_ledger, tax_csv
@@ -79,6 +91,8 @@ from .quality import (
     QualityCheck,
     QualityReport,
     assess,
+    bid_ask_source,
+    daily_turnover,
     failed_report,
     freshest,
     profile_of,
@@ -91,11 +105,15 @@ from .records import (
     TradePosition,
     TradeRound,
 )
+from .regime import policy_for
 from .research import DeskResearch, ReadPage
 from .risk import Exposure, risk_gate, size_position
 from .scanner import Candidate, scan
+from .scorecard import TradeFacts, score_trade
 from .seats import Decision, Forecast, Think
 from .sessions import last_close, session, sydney_offset
+from .stress import Holding as HeldPosition
+from .stress import StressInput, StressReport, stress_test
 
 TICK_SECONDS = 10.0
 ASKED = "asked by you"
@@ -120,6 +138,17 @@ DAY_MS = 86_400_000
 
 class TradingError(ValueError):
     """Something asked of the desk can't be done; the message says why."""
+
+
+@dataclass(frozen=True, slots=True)
+class Tightening:
+    """What the decision engine leaves of a buy: never more than before."""
+
+    size_factor: float
+    why: str
+    max_qty: float | None
+    """The largest size the investment stress test allows (None: not run)."""
+    confidence: float
 
 
 class TradingDesk:
@@ -649,6 +678,9 @@ class TradingDesk:
         async def latest() -> QuoteSnapshot | None:
             return await self._latest(checked, config)
 
+        async def stressed(plan: PMDecision) -> str:
+            return await self._stress_preview(checked, config, quality, plan)
+
         debate = Debate(
             think=self._think,
             feed=self.feed,
@@ -666,6 +698,7 @@ class TradingDesk:
                 look_up=look_up,
                 latest=latest,
                 keep_pack=self._keep_pack,
+                stress=stressed,
                 data=config.data,
                 profile=profile_of(instrument),
                 cost_pct=_round_trip_pct(config, quality),
@@ -923,6 +956,314 @@ class TradingDesk:
             estimated=tuple(item.symbol for item in exposures if item.estimated),
         )
 
+    async def _tighten(
+        self,
+        assessment: RiskAssessment,
+        *,
+        briefing: Briefing,
+        result: DebateResult,
+        decision: Decision,
+        config: DeskConfig,
+        quality: QualityReport,
+        rules: Rules,
+        fx: float,
+        equity: float,
+        exposures: list[Exposure],
+        broker: Broker,
+        round_id: str,
+    ) -> Tightening:
+        """The investment stress test, the conflicts, the scorecard, and every
+        rule of the decision engine, on top of the risk report."""
+        instrument = briefing.instrument
+        policy = policy_for(briefing.regime)
+        stress: StressReport | None = None
+        try:
+            given = await self._stress_input(
+                briefing,
+                config,
+                quality,
+                qty=assessment.qty,
+                entry=assessment.entry,
+                stop=assessment.stop,
+                fx=fx,
+                equity=equity,
+                exposures=exposures,
+                min_qty=rules.min_qty,
+                extra=tuple((case.name, case.loss) for case in assessment.stress),
+                guardian=tuple(
+                    (item.name, item.fall_pct)
+                    for item in (result.review.scenarios if result.review else ())
+                ),
+                earnings_in_window=any(
+                    event.get("name") == "Earnings or results"
+                    and bool(event.get("in_window"))
+                    for event in assessment.events
+                ),
+            )
+            stress = stress_test(
+                given,
+                now=self._clock(),
+                trade_limit_pct=config.assessment.stress_trade_pct,
+                account_limit_pct=config.assessment.stress_account_pct,
+            )
+        except (MarketDataError, ServiceError, ValueError) as error:
+            logger.info("Trading: the stress test couldn't run: {}", error)
+        if stress is not None:
+            assessment.stress_test = stress.view()
+            assessment.stress_text = stress.lines()
+        conflicts = [
+            *seat_conflicts(instrument.symbol, result.closing, buying=True),
+            *data_conflicts(
+                instrument.symbol,
+                instrument.market,
+                briefing.daily,
+                briefing.price,
+                source=self._data.bars_source(instrument),
+            ),
+        ]
+        penalty, conflict_size, conflict_blocking = applied(conflicts)
+        info = result.info_test
+        worst = stress.worst_trade if stress is not None else None
+        spread = bid_ask_source(
+            quality.snapshots,
+            quality.preferred,
+            now=quality.at,
+            limits=config.data,
+            profile=profile_of(instrument),
+        )
+        card = score_trade(
+            TradeFacts(
+                consensus=result.consensus,
+                buy_share=result.buy_share,
+                quality_score=quality.score,
+                reward_risk=assessment.reward_risk,
+                stop_atr=assessment.stop_atr,
+                trend=briefing.tech.trend,
+                price=briefing.price,
+                sma50=briefing.tech.sma50,
+                sma200=briefing.tech.sma200,
+                rsi=briefing.tech.rsi,
+                held_up=sum(1 for item in info.items if item.verdict == "holds")
+                if info is not None
+                else None,
+                tested=len(info.items) if info is not None else None,
+                regime_kind=briefing.regime.kind,
+                regime_extreme=briefing.regime.extreme,
+                events_in_window=sum(
+                    1 for event in assessment.events if event.get("in_window")
+                ),
+                stress_worst_pct=worst.pct_of_equity if worst is not None else None,
+                stress_limit_pct=config.assessment.stress_trade_pct,
+                max_correlation=max(assessment.correlations.values(), default=None),
+                correlation_limit=config.assessment.max_correlation,
+                position_pct=assessment.value / equity * 100 if equity > 0 else None,
+                position_cap_pct=config.risk.meme_position_pct
+                if instrument.meme
+                else config.risk.max_position_pct,
+                spread_pct=spread.spread_pct if spread is not None else None,
+                spread_limit_pct=config.data.spread_pct.get(
+                    profile_of(instrument), 1.0
+                ),
+                adv_pct=assessment.adv_pct,
+                adv_limit_pct=config.assessment.max_adv_pct,
+                base_target_first=briefing.base.target_first
+                if briefing.base is not None
+                else None,
+            )
+        )
+        assessment.scorecard = card.view()
+        assessment.scorecard_text = card.lines()
+        confidence = max(0.0, min(decision.confidence - penalty / 100, card.confidence))
+        assessment.confidence = confidence
+        trades_today: int | None = None
+        with contextlib.suppress(ServiceError, MarketDataError, TradingError):
+            trades_today, _, _ = await self._day(broker, config, equity)
+        checks = buy_rules(
+            BuyFacts(
+                data_ok=quality.ok,
+                data_summary=quality.summary(),
+                stop_atr=assessment.stop_atr,
+                min_stop_atr=config.assessment.min_stop_atr,
+                reward_risk=assessment.reward_risk,
+                min_reward_risk=config.assessment.min_reward_risk,
+                confidence=confidence,
+                min_confidence=config.risk.min_confidence,
+                consensus=result.consensus,
+                min_consensus=config.risk.min_consensus,
+                trades_today=trades_today,
+                max_trades_per_day=config.risk.max_trades_per_day,
+                objections_left=len(result.objections),
+                answered=len(decision.answers),
+                stress_blocked=stress.blocked if stress is not None else None,
+                stress_reasons=stress.reasons if stress is not None else (),
+                stress_worst_pct=worst.pct_of_equity if worst is not None else None,
+                stress_limit_pct=config.assessment.stress_trade_pct,
+                info_blocked=info.blocked if info is not None else None,
+                conflicts_blocking=conflict_blocking,
+                conflict_reasons=tuple(item.line() for item in conflicts),
+            ),
+            policy,
+        )
+        assessment.rules = [check.view() for check in checks]
+        assessment.blockers.extend(rule_blockers(checks))
+        failed = [check for check in checks if not check.passed]
+        await self.feed.emit(
+            "engine",
+            (
+                f"Decision engine: {len(checks) - len(failed)} of {len(checks)} rules "
+                f"passed. Market: {policy.note}."
+            )
+            + "".join(f"\n{check.line()}" for check in failed)
+            + f"\nScorecard confidence {card.confidence:.2f}; the order goes ahead "
+            f"with {confidence:.2f}.",
+            round_id=round_id,
+            symbol=instrument.symbol,
+            stage="Risk period",
+            data={
+                "rules": assessment.rules,
+                "policy": policy.view(),
+                "scorecard": card.view(),
+                "stress_test": assessment.stress_test,
+                "conflicts": [item.view() for item in conflicts],
+            },
+        )
+        why = []
+        if policy.size_factor < 1:
+            why.append(f"the market's mood (x{policy.size_factor:g})")
+        if conflict_size < 1:
+            why.append(f"seats that oppose the buy (x{conflict_size:.2f})")
+        return Tightening(
+            size_factor=policy.size_factor * conflict_size,
+            why="Size cut for " + " and ".join(why) + "." if why else "",
+            max_qty=(0.0 if stress.blocked else stress.max_qty)
+            if stress is not None
+            else None,
+            confidence=confidence,
+        )
+
+    async def _stress_input(
+        self,
+        briefing: Briefing,
+        config: DeskConfig,
+        quality: QualityReport,
+        *,
+        qty: float,
+        entry: float,
+        stop: float,
+        fx: float,
+        equity: float,
+        exposures: list[Exposure],
+        min_qty: float = 0.0,
+        extra: tuple[tuple[str, float], ...] = (),
+        guardian: tuple[tuple[str, float], ...] = (),
+        earnings_in_window: bool = False,
+    ) -> StressInput:
+        instrument = briefing.instrument
+        index: list[Bar] = []
+        with contextlib.suppress(MarketDataError, ServiceError):
+            index = await self._data.index_bars(instrument.market)
+        currency: list[Bar] = []
+        if briefing.quote.currency != config.currency:
+            with contextlib.suppress(MarketDataError, ServiceError):
+                currency = await self._data.fx_bars(
+                    briefing.quote.currency, config.currency
+                )
+        recent = briefing.daily[-20:]
+        turnover = (
+            sum(daily_turnover(bar, instrument.market) for bar in recent) / len(recent)
+            if recent
+            else None
+        )
+        spread = bid_ask_source(
+            quality.snapshots,
+            quality.preferred,
+            now=quality.at,
+            limits=config.data,
+            profile=profile_of(instrument),
+        )
+        held: list[HeldPosition] = []
+        for item in exposures:
+            crypto = False
+            with contextlib.suppress(SymbolError):
+                crypto = parse_symbol(item.symbol).market in {"crypto", "dex"}
+            held.append(HeldPosition(item.symbol, item.value, None, crypto))
+        return StressInput(
+            symbol=instrument.symbol,
+            market="crypto"
+            if instrument.market in {"crypto", "dex"}
+            else instrument.market,
+            side="long",
+            qty=qty,
+            entry=entry,
+            stop=stop,
+            fx=fx,
+            equity=equity,
+            atr=briefing.tech.atr,
+            daily=briefing.daily,
+            index_daily=index,
+            beta=briefing.beta,
+            meme=instrument.meme,
+            spread_pct=spread.spread_pct if spread is not None else None,
+            avg_daily_turnover=turnover,
+            holdings=tuple(held),
+            fx_daily=currency,
+            earnings_in_window=earnings_in_window,
+            guardian=guardian,
+            min_qty=min_qty,
+            extra=extra,
+        )
+
+    async def _stress_preview(
+        self,
+        briefing: Briefing,
+        config: DeskConfig,
+        quality: QualityReport,
+        plan: PMDecision,
+    ) -> str:
+        """The investment stress test on the plan the Guardian reviews: the
+        same code the buy faces later, at the size the limits would give."""
+        broker = self._broker(config)
+        try:
+            equity, exposures, _ = await self._account_picture(broker, config)
+            rules = await broker.rules(briefing.instrument)
+            fx = await self._data.fx(briefing.quote.currency, config.currency)
+        except (ServiceError, MarketDataError, TradingError) as error:
+            return f"It couldn't be run: {error}"
+        stop = plan.stop_loss or 0.0
+        sizing = size_position(
+            equity=equity,
+            price=briefing.price,
+            stop=stop,
+            fx=fx,
+            limits=config.risk,
+            meme=briefing.instrument.meme,
+            regime_scale=briefing.regime.risk_scale,
+            size_pct=plan.size_pct or 0.0,
+            rules=rules,
+        )
+        given = await self._stress_input(
+            briefing,
+            config,
+            quality,
+            qty=sizing.qty,
+            entry=briefing.price,
+            stop=stop,
+            fx=fx,
+            equity=equity,
+            exposures=exposures,
+            min_qty=rules.min_qty,
+        )
+        report = stress_test(
+            given,
+            now=self._clock(),
+            trade_limit_pct=config.assessment.stress_trade_pct,
+            account_limit_pct=config.assessment.stress_account_pct,
+        )
+        return (
+            f"At {sizing.qty:g} units (the size the limits would give):\n"
+            + report.lines()
+        )
+
     async def _keep_pack(self, pack: EvidencePack) -> None:
         """Keep each new version of the pack, so every answer can be traced
         to exactly what its seat saw."""
@@ -1127,6 +1468,22 @@ class TradingDesk:
             events=result.events,
             now_ms=now_ms(),
         )
+        # The original checks above ran first, on the original size; what
+        # follows can only add blockers or make the order smaller.
+        tightened = await self._tighten(
+            assessment,
+            briefing=briefing,
+            result=result,
+            decision=decision,
+            config=config,
+            quality=quality,
+            rules=rules,
+            fx=fx,
+            equity=equity,
+            exposures=exposures,
+            broker=broker,
+            round_id=record.id,
+        )
         await self.feed.emit(
             "risk_report",
             assessment.report(config.currency),
@@ -1154,6 +1511,16 @@ class TradingDesk:
                 f"{quality.size_factor:.0%}."
             )
         resize(assessment, rules, fx, equity)
+        shrink(assessment, tightened.size_factor, rules, fx, equity, tightened.why)
+        if tightened.max_qty is not None and assessment.qty > tightened.max_qty:
+            shrink(
+                assessment,
+                tightened.max_qty / assessment.qty,
+                rules,
+                fx,
+                equity,
+                "The investment stress test cut the size to fit its limit.",
+            )
         cooling = (
             config.assessment.cooling_crypto_minutes
             if instrument.market in {"crypto", "dex"}
@@ -1214,7 +1581,8 @@ class TradingDesk:
                 "decision": decision.model_dump(),
                 "assessment": assessment.view(),
                 "consensus": result.consensus,
-                "confidence": decision.confidence,
+                "confidence": tightened.confidence,
+                "manager_confidence": decision.confidence,
                 "meme": instrument.meme,
             },
             due_at=now_ms() + int(cooling * 60_000),

@@ -124,6 +124,10 @@ class StressInput:
     """The Risk Guardian's own scenarios: (name, fall in %, 0-90)."""
     min_qty: float = 0.0
     """The smallest size the platform allows (0 = any)."""
+    extra: Sequence[tuple[str, float]] = ()
+    """The original stress cases from the risk report: (name, loss in the
+    base currency at ``qty``). They are kept exactly, so the worst case here
+    is never smaller than the original worst case."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,6 +445,16 @@ def stress_test(
             -bounded / 100,
             value * bounded / 100,
             "guardian",
+        )
+
+    # 9. The original stress cases, exactly as the risk report worked them out.
+    for name, loss in given.extra:
+        add(
+            name,
+            "an original stress case, worked out as before",
+            -loss / value if value else 0.0,
+            loss,
+            "fixed",
         )
 
     # The limits.
