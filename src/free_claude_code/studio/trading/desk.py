@@ -52,6 +52,9 @@ from .assessment import (
     risk_round,
     shrink,
 )
+from .backtest import HISTORY as BACKTEST_HISTORY
+from .backtest import Settings as BacktestSettings
+from .backtest import run as run_backtest
 from .breaks import Budget, Findings
 from .briefing import Briefing, build_briefing
 from .brokers.base import Broker, Holding, OrderRequest, OrderResult, Rules, Sent
@@ -4101,6 +4104,97 @@ class TradingDesk:
                 TradeDebrief, order_by="created_at DESC", limit=limit
             )
         ]
+
+    async def backtest(
+        self, *, market: str = "us", symbols: Sequence[str] = (), days: int = 365
+    ) -> JsonObject:
+        """Replay the desk's rules on past daily prices (a labelled
+        historical simulation; see ``backtest``). Results are kept."""
+        if market not in {"us", "asx", "crypto"}:
+            raise TradingError("Backtests run on us, asx or crypto.")
+        config = self.config()
+        try:
+            chosen = (
+                [parse_symbol(symbol) for symbol in symbols]
+                if symbols
+                else [
+                    item
+                    for item in universe(config.markets | {market: True}, [])
+                    if item.market == market
+                ]
+            )
+        except SymbolError as error:
+            raise TradingError(str(error)) from error
+        chosen = [item for item in chosen if item.market == market][:30]
+        if not chosen:
+            raise TradingError(f"No {market} symbols to test.")
+        keep = max(30, min(days, 1500)) + BACKTEST_HISTORY
+        bars: dict[str, list[Bar]] = {}
+        for item in chosen:
+            with contextlib.suppress(MarketDataError, ServiceError):
+                bars[item.symbol] = list(await self._data.bars(item, "1d"))[-keep:]
+        if not bars:
+            raise TradingError("No price history could be read for those symbols.")
+        index: list[Bar] = []
+        with contextlib.suppress(MarketDataError, ServiceError):
+            index = list(await self._data.index_bars(market))[-keep:]
+        currency = chosen[0].currency or "USD"
+        try:
+            fx = await self._data.fx(currency, config.currency)
+        except MarketDataError as error:
+            raise TradingError(f"No exchange rate: {error}") from error
+        settings = BacktestSettings(
+            market=market,
+            equity=config.paper_cash,
+            limits=config.risk,
+            min_stop_atr=config.assessment.min_stop_atr,
+            fee_pct=config.fee_pct,
+            min_fee=config.min_fee,
+            fx=fx,
+        )
+        result = await asyncio.to_thread(
+            run_backtest, bars, index, settings, now=self._clock()
+        )
+        result["id"] = f"bt_{int(self._clock())}_{market}"
+        folder = self._root / "backtests"
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{result['id']}.json").write_text(
+            json.dumps(result), encoding="utf-8"
+        )
+        for old in sorted(folder.glob("bt_*.json"))[:-20]:
+            old.unlink(missing_ok=True)
+        metrics_found = result.get("metrics")
+        summary = metrics_found if isinstance(metrics_found, dict) else {}
+        await self.feed.emit(
+            "info",
+            f"Backtest ({market}, {len(bars)} symbols): "
+            + (
+                f"{summary.get('trades', 0)} trades, return "
+                f"{summary.get('return_pct')}%, worst drawdown "
+                f"{summary.get('max_drawdown_pct')}%. A historical simulation, "
+                "not a prediction."
+                if summary
+                else str(result.get("error") or "no result")
+            ),
+        )
+        return result
+
+    async def backtests(self) -> list[JsonObject]:
+        """The kept backtests, newest first (summaries)."""
+        found: list[JsonObject] = []
+        for path in sorted((self._root / "backtests").glob("bt_*.json"), reverse=True):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError, OSError:
+                continue
+            if isinstance(data, dict):
+                found.append(
+                    {
+                        key: data.get(key)
+                        for key in ("id", "market", "symbols", "from", "to", "metrics")
+                    }
+                )
+        return found
 
     async def export_csv(self) -> str:
         config = self.config()

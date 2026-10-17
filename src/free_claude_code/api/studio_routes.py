@@ -3260,6 +3260,12 @@ class TradingSymbolPayload(BaseModel):
     symbol: str = Field(min_length=1, max_length=120)
 
 
+class TradingBacktestPayload(BaseModel):
+    market: str = Field(default="us", max_length=10)
+    symbols: list[str] = Field(default_factory=list, max_length=30)
+    days: int = Field(default=365, ge=30, le=1500)
+
+
 class TradingKillPayload(BaseModel):
     flatten: bool = False
     confirm: str = Field(default="", max_length=100)
@@ -3356,6 +3362,27 @@ async def trading_release_kill(
         return await studio.trading.release_kill(on_pc=_from_pc(request))
     except TradingError as error:
         raise _trading_failed(error) from error
+
+
+@router.post("/studio/api/trading/backtest")
+async def trading_backtest(
+    payload: TradingBacktestPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        return await studio.trading.backtest(
+            market=payload.market, symbols=payload.symbols, days=payload.days
+        )
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
+@router.get("/studio/api/trading/backtests")
+async def trading_backtests(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> list[JsonObject]:
+    return await studio.trading.backtests()
 
 
 @router.get("/studio/api/trading/learning")

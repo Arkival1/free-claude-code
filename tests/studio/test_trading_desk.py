@@ -1772,3 +1772,15 @@ async def test_learned_weights_are_versioned_and_the_owner_can_undo_them(
     newest = (await desk.learning())["versions"][0]
     assert newest["status"] == "rejected" and "50 scored" in newest["reason"]
     await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_a_backtest_runs_on_past_prices_and_is_kept(make_desk):
+    desk, _ = make_desk()
+    result = await desk.backtest(market="crypto", symbols=["BTC"], days=120)
+    assert "historical simulation" in str(result["label"]).lower()
+    [kept] = await desk.backtests()
+    assert kept["id"] == result["id"]
+    with pytest.raises(TradingError):
+        await desk.backtest(market="forex")
+    await desk.close()
