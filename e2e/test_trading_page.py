@@ -57,3 +57,22 @@ def test_the_trading_page_fits_an_iphone(page: Page, admin_base_url: str) -> Non
             "() => document.documentElement.scrollWidth > window.innerWidth + 1"
         )
         assert not wide, f"the {tab} tab scrolls sideways on an iPhone"
+
+
+def test_the_pc_page_shows_health_decisions_learning_and_backtests(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_viewport_size({"width": 1366, "height": 900})
+    page.goto(f"{admin_base_url}/studio#trade")
+    expect(page.get_by_role("heading", name="Engine")).to_be_visible()
+    page.locator(".trade-tab", has_text="Orders").click()
+    expect(page.get_by_role("heading", name="Decision records")).to_be_visible()
+    page.get_by_role("button", name="Search", exact=True).click()
+    expect(page.locator(".decision-list")).to_contain_text("No decisions match")
+    page.locator(".trade-tab", has_text="Debriefs").click()
+    expect(
+        page.get_by_role("heading", name="Learning: every seat counts the same")
+    ).to_be_visible()
+    expect(page.get_by_role("heading", name="Backtest")).to_be_visible()
+    page.locator(".trade-tab", has_text="Setup").click()
+    expect(page.get_by_label("Practice coin prices")).to_have_value("exchanges")

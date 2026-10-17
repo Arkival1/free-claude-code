@@ -1684,6 +1684,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "swyftx",
             "interactive brokers",
             "ibkr",
+            "hyperliquid",
+            "invo",
+            "backtest",
+            "circuit breaker",
+            "evidence pack",
+            "audit trail",
             "asx",
             "paper trading",
             "kill switch",
@@ -1700,13 +1706,20 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "or in the 3D arena on Desk. Before any order a risk period grades it "
             "A to F with stress tests and an event check, a cooling-off wait "
             "re-checks the price, hard limits (Setup) are plain code, and the "
-            "live account is checked to be the one you verified. Modes: Paper "
-            "(practice money, the default), Live: I approve (each order waits "
-            "for Approve on Desk), and Live: automatic (type the phrase). Going "
-            "live, saving keys, and verifying accounts work only on the PC: "
-            "Setup, the platform, Save keys, Test, then Yes, this is my account. "
-            "The Kill switch stops everything. Orders has the AUD tax CSV. No "
-            "system can promise returns: run paper first and start live small."
+            "live account is checked to be the one you verified. The data is "
+            "checked first and the seats read a numbered evidence pack; four "
+            "debate rounds with research and simulations between them; an "
+            "information and an investment stress test can only shrink or stop "
+            "a buy. Modes: Practice (fake money on real live prices, the "
+            "default), Alert only, Live: I approve, and Live: automatic (type "
+            "the phrase). Going live, saving keys, and verifying accounts work "
+            "only on the PC: Setup, the platform, Save keys, Test, then Yes, "
+            "this is my account. Keys are encrypted on the PC. The Kill switch "
+            "latches; the circuit breaker pauses new trades when something goes "
+            "wrong. Orders has decision records, the audit trail and the AUD "
+            "tax CSV; Debriefs has learning and the backtest; Desk shows the "
+            "engine's health. Hyperliquid / Invo trades at 1x, long only. No "
+            "system can promise returns: practise first and start live small."
         ),
         asks=(
             "How do I connect my broker?",

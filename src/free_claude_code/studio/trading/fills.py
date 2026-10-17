@@ -124,7 +124,7 @@ def next_slice(
     qty = remaining
     if seen.turnover is not None and reference > 0:
         per_minute = seen.turnover / TRADING_MINUTES.get(market, 1440.0)
-        qty = min(remaining, PARTICIPATION * per_minute * max(1.0, minutes) / reference)
+        qty = min(remaining, PARTICIPATION * per_minute * max(0.0, minutes) / reference)
     if step > 0:
         # Whole units (ASX shares): at least one, never more than is left.
         qty = min(remaining, max(step, math.floor(qty / step) * step))

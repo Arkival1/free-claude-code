@@ -881,3 +881,22 @@ body[data-page="trade"] .view {
     min-height: 460px;
   }
 }
+
+/* Decision records, the engine card, and backtests */
+.decision-list {
+  display: grid;
+  gap: 4px;
+}
+.decision {
+  border-top: 1px solid var(--line, rgba(127, 169, 186, 0.25));
+  padding: 6px 0;
+}
+.decision summary {
+  cursor: pointer;
+}
+.decision .pill {
+  margin-left: 8px;
+}
+.live-warning {
+  font-weight: 600;
+}

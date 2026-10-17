@@ -2,9 +2,11 @@
    a risk assessment period, hard limits, and an account check guard every
    order; the desk trades on paper or on the owner's platform.
 
-   Tabs: Desk (the seats, waiting orders, holdings), Debate (the live feed,
-   round by round), Risk (the latest risk assessment), Orders, Debriefs, and
-   Setup (mode, markets, seats, limits, platforms). The feed is read a few
+   Tabs: Desk (the seats, waiting orders, holdings, the engine's health),
+   Debate (the live feed, round by round), Risk (the latest risk
+   assessment), Orders (orders, rounds, decision records, the audit trail),
+   Debriefs (leaderboard, learning, backtests, debriefs), and Setup (mode,
+   markets, seats, limits, platforms). The feed is read a few
    lines at a time and only while the page is visible. Studio calls
    FCCTrade.render(ctx). */
 (() => {
@@ -31,6 +33,8 @@
   const STATUS_MS = 5000;
   const MAX_EVENTS = 600;
   const POSITIONS_MS = 30000;
+  const ENGINE_MS = 30000;
+  const SEAT_NAMES = { 1: "Technical Analyst", 2: "Researcher", 3: "Macro & Sentiment", 4: "Risk Guardian", 5: "Portfolio Manager" };
   const STANCE_COLOURS = { buy: "#4dffa6", hold: "#ffb547", sell: "#ff5d6c", avoid: "#ff5d6c" };
   const MODES = [
     ["paper", "Practice", "Fake money on real live prices; the desk trades on its own."],
@@ -68,6 +72,9 @@
     positions: null,
     positionsError: "",
     positionsAt: 0,
+    engine: null,
+    engineError: "",
+    engineAt: 0,
   };
   // What each desk box last showed, so a poll redraws only what changed (and
   // an opened account check stays open).
@@ -285,6 +292,12 @@
         el("strong", { text: live ? (status.mode === "live_auto" ? "LIVE · AUTO" : "LIVE · APPROVE") : status.alert_only ? "ALERT ONLY" : "PRACTICE" }),
         el("span", { text: status.broker_name }),
       ]),
+      status.mode === "live_auto"
+        ? el("div", { class: "trade-error wide live-warning", role: "alert" }, [
+            el("strong", { text: "Real money, automatic. " }),
+            el("span", { text: "Orders go through on their own, inside every hard limit. Press the kill switch to stop everything at once." }),
+          ])
+        : null,
       stat("Equity", account.error ? "—" : money(account.equity_base, status.currency)),
       stat("Today", account.error ? "—" : pct(account.day_change_pct, 2), toneOf(account.day_change_pct)),
       stat("Invested", account.error ? "—" : money(account.invested, status.currency)),
@@ -453,8 +466,53 @@
         el("div", { id: "desk-orders" }),
         el("div", { id: "desk-seats" }),
         el("div", { id: "positions-host" }, [el("p", { class: "muted", text: "Loading holdings…" })]),
+        el("div", { id: "desk-engine" }),
       ]),
     ];
+  }
+
+  async function refreshEngine() {
+    state.engineAt = Date.now();
+    try {
+      state.engine = await ctx.api("/studio/api/trading/health");
+      state.engineError = "";
+    } catch (error) {
+      state.engineError = error.message;
+    }
+    if (stillHere()) repaint("#desk-engine", [state.engine, state.engineError], () => engineCard());
+  }
+
+  function engineCard() {
+    if (state.engineError) return el("section", { class: "card" }, [el("h2", { text: "Engine" }), el("p", { class: "trade-error", text: state.engineError })]);
+    const health = state.engine;
+    if (!health) return el("p", { class: "muted", text: "Reading the engine…" });
+    const metrics = health.metrics || {};
+    const steps = Object.entries(health.steps || {})
+      .filter(([, step]) => step.failures)
+      .sort((a, b) => b[1].failures - a[1].failures)
+      .slice(0, 3);
+    const sources = Object.entries(health.data_sources || {}).filter(([, value]) => value && value !== "ok");
+    const loop = !health.looping ? "stopped" : health.stalled ? "stalled" : "running";
+    return el("section", { class: "card engine-card" }, [
+      el("h2", { text: "Engine" }),
+      el("div", { class: "risk-stats" }, [
+        stat("Loop", loop, loop === "running" ? "good" : "bad"),
+        stat("Last pass", health.heartbeat_age_s == null ? "—" : `${Math.round(health.heartbeat_age_s)} s ago`),
+        stat("Cycle (median)", metrics.cycle_seconds_median == null ? "—" : `${Math.round(metrics.cycle_seconds_median)} s`),
+        stat("Fill rate", metrics.fill_rate_pct == null ? "—" : `${metrics.fill_rate_pct}%`),
+        stat("Refused", metrics.reject_rate_pct == null ? "—" : `${metrics.reject_rate_pct}%`),
+        stat("Slippage (avg)", metrics.slippage_pct_average == null ? "—" : `${metrics.slippage_pct_average}%`),
+        stat("Fees", metrics.fees_total == null ? "—" : money(metrics.fees_total)),
+      ]),
+      health.lease ? el("p", { class: "trade-error", text: `Another FCC holds the desk (${health.lease}); this one waits.` }) : null,
+      (health.unmatched || []).length ? el("p", { class: "trade-error", text: `Not matched with the account yet: ${health.unmatched.join("; ")}` }) : null,
+      (health.retries || []).length ? el("p", { class: "muted", text: `${health.retries.length} background job(s) waiting to be tried again.` }) : null,
+      (health.dead_letters || []).length ? el("p", { class: "trade-error", text: `${health.dead_letters.length} background job(s) failed every try and were set aside (see the audit trail).` }) : null,
+      sources.length ? el("p", { class: "muted", text: `Data sources: ${sources.map(([name, value]) => `${name} ${value}`).join("; ")}` }) : null,
+      steps.length
+        ? el("ul", { class: "round-list" }, steps.map(([name, step]) => el("li", {}, [el("strong", { text: name }), ` failed ${step.failures} of ${step.runs}: `, el("span", { class: "muted", text: step.last_error })])))
+        : el("p", { class: "muted", text: "Every step of the loop is running cleanly." }),
+    ]);
   }
 
   function paintDesk() {
@@ -465,6 +523,8 @@
     repaint("#desk-seats", status.seats || [], () => seatCards(status));
     if (Date.now() - state.positionsAt > POSITIONS_MS) refreshPositions();
     else paintPositions();
+    if (Date.now() - state.engineAt > ENGINE_MS) refreshEngine();
+    else repaint("#desk-engine", [state.engine, state.engineError], () => engineCard());
     paintArena();
   }
 
@@ -901,6 +961,7 @@
             ])
           : el("p", { class: "empty", text: "No orders yet." }),
       ]),
+      decisionsCard(),
       el("section", { class: "card" }, [
         el("h2", { text: "Rounds" }),
         rounds.rounds.length
@@ -914,10 +975,94 @@
     ];
   }
 
+  function decisionsCard() {
+    const words = el("input", { type: "search", placeholder: "Words, e.g. stale or BTC", "aria-label": "Search decisions" });
+    const symbol = el("input", { type: "text", placeholder: "Symbol", "aria-label": "Symbol", size: "8" });
+    const status = el(
+      "select",
+      { "aria-label": "Decision status" },
+      [
+        ["", "Any status"],
+        ["no_trade", "No trade"],
+        ["blocked", "Blocked"],
+        ["discarded", "Discarded (stale)"],
+        ["rejected", "Rejected"],
+        ["alert", "Alert"],
+        ["order_submitted", "Order sent"],
+        ["position_open", "Position open"],
+        ["position_closed", "Closed"],
+      ].map(([value, label]) => el("option", { value, text: label }))
+    );
+    const list = el("div", { class: "decision-list" }, [el("p", { class: "muted", text: "Every cycle's record: the evidence, each seat, every rule checked, and what happened." })]);
+    const search = async () => {
+      const query = new URLSearchParams({ q: words.value, symbol: symbol.value, status: status.value, limit: "50" });
+      try {
+        const found = await ctx.api(`/studio/api/trading/decisions?${query}`);
+        fill(list, found.decisions.length ? found.decisions.map(decisionRow) : [el("p", { class: "empty", text: "No decisions match." })]);
+      } catch (error) {
+        fill(list, el("p", { class: "trade-error", text: error.message }));
+      }
+    };
+    return el("section", { class: "card" }, [
+      el("h2", { text: "Decision records" }),
+      el("div", { class: "row" }, [
+        words,
+        symbol,
+        status,
+        el("button", { class: "secondary", text: "Search", onclick: search }),
+        el("button", { class: "ghost", text: "Download the audit trail (CSV)", onclick: () => downloadFile("/studio/api/trading/audit.csv", "fcc-audit.csv") }),
+      ]),
+      list,
+    ]);
+  }
+
+  function decisionRow(record) {
+    const data = record.data || {};
+    const failed = (data.risk_checks || []).filter((check) => check && check.passed === false);
+    const result = data.result || null;
+    return el("details", { class: "decision" }, [
+      el("summary", {}, [
+        el("strong", { text: record.symbol }),
+        ` ${record.status.replace(/_/g, " ")} · ${ago(record.created_at)}`,
+        record.pnl != null ? el("span", { class: `pill ${record.pnl >= 0 ? "good" : "warn"}`, text: money(record.pnl) }) : null,
+      ]),
+      record.reason ? el("p", { text: record.reason }) : null,
+      (data.rejection_reasons || []).length ? el("p", { class: "muted", text: `Why not: ${data.rejection_reasons.join("; ")}` }) : null,
+      failed.length
+        ? el("ul", { class: "round-list" }, failed.map((check) => el("li", { text: `${check.rule}: measured ${check.measured ?? "—"}${check.unit ? ` ${check.unit}` : ""}, limit ${check.limit ?? "—"}${check.detail ? ` (${check.detail})` : ""}` })))
+        : null,
+      result
+        ? el("p", { class: "muted", text: `Result: ${result.exit || ""}; entry ${num(result.entry)} → exit ${num(result.exit_price)}; worst ${result.mae_pct ?? "—"}%, best ${result.mfe_pct ?? "—"}%; fees ${result.fees ?? "—"}.` })
+        : null,
+      el("p", { class: "muted", text: `Rules ${record.config_version} · FCC ${record.system_version} · evidence ${record.pack_id || "—"}` }),
+    ]);
+  }
+
+  async function downloadFile(path, name) {
+    let key = "";
+    try {
+      key = localStorage.getItem("fcc.studio.token") || "";
+    } catch {
+      /* no saved token: the server may not need one */
+    }
+    try {
+      const response = await fetch(path, { headers: key ? { "x-api-key": key } : {} });
+      if (!response.ok) throw new Error(`The file didn't download (${response.status}).`);
+      saveFile(await response.blob(), name);
+    } catch (error) {
+      ctx.notify(error.message);
+    }
+  }
+
   /* ------------------------------------------------------------ debriefs */
 
   async function debriefsPanel() {
-    const [debriefs, stats] = await Promise.all([ctx.api("/studio/api/trading/debriefs"), ctx.api("/studio/api/trading/seats/stats")]);
+    const [debriefs, stats, learning, backtests] = await Promise.all([
+      ctx.api("/studio/api/trading/debriefs"),
+      ctx.api("/studio/api/trading/seats/stats"),
+      ctx.api("/studio/api/trading/learning"),
+      ctx.api("/studio/api/trading/backtests"),
+    ]);
     const market = el("select", { "aria-label": "Debrief" }, [
       ["weekly", "Weekly review"],
       ["asx", "ASX session"],
@@ -939,6 +1084,8 @@
           )
         ),
       ]),
+      learningCard(learning),
+      backtestCard(backtests),
       el("section", { class: "card" }, [
         el("h2", { text: "Debriefs" }),
         el("div", { class: "row" }, [
@@ -959,6 +1106,82 @@
         debriefs.debriefs.length ? el("div", { class: "debrief-list" }, debriefs.debriefs.map(debriefCard)) : el("p", { class: "empty", text: "No debriefs yet: they come after closed trades, forecasts that come due, each market close, and each week." }),
       ]),
     ];
+  }
+
+  function learningCard(learning) {
+    const versions = learning.versions || [];
+    return el("section", { class: "card" }, [
+      el("h2", { text: learning.active_version ? `Learning: vote weights v${learning.active_version}` : "Learning: every seat counts the same" }),
+      el("div", { class: "risk-stats" }, Object.entries(learning.weights || {}).map(([number, weight]) => stat(SEAT_NAMES[number] || `Seat ${number}`, `×${Number(weight).toFixed(2)}`))),
+      el("p", { class: "muted", text: learning.rules }),
+      versions.length
+        ? el("ul", { class: "round-list" }, versions.slice(0, 8).map((v) => el("li", {}, [el("strong", { text: `v${v.version} ${v.status.replace(/_/g, " ")}` }), ` · ${ago(v.created_at)} — `, el("span", { class: "muted", text: v.reason })])))
+        : el("p", { class: "empty", text: "No learned versions yet: weights only move after 50+ scored forecasts per seat, and only if they test better." }),
+      learning.active_version
+        ? el("button", {
+            class: "secondary",
+            text: "Roll back to the previous weights",
+            onclick: async () => {
+              if (!window.confirm("Undo the active vote weights?")) return;
+              try {
+                await ctx.post("/studio/api/trading/learning/rollback", {});
+                ctx.notify("Rolled back.");
+                await drawPanel();
+              } catch (error) {
+                ctx.notify(error.message);
+              }
+            },
+          })
+        : null,
+    ]);
+  }
+
+  function backtestCard(kept) {
+    const market = el("select", { "aria-label": "Backtest market" }, [["us", "US shares"], ["asx", "ASX shares"], ["crypto", "Crypto"]].map(([value, label]) => el("option", { value, text: label })));
+    const days = el("input", { type: "number", min: "30", max: "1500", step: "30", value: "365", "aria-label": "Days" });
+    const symbols = el("input", { type: "text", placeholder: "Symbols (optional), e.g. AAPL, MSFT", "aria-label": "Symbols" });
+    const out = el("div", { class: "backtest-result" });
+    const show = (result) => {
+      const m = result.metrics || {};
+      fill(
+        out,
+        el("p", { class: "muted", text: result.label || "" }),
+        result.error
+          ? el("p", { class: "trade-error", text: result.error })
+          : el("div", { class: "risk-stats" }, [
+              stat("Return", m.return_pct == null ? "—" : `${m.return_pct}%`, toneOf(m.return_pct)),
+              stat("Worst drawdown", m.max_drawdown_pct == null ? "—" : `${m.max_drawdown_pct}%`, "bad"),
+              stat("Trades", String(m.trades ?? 0)),
+              stat("Win rate", m.win_rate_pct == null ? "—" : `${m.win_rate_pct}%`),
+              stat("Average R", m.average_r == null ? "—" : String(m.average_r)),
+              stat("Fees", m.fees == null ? "—" : money(m.fees)),
+            ])
+      );
+    };
+    const run = el("button", {
+      class: "secondary",
+      text: "Run backtest",
+      onclick: async () => {
+        run.disabled = true;
+        fill(out, el("p", { class: "muted", text: "Replaying the rules on past prices…" }));
+        try {
+          const list = symbols.value.split(",").map((text) => text.trim()).filter(Boolean);
+          show(await ctx.post("/studio/api/trading/backtest", { market: market.value, days: Number(days.value), symbols: list }));
+        } catch (error) {
+          fill(out, el("p", { class: "trade-error", text: error.message }));
+        } finally {
+          run.disabled = false;
+        }
+      },
+    });
+    if (kept.length) show(kept[0]);
+    return el("section", { class: "card" }, [
+      el("h2", { text: "Backtest" }),
+      el("p", { class: "muted", text: "The desk's own rules on past daily prices (closed candles only, filled at the next open, with fees, spread and slippage). The seats' debate isn't replayed. Past results are not a prediction." }),
+      el("div", { class: "row" }, [market, el("label", {}, ["Days ", days]), symbols, run]),
+      out,
+      kept.length > 1 ? el("p", { class: "muted", text: `${kept.length} backtests kept (newest shown).` }) : null,
+    ]);
   }
 
   function debriefCard(item) {
@@ -1210,6 +1433,20 @@
     return el("section", { class: "card" }, [
       el("h2", { text: "Paper account" }),
       el("p", { class: "muted", text: `Practice money on real prices, in ${config.currency}; fees ${config.fee_pct}% (min ${config.min_fee}).` }),
+      el("label", {}, [
+        "Practice coin prices from ",
+        el(
+          "select",
+          {
+            "aria-label": "Practice coin prices",
+            onchange: (event) => saveConfig({ practice_book: event.target.value }),
+          },
+          [
+            ["exchanges", "Coin exchanges (Coinbase, Kraken)"],
+            ["hyperliquid", "Hyperliquid's live book (Invo)"],
+          ].map(([value, label]) => el("option", { value, text: label, selected: config.practice_book === value }))
+        ),
+      ]),
       el("label", {}, [`Start again with (${config.currency}) `, cash]),
       el("button", {
         class: "secondary",
@@ -1231,7 +1468,8 @@
   function platformsCard(config) {
     return el("section", { class: "card" }, [
       el("h2", { text: "Platforms" }),
-      el("p", { class: "muted", text: "Keys stay in an owner-only file on this PC and are never shown back. Saving keys and verifying accounts works only on the PC." }),
+      el("p", { class: "muted", text: "Keys are encrypted on this PC (Windows' own protection), never shown back, and blanked out of every log. Saving keys and verifying accounts works only on the PC. Keys that can withdraw or transfer money are refused." }),
+      state.status?.vault && !state.status.vault.available ? el("p", { class: "trade-error", text: state.status.vault.note }) : null,
       ...state.brokers.filter((b) => b.id !== "paper").map((b) => brokerCard(b, config)),
     ]);
   }

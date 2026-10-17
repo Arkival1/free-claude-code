@@ -22,6 +22,7 @@ from free_claude_code.studio import resilience
 from free_claude_code.studio.memory import MemoryService
 from free_claude_code.studio.models import now_ms
 from free_claude_code.studio.resilience import ServiceError
+from free_claude_code.studio.trading import fills as fills_module
 from free_claude_code.studio.trading.brokers import registry
 from free_claude_code.studio.trading.brokers.base import (
     Account,
@@ -1867,3 +1868,48 @@ async def test_practice_keys_never_trade_real_money(
     with pytest.raises(TradingError, match="practice account"):
         await desk.update_config({"mode": "live_approve", "broker": "fake"}, on_pc=True)
     await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_practice_end_to_end_partial_fill_restart_exit_and_audit(
+    make_desk, store, monkeypatch
+):
+    # A thin market at first: the buy fills only in part.
+    monkeypatch.setattr(fills_module, "PARTICIPATION", 1e-9)
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    [order] = await store.find(TradeOrder)
+    assert order.status == "partially_filled" and 0 < order.filled_qty < order.qty
+    first = order.filled_qty
+    # FCC restarts: a new desk on the same records matches everything first.
+    await desk.close()
+    again, _ = make_desk()
+    await again._reconcile()
+    assert again._unmatched_text() == ""
+    # The market deepens: the rest fills, and nothing is sent twice.
+    monkeypatch.setattr(fills_module, "PARTICIPATION", 1e9)
+    later = time.time() + 120
+    again._clock = lambda: later
+    await again.tick()
+    [order] = await store.find(TradeOrder)
+    assert order.status == "filled" and order.filled_qty == pytest.approx(order.qty)
+    fills = await store.find(TradeFill, where={"order_id": order.id})
+    assert len(fills) == 2 and fills[0].qty + fills[1].qty == pytest.approx(order.qty)
+    assert any(fill.qty == pytest.approx(first) for fill in fills)
+    paper = json.loads((again._root / "paper.json").read_text())
+    assert len(paper["orders"]) == 1
+    # The stop is hit: the holding is sold, and the record has the result.
+    position = await store.get(TradePosition, "paper:BTC")
+    assert position is not None and position.qty == pytest.approx(order.qty)
+    await store.put(position.model_copy(update={"stop_loss": position.avg_price * 2}))
+    await again.tick()
+    assert await store.get(TradePosition, "paper:BTC") is None
+    [record] = await store.find(TradeDecision)
+    assert record.status == "position_closed" and record.pnl is not None
+    assert "stop-loss" in str(record.data["result"]["exit"])
+    kinds_seen = {line.kind for line in await store.find(TradeAudit)}
+    assert {"order", "fill", "decision"} <= kinds_seen
+    await again.close()

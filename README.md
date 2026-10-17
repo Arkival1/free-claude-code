@@ -1075,11 +1075,36 @@ turns on the graphics card.
   tab and lights up the 3D arena on the **Desk** tab; **Download the log**
   saves a round, and a plain log of every day is kept in Studio's data
   folder (`trading/logs`, 30 days).
-- **Forecasts are scored.** Every seat's forecast (traded or not) is checked
-  when it comes due: right or wrong, how confident, whether the target came
-  before the stop. Seats earn vote weight from their record (×0.5 to ×2 after
-  20 scored forecasts), shown with a calibration chart on the **Debriefs**
-  leaderboard.
+- **Checked information first.** Before any seat is asked, the desk checks
+  the data: each price's own time against its market's age limit (stale,
+  future-dated or delayed prices are flagged, never passed off as live), a
+  real bid and ask (Coinbase, Kraken, Hyperliquid, or the platform), the
+  spread, volume and turnover, missing candles, prices that disagree between
+  sources, dated news (ASX announcements, Yahoo Finance) and whether a story
+  is confirmed or already priced in. A failing critical check stops new buys
+  (holdings are still reviewed). Everything the seats see comes as a
+  numbered **evidence pack** (facts, calculations, news, each with source and
+  time); seats must cite items by number, and web text is fenced off as data.
+- **Four long debate rounds** (Setup, *Debate rounds*, 1-6): between rounds
+  the desk researches the seats' open questions (dated news, web, market
+  data), collects their ideas, and **simulates** the plan on the asset's own
+  past returns (2,000 paths: chance stop first or target first, the worst
+  5%). Seat answers are checked against a strict format (one repair, then
+  the seat is ignored). Before any buy an **information stress test** checks
+  the evidence the decision rests on (stale or unconfirmed support blocks or
+  shrinks it), the Guardian reviews a draft plan with a veto, and plain code
+  runs a **decision engine** (every rule with what was measured and the
+  limit), a scorecard, the market regime's policy (no new trades in an
+  extreme market), and an **investment stress test** (worst day and week,
+  gaps, a crash across the portfolio, liquidity) that can only make an order
+  smaller or stop it. A decision that went stale during a long debate is
+  discarded and analysed again.
+- **Forecasts are scored and learning is controlled.** Every seat's forecast
+  (traded or not) is checked when it comes due. Vote weights change only in
+  checked, versioned steps: 50+ scored forecasts per seat, tested on the
+  newest 30% held back, at most 10% a step, between ×0.5 and ×2; every
+  version is kept and can be rolled back (Debriefs, *Learning*). Learning
+  never touches limits, keys or safety settings.
 - **The risk period.** Before any order: a risk report (money at risk,
   reward for risk, expected value, a quarter-Kelly cap, stop distance against
   normal swings, share of a day's volume, correlation with what you hold,
@@ -1099,24 +1124,54 @@ turns on the graphics card.
   account: it must be the exact account you verified (Test, then *Yes, this
   is my account*), active, in the right currency, with enough buying power,
   the market open, the price still near the decision, and no duplicate order.
-- **Three modes.** **Paper** trades practice money on real prices (AUD
-  10,000 to start; reset any time). **Live: I approve** puts each real order
+- **Every decision is recorded.** Each cycle keeps a decision record (the
+  evidence pack, every seat's answer, every rule checked, timings and prices
+  at each step, the order and its result), searchable on **Orders**, and an
+  audit trail of orders, fills, settings, mode changes, key changes and the
+  kill switch that is never pruned (download it as CSV).
+- **Protection.** A **circuit breaker** pauses new trades after a daily loss,
+  a losing streak, a slippage spike, a burst of errors, repeated bad data, or
+  orders FCC can't match with the account; positions are still managed. The
+  **kill switch** latches until you release it on the PC, keeps the
+  platform's own stops on what you hold, and closing everything needs the
+  typed phrase *CLOSE EVERYTHING*. An order whose answer was lost stays open
+  (never sent twice) until FCC can match it.
+- **Realistic practice fills and a position manager.** Practice orders pay
+  the live ask and get the bid (an assumed spread, labelled, when there is
+  no live book), with slippage that grows with size and partial fills in
+  thin markets; limits expire after a day. Each holding's highest and lowest
+  price are kept, the stop moves to the entry at +1R (and trails when the
+  plan says so), and the plan's holding period ends with a time exit.
+- **Backtest** (Debriefs): the desk's rules replayed on past daily candles
+  (closed candles only, filled at the next open, gaps, halts, fees),
+  labelled a historical simulation, never a prediction.
+- **Four modes.** **Practice** trades practice money on real live prices (AUD
+  10,000 to start; reset any time). **Alert only** analyses and alerts but
+  never orders. **Live: I approve** puts each real order
   on the Desk tab with its risk grade and account check, waiting for your
   **Approve** (it re-checks first) or **Deny**. **Live: automatic** trades on
   its own inside every limit and needs the phrase *I accept real-money
   trades*. Switching to live, saving keys, and verifying accounts work only
-  on the PC. After a restart only paper trading carries on; live needs
-  **Start** again. The **Kill switch** stops the desk and cancels every
-  waiting order, and can sell everything too.
+  on the PC. After a restart only practice carries on; live needs
+  **Start** again, and a red banner stays up while real money is automatic.
+  Each market (coins, US shares, ASX shares) can trade on its own verified
+  account. Keys that fail their regular check switch real money off.
 - **Platforms** (Setup, each with where to get keys): **Alpaca** (US shares
   and crypto, free paper account), **Interactive Brokers** (ASX and US shares
   through IBKR's Client Portal Gateway on this PC), **Kraken**, **Coinbase**,
   **BTC Markets**, **Independent Reserve**, **CoinSpot (beta)** and **Swyftx
   (beta)** for crypto and meme coins, and **Any platform (webhook)**, which
   posts each approved order as JSON (with an optional signature) to
-  TradersPost, your own bot, or an automation. Keys are kept in an
-  owner-only file on the PC, never shown back, and never need withdrawal
-  rights. A lost answer mid-order is looked up by the order's own id before
+  TradersPost, your own bot, or an automation, and **Hyperliquid / Invo
+  (beta)**: the exchange the Invo app trades on, reached through an API
+  wallet you create for your Invo account (it can trade but can't withdraw).
+  FCC trades it at 1x, isolated, long only, with the stop and target held by
+  the exchange, and you can practise on Hyperliquid's live book first
+  (Setup, *Practice coin prices*). Keys are encrypted on the PC with
+  Windows' own protection (without it, keys can't be saved and FCC stays in
+  practice), never shown back, blanked out of every log, and a key that can
+  withdraw or transfer is refused; FCC refuses any call that would move
+  money. A lost answer mid-order is looked up by the order's own id before
   anything is sent again, so an order is never placed twice.
 - **Debriefs.** After each closed trade every seat says what it predicted and
   what it missed and the PM writes the lesson into the desk's memory (the
@@ -1131,7 +1186,9 @@ turns on the graphics card.
   record for your accountant, not tax advice).
 - **Honestly:** no system can promise returns, and a debate can be
   confidently wrong. Run paper for a few weeks, read the debriefs and the
-  leaderboard, and start live small. Meme coins on DEXes are research-only
+  leaderboard, and start live small. **Desk → Engine** shows whether the loop
+  is running, each step's errors, and fill and slippage figures; only one
+  FCC runs the desk at a time. Meme coins on DEXes are research-only
   (buying there would need a wallet key inside the app); sites without an
   API (CommSec, SelfWealth, Stake) aren't connected, but a webhook covers
   anything that takes a web signal.

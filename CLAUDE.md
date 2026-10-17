@@ -50,7 +50,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   one session at a time for code changes so pushes don't clash. Don't open
   pull requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.72.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.73.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -74,6 +74,12 @@ Notes carried over from the long session that built FCC Studio (LCC).
   verifying accounts work only from the PC; after a restart only paper
   resumes. CoinSpot and Swyftx adapters are marked beta. DEX meme-coin
   buying and sites with no API (CommSec, SelfWealth, Stake) are left out.
+- Trading Bank safety (owner's no-downgrade rule): a change may only add a
+  check or make one stricter; where a wrong number is fixed, the stricter of
+  the old and new figures is used. Learning changes vote weights only.
+  Trading keys live encrypted in `trading-keys.vault` (Windows DPAPI); with
+  no such protection FCC stays in practice. Hyperliquid (Invo) trades at 1x,
+  isolated, long only, and FCC signs only orders, cancels and leverage.
 - Ruflo-core is set up for Claude Code here as project files
   (`.claude/agents`, `.claude/skills`, `.mcp.json`); see
   `vendor/ruflo-core/README.md`. Its `.claude-flow/` runtime folder is
