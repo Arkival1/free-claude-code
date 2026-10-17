@@ -3504,6 +3504,13 @@ async def trading_audit(
     }
 
 
+@router.get("/studio/api/trading/health")
+async def trading_health(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return await studio.trading.health()
+
+
 @router.get("/studio/api/trading/audit.csv")
 async def trading_audit_csv(
     studio: StudioService = Depends(get_studio),

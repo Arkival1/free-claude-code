@@ -122,6 +122,7 @@ from .seats import Decision, Forecast, Think
 from .sessions import last_close, session, sydney_offset
 from .stress import Holding as HeldPosition
 from .stress import StressInput, StressReport, stress_test
+from .worker import JOB_TRIES, Job, Lease, Steps, metrics
 
 TICK_SECONDS = 10.0
 ASKED = "asked by you"
@@ -147,6 +148,8 @@ EXIT_RETRY_SECONDS = 600.0
 PROBLEM_REPEAT_SECONDS = 600.0
 """The same problem goes to the feed at most this often."""
 RECONCILE_SECONDS = 300.0
+STALL_SECONDS = 120.0
+"""A loop that hasn't finished a pass for this long shows as stalled."""
 """How often orders not yet matched with their account are asked about."""
 DAY_MS = 86_400_000
 
@@ -225,7 +228,16 @@ class TradingDesk:
         self._loop_task: asyncio.Task[None] | None = None
         self._round_task: asyncio.Task[None] | None = None
         self._requests: list[str] = []
-        self._chores: list[Callable[[], Awaitable[object]]] = []
+        self._chores: list[Callable[[], Awaitable[object]] | Job] = []
+        self._retries: list[Job] = []
+        """Background jobs that failed, waiting for their next try."""
+        self._dead: list[JsonObject] = []
+        """Jobs that failed every try (also in the audit trail)."""
+        self._lease = Lease(root / "desk.lease", uuid.uuid4().hex, clock)
+        self._lease_note = ""
+        """Why this FCC isn't running the loop (another one holds it)."""
+        self._steps = Steps()
+        self._heartbeat = 0.0
         self._activity: JsonObject = {}
         self._last_scan = 0.0
         self._last_score = 0.0
@@ -570,6 +582,7 @@ class TradingDesk:
 
     async def close(self) -> None:
         await self._cancel_tasks()
+        self._lease.release()
         for _, broker in self._live.values():
             with contextlib.suppress(Exception):
                 await broker.aclose()
@@ -658,7 +671,17 @@ class TradingDesk:
     async def _loop(self) -> None:
         while True:
             try:
-                await self.tick()
+                # Only the FCC holding the lease runs the desk, so two copies
+                # open on the same data never place the same order twice.
+                held = self._lease.take()
+                self._lease_note = held
+                if held:
+                    await self._problem(
+                        "Another FCC is running this trading desk; this one "
+                        "waits, so nothing is done twice."
+                    )
+                else:
+                    await self.tick()
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -690,16 +713,26 @@ class TradingDesk:
             self._score_forecasts,
             self._schedule_debriefs,
         ):
+            name = step.__name__.strip("_").replace("_", " ")
+            started = time.perf_counter()
+            failed = ""
             try:
                 await step(config)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
                 logger.opt(exception=True).debug("Trading desk step failed")
-                await self._problem(
-                    f"{step.__name__.strip('_').replace('_', ' ')}: {error}"
-                )
+                failed = str(error) or type(error).__name__
+                await self._problem(f"{name}: {error}")
+            self._steps.record(
+                name, time.perf_counter() - started, error=failed, at=self._clock()
+            )
         now = self._clock()
+        ready = [job for job in self._retries if job.due <= now]
+        if ready:
+            self._retries = [job for job in self._retries if job.due > now]
+            self._chores.extend(ready)
+        self._heartbeat = now
         due = now - self._last_scan >= config.scan_minutes * 60
         free = self._round_task is None or self._round_task.done()
         entering = config.running and not self._entry_block(config)
@@ -717,13 +750,14 @@ class TradingDesk:
             async with asyncio.timeout(round_seconds(start, debates)):
                 while self._chores:
                     chore = self._chores.pop(0)
+                    job = chore if isinstance(chore, Job) else Job(chore)
                     try:
-                        await chore()
+                        await job.run()
                     except asyncio.CancelledError:
                         raise
                     except Exception as error:
                         logger.exception("Trading debrief failed")
-                        await self.feed.emit("error", f"A debrief failed: {error}")
+                        await self._job_failed(job, str(error) or type(error).__name__)
                 config = self.config()
                 if self._requests:
                     symbol = self._requests.pop(0)
@@ -739,6 +773,65 @@ class TradingDesk:
             await self.feed.emit("error", "A round ran too long and was stopped.")
         finally:
             self._activity = {}
+
+    async def _job_failed(self, job: Job, error: str) -> None:
+        """Try a failed job again later, or set it aside after its last try."""
+        if job.failed(error, self._clock()):
+            self._retries.append(job)
+            await self.feed.emit(
+                "error",
+                f"A {job.name} failed (try {job.tries} of {JOB_TRIES}): {error}. "
+                f"Trying again in {(job.due - self._clock()) / 60:.0f} min.",
+            )
+            return
+        entry: JsonObject = {
+            "name": job.name,
+            "tries": job.tries,
+            "errors": list(job.errors),
+            "at": self._clock(),
+        }
+        self._dead = [*self._dead, entry][-50:]
+        await self.feed.emit(
+            "error",
+            f"A {job.name} failed {job.tries} times and was set aside: {error}.",
+        )
+        await self._decisions.audit(
+            "dead_letter",
+            f"A {job.name} failed {job.tries} times and was set aside.",
+            data=entry,
+        )
+
+    async def health(self) -> JsonObject:
+        """How the desk itself is running: the loop, each step, background
+        jobs, data sources, and measures from its own records."""
+        now = self._clock()
+        rounds = await self._store.find(
+            TradeRound, order_by="created_at DESC", limit=200
+        )
+        orders = await self._store.find(
+            TradeOrder, order_by="created_at DESC", limit=500
+        )
+        decisions = await self._store.find(
+            TradeDecision, order_by="created_at DESC", limit=200
+        )
+        return {
+            "looping": self._loop_task is not None and not self._loop_task.done(),
+            "heartbeat_age_s": round(now - self._heartbeat, 1)
+            if self._heartbeat
+            else None,
+            "stalled": bool(self._heartbeat) and now - self._heartbeat > STALL_SECONDS,
+            "lease": self._lease_note,
+            "steps": self._steps.view(),
+            "jobs_waiting": len(self._chores),
+            "retries": [
+                {"name": job.name, "tries": job.tries, "due": job.due}
+                for job in self._retries
+            ],
+            "dead_letters": list(self._dead[-20:]),
+            "unmatched": list(self._unmatched.values()),
+            "data_sources": dict(self._data.health()),
+            "metrics": metrics(rounds, orders, decisions),
+        }
 
     async def debate(self, symbol: str) -> JsonObject:
         """Ask the desk about one symbol now (in the background)."""
@@ -3579,6 +3672,10 @@ class TradingDesk:
             "kill": dict(killed) if isinstance(killed, dict) else None,
             "breaker": breaker.view() if breaker is not None else None,
             "unmatched": list(self._unmatched.values()),
+            "heartbeat_age_s": round(self._clock() - self._heartbeat, 1)
+            if self._heartbeat
+            else None,
+            "lease": self._lease_note,
             "routes": dict(config.routes),
             "looping": self._loop_task is not None and not self._loop_task.done(),
             "busy": self._round_task is not None and not self._round_task.done(),

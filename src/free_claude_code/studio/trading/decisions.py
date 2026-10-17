@@ -60,6 +60,7 @@ AUDIT_KINDS = frozenset(
         "breaker",
         "alert",
         "position",
+        "dead_letter",
     }
 )
 """Feed kinds that also go to the audit trail."""

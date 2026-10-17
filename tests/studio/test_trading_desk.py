@@ -1717,3 +1717,30 @@ async def test_the_position_manager_raises_the_stop_and_ends_on_time(make_desk, 
     assert "holding period" in result["exit"]
     assert result["mfe_pct"] > 0 and result["planned_stop"] == plan["initial_stop"]
     await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_debrief_is_retried_then_set_aside(make_desk, store):
+    desk, _ = make_desk()
+    tries: list[int] = []
+
+    async def broken() -> None:
+        tries.append(1)
+        raise RuntimeError("model offline")
+
+    desk._chores.append(broken)
+    await desk._round()
+    assert len(tries) == 1 and len(desk._retries) == 1
+    # Not due yet: nothing runs; once due it runs again.
+    await desk.tick()
+    assert len(tries) == 1
+    for _ in range(2):
+        desk._retries[0].due = 0.0
+        await desk.tick()
+        assert desk._round_task is not None
+        await desk._round_task
+    assert len(tries) == 3 and desk._retries == []
+    health = await desk.health()
+    assert health["dead_letters"] and health["heartbeat_age_s"] is not None
+    assert "dead_letter" in {line.kind for line in await store.find(TradeAudit)}
+    await desk.close()
