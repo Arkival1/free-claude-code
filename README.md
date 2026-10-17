@@ -1326,6 +1326,35 @@ the warning, so you know never to do them.
 </details>
 
 <details>
+<summary><strong>Maths tutor: the maths to become an electrician in NSW</strong></summary>
+
+Open **Learn** in the tab bar and press **Open the maths tutor** (or the HUD
+menu, **Maths tutor**). It is for you, not the agents: 28 topics in six
+stages, from apprenticeship entry tests through DC, AC and three-phase theory
+to the installation calculations in the final licensing assessment (voltage
+drop, longest cable run, earth fault-loop impedance).
+
+- **Practice**: pick a topic for a short lesson and its formulas, then answer
+  questions with new numbers every time. Answers are marked in code and show
+  the full working, so the answer is always right. **Explain it to me** asks
+  the AI to explain in plain words; it is given the right answer and working
+  and is told not to change them. Each topic shows how you are going, and
+  **Next** suggests what to practise.
+- **Practice test**: ten questions from one stage (or everything), marked at
+  the end with the working for anything missed.
+- **Ask the tutor**: any maths question about electrical work, answered by the
+  AI with its working (labelled as the AI's: check it).
+- **Licence path**: apprenticeship, the Certificate III in Electrotechnology
+  Electrician (UEE30820), the final assessment, and the Qualified Supervisor
+  Certificate from NSW Fair Trading, with links to the NSW Government and
+  TAFE NSW pages to check the current rules.
+
+Values from Australian Standards tables (AS/NZS 3008 cable voltage drops, for
+example) are given in the questions, never quoted from the tables.
+
+</details>
+
+<details>
 <summary><strong>Agents that search the web and build sites</strong></summary>
 
 An agent is a name, a model, a set of tools, its own memory, and optionally its

@@ -682,6 +682,47 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Maths tutor (electrician)",
+        route="/studio#tutor",
+        where=(
+            "Learn in the tab bar, Open the maths tutor (or MENU, Maths tutor). "
+            "Tabs: Practice, Practice test, Ask the tutor, Licence path."
+        ),
+        terms=(
+            "maths",
+            "math",
+            "tutor",
+            "electrician",
+            "apprentice",
+            "apprenticeship",
+            "ohm's law",
+            "voltage drop",
+            "three-phase",
+            "power factor",
+            "capstone",
+            "licence",
+            "license",
+            "uee30820",
+        ),
+        body=(
+            "A maths tutor for you on the path to an electrician's licence in "
+            "NSW: entry test maths, formulas, DC (year 1), AC (year 2), "
+            "three-phase and machines (year 3), and installation calculations "
+            "(voltage drop, longest run, fault-loop impedance). Pick a topic to "
+            "read the short lesson and formulas, then answer questions with new "
+            "numbers each time; every answer is marked in code with the full "
+            "working, and Explain it to me asks the AI to explain in plain words "
+            "(it is given the right answer and can't change it). Each topic shows "
+            "how you are going; Next suggests what to practise. Practice test: "
+            "ten questions from a stage, marked at the end. Ask the tutor: any "
+            "maths question, answered by the AI with working (check it). "
+            "Licence path: apprenticeship, the Certificate III (UEE30820), the "
+            "final assessment and the NSW Fair Trading licence, with links to "
+            "check the current rules. Standards values (AS/NZS 3000, 3008) are "
+            "given in questions, not quoted from the tables."
+        ),
+    ),
+    GuideTopic(
         title="Learn mode",
         route="/studio#more",
         where=(

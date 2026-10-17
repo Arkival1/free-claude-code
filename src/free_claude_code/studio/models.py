@@ -576,6 +576,19 @@ class LabPart(Record):
     created_at: int = Field(default_factory=now_ms)
 
 
+class TutorAttempt(Record):
+    """One answer to a maths tutor question, marked in code."""
+
+    id: str = Field(default_factory=lambda: new_id("tat"))
+    topic: str
+    question_id: str
+    given: str = ""
+    correct: bool = False
+    test_id: str = ""
+    """Set when the answer was part of a practice test."""
+    created_at: int = Field(default_factory=now_ms)
+
+
 class LabChemical(Record):
     """A chemical the Lab looked up (on PubChem) and keeps on its shelf."""
 

@@ -308,6 +308,7 @@ from .trading.config import SeatConfig
 from .trading.desk import TradingDesk
 from .trading.keyvault import KeyVault, default_protector
 from .tuning import CloudTuner, LightTuner, TuningError
+from .tutor.coach import Tutor
 from .vault import RepoVault
 from .video_ears import Fetch, Hear, VideoEars, VideoEarsError, ytdlp_fetch
 from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
@@ -829,6 +830,8 @@ class StudioService:
         self._main_busy = 0
         self._main_error: str | None = None
         self._lab = LabBench(store, think=self._lab_think, transport=search_transport)
+        # The maths tutor asks the same server AI as the Lab (for explanations only).
+        self._tutor = Tutor(store, think=self._lab_think)
         self._lab_busy = 0
         self._lab_error: str | None = None
         self._farm = ContentFarm(
@@ -2488,6 +2491,11 @@ class StudioService:
     def lab(self) -> LabBench:
         """The Lab: mixing, products, materials, and electronics."""
         return self._lab
+
+    @property
+    def tutor(self) -> Tutor:
+        """The maths tutor for the path to an electrician's licence."""
+        return self._tutor
 
     async def _lab_think(self, system: str, prompt: str) -> str:
         """The Lab's own questions go to a server AI: it knows more chemistry.

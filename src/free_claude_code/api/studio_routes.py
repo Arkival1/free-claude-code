@@ -64,6 +64,7 @@ from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.trading.desk import TradingError
 from free_claude_code.studio.tuning import TuningError
+from free_claude_code.studio.tutor.coach import TutorError
 from free_claude_code.studio.vault import VaultError, item_view
 from free_claude_code.studio.videos import clock, render_note
 from free_claude_code.studio.voice import MAX_AUDIO_BYTES, VoiceError
@@ -87,6 +88,8 @@ _ASSET_FILENAMES = frozenset(
         "hq.js",
         "trade.css",
         "trade.js",
+        "tutor.css",
+        "tutor.js",
         "fcc3d.js",
         "trade3d.js",
         "ops.css",
@@ -3251,6 +3254,20 @@ class LabKeepPayload(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class TutorCheckPayload(BaseModel):
+    question_id: str = Field(min_length=3, max_length=60)
+    answer: str = Field(default="", max_length=80)
+
+
+class TutorMarkPayload(BaseModel):
+    test_id: str = Field(min_length=3, max_length=40)
+    answers: dict[str, str] = Field(default_factory=dict)
+
+
+class TutorAskPayload(BaseModel):
+    question: str = Field(min_length=1, max_length=1000)
+
+
 class LabLookupPayload(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
@@ -4554,3 +4571,88 @@ async def farm_say(
     """Ask the main AI for videos, ideas, or advice in the Content Farm."""
     chat = await studio.farm_say(payload.text)
     return {"accepted": True, "chat_id": chat.id}
+
+
+# ------------------------------------------------------------ maths tutor
+
+
+def _tutor_failed(error: TutorError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(error))
+
+
+@router.get("/studio/api/tutor")
+async def tutor_overview(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The licence path, the stages, every topic, and progress so far."""
+    return {**studio.tutor.overview(), "progress": await studio.tutor.progress()}
+
+
+@router.get("/studio/api/tutor/question")
+async def tutor_question(
+    topic: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return studio.tutor.question(topic)
+    except TutorError as error:
+        raise _tutor_failed(error) from error
+
+
+@router.post("/studio/api/tutor/check")
+async def tutor_check(
+    payload: TutorCheckPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Mark one answer (worked out in code, never by a model)."""
+    try:
+        return await studio.tutor.check(payload.question_id, payload.answer)
+    except TutorError as error:
+        raise _tutor_failed(error) from error
+
+
+@router.get("/studio/api/tutor/test")
+async def tutor_test(
+    stage: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return studio.tutor.test(stage)
+    except TutorError as error:
+        raise _tutor_failed(error) from error
+
+
+@router.post("/studio/api/tutor/test")
+async def tutor_mark(
+    payload: TutorMarkPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        return await studio.tutor.mark(payload.test_id, payload.answers)
+    except TutorError as error:
+        raise _tutor_failed(error) from error
+
+
+@router.post("/studio/api/tutor/explain")
+async def tutor_explain(
+    payload: TutorCheckPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The working, plus the AI's explanation of it in plain words."""
+    try:
+        return await studio.tutor.explain(payload.question_id, payload.answer)
+    except TutorError as error:
+        raise _tutor_failed(error) from error
+
+
+@router.post("/studio/api/tutor/ask")
+async def tutor_ask(
+    payload: TutorAskPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        return await studio.tutor.ask(payload.question)
+    except TutorError as error:
+        raise _tutor_failed(error) from error

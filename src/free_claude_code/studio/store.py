@@ -43,6 +43,7 @@ from .models import (
     TuneJob,
     TunePack,
     TuneSample,
+    TutorAttempt,
     VideoNote,
     now_ms,
 )
@@ -116,6 +117,7 @@ TABLES: Mapping[type[Record], str] = {
     LabProject: "studio_lab_projects",
     LabPart: "studio_lab_parts",
     LabChemical: "studio_lab_chemicals",
+    TutorAttempt: "studio_tutor_attempts",
     FarmChannel: "studio_farm_channels",
     FarmPost: "studio_farm_posts",
     FarmAsset: "studio_farm_assets",
@@ -156,6 +158,7 @@ _INDEXES: tuple[tuple[str, str, str], ...] = (
     ("studio_trade_audit_kind", "studio_trade_audit", "kind, created_at"),
     ("studio_trade_fills_order", "studio_trade_fills", "order_id, created_at"),
     ("studio_trade_weights_when", "studio_trade_weights", "created_at"),
+    ("studio_tutor_attempts_topic", "studio_tutor_attempts", "topic, created_at"),
 )
 
 

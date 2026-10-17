@@ -14,6 +14,8 @@ const SHELL = [
   `/studio/assets/${VERSION}/hq.js`,
   `/studio/assets/${VERSION}/trade.css`,
   `/studio/assets/${VERSION}/trade.js`,
+  `/studio/assets/${VERSION}/tutor.css`,
+  `/studio/assets/${VERSION}/tutor.js`,
   `/studio/assets/${VERSION}/ops.css`,
   `/studio/assets/${VERSION}/ops.js`,
   `/studio/assets/${VERSION}/icon-180.png`,

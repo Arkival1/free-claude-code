@@ -2065,6 +2065,16 @@
     const count = el("input", { type: "number", value: "3", min: "2", max: "6" });
     const nodes = [
       card(
+        "Maths tutor",
+        [
+          el("p", {
+            class: "muted",
+            text: "For you, not the agents: the maths on the path to an electrician's licence in NSW, from entry tests to the licence assessment. Questions are marked in code; the AI explains.",
+          }),
+          el("button", { class: "primary", text: "Open the maths tutor", onclick: () => go("tutor") }),
+        ]
+      ),
+      card(
         "Open a class",
         [
           el("p", {
@@ -6077,6 +6087,7 @@
     ["Trading Bank", "trade", "📈"],
     ["Ops (what the PC is doing)", "ops", "◉"],
     ["Classroom", "learn", "✎"],
+    ["Maths tutor (electrician)", "tutor", "∑"],
     ["Models", "models", "▣"],
     ["Model Control", "engine", "⚡"],
     ["Tuning & LoRA", "tune", "⟁"],
@@ -7259,6 +7270,7 @@
         case "lab": return await renderLab(generation);
         case "farm": return await renderFarm(generation);
         case "trade": return await renderTrade(generation);
+        case "tutor": return await renderTutor(generation);
         case "ops": return await renderOps(generation);
         case "hq": return await renderHQ(generation);
         case "connectors": return await renderConnectors();
@@ -7534,6 +7546,20 @@
     });
   }
 
+  // The maths tutor (electrician's licence, NSW) lives in tutor.js.
+  async function renderTutor(generation) {
+    if (!window.FCCTutor) throw new Error("The maths tutor didn't load. Reload the page.");
+    await window.FCCTutor.render({
+      view,
+      el,
+      api,
+      post,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
   // Ops (the PC's load, background lanes, busy agents) lives in ops.js.
   async function renderOps(generation) {
     if (!window.FCCOps) throw new Error("The Ops page didn't load. Reload the page.");
@@ -7569,6 +7595,7 @@
         lab: "Lab",
         farm: "Content Farm",
         trade: "Trading Bank",
+        tutor: "Maths tutor",
         ops: "Ops",
         hq: "HQ",
         connectors: "Connectors",

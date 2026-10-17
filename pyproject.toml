@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.73.0"
+version = "6.74.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -143,6 +143,10 @@ ignore = [
     "B008",  # FastAPI Depends() in argument defaults is intentional
     "RUF006",  # fire-and-forget tasks intentionally not awaited
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# The maths tutor writes real maths signs (×, −, α, ρ, µ) for people to read.
+"src/free_claude_code/studio/tutor/*.py" = ["RUF001", "RUF002"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["free_claude_code", "smoke"]
