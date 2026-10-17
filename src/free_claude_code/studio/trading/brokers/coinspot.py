@@ -6,11 +6,14 @@ with the secret, in a ``sign`` header. Market buys and sells fill at once
 ("buy now"), with the decision's price and the slippage limit sent as the
 rate and threshold so a runaway price is refused rather than paid.
 
-CoinSpot has no client order ids. Each attempt is noted first; after a lost
-answer the desk looks for a completed order of the same coin and size made
-since the attempt, and only sends again when there is none. Marked beta:
-checked against CoinSpot's API page and an open-source client, not yet
-against a live account; try it with a small order first.
+CoinSpot has no client order ids. Each attempt is noted first (and noted
+again after FCC restarts); after a lost answer the desk looks for a
+completed order of the same coin, side and size made since the attempt. When
+there is none it can't tell whether the order went through, so it never
+sends again: the order stays open and new trades pause until a later check
+matches it. Marked beta: checked against CoinSpot's API page and an
+open-source client, not yet against a live account; try it with a small
+order first.
 """
 
 import hashlib
@@ -19,6 +22,7 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 
 import httpx
 
@@ -31,6 +35,7 @@ from .base import (
     OrderRequest,
     OrderResult,
     Rules,
+    Sent,
     fingerprint,
     masked,
 )
@@ -39,6 +44,8 @@ from .common import Nonce, items, make_web, number, obj, text
 HOST = "www.coinspot.com.au"
 PRIVATE = f"https://{HOST}/api/v2"
 PUBLIC = f"https://{HOST}/pubapi/v2"
+CLOCK_SKEW_SECONDS = 60.0
+"""How far CoinSpot's clock and this PC's may differ when matching times."""
 
 
 def sign(body: str, secret: str) -> str:
@@ -239,6 +246,12 @@ class CoinSpotBroker:
         self._done[order.client_id] = result
         return result
 
+    def remember(self, sent: Sent) -> None:
+        """After a restart: an order FCC sent, so ``find`` can look for it."""
+        self._attempts.setdefault(
+            sent.client_id, _Attempt(sent.symbol, sent.side, sent.qty, sent.at)
+        )
+
     async def find(self, client_id: str) -> OrderResult | None:
         if client_id in self._done:
             return self._done[client_id]
@@ -255,9 +268,14 @@ class CoinSpotBroker:
                 1e-8, attempt.qty * 1e-6
             ):
                 continue
+            # Only an order completed after this one was sent can be it; one
+            # with no readable time can't be told apart from an older one.
+            sold = _when(info.get("solddate"))
+            if sold is None or sold < attempt.at - CLOCK_SKEW_SECONDS:
+                continue
             filled = number(info.get("amount"))
             total = number(info.get("audtotal")) or number(info.get("total"))
-            return OrderResult(
+            result = OrderResult(
                 broker_order_id=text(info.get("id")) or f"coinspot-{client_id}",
                 status="filled",
                 client_id=client_id,
@@ -268,7 +286,16 @@ class CoinSpotBroker:
                 else number(info.get("rate")) or None,
                 raw={"currency": "AUD", "fee_currency": "AUD"},
             )
-        return None
+            self._done[client_id] = result
+            return result
+        # Not among the completed orders yet: it may still be on its way, or
+        # never have arrived. Nobody can say, so it is not sent again.
+        raise ServiceError(
+            f"CoinSpot shows no completed {attempt.coin} {attempt.side} of "
+            f"{attempt.qty:g} since FCC sent it.",
+            transient=False,
+            host=HOST,
+        )
 
     async def cancel(self, broker_order_id: str) -> None:
         for path in ("/my/buy/cancel", "/my/sell/cancel"):
@@ -293,3 +320,19 @@ class CoinSpotBroker:
 
     async def aclose(self) -> None:
         await self._web.aclose()
+
+
+def _when(value: object) -> float | None:
+    """CoinSpot's order time (an ISO date, or seconds or milliseconds since
+    1970) in seconds, or None when it can't be read."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return value / 1000 if value > 1e11 else float(value)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.timestamp() if parsed.tzinfo is not None else None

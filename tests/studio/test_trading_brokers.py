@@ -5,6 +5,8 @@ import base64
 import hashlib
 import hmac
 import json
+import time
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -14,9 +16,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 
-from free_claude_code.studio.resilience import Web
+from free_claude_code.studio.resilience import ServiceError, Web
 from free_claude_code.studio.trading.brokers.alpaca import AlpacaBroker
-from free_claude_code.studio.trading.brokers.base import OrderRequest
+from free_claude_code.studio.trading.brokers.base import OrderRequest, Sent
 from free_claude_code.studio.trading.brokers.btcmarkets import BtcMarketsBroker
 from free_claude_code.studio.trading.brokers.btcmarkets import sign as btcm_sign
 from free_claude_code.studio.trading.brokers.catalog import PLATFORMS, ensure_catalog
@@ -55,6 +57,11 @@ def market_data(handler=None) -> MarketData:
     return MarketData(
         Web(transport=httpx.MockTransport(handler or offline), attempts=1)
     )
+
+
+def iso(seconds: float) -> str:
+    """A time as CoinSpot writes it (ISO 8601, UTC)."""
+    return datetime.fromtimestamp(seconds, tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 def order(symbol: str, qty: float, *, side: str = "buy", **extra: Any) -> OrderRequest:
@@ -515,7 +522,21 @@ async def test_coinspot_signs_the_body_and_finds_instant_fills():
             "POST /api/v2/ro/my/orders/market/completed": {
                 "status": "ok",
                 "buyorders": [
-                    {"id": "cs-9", "coin": "PEPE", "amount": 1000000, "audtotal": 19.5}
+                    # The same size an hour earlier: an older order, not this.
+                    {
+                        "id": "cs-1",
+                        "coin": "PEPE",
+                        "amount": 1000000,
+                        "audtotal": 30.0,
+                        "solddate": iso(time.time() - 3600),
+                    },
+                    {
+                        "id": "cs-9",
+                        "coin": "PEPE",
+                        "amount": 1000000,
+                        "audtotal": 19.5,
+                        "solddate": iso(time.time() + 1),
+                    },
                 ],
                 "sellorders": [],
             },
@@ -543,7 +564,39 @@ async def test_coinspot_signs_the_body_and_finds_instant_fills():
     # The answer was lost: the order is found among completed ones.
     found = await broker.find("fcc-abc123")
     assert found is not None and found.status == "filled"
+    assert found.broker_order_id == "cs-9"
     assert found.fill_price == pytest.approx(0.0000195)
+    await broker.aclose()
+
+
+@pytest.mark.asyncio
+async def test_coinspot_never_guesses_after_a_restart():
+    completed = {
+        "status": "ok",
+        "buyorders": [
+            {
+                "id": "cs-1",
+                "coin": "PEPE",
+                "amount": 1000000,
+                "audtotal": 30.0,
+                "solddate": iso(time.time() - 3600),
+            },
+            # No readable time: it can't be told apart from an older order.
+            {"id": "cs-2", "coin": "PEPE", "amount": 1000000, "audtotal": 30.0},
+        ],
+        "sellorders": [],
+    }
+    platform = Recorder({"POST /api/v2/ro/my/orders/market/completed": completed})
+    broker = CoinSpotBroker(
+        {"api_key": "cs-key", "api_secret": "cs-secret"},
+        market_data(),
+        platform.transport(),
+    )
+    # A fresh start knows nothing of the order until it is told.
+    assert await broker.find("fcc-abc123") is None
+    broker.remember(Sent("fcc-abc123", "PEPE", "buy", 1_000_000, time.time() - 5))
+    with pytest.raises(ServiceError, match="no completed PEPE buy"):
+        await broker.find("fcc-abc123")
     await broker.aclose()
 
 
@@ -579,6 +632,48 @@ async def test_swyftx_swaps_the_key_for_a_token_and_places_in_aud():
     assert placed.status == "filled" and placed.fill_price == 98000
     found = await broker.find("fcc-abc123")
     assert found is not None and found.broker_order_id == "ord_1"
+    await broker.aclose()
+
+
+@pytest.mark.asyncio
+async def test_swyftx_matches_only_a_later_order_on_the_same_side():
+    now = time.time()
+    platform = Recorder(
+        {
+            "POST /auth/refresh/": {"accessToken": "tok-1"},
+            "GET /orders/": [
+                # A sell of the same size: the other side, not this.
+                {
+                    "orderUuid": "ord_s",
+                    "quantity": "0.01",
+                    "order_type": 2,
+                    "created_time": (now + 1) * 1000,
+                    "status": 4,
+                },
+                # The same size before it was sent: an older order.
+                {
+                    "orderUuid": "ord_old",
+                    "quantity": "0.01",
+                    "order_type": 1,
+                    "created_time": (now - 3600) * 1000,
+                    "status": 4,
+                },
+            ],
+        }
+    )
+    broker = SwyftxBroker({"api_key": "sw-key"}, market_data(), platform.transport())
+    broker.remember(Sent("fcc-abc123", "BTC", "buy", 0.01, now - 5))
+    with pytest.raises(ServiceError, match="no recent BTC buy"):
+        await broker.find("fcc-abc123")
+    # Its own id, when FCC kept it, is asked about directly.
+    platform.routes["GET /orders/byId/ord_9/"] = {
+        "status": 4,
+        "amount": "0.01",
+        "rate": "98000",
+    }
+    broker.remember(Sent("fcc-def456", "BTC", "buy", 0.01, now - 5, "ord_9"))
+    found = await broker.find("fcc-def456")
+    assert found is not None and found.status == "filled"
     await broker.aclose()
 
 
@@ -724,6 +819,16 @@ async def test_a_webhook_signs_its_signal_and_never_sends_twice():
     # It may have arrived: looking it up refuses rather than allowing a resend.
     with pytest.raises(Exception, match="not sent again"):
         await broker.find("fcc-abc123")
+    # The same after a restart, once FCC says it may have been posted.
+    restarted = WebhookBroker(
+        {"url": "https://signals.example/hooks/trade", "account_size": "5000"},
+        market_data(),
+        platform.transport(),
+    )
+    restarted.remember(Sent("fcc-abc123", "BHP.AX", "buy", 20, time.time()))
+    with pytest.raises(Exception, match="not sent again"):
+        await restarted.find("fcc-abc123")
+    await restarted.aclose()
     ok = Recorder({"POST /hooks/trade": {"id": "tp-1"}})
     sender = WebhookBroker(
         {"url": "https://signals.example/hooks/trade", "account_size": "5000"},

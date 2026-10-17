@@ -6,10 +6,12 @@ and sell (types 1 and 2) or limit buy and sell (3 and 4, the trigger price).
 Choose the demo environment first to practise with Swyftx's demo funds.
 
 Swyftx has no client order ids: the desk keeps each order's Swyftx id, and
-after a lost answer looks through recent orders for the same coin and size
-before sending again. Marked beta: checked against open-source clients,
-not yet against a live account; use the demo environment or a small order
-first.
+after a lost answer (or a restart) looks through recent orders for one of
+the same side and size made since it was sent. When there is none it can't
+tell whether the order went through, so it never sends again: the order
+stays open and new trades pause until a later check matches it. Marked
+beta: checked against open-source clients, not yet against a live account;
+use the demo environment or a small order first.
 """
 
 import time
@@ -27,6 +29,7 @@ from .base import (
     OrderRequest,
     OrderResult,
     Rules,
+    Sent,
     fingerprint,
     masked,
 )
@@ -44,6 +47,9 @@ ORDER_TYPES = {
 }
 DONE = {4, "4", "COMPLETED", "FILLED", "COMPLETE"}
 CANCELLED = {5, "5", "CANCELLED", "CANCELED", 6, "6", "FAILED"}
+SIDES = {1: "buy", 3: "buy", 2: "sell", 4: "sell"}
+CLOCK_SKEW_SECONDS = 60.0
+"""How far Swyftx's clock and this PC's may differ when matching times."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +243,14 @@ class SwyftxBroker:
             )
         )
 
+    def remember(self, sent: Sent) -> None:
+        """After a restart: an order FCC sent, so ``find`` can look for it."""
+        self._attempts.setdefault(
+            sent.client_id, _Attempt(sent.symbol, sent.side, sent.qty, sent.at)
+        )
+        if sent.broker_order_id:
+            self._ids.setdefault(sent.client_id, sent.broker_order_id)
+
     async def find(self, client_id: str) -> OrderResult | None:
         uuid = self._ids.get(client_id)
         attempt = self._attempts.get(client_id)
@@ -252,13 +266,26 @@ class SwyftxBroker:
                 1e-8, attempt.qty * 1e-6
             ):
                 continue
+            # Only an order made after this one was sent, on the same side,
+            # can be it; one with no readable time can't be told apart from
+            # an older one.
             created = number(row.get("created_time") or row.get("createdTime")) / 1000
-            if created and created < attempt.at - 5:
+            if not created or created < attempt.at - CLOCK_SKEW_SECONDS:
+                continue
+            kind = number(row.get("order_type") or row.get("orderType"))
+            side = SIDES.get(int(kind)) if kind.is_integer() else None
+            if side is not None and side != attempt.side:
                 continue
             found_uuid = text(row.get("orderUuid"))
             self._ids[client_id] = found_uuid
             return _order(found_uuid, row, client_id, attempt.coin)
-        return None
+        # Not among the recent orders: it may never have arrived, or be older
+        # than the list goes. Nobody can say, so it is not sent again.
+        raise ServiceError(
+            f"Swyftx shows no recent {attempt.coin} {attempt.side} of "
+            f"{attempt.qty:g} since FCC sent it.",
+            transient=False,
+        )
 
     async def cancel(self, broker_order_id: str) -> None:
         await self._web.request(

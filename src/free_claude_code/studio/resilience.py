@@ -60,6 +60,12 @@ class CircuitOpen(ServiceError):
     """A service failed too often; calls wait out its cool-down."""
 
 
+class Unconfirmed(ServiceError):
+    """An order may or may not have reached the platform, and asking it
+    couldn't settle which: it must not be sent again, nor taken as never
+    sent, until a later check finds out."""
+
+
 def retry_after(response: httpx.Response) -> float | None:
     """Seconds the service asked us to wait (Retry-After as seconds or a date)."""
     milliseconds = response.headers.get("retry-after-ms")
@@ -530,7 +536,7 @@ async def _look_up[T](
             if not error.transient:
                 break
             await sleep(backoff(attempt))
-    raise ServiceError(
+    raise Unconfirmed(
         "Couldn't confirm whether the order went through, so it was not sent "
         f"again. Check the platform before retrying ({last}).",
         transient=False,

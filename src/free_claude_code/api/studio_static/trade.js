@@ -301,8 +301,23 @@
         ? el("div", { class: "trade-error wide" }, [
             el("strong", { text: "Circuit breaker: new trades paused. " }),
             el("span", { text: `${status.breaker.reason}. Open positions are still managed; it clears by itself after ${new Date(status.breaker.until * 1000).toLocaleTimeString()} once the cause is gone. ` }),
-            el("button", { class: "secondary", text: "Reset now", onclick: () => protection("breaker/reset", "Circuit breaker reset.") }),
+            el("button", {
+              class: "secondary",
+              text: "Reset now",
+              onclick: () => {
+                // Orders FCC couldn't match are the owner's to check first.
+                if (
+                  status.breaker.kind === "reconciliation" &&
+                  !window.confirm("Have you checked the account? Orders FCC couldn't match will be marked unconfirmed (not open), and FCC won't track them.")
+                )
+                  return;
+                protection("breaker/reset", "Circuit breaker reset.");
+              },
+            }),
           ])
+        : null,
+      !status.breaker && status.unmatched?.length
+        ? el("p", { class: "trade-error wide", text: `New trades paused: FCC couldn't match ${status.unmatched.join("; ")}. It asks the account again every few minutes.` })
         : null,
       account.error ? el("p", { class: "trade-error wide", text: `Account: ${account.error}` }) : null,
       status.running && status.next_scan_in != null

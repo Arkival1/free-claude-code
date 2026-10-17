@@ -171,6 +171,27 @@ class TradeOrder(Record):
     updated_at: int = Field(default_factory=now_ms)
 
 
+class TradeFill(Record):
+    """One fill as it happened: the new quantity since the last update (not
+    the running total), its price, and its fees. Positions change by these
+    amounts only, so a partly filled order is never counted twice."""
+
+    id: str = Field(default_factory=lambda: new_id("tfl"))
+    order_id: str
+    round_id: str = ""
+    broker: str = ""
+    symbol: str = ""
+    side: str = "buy"
+    qty: float
+    price: float | None = None
+    """In the symbol's own currency."""
+    fees: float = 0.0
+    """In the base currency; unknown when the platform doesn't say."""
+    fees_known: bool = True
+    currency: str = ""
+    created_at: int = Field(default_factory=now_ms)
+
+
 class TradePosition(Record):
     """What is held: the paper account's own, or a live platform's, cached."""
 

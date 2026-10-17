@@ -29,7 +29,15 @@ from free_claude_code.core.json_types import JsonObject
 from ...resilience import ServiceError, read_json
 from ..data import MarketData, Quote
 from ..instruments import Instrument
-from .base import Account, Holding, OrderRequest, OrderResult, Rules, fingerprint
+from .base import (
+    Account,
+    Holding,
+    OrderRequest,
+    OrderResult,
+    Rules,
+    Sent,
+    fingerprint,
+)
 from .common import make_web, number, obj, text
 
 DEFAULT_TEMPLATE: JsonObject = {
@@ -238,6 +246,11 @@ class WebhookBroker:
         )
         self._sent[order.client_id] = result
         return result
+
+    def remember(self, sent: Sent) -> None:
+        """After a restart: an order that may have been posted (a webhook
+        can't be asked, so it is never posted again)."""
+        self._tried.add(sent.client_id)
 
     async def find(self, client_id: str) -> OrderResult | None:
         if client_id in self._sent:

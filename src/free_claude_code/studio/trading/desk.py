@@ -39,7 +39,7 @@ from free_claude_code.core.json_types import JsonObject
 from ..connectors import ConnectorStore
 from ..memory import MemoryService
 from ..models import now_ms
-from ..resilience import ServiceError, Web, submit_once
+from ..resilience import ServiceError, Unconfirmed, Web, submit_once
 from ..search import StudioSearch
 from ..store import StudioStore
 from ..workers import WorkerPool
@@ -54,7 +54,7 @@ from .assessment import (
 )
 from .breaks import Budget, Findings
 from .briefing import Briefing, build_briefing
-from .brokers.base import Broker, Holding, OrderRequest, OrderResult, Rules
+from .brokers.base import Broker, Holding, OrderRequest, OrderResult, Rules, Sent
 from .brokers.catalog import ensure_catalog
 from .brokers.paper import PaperBroker
 from .brokers.registry import BROKERS, BrokerSetupError, check_values, make_broker
@@ -106,6 +106,7 @@ from .records import (
     OPEN_ORDER_STATUSES,
     TradeDebrief,
     TradeDecision,
+    TradeFill,
     TradeForecast,
     TradeOrder,
     TradePosition,
@@ -144,6 +145,8 @@ EXIT_RETRY_SECONDS = 600.0
 """A stop or target exit the checks blocked is tried again after this."""
 PROBLEM_REPEAT_SECONDS = 600.0
 """The same problem goes to the feed at most this often."""
+RECONCILE_SECONDS = 300.0
+"""How often orders not yet matched with their account are asked about."""
 DAY_MS = 86_400_000
 
 
@@ -207,8 +210,12 @@ class TradingDesk:
         """Symbols whose decision went stale: analysed again from scratch."""
         self._rechecked: dict[str, float] = {}
         self._last_protect = 0.0
-        self._reconcile_problem = ""
-        """Why FCC's records and an account's didn't match at the last check."""
+        self._unmatched: dict[str, str] = {}
+        """Orders FCC couldn't match with their account (by order id), and
+        why; they pause new trades until a later check matches them."""
+        self._sending: set[str] = set()
+        """Client ids of orders being sent right now (not for the re-check)."""
+        self._last_reconcile = 0.0
         self._research = DeskResearch(search=search, read_page=read_page)
         self._news = NewsFeeds(self._web, wall=clock)
         self._debriefs = Debriefs(
@@ -432,10 +439,24 @@ class TradingDesk:
                 cancelled += 1
         accounts: list[str] = []
         problems: list[str] = []
+        kept = 0
         for broker in self._brokers_with_keys(config):
             accounts.append(broker.name)
+            bracketed = {
+                position.symbol
+                for position in await self._store.find(
+                    TradePosition, where={"broker": broker.id}
+                )
+                if position.data.get("bracket")
+            }
             try:
                 for result in await broker.open_orders():
+                    if result.symbol in bracketed and result.raw.get("side") == "sell":
+                        # A held position's own stop and target on the
+                        # platform protect it: they stay (closing everything
+                        # cancels them only as each holding is sold).
+                        kept += 1
+                        continue
                     try:
                         await broker.cancel(result.broker_order_id)
                         cancelled += 1
@@ -460,6 +481,11 @@ class TradingDesk:
             "kill",
             f"Kill switch on {len(accounts)} account(s): {cancelled} orders cancelled"
             + (f", {sold} holdings sold" if flatten else "")
+            + (
+                f", {kept} platform stop and target orders kept on what is held"
+                if kept
+                else ""
+            )
             + ". It stays on until you release it on the PC."
             + (f" Problems: {'; '.join(problems)}." if problems else ""),
             data={
@@ -487,7 +513,10 @@ class TradingDesk:
         return await self.status()
 
     async def reset_breaker(self, *, on_pc: bool) -> JsonObject:
-        """Clear the circuit breaker by hand (the owner's call, on the PC)."""
+        """Clear the circuit breaker by hand (the owner's call, on the PC).
+        Orders FCC couldn't match with their account are the owner's to
+        check: the reset marks them unconfirmed (no longer open) and says
+        so, rather than guessing whether they went through."""
         if not on_pc:
             raise TradingError("The circuit breaker can only be reset from the PC.")
         state = self._state()
@@ -495,7 +524,28 @@ class TradingDesk:
             raise TradingError("The circuit breaker isn't on.")
         state["breaker_since"] = self._clock()
         self._save_state(state)
-        await self.feed.emit("breaker", "Circuit breaker reset by you on the PC.")
+        closed: list[str] = []
+        for order_id, label in self._unmatched.items():
+            order = await self._store.get(TradeOrder, order_id)
+            if order is None or order.status != "submitting":
+                continue
+            why = (
+                "Couldn't be matched with the account; marked unconfirmed when "
+                "you reset the circuit breaker on the PC."
+            )
+            await self._set(order, status="unconfirmed", reason=why)
+            await self._decisions.update(order.round_id, reason=why)
+            closed.append(label.split(":", 1)[0])
+        self._unmatched = {}
+        await self.feed.emit(
+            "breaker",
+            "Circuit breaker reset by you on the PC."
+            + (
+                f" Marked unconfirmed (check the account for them): {'; '.join(closed)}."
+                if closed
+                else ""
+            ),
+        )
         return await self.status()
 
     async def resume(self) -> None:
@@ -540,32 +590,66 @@ class TradingDesk:
         self._activity = {}
 
     async def _reconcile(self) -> None:
-        """Orders cut off mid-send when FCC closed: ask the platform what
-        happened to each, by its own id."""
+        """Orders nobody can vouch for (cut off mid-send when FCC closed, or
+        whose answer was lost): ask each platform what happened to them. One
+        that can't be matched stays open, so it is never sent twice, and
+        pauses new trades (the circuit breaker) until a later check matches
+        it, or the owner checks the account and resets the breaker."""
         config = self.config()
-        problems: list[str] = []
+        self._last_reconcile = self._clock()
+        unmatched: dict[str, str] = {}
         for order in await self._store.find(TradeOrder, where={"status": "submitting"}):
+            if order.client_id in self._sending:
+                continue
+            label = f"{order.side} {order.qty:g} {order.symbol} on {order.broker}"
+            remember = None
             try:
                 broker = self._broker_for(order, config)
+                # A platform without FCC's own order ids is told what was
+                # sent (it forgets when FCC restarts) so it can look.
+                remember = getattr(broker, "remember", None)
+                if remember is not None:
+                    remember(_sent(order))
                 found = await broker.find(order.client_id)
             except (ServiceError, TradingError) as error:
-                problems.append(f"{order.symbol} order on {order.broker}: {error}")
-                await self.feed.emit(
-                    "error", f"Couldn't check {order.symbol} order: {error}"
-                )
+                unmatched[order.id] = f"{label}: {error}"
+                if order.id not in self._unmatched:
+                    await self.feed.emit(
+                        "error",
+                        f"Couldn't match the {order.symbol} order with the "
+                        f"account: {error} It stays open and isn't sent again; "
+                        "new trades pause until it's matched.",
+                        round_id=order.round_id,
+                        symbol=order.symbol,
+                    )
                 continue
-            if found is None:
+            if found is not None:
+                await self._record(order, found, config)
+            elif remember is None:
+                # The platform looks orders up by FCC's own id: it has none.
                 await self._set(
                     order, status="failed", reason="Never reached the platform."
                 )
             else:
-                await self._record(order, found, config)
-        # Orders FCC couldn't match with their account pause new trades (the
-        # circuit breaker) until a later check matches them.
-        self._reconcile_problem = (
-            "FCC couldn't match its orders with the account: " + "; ".join(problems)
-            if problems
-            else ""
+                unmatched[order.id] = f"{label}: no matching order found"
+        if set(unmatched) - set(self._unmatched):
+            self._last_protect = 0.0
+        self._unmatched = unmatched
+
+    async def _reconcile_due(self, config: DeskConfig) -> None:
+        """Every few minutes, ask again about orders not yet matched."""
+        if self._clock() - self._last_reconcile >= RECONCILE_SECONDS:
+            await self._reconcile()
+
+    def _unmatched_text(self) -> str:
+        if not self._unmatched:
+            return ""
+        shown = list(self._unmatched.values())
+        more = f" (and {len(shown) - 3} more)" if len(shown) > 3 else ""
+        return (
+            "FCC couldn't match its orders with the account: "
+            + "; ".join(shown[:3])
+            + more
         )
 
     # ------------------------------------------------------------ the loop
@@ -596,6 +680,7 @@ class TradingDesk:
             self._offline = False
             await self.feed.emit("info", "Internet is back; the desk carries on.")
         for step in (
+            self._reconcile_due,
             self._sync_orders,
             self._watch_positions,
             self._protect,
@@ -1013,14 +1098,17 @@ class TradingDesk:
         return ""
 
     def _entry_block(self, config: DeskConfig) -> str:
-        """Why no new trade may start now ("" when one may): the kill switch
-        or the circuit breaker."""
+        """Why no new trade may start now ("" when one may): the kill switch,
+        the circuit breaker, or an order not yet matched with its account
+        (at once, before the breaker's next look trips it)."""
         state = self._state()
         if isinstance(state.get("kill"), dict):
             return "the kill switch is on"
         current = Trip.read(state.get("breaker"))
         if current is not None:
             return f"the circuit breaker is on ({current.reason})"
+        if self._unmatched:
+            return "FCC couldn't match an order with its account yet"
         return ""
 
     async def _protect(self, config: DeskConfig) -> None:
@@ -1120,7 +1208,7 @@ class TradingDesk:
             slippage_limit_pct=config.risk.slippage_pct,
             errors_recent=len(errors),
             stale_streak=streak,
-            reconcile_failed=self._reconcile_problem,
+            reconcile_failed=self._unmatched_text(),
         )
 
     def _recheck(self, symbol: str) -> bool:
@@ -2289,7 +2377,23 @@ class TradingDesk:
     ) -> None:
         instrument = parse_symbol(order.symbol)
         request = _request(order, instrument)
-        order = await self._set(order, status="submitting")
+        order = await self._set(
+            order, status="submitting", data={**order.data, "sent_at": self._clock()}
+        )
+        # While it is being sent, the re-check of unmatched orders leaves it be.
+        self._sending.add(order.client_id)
+        try:
+            await self._send(order, broker, request, config)
+        finally:
+            self._sending.discard(order.client_id)
+
+    async def _send(
+        self,
+        order: TradeOrder,
+        broker: Broker,
+        request: OrderRequest,
+        config: DeskConfig,
+    ) -> None:
         buying = order.side == "buy"
         await self._decisions.update(
             order.round_id,
@@ -2313,6 +2417,24 @@ class TradingDesk:
             result = await submit_once(
                 lambda: broker.place(request), lambda: broker.find(order.client_id)
             )
+        except Unconfirmed as error:
+            # It may have gone through: it stays open (never sent twice),
+            # new trades pause, and later checks ask the platform again.
+            await self._set(order, reason=str(error))
+            self._unmatched[order.id] = (
+                f"{order.side} {order.qty:g} {order.symbol} on {order.broker}: "
+                "couldn't confirm whether it went through"
+            )
+            self._last_protect = 0.0
+            await self.feed.emit(
+                "error",
+                f"Couldn't confirm whether the {order.symbol} order reached "
+                f"{broker.name}, so it wasn't sent again. New trades pause until "
+                "FCC can match it with the account (check the account).",
+                round_id=order.round_id,
+                symbol=order.symbol,
+            )
+            return
         except ServiceError as error:
             await self._set(
                 order,
@@ -2377,10 +2499,43 @@ class TradingDesk:
             status in {"filled", "partially_filled"}
             and result.filled_qty > order.filled_qty
         ):
+            # Only what is new since the last update counts: a platform
+            # reports the running total, and adding that again would count
+            # a partly filled order twice.
+            new_qty = result.filled_qty - order.filled_qty
+            new_price = _new_fill_price(
+                order.filled_qty, order.fill_price, result.filled_qty, price
+            )
+            new_fees = max(0.0, fees - order.fees)
+            fees_known = result.raw.get("fees_reported") is not False
+            await self._store.put(
+                TradeFill(
+                    order_id=order.id,
+                    round_id=order.round_id,
+                    broker=order.broker,
+                    symbol=order.symbol,
+                    side=order.side,
+                    qty=new_qty,
+                    price=new_price,
+                    fees=new_fees,
+                    fees_known=fees_known,
+                    currency=order.currency,
+                )
+            )
             await self.feed.emit(
                 "fill",
-                f"Filled: {order.side} {result.filled_qty:g} {order.symbol} at "
-                f"{price or 0:g} {order.currency} (fees {fees:,.2f} {config.currency})"
+                f"Filled: {order.side} {new_qty:g} {order.symbol} at "
+                f"{new_price or 0:g} {order.currency}"
+                + (
+                    f" ({result.filled_qty:g} of {order.qty:g} so far)"
+                    if status == "partially_filled"
+                    else ""
+                )
+                + (
+                    f" (fees {new_fees:,.2f} {config.currency})"
+                    if fees_known
+                    else " (fees not reported by the platform)"
+                )
                 + (
                     " (sent by webhook, not confirmed)"
                     if result.raw.get("unconfirmed")
@@ -2389,7 +2544,7 @@ class TradingDesk:
                 + ".",
                 round_id=order.round_id,
                 symbol=order.symbol,
-                data={"order": order_view(updated)},
+                data={"order": order_view(updated), "fill_qty": new_qty},
             )
             if order.side == "buy":
                 await self._decisions.update(
@@ -2406,9 +2561,14 @@ class TradingDesk:
                 await self._round_status(order.round_id, "traded", "Bought.")
                 await self._mark_traded(order.round_id)
                 if order.broker != "paper":
-                    await self._remember_live_position(updated)
+                    await self._remember_live_position(
+                        updated,
+                        new_qty,
+                        new_price or price or order.entry_price,
+                        new_fees,
+                    )
             else:
-                await self._after_sell(updated, config)
+                await self._after_sell(updated, config, sold=new_qty)
         elif status == "rejected":
             await self.feed.emit(
                 "error",
@@ -2515,18 +2675,31 @@ class TradingDesk:
             await self._watch_on(broker, config)
 
     async def _watch_on(self, broker: Broker, config: DeskConfig) -> None:
+        # The kill switch's "close everything": a holding that couldn't be
+        # sold yet (its market was closed, or the sale was refused) is tried
+        # again once its market is open, until the owner releases the switch.
+        latch = self._state().get("kill")
+        closing = isinstance(latch, dict) and bool(latch.get("flatten"))
         for position in await self._store.find(
             TradePosition, where={"broker": broker.id}
         ):
-            if broker.supports_brackets and position.data.get("bracket"):
+            platform_holds = broker.supports_brackets and position.data.get("bracket")
+            if platform_holds and not closing:
                 continue
-            if position.stop_loss is None and position.take_profit is None:
+            if (
+                not closing
+                and position.stop_loss is None
+                and position.take_profit is None
+            ):
                 continue
             try:
                 instrument = parse_symbol(position.symbol)
             except SymbolError:
                 continue
             if not self._is_open(instrument.market):
+                continue
+            if closing:
+                await self._exit(position, "the kill switch (close everything)", config)
                 continue
             quote = await self._quote_in(broker, instrument, position.currency)
             if quote is None:
@@ -2569,6 +2742,21 @@ class TradingDesk:
         if not force and not round_id and self._clock() - tried < EXIT_RETRY_SECONDS:
             return
         self._exit_tried[position.id] = self._clock()
+        if position.data.get("bracket"):
+            with contextlib.suppress(SymbolError):
+                if not self._is_open(parse_symbol(position.symbol).market):
+                    # Nothing can sell until the open: the platform's stop
+                    # and target keep guarding it meanwhile.
+                    await self.feed.emit(
+                        "order",
+                        f"{position.symbol}: its market is closed, so the "
+                        "platform's stop and target stay in place; the sale "
+                        "waits for the open.",
+                        symbol=position.symbol,
+                    )
+                    return
+            if not await self._cancel_legs(position, config):
+                return
         price = position.avg_price
         with contextlib.suppress(SymbolError, MarketDataError):
             price = (await self._data.quote(parse_symbol(position.symbol))).price
@@ -2598,19 +2786,75 @@ class TradingDesk:
         # Manager's sell waits for a tap in approve mode.
         await self._route(order, config, approved=force or not round_id)
 
-    async def _after_sell(self, order: TradeOrder, config: DeskConfig) -> None:
+    async def _cancel_legs(self, position: TradePosition, config: DeskConfig) -> bool:
+        """Before selling a holding whose stop and target sit on the platform
+        (a bracket), cancel those two orders: the platform would refuse the
+        sell while they hold the shares (or both could fill). False when they
+        couldn't be cancelled; the exit is tried again later."""
+        try:
+            broker = (
+                self._paper(config)
+                if position.broker == "paper"
+                else self._live_broker(position.broker)
+            )
+            legs = [
+                result
+                for result in await broker.open_orders()
+                if result.symbol == position.symbol and result.raw.get("side") != "buy"
+            ]
+            for leg in legs:
+                await broker.cancel(leg.broker_order_id)
+        except (ServiceError, TradingError) as error:
+            await self.feed.emit(
+                "error",
+                f"Couldn't cancel the platform's stop and target for "
+                f"{position.symbol} before selling ({error}); FCC tries again "
+                "later, and they stay in place meanwhile.",
+                symbol=position.symbol,
+            )
+            return False
+        # From here FCC watches the stop and target itself, whatever happens
+        # to the sell.
+        await self._unbracket(broker, position.symbol)
+        return True
+
+    async def _unbracket(self, broker: Broker, symbol: str = "") -> None:
+        """The platform no longer holds these positions' stops and targets:
+        FCC watches them from now on."""
+        for position in await self._store.find(
+            TradePosition, where={"broker": broker.id}
+        ):
+            if position.data.get("bracket") and symbol in {"", position.symbol}:
+                await self._store.put(
+                    position.model_copy(
+                        update={
+                            "data": {**position.data, "bracket": False},
+                            "updated_at": now_ms(),
+                        }
+                    )
+                )
+
+    async def _after_sell(
+        self, order: TradeOrder, config: DeskConfig, *, sold: float
+    ) -> None:
+        """``sold`` is what this update sold (not the order's running total)."""
         if order.broker != "paper":
             position = await self._store.get(
                 TradePosition, f"{order.broker}:{order.symbol}"
             )
             if position is not None:
-                left = position.qty - order.filled_qty
+                left = position.qty - sold
                 if left <= 1e-12:
                     await self._store.delete(TradePosition, position.id)
                 else:
+                    # What is left carries its share of the cost, as on paper.
                     await self._store.put(
                         position.model_copy(
-                            update={"qty": left, "updated_at": now_ms()}
+                            update={
+                                "qty": left,
+                                "cost_base": position.cost_base * left / position.qty,
+                                "updated_at": now_ms(),
+                            }
                         )
                     )
         still = await self._store.get(TradePosition, f"{order.broker}:{order.symbol}")
@@ -2689,13 +2933,15 @@ class TradingDesk:
 
         self._chores.append(debrief)
 
-    async def _remember_live_position(self, order: TradeOrder) -> None:
+    async def _remember_live_position(
+        self, order: TradeOrder, qty_new: float, price: float, fees_new: float
+    ) -> None:
+        """Add one fill (only what is new) to the live position FCC keeps."""
         key = f"{order.broker}:{order.symbol}"
         existing = await self._store.get(TradePosition, key)
-        qty = (existing.qty if existing else 0.0) + order.filled_qty
-        price = order.fill_price or order.entry_price
+        qty = (existing.qty if existing else 0.0) + qty_new
         avg = (
-            (existing.avg_price * existing.qty + price * order.filled_qty) / qty
+            (existing.avg_price * existing.qty + price * qty_new) / qty
             if existing and qty
             else price
         )
@@ -2709,8 +2955,8 @@ class TradingDesk:
                 avg_price=avg,
                 currency=order.currency,
                 cost_base=(existing.cost_base if existing else 0.0)
-                + order.filled_qty * price * order.fx_rate
-                + order.fees,
+                + qty_new * price * order.fx_rate
+                + fees_new,
                 stop_loss=order.stop_loss,
                 take_profit=order.take_profit,
                 round_id=order.round_id,
@@ -3210,6 +3456,7 @@ class TradingDesk:
             "alert_only": config.alert_only,
             "kill": dict(killed) if isinstance(killed, dict) else None,
             "breaker": breaker.view() if breaker is not None else None,
+            "unmatched": list(self._unmatched.values()),
             "routes": dict(config.routes),
             "looping": self._loop_task is not None and not self._loop_task.done(),
             "busy": self._round_task is not None and not self._round_task.done(),
@@ -3568,6 +3815,40 @@ def _round_trip_pct(config: DeskConfig, quality: QualityReport) -> float:
         snap.spread_pct for snap in quality.snapshots if snap.spread_pct is not None
     ]
     return round(2 * config.fee_pct + (min(spreads) if spreads else 0.1), 4)
+
+
+def _sent(order: TradeOrder) -> Sent:
+    sent_at = order.data.get("sent_at")
+    symbol = order.symbol
+    with contextlib.suppress(SymbolError):
+        symbol = parse_symbol(order.symbol).symbol
+    return Sent(
+        client_id=order.client_id,
+        symbol=symbol,
+        side=order.side,
+        qty=order.qty,
+        at=float(sent_at)
+        if isinstance(sent_at, int | float)
+        else order.updated_at / 1000,
+        broker_order_id=order.broker_order_id,
+    )
+
+
+def _new_fill_price(
+    before_qty: float,
+    before_price: float | None,
+    total_qty: float,
+    total_price: float | None,
+) -> float | None:
+    """The price of just the new part of a fill, from the running totals the
+    platform reports (its average price over everything filled so far)."""
+    if total_price is None:
+        return None
+    new_qty = total_qty - before_qty
+    if before_qty <= 0 or before_price is None or new_qty <= 0:
+        return total_price
+    found = (total_qty * total_price - before_qty * before_price) / new_qty
+    return found if found > 0 else total_price
 
 
 def _decision_summary(record: TradeDecision) -> JsonObject:

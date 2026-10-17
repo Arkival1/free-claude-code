@@ -18,6 +18,7 @@ from urllib.parse import unquote
 import httpx
 import pytest
 
+from free_claude_code.studio import resilience
 from free_claude_code.studio.connectors import ConnectorStore
 from free_claude_code.studio.memory import MemoryService
 from free_claude_code.studio.models import now_ms
@@ -43,6 +44,7 @@ from free_claude_code.studio.trading.records import (
     TradeDecision,
     TradeEvent,
     TradeEvidence,
+    TradeFill,
     TradeForecast,
     TradeOrder,
     TradePosition,
@@ -436,6 +438,10 @@ class FakeLive:
         self.held: dict[str, float] = {}
         self.placed = 0
         self.lose_answer = False
+        self.partial: float | None = None
+        """Fill only this share of an order at first (the rest stays open)."""
+        self.unsure = False
+        """Lookups can't say whether an order arrived."""
 
     def markets(self) -> frozenset[str]:
         return frozenset({"us", "asx", "crypto"})
@@ -476,12 +482,13 @@ class FakeLive:
 
     async def place(self, order: OrderRequest) -> OrderResult:
         self.placed += 1
+        share = self.partial or 1.0
         result = OrderResult(
             broker_order_id=f"live-{self.placed}",
-            status="filled",
+            status="filled" if share >= 1 else "partially_filled",
             client_id=order.client_id,
             symbol=order.instrument.symbol,
-            filled_qty=order.qty,
+            filled_qty=order.qty * share,
             fill_price=100.0,
             fees=1.0,
         )
@@ -496,6 +503,8 @@ class FakeLive:
         return result
 
     async def find(self, client_id: str) -> OrderResult | None:
+        if self.unsure:
+            raise ServiceError("no answer about that order", transient=False)
         return self.book.get(client_id)
 
     async def cancel(self, broker_order_id: str) -> None:
@@ -1421,4 +1430,223 @@ async def test_each_market_can_trade_on_its_own_verified_account(
     assert routed.broker_for("crypto") == "fake"
     assert routed.broker_for("us") == "fake"
     assert config.model_copy(update={"mode": "paper"}).broker_for("crypto") == "paper"
+    await desk.close()
+
+
+# ------------------------------------------------------------ S7 execution
+
+
+@pytest.mark.asyncio
+async def test_partial_fills_change_a_position_by_what_is_new_only(
+    make_desk, store, fake_platform
+):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    await go_live(desk, "live_auto", LIVE_AUTO_PHRASE)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    fake_platform.partial = 0.4
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    [order] = await store.find(TradeOrder)
+    assert order.status == "partially_filled"
+    first, total = order.filled_qty, order.qty
+    position = await store.get(TradePosition, "fake:BTC")
+    assert position is not None and position.qty == pytest.approx(first)
+    # The platform reports running totals: the rest fills at 102.
+    fake_platform.book[order.client_id] = OrderResult(
+        broker_order_id="live-1",
+        status="filled",
+        client_id=order.client_id,
+        symbol="BTC",
+        filled_qty=total,
+        fill_price=(first * 100.0 + (total - first) * 102.0) / total,
+        fees=2.0,
+    )
+    await desk.tick()
+    await desk.tick()
+    position = await store.get(TradePosition, "fake:BTC")
+    assert position is not None and position.qty == pytest.approx(total)
+    fills = await store.find(TradeFill, where={"order_id": order.id})
+    assert sum(fill.qty for fill in fills) == pytest.approx(total)
+    assert sorted(fill.price or 0 for fill in fills) == pytest.approx([100.0, 102.0])
+    # Fees too: the parts add up to the order's total (in the base currency).
+    done = await store.get(TradeOrder, order.id)
+    assert done is not None and done.fees > 0
+    assert sum(fill.fees for fill in fills) == pytest.approx(done.fees)
+    # Selling in two parts takes off only what each part sold.
+    fake_platform.partial = 0.5
+    await desk._exit(position, "a test exit", desk.config(), force=True)
+    [sell] = [item for item in await store.find(TradeOrder) if item.side == "sell"]
+    assert sell.status == "partially_filled"
+    left = await store.get(TradePosition, "fake:BTC")
+    assert left is not None and left.qty == pytest.approx(total / 2)
+    assert left.cost_base == pytest.approx(position.cost_base / 2)
+    fake_platform.book[sell.client_id] = OrderResult(
+        broker_order_id="live-2",
+        status="filled",
+        client_id=sell.client_id,
+        symbol="BTC",
+        filled_qty=sell.qty,
+        fill_price=101.0,
+        fees=1.0,
+    )
+    await desk.tick()
+    assert await store.get(TradePosition, "fake:BTC") is None
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_an_order_nobody_can_confirm_stays_open_and_pauses_trading(
+    make_desk, store, fake_platform, monkeypatch
+):
+    monkeypatch.setattr(resilience, "LOOKUP_PAUSE_SECONDS", 0.0)
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    await go_live(desk, "live_auto", LIVE_AUTO_PHRASE)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    fake_platform.lose_answer = True
+    fake_platform.unsure = True
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    [order] = await store.find(TradeOrder)
+    # Not "failed": it may have gone through, so it is never sent again.
+    assert order.status == "submitting" and fake_platform.placed == 1
+    assert "couldn't match" in desk._entry_block(desk.config()).lower()
+    await desk._protect(desk.config())
+    assert "circuit breaker" in desk._entry_block(desk.config())
+    # A later check that gets an answer matches it, and the cause is gone.
+    fake_platform.unsure = False
+    desk._last_reconcile = 0.0
+    await desk.tick()
+    [order] = await store.find(TradeOrder)
+    assert order.status == "filled" and fake_platform.placed == 1
+    assert desk._unmatched_text() == ""
+    assert await store.get(TradePosition, "fake:BTC") is not None
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_the_owner_settles_an_order_that_never_matches(
+    make_desk, store, fake_platform, monkeypatch
+):
+    monkeypatch.setattr(resilience, "LOOKUP_PAUSE_SECONDS", 0.0)
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    await go_live(desk, "live_auto", LIVE_AUTO_PHRASE)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    fake_platform.lose_answer = True
+    fake_platform.unsure = True
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    await desk._protect(desk.config())
+    assert desk._entry_block(desk.config())
+    await desk.reset_breaker(on_pc=True)
+    [order] = await store.find(TradeOrder)
+    assert order.status == "unconfirmed" and "reset" in order.reason
+    assert desk._unmatched_text() == ""
+    # Still never sent again, and the next checks keep the breaker clear.
+    desk._last_reconcile = 0.0
+    desk._last_protect = 0.0
+    await desk.tick()
+    assert fake_platform.placed == 1
+    assert desk._entry_block(desk.config()) == ""
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_after_a_restart_a_platform_without_order_ids_is_told_what_was_sent(
+    make_desk, store, fake_platform
+):
+    remembered: list[str] = []
+
+    def remember(sent) -> None:
+        remembered.append(f"{sent.side} {sent.qty:g} {sent.symbol}")
+
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    await go_live(desk, "live_auto", LIVE_AUTO_PHRASE)
+    fake_platform.remember = remember
+    fake_platform.unsure = True
+    cut_off = TradeOrder(
+        client_id="fcc-cut-off",
+        broker="fake",
+        mode="live_auto",
+        symbol="BTC",
+        market="crypto",
+        qty=0.01,
+        status="submitting",
+        data={"sent_at": time.time() - 30},
+    )
+    await store.put(cut_off)
+    await desk.resume()
+    assert remembered == ["buy 0.01 BTC"]
+    # It can't be matched, so it stays open (not "never reached").
+    found = await store.get(TradeOrder, cut_off.id)
+    assert found is not None and found.status == "submitting"
+    assert "BTC" in desk._unmatched_text()
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_platform_stops_stay_until_each_holding_is_actually_sold(
+    make_desk, store, fake_platform
+):
+    desk, _ = make_desk()
+    await go_live(desk, "live_auto", LIVE_AUTO_PHRASE)
+    await store.put(
+        TradePosition(
+            id="fake:AAPL",
+            broker="fake",
+            symbol="AAPL",
+            market="us",
+            qty=10,
+            avg_price=100.0,
+            currency="USD",
+            cost_base=1500.0,
+            stop_loss=90.0,
+            take_profit=120.0,
+            data={"bracket": True},
+        )
+    )
+    fake_platform.held["AAPL"] = 10
+    legs = [
+        OrderResult("leg-stop", "submitted", symbol="AAPL", raw={"side": "sell"}),
+        OrderResult("leg-target", "submitted", symbol="AAPL", raw={"side": "sell"}),
+        OrderResult("buy-msft", "submitted", symbol="MSFT", raw={"side": "buy"}),
+    ]
+    cancelled: list[str] = []
+
+    async def open_orders() -> list[OrderResult]:
+        return [leg for leg in legs if leg.broker_order_id not in cancelled]
+
+    async def cancel(broker_order_id: str) -> None:
+        cancelled.append(broker_order_id)
+
+    fake_platform.supports_brackets = True
+    fake_platform.open_orders = open_orders
+    fake_platform.cancel = cancel
+    market = {"open": False}
+    desk._is_open = lambda name: market["open"]
+    # The kill switch cancels what waits, but a holding's own stop and
+    # target on the platform protect it, so they stay.
+    await desk.kill(reason="test")
+    assert cancelled == ["buy-msft"]
+    await desk.release_kill(on_pc=True)
+    # Closing everything while the market is shut: nothing can sell yet, so
+    # the stop and target stay too.
+    await desk.kill(flatten=True, confirm="CLOSE EVERYTHING", reason="test")
+    assert cancelled == ["buy-msft"]
+    position = await store.get(TradePosition, "fake:AAPL")
+    assert position is not None and position.data["bracket"]
+    # Once the market opens the sale is tried again, cancelling the
+    # platform's stop and target first (it would refuse the sell otherwise).
+    market["open"] = True
+    desk._exit_tried.clear()
+    await desk.tick()
+    assert set(cancelled) == {"buy-msft", "leg-stop", "leg-target"}
+    position = await store.get(TradePosition, "fake:AAPL")
+    assert position is None or not position.data["bracket"]
+    assert [
+        order.symbol for order in await store.find(TradeOrder) if order.side == "sell"
+    ] == ["AAPL"]
     await desk.close()

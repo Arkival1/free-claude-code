@@ -277,5 +277,12 @@ def _order(row: Mapping[str, object]) -> OrderResult:
         symbol=fcc_symbol(text(row.get("symbol")), text(row.get("asset_class"))),
         filled_qty=filled,
         fill_price=price or None,
-        raw={"status": text(row.get("status"))},
+        # Alpaca's order answers don't carry fees: unknown, never zero.
+        raw={
+            "status": text(row.get("status")),
+            "fees_reported": False,
+            # A bracket's stop and target are open sells (the kill switch
+            # keeps them: they protect what is held).
+            "side": text(row.get("side")),
+        },
     )

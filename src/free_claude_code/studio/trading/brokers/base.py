@@ -141,6 +141,20 @@ class OrderResult:
         return self.status in {"filled", "cancelled", "rejected"}
 
 
+@dataclass(frozen=True, slots=True)
+class Sent:
+    """An order FCC sent, or may have sent, as a platform without FCC's own
+    order ids needs it to look the order up again after FCC restarts."""
+
+    client_id: str
+    symbol: str
+    side: str
+    qty: float
+    at: float
+    """When it was sent (seconds since 1970)."""
+    broker_order_id: str = ""
+
+
 def rejected(message: str, *, host: str = "") -> ServiceError:
     """A refusal that trying again won't change."""
     return ServiceError(message, transient=False, host=host)

@@ -352,6 +352,8 @@ def _order(row: Mapping[str, object]) -> OrderResult:
         fill_price=number(row.get("avgPrice")) or None,
         raw={
             "status": status,
+            # IBKR's order list doesn't carry commissions: unknown, not zero.
+            "fees_reported": False,
             **({"currency": text(row.get("cashCcy"))} if row.get("cashCcy") else {}),
         },
     )
