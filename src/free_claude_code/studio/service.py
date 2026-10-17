@@ -4266,6 +4266,18 @@ class StudioService:
         await self._store.put(updated)
         return updated
 
+    async def set_subagent(self, agent_id: str, subagent: bool) -> Agent:
+        """Make any agent (one from a GitHub repo too) a subagent that helps
+        by itself, or take it back to a normal team member."""
+        agent = await self._store.require(Agent, agent_id)
+        if agent.role in {MAIN_ROLE, "guide"}:
+            raise StudioError(f"{agent.name} runs the team; it can't be a subagent.")
+        updated = agent.model_copy(
+            update={"subagent": subagent, "active": True, "updated_at": now_ms()}
+        )
+        await self._store.put(updated)
+        return updated
+
     async def _helpers_for(self, agent: Agent, run: AgentRun) -> list[Agent]:
         try:
             return pick(await self.subagents(), agent, run.goal)

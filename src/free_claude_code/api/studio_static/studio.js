@@ -966,22 +966,50 @@
   }
 
   // Subagents: helpers with a role that join fitting tasks on their own.
-  function subagentsCard() {
+  function subagentsCard(agents) {
     const box = el("div", { class: "subagents" }, [el("p", { class: "muted", text: "Loading…" })]);
+    // The model list can be slow (LM Studio off), so it fills in afterwards.
+    const models = api("/studio/api/team-models").catch(() => ({ server: [], local: { models: [] } }));
     api("/studio/api/subagents")
-      .then((data) => paintSubagents(box, data))
+      .then((data) => paintSubagents(box, data, models, agents))
       .catch((error) => box.replaceChildren(el("p", { class: "muted", text: error.message })));
     return card("Subagents", [
       el("p", {
         class: "muted",
-        text: "Helpers you add, each with a role. When any agent starts a task that fits a subagent's role, it joins in by itself: developers, coders, builders, and researchers help while the work runs; testers and reviewers check it when it's done. They show in the HQ like the rest of the team. Switch one off to keep it out.",
+        text: "Helpers you add, each with a role and its own model. When any agent starts a task that fits a subagent's role (or, for agents from GitHub repos, the skills its description names), it joins in by itself: developers, coders, builders, and researchers help while the work runs; testers and reviewers check it when it's done. They show in the HQ like the rest of the team. Switch one off to keep it out.",
       }),
       box,
     ]);
   }
 
-  function paintSubagents(box, data) {
+  function paintSubagents(box, data, models, agents) {
     const name = el("input", { type: "text", maxlength: "60", placeholder: "Name, e.g. Dev-1", "aria-label": "Subagent name" });
+    const model = el("select", { "aria-label": "Subagent model" }, [
+      el("option", { value: "", text: "Model: the server default" }),
+    ]);
+    models.then((found) => {
+      const choices = [
+        ...(found.server || []).map((id) => [id, `${id} (server)`]),
+        ...((found.local && found.local.models) || []).map((id) => [id, `${id} (this PC)`]),
+      ].filter(([id]) => id);
+      model.append(...choices.map(([id, label]) => el("option", { value: id, text: label })));
+    });
+    const patchSub = async (agent, body) => {
+      try {
+        await api(`/studio/api/subagents/${agent.id}`, { method: "PATCH", body: JSON.stringify(body) });
+        render();
+      } catch (error) {
+        notify(error.message);
+      }
+    };
+    const others = (agents || []).filter(
+      (agent) => !agent.subagent && !agent.archived && !["main", "guide"].includes(agent.role)
+    );
+    const existing = el(
+      "select",
+      { "aria-label": "Agent to make a subagent" },
+      others.map((agent) => el("option", { value: agent.id, text: `${agent.name} (${agent.role})` }))
+    );
     const role = el(
       "select",
       { "aria-label": "Subagent role" },
@@ -1019,6 +1047,13 @@
           " On",
         ]),
         el("button", {
+          class: "secondary small",
+          type: "button",
+          text: "Back to team",
+          title: `${agent.name} stops helping on its own and stays on the team`,
+          onclick: () => patchSub(agent, { subagent: false }),
+        }),
+        el("button", {
           class: "danger icon-button",
           type: "button",
           text: "🗑",
@@ -1033,6 +1068,7 @@
       el("div", { class: "subagent-add" }, [
         name,
         role,
+        model,
         el("button", {
           class: "primary",
           type: "button",
@@ -1040,7 +1076,7 @@
           onclick: async () => {
             if (!name.value.trim()) return notify("Give the subagent a name.");
             try {
-              await post("/studio/api/subagents", { name: name.value.trim(), role: role.value });
+              await post("/studio/api/subagents", { name: name.value.trim(), role: role.value, model: model.value });
               notify(`${name.value.trim()} joined as a subagent.`);
               render();
             } catch (error) {
@@ -1048,7 +1084,19 @@
             }
           },
         }),
-      ])
+      ]),
+      others.length
+        ? el("div", { class: "subagent-add" }, [
+            existing,
+            el("button", {
+              class: "secondary",
+              type: "button",
+              text: "Make subagent",
+              title: "Any agent, including ones added from a GitHub repo",
+              onclick: () => patchSub({ id: existing.value }, { subagent: true }),
+            }),
+          ])
+        : null
     );
   }
 
@@ -1103,7 +1151,7 @@
             )
           : empty("No agents yet.")
       ),
-      subagentsCard(),
+      subagentsCard(agents),
       card("Team brains", [
         el("p", {
           class: "muted",

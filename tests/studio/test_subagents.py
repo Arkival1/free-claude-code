@@ -73,15 +73,16 @@ async def test_subagents_are_added_switched_and_kept_out_of_the_main_team(make_s
         await studio.set_subagent_active(builder.id, False)
 
 
-async def settle(studio) -> None:
-    for _ in range(200):
+async def settle(studio, helpers: int) -> None:
+    """Wait until the task and its helpers (the after-helpers start only once
+    the task is done) have all finished; slow machines get 60 seconds."""
+    for _ in range(1200):
         runs = await studio.runs()
-        if runs and all(run.status not in {"queued", "running"} for run in runs):
-            # Helpers that start after the task need a moment to be queued.
-            await asyncio.sleep(0.05)
-            runs = await studio.runs()
-            if all(run.status not in {"queued", "running"} for run in runs):
-                return
+        helping = [run for run in runs if run.goal.startswith(HELP_PREFIX)]
+        if len(helping) >= helpers and all(
+            run.status not in {"queued", "running"} for run in runs
+        ):
+            return
         await asyncio.sleep(0.05)
     raise AssertionError("tasks didn't finish")
 
@@ -103,17 +104,22 @@ async def test_matching_subagents_help_during_and_after_a_task(make_studio):
     run = await studio.start_task(
         agent_id=builder.id, goal="Build a todo app", site_id=site.id
     )
-    await settle(studio)
+    await settle(studio, helpers=2)
     runs = await studio._store.find(AgentRun)
     helping = {r.agent_id: r for r in runs if r.goal.startswith(HELP_PREFIX)}
     assert set(helping) == {dev.id, tester.id}
     assert all(r.site_id == site.id for r in helping.values())
     assert "Built it." in helping[tester.id].goal  # the tester saw the result
-    events = [
-        m.text
-        for m in await studio._store.find(Message, where={"chat_id": run.chat_id})
-        if m.role == "event"
-    ]
+    events: list[str] = []
+    for _ in range(600):  # the "finished" note follows the helper's last step
+        events = [
+            m.text
+            for m in await studio._store.find(Message, where={"chat_id": run.chat_id})
+            if m.role == "event"
+        ]
+        if sum("(subagent) finished" in text for text in events) == 2:
+            break
+        await asyncio.sleep(0.05)
     assert any("Dev-1 (subagent, developer) is helping Builder" in t for t in events)
     assert any("Test-1 (subagent) finished (succeeded)" in t for t in events)
 
@@ -144,3 +150,43 @@ async def test_subagents_through_the_app(make_studio):
         gone = await client.delete(f"/studio/api/agents/{agent_id}")
         assert gone.status_code == 200
         assert (await client.get("/studio/api/subagents")).json()["subagents"] == []
+
+
+def test_repo_agents_help_when_their_skills_fit():
+    owner = agent("Builder", "builder")
+    seo = agent(
+        "seo-expert",
+        "agent",
+        subagent=True,
+        description="Improves search rankings: metadata, sitemaps, keywords.",
+    )
+    assert pick([seo], owner, "Add a sitemap and better keywords to the site") == [seo]
+    assert pick([seo], owner, "Make the buttons blue") == []
+    goal = helper_goal(seo, owner, "Add a sitemap")
+    assert "fits your skills" in goal and "sitemaps" in goal
+    # Common words alone don't count as a skill.
+    vague = agent(
+        "helper-x", "agent", subagent=True, description="Helps agents with files."
+    )
+    assert pick([vague], owner, "help the agents write files") == []
+
+
+@pytest.mark.asyncio
+async def test_any_agent_can_become_a_subagent_with_its_own_model(make_studio):
+    studio, _ = make_studio([])
+    await studio.ensure_defaults()
+    chosen = await studio.create_subagent(
+        name="Dev-9", role="developer", model="open_router/poolside/laguna-s-2.1:free"
+    )
+    assert chosen.model == "open_router/poolside/laguna-s-2.1:free"
+    repo = await studio.create_agent(
+        name="seo-expert", role="agent", description="Sitemaps and keywords."
+    )
+    made = await studio.set_subagent(repo.id, True)
+    assert made.subagent and made.active
+    assert "seo-expert" in [a.name for a in await studio.subagents()]
+    back = await studio.set_subagent(repo.id, False)
+    assert not back.subagent
+    main = await studio.main_agent()
+    with pytest.raises(StudioError, match="runs the team"):
+        await studio.set_subagent(main.id, True)

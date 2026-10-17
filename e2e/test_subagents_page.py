@@ -13,6 +13,7 @@ def test_add_switch_and_see_a_subagent(page: Page, admin_base_url: str) -> None:
     expect(page.get_by_role("heading", name="Subagents")).to_be_visible()
     page.get_by_label("Subagent name").fill("Dev-1")
     page.get_by_label("Subagent role").select_option("developer")
+    expect(page.get_by_label("Subagent model")).to_be_visible()
     page.get_by_role("button", name="Add subagent").click()
     row = page.locator(".subagent-row", has_text="Dev-1")
     expect(row).to_contain_text("developer")

@@ -163,6 +163,85 @@ def fits(role: str, goal: str) -> bool:
     return any(re.search(rf"\b{re.escape(word)}", text) for word in helper.words)
 
 
+SKILL_STOPWORDS = frozenset(
+    [
+        "about",
+        "after",
+        "agent",
+        "agents",
+        "again",
+        "along",
+        "always",
+        "another",
+        "answer",
+        "answers",
+        "before",
+        "being",
+        "build",
+        "built",
+        "every",
+        "files",
+        "first",
+        "from",
+        "helps",
+        "their",
+        "there",
+        "these",
+        "thing",
+        "things",
+        "those",
+        "through",
+        "tools",
+        "under",
+        "until",
+        "using",
+        "where",
+        "which",
+        "while",
+        "with",
+        "without",
+        "would",
+        "write",
+        "writes",
+        "your",
+        "yours",
+        "other",
+        "given",
+        "makes",
+        "making",
+        "could",
+        "should",
+        "person",
+        "people",
+        "simple",
+        "short",
+        "better",
+        "great",
+    ]
+)
+"""Words too common to say what an agent is good at."""
+
+
+def skill_words(agent: Agent) -> frozenset[str]:
+    """What an agent from a repo says it is good at, as words of five letters
+    or more from its name and description."""
+    text = f"{agent.name} {agent.description}".casefold()
+    return frozenset(
+        word
+        for word in re.findall(r"[a-z][a-z0-9+#-]{4,}", text)
+        if word not in SKILL_STOPWORDS
+    )
+
+
+def fits_agent(agent: Agent, goal: str) -> bool:
+    """A subagent fits a task by its role, or (for agents from repos, whose
+    role is just 'agent') by the skills its description names."""
+    if agent.role in BY_ROLE:
+        return fits(agent.role, goal)
+    words = set(re.findall(r"[a-z][a-z0-9+#-]{4,}", goal.casefold()))
+    return bool(words & skill_words(agent))
+
+
 def is_help(goal: str) -> bool:
     return goal.startswith(HELP_PREFIX)
 
@@ -179,17 +258,22 @@ def pick(subagents: Sequence[Agent], owner: Agent, goal: str) -> list[Agent]:
         and agent.active
         and not agent.archived
         and agent.id != owner.id
-        and fits(agent.role, goal)
+        and agent.role not in {"main", "guide"}
+        and fits_agent(agent, goal)
     ]
     return chosen[:MAX_HELPERS]
 
 
 def helper_goal(helper: Agent, owner: Agent, goal: str, result: str = "") -> str:
-    role = BY_ROLE[helper.role]
-    lines = [
-        f"{HELP_PREFIX}{owner.name} ({owner.role}) is working on: {goal}",
-        f"Your part, as the {role.title}: {role.part}",
-    ]
+    role = BY_ROLE.get(helper.role)
+    part = (
+        f"Your part, as the {role.title}: {role.part}"
+        if role
+        else "Your part: the piece of the job that fits your skills ("
+        f"{helper.description.strip()[:300] or helper.name}). Write your own "
+        "files; don't rewrite the files it is writing."
+    )
+    lines = [f"{HELP_PREFIX}{owner.name} ({owner.role}) is working on: {goal}", part]
     if result.strip():
         lines.append(
             f"What {owner.name} reported when it finished: {result.strip()[:1500]}"

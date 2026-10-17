@@ -3264,7 +3264,8 @@ class SubagentPayload(BaseModel):
 
 
 class SubagentSwitchPayload(BaseModel):
-    active: bool
+    active: bool | None = None
+    subagent: bool | None = None
 
 
 class ChangerStartPayload(BaseModel):
@@ -4808,6 +4809,11 @@ async def subagent_switch(
     studio: StudioService = Depends(get_studio),
     _: None = Access,
 ) -> JsonObject:
-    """Switch a subagent on or off."""
-    agent = await studio.set_subagent_active(agent_id, payload.active)
-    return await studio.agent_view(agent)
+    """Switch a subagent on or off, or make any agent one (or not)."""
+    if payload.subagent is not None:
+        await studio.set_subagent(agent_id, payload.subagent)
+    if payload.active is not None:
+        await studio.set_subagent_active(agent_id, payload.active)
+    if payload.subagent is None and payload.active is None:
+        raise StudioError("Say active or subagent.")
+    return await studio.agent_view(await studio.agent(agent_id))

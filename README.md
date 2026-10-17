@@ -1340,8 +1340,13 @@ the same project, at most two per task:
 - Their progress shows in that task's chat, and they appear in the **HQ**
   (marked subagent). Subagents never call more subagents.
 
-Untick **On** to switch one off, and the bin deletes it. They start on a
-server model; change it on the agent's page.
+Pick each subagent's model when you add it (any server model, such as an
+OpenRouter or NVIDIA NIM one, or a model on your PC), or change it later on
+its page. **Make subagent** turns any agent on the team into one, including
+agents added from GitHub repos (**Knowledge & Memory → Add from GitHub**);
+those join tasks that fit the skills their description names. Untick **On**
+to switch one off, **Back to team** keeps it as a normal agent, and the bin
+deletes it.
 
 </details>
 
