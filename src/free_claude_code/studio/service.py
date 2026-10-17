@@ -2623,6 +2623,26 @@ class StudioService:
                     text=lab_text.describe_build(result),
                     data={"tool": "lab", "action": "build", "project_id": result["id"]},
                 )
+            if action == "design":
+                result = await self._lab.design(
+                    _dict_list(arguments.get("components")),
+                    name=request,
+                    wet=bool(arguments.get("wet")),
+                    save=True,
+                    request=request,
+                    made_by=made_by,
+                )
+                data = result.get("data")
+                return ToolOutcome(
+                    text=lab_text.describe_design(
+                        data if isinstance(data, dict) else {}
+                    ),
+                    data={
+                        "tool": "lab",
+                        "action": "design",
+                        "project_id": result["id"],
+                    },
+                )
             if action == "material":
                 parts = _dict_list(arguments.get("parts"))
                 result = await self._lab.material(

@@ -557,13 +557,23 @@ class LabProject(Record):
     id: str = Field(default_factory=lambda: new_id("lab"))
     name: str
     kind: str = "mix"
-    """mix, product, material, or build."""
+    """mix, product, material, build, or design."""
     request: str = ""
     """What was asked for, e.g. 'make shampoo'."""
     data: JsonObject = Field(default_factory=dict)
     made_by: str = "You"
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
+
+
+class LabPart(Record):
+    """A creation kept for reuse: its components can be added to any design."""
+
+    id: str = Field(default_factory=lambda: new_id("lpt"))
+    name: str
+    data: JsonObject = Field(default_factory=dict)
+    """components (the design's components as written), source, note."""
+    created_at: int = Field(default_factory=now_ms)
 
 
 class LabChemical(Record):

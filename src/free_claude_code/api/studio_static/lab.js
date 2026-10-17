@@ -1,7 +1,9 @@
 /* FCC Studio Lab — a game-like science sandbox with real results.
    Pour chemicals into a beaker, make products and see every ingredient,
-   forge and test materials, power up electronics, and ask the main AI to
-   do any of it from the Lab chat. Studio calls FCCLab.render(ctx). */
+   forge and test materials, power up electronics, design technology in its
+   real materials (steel, iron, a circuit board...) and check it against
+   physics, keep any creation as a part for other designs, and ask the main
+   AI to do any of it from the Lab chat. Studio calls FCCLab.render(ctx). */
 (() => {
   "use strict";
 
@@ -10,6 +12,7 @@
     ["make", "Make", "🧴"],
     ["materials", "Materials", "🔩"],
     ["tech", "Tech", "🔌"],
+    ["design", "Design", "🛠"],
     ["elements", "Elements", "⚛"],
     ["made", "Made", "📦"],
   ];
@@ -66,6 +69,11 @@
     techParts: [],
     series: true,
     lastBuild: null,
+    designParts: [],
+    designName: "My design",
+    lastDesign: null,
+    wet: false,
+    library: null,
     chatAfter: 0,
     chatMessages: [],
     chatBusy: false,
@@ -303,6 +311,7 @@
       make: drawMake,
       materials: drawMaterials,
       tech: drawTech,
+      design: drawDesign,
       elements: drawElements,
       made: drawMade,
     }[state.mode];
@@ -842,6 +851,13 @@
       state.series = project.data.series !== false;
       if (state.mode !== "tech") switchMode("tech");
       else drawMode();
+    } else if (project.kind === "design") {
+      state.lastDesign = project.data;
+      state.designParts = (project.data.spec || []).map((item) => ({ ...item }));
+      state.designName = project.data.name || project.name;
+      state.wet = Boolean(project.data.wet);
+      if (state.mode !== "design") switchMode("design");
+      else drawMode();
     } else if (project.kind === "material") {
       state.lastMaterial = project.data;
       state.materialParts = (project.data.material.composition || []).map((part) => ({ id: part.part, percent: part.percent }));
@@ -1258,6 +1274,376 @@
     }
   }
 
+
+  /* ------------------------------------------------------------ design */
+
+  const ROLE_LABELS = [
+    ["structure", "Structure"],
+    ["casing", "Casing"],
+    ["electronics", "Electronics"],
+    ["moving", "Moving parts"],
+    ["wiring", "Wiring"],
+    ["fastener", "Fasteners"],
+    ["other", "Other"],
+  ];
+  const SHAPES = ["box", "plate", "board", "rod", "cylinder", "tube", "sphere", "wire"];
+  const EXAMPLES = [
+    {
+      name: "Robot cart (steel frame)",
+      wet: false,
+      parts: [
+        { name: "Frame", material: "steel", shape: "plate", size_mm: [200, 3, 150], role: "structure", carries_kg: 2, how: "A flat steel plate everything bolts to; it carries the load to the wheels." },
+        { name: "Shell", material: "abs", shape: "box", size_mm: [210, 60, 160], role: "casing" },
+        { name: "Controller board", part: "arduino", material: "fr4", shape: "board", size_mm: [69, 1.6, 53], role: "electronics" },
+        { name: "Motor driver", part: "motor-driver", material: "fr4", shape: "board", size_mm: [43, 1.6, 43], role: "electronics" },
+        { name: "Battery", part: "aa", material: "steel", shape: "cylinder", size_mm: [14, 50], role: "electronics", count: 4 },
+        { name: "Wheels and gear motors", part: "wheels", material: "rubber", shape: "cylinder", size_mm: [65, 26], role: "moving", count: 2, how: "Each pair is two rubber tyres on small gear motors: the gears trade speed for the turning force to move the cart." },
+        { name: "Power switch", part: "switch", role: "electronics" },
+        { name: "Wiring", material: "copper", shape: "wire", size_mm: [0.8, 600], role: "wiring" },
+      ],
+    },
+    {
+      name: "Garden lamp (iron post, outdoors)",
+      wet: true,
+      parts: [
+        { name: "Post", material: "cast-iron", shape: "rod", size_mm: [20, 600], role: "structure", carries_kg: 1.5 },
+        { name: "Globe", material: "glass", shape: "sphere", size_mm: [120], role: "casing" },
+        { name: "Solar panel", part: "solar", material: "silicon", shape: "plate", size_mm: [80, 3, 80], role: "electronics" },
+        { name: "Charger", part: "tp4056", material: "fr4", shape: "board", size_mm: [26, 1.6, 17], role: "electronics" },
+        { name: "Battery", part: "18650", material: "steel", shape: "cylinder", size_mm: [18, 65], role: "electronics" },
+        { name: "Light", part: "led-white", material: "epoxy", shape: "sphere", size_mm: [5], role: "electronics", count: 3 },
+        { name: "Dusk sensor", part: "light-sensor", material: "fr4", shape: "board", size_mm: [20, 1.6, 15], role: "electronics" },
+        { name: "Screws", material: "brass", shape: "rod", size_mm: [3, 12], role: "fastener", count: 4 },
+      ],
+    },
+    {
+      name: "Desk fan (aluminium)",
+      wet: false,
+      parts: [
+        { name: "Stand", material: "aluminium", shape: "tube", size_mm: [25, 180], role: "structure", carries_kg: 0.5 },
+        { name: "Housing", material: "aluminium", shape: "box", size_mm: [120, 120, 40], role: "casing" },
+        { name: "Fan", part: "fan", material: "abs", shape: "cylinder", size_mm: [80, 25], role: "moving" },
+        { name: "USB power", part: "usb", role: "electronics" },
+        { name: "Switch", part: "switch", role: "electronics" },
+      ],
+    },
+  ];
+
+  const materialOf = (id) => state.catalogue.materials.find((item) => item.id === id);
+  const partOf = (id) => state.catalogue.parts.find((item) => item.id === id);
+
+  function drawDesign() {
+    const canvas = h("div", { class: "design-canvas" });
+    const results = h("section", { class: "card design-results" });
+    const library = h("div", { class: "design-library" }, [h("p", { class: "muted small", text: "Loading saved parts…" })]);
+    const name = h("input", { type: "text", value: state.designName, "aria-label": "Design name", class: "grow" });
+    name.addEventListener("input", () => { state.designName = name.value; });
+    const wet = toggle(state.wet ? "Outdoors / wet" : "Indoors / dry", state.wet, () => {
+      state.wet = !state.wet;
+      wet.textContent = state.wet ? "Outdoors / wet" : "Indoors / dry";
+      state.lastDesign = null;
+      paintDesign(canvas, results);
+    });
+    stage.append(...clean([
+      h("div", { class: "tech-grid" }, [
+        h("div", { class: "tech-column" }, [
+          addComponentCard(canvas, results),
+          h("section", { class: "card" }, [h("h2", { text: "Saved parts" }), h("p", { class: "muted small", text: "Creations you kept: add them to this design." }), library]),
+        ]),
+        h("div", { class: "tech-column" }, [
+          h("section", { class: "card" }, [
+            h("h2", { text: "Design" }),
+            h("div", { class: "chips" }, EXAMPLES.map((example) =>
+              h("button", {
+                class: "chip",
+                type: "button",
+                text: example.name,
+                onclick: () => {
+                  state.designParts = example.parts.map((item) => ({ ...item }));
+                  state.designName = example.name;
+                  state.wet = example.wet;
+                  state.lastDesign = null;
+                  drawMode();
+                },
+              })
+            )),
+            h("div", { class: "row" }, [name, wet]),
+            canvas,
+            h("div", { class: "row" }, [
+              h("button", { class: "primary power-button", type: "button", text: "⚙ Check physics", onclick: () => checkDesign(canvas, results, false) }),
+              h("button", { class: "secondary", type: "button", text: "Save to Made", onclick: () => checkDesign(canvas, results, true) }),
+              h("button", {
+                class: "secondary",
+                type: "button",
+                text: "Keep as a part",
+                onclick: async () => {
+                  if (!state.designParts.length) return ctx.notify("Add some components first.");
+                  try {
+                    await ctx.post("/studio/api/lab/library", { name: state.designName, components: state.designParts });
+                    state.library = null;
+                    loadLibrary(library, canvas, results);
+                    ctx.notify("Kept: add it to any design from Saved parts.");
+                  } catch (error) {
+                    ctx.notify(error.message);
+                  }
+                },
+              }),
+              h("button", { class: "ghost-button", type: "button", text: "Clear", onclick: () => { state.designParts = []; state.lastDesign = null; paintDesign(canvas, results); } }),
+            ]),
+          ]),
+          results,
+        ]),
+      ]),
+    ]));
+    paintDesign(canvas, results);
+    loadLibrary(library, canvas, results);
+  }
+
+  function addComponentCard(canvas, results) {
+    const materialsList = state.catalogue.materials;
+    const name = h("input", { type: "text", placeholder: "Name, e.g. Frame", "aria-label": "Component name" });
+    const material = h("select", { "aria-label": "Material" }, materialsList.map((item) => h("option", { value: item.id, text: item.name, selected: item.id === "steel" })));
+    const shape = h("select", { "aria-label": "Shape" }, SHAPES.map((item) => h("option", { value: item, text: item })));
+    const role = h("select", { "aria-label": "Role" }, ROLE_LABELS.map(([value, label]) => h("option", { value, text: label })));
+    const part = h("select", { "aria-label": "Electronics part" }, [h("option", { value: "", text: "No electronics part" }), ...state.catalogue.parts.map((item) => h("option", { value: item.id, text: `${item.icon} ${item.name}` }))]);
+    const size = ["w", "h", "d"].map((axis, index) => h("input", { type: "number", min: "0.1", step: "0.1", value: String([40, 40, 40][index]), "aria-label": `Size ${axis} (mm)`, class: "size-input" }));
+    const load = h("input", { type: "number", min: "0", step: "0.1", value: "0", "aria-label": "Load carried (kg)", class: "size-input" });
+    const count = h("input", { type: "number", min: "1", step: "1", value: "1", "aria-label": "How many", class: "size-input" });
+    const how = h("input", { type: "text", placeholder: "How it works (optional)", "aria-label": "How it works" });
+    const preview = h("div", { class: "material-preview" });
+    const showPreview = () => {
+      const found = materialOf(material.value);
+      preview.replaceChildren(...clean([
+        h("span", { class: `swatch fin-${finishOf(found)}`, style: `--mat:${found ? found.colour : "#999"}` }),
+        h("span", { class: "muted small", text: found ? `${found.name}: ${found.strength} MPa, ${found.density} g/cm³, melts ${found.melts} °C${found.rusts !== "no" ? `, rusts ${found.rusts}` : ""}` : "" }),
+      ]));
+    };
+    material.addEventListener("change", showPreview);
+    part.addEventListener("change", () => {
+      if (part.value && role.value === "structure") role.value = "electronics";
+    });
+    showPreview();
+    return h("section", { class: "card" }, [
+      h("h2", { text: "Add a component" }),
+      h("div", { class: "design-form" }, [
+        name,
+        h("label", {}, ["Material ", material]),
+        preview,
+        h("label", {}, ["Shape ", shape]),
+        h("label", {}, ["Role ", role]),
+        h("label", {}, ["Part ", part]),
+        h("label", {}, ["Size (mm) ", ...size]),
+        h("label", {}, ["Carries (kg) ", load, " × ", count]),
+        how,
+        h("button", {
+          class: "secondary",
+          type: "button",
+          text: "Add to the design",
+          onclick: () => {
+            state.designParts.push({
+              name: name.value.trim() || (part.value ? (partOf(part.value) || {}).name : (materialOf(material.value) || {}).name),
+              material: material.value,
+              shape: shape.value,
+              role: role.value,
+              part: part.value || undefined,
+              size_mm: size.map((input) => Number(input.value) || 0),
+              carries_kg: Number(load.value) || 0,
+              count: Math.max(1, Math.round(Number(count.value) || 1)),
+              how: how.value.trim() || undefined,
+            });
+            state.lastDesign = null;
+            paintDesign(canvas, results);
+          },
+        }),
+      ]),
+    ]);
+  }
+
+  function isLight(colour) {
+    const match = /^#?([0-9a-f]{6})$/i.exec(String(colour || ""));
+    if (!match) return false;
+    const value = parseInt(match[1], 16);
+    const [r, g, b] = [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+    return 0.299 * r + 0.587 * g + 0.114 * b > 165;
+  }
+
+  function finishOf(material) {
+    if (!material) return "plastic";
+    const byId = { fr4: "board", "carbon-fibre": "weave", kevlar: "weave", rubber: "rubber", silicone: "rubber", "wood-oak": "wood", "wood-pine": "wood", bamboo: "wood", cotton: "fibre", "spider-silk": "fibre", silicon: "wafer", "gallium-arsenide": "wafer", diamond: "gem", concrete: "stone" };
+    const byCategory = { metal: "metal", alloy: "metal", polymer: "plastic", ceramic: "ceramic", glass: "glass", composite: "fibre", natural: "fibre", semiconductor: "wafer" };
+    return byId[material.id] || byCategory[material.category] || "plastic";
+  }
+
+  async function loadLibrary(holder, canvas, results) {
+    try {
+      if (!state.library) state.library = (await ctx.api("/studio/api/lab/library")).parts;
+    } catch (error) {
+      holder.replaceChildren(...clean([h("p", { class: "muted small", text: error.message })]));
+      return;
+    }
+    if (!state.library.length) {
+      holder.replaceChildren(...clean([h("p", { class: "muted small", text: "Nothing kept yet: press Keep as a part, or ➕ on Made." })]));
+      return;
+    }
+    holder.replaceChildren(...clean(state.library.map((part) =>
+      h("div", { class: "made-row" }, [
+        h("span", { class: "grow" }, [h("strong", { text: part.name }), h("small", { class: "muted", text: ` ${part.count} components${part.source ? ` · from ${part.source}` : ""}` })]),
+        h("button", {
+          class: "secondary small",
+          type: "button",
+          text: "Add",
+          onclick: () => {
+            state.designParts.push({ assembly: part.id, name: part.name, count: 1 });
+            state.lastDesign = null;
+            paintDesign(canvas, results);
+          },
+        }),
+        h("button", {
+          class: "ghost-button small",
+          type: "button",
+          "aria-label": `Forget ${part.name}`,
+          text: "🗑",
+          onclick: async () => {
+            await ctx.remove(`/studio/api/lab/library/${part.id}`);
+            state.library = null;
+            loadLibrary(holder, canvas, results);
+          },
+        }),
+      ])
+    )));
+  }
+
+  async function checkDesign(canvas, results, save) {
+    if (!state.designParts.length) {
+      ctx.notify("Add some components first, or pick an example.");
+      return;
+    }
+    try {
+      const answer = await ctx.post("/studio/api/lab/design", { components: state.designParts, name: state.designName, wet: state.wet, save });
+      state.lastDesign = save ? answer.data : answer;
+      canvas.classList.add("spark");
+      await wait(300);
+      paintDesign(canvas, results);
+      if (save) ctx.notify("Saved to Made.");
+    } catch (error) {
+      ctx.notify(error.message);
+    }
+  }
+
+  function tileFor(entry, row, index, canvas, results) {
+    const material = materialOf(entry.material || (row && row.material && row.material.id)) || null;
+    const finishName = row ? row.material.finish : entry.assembly ? "group" : finishOf(material || (entry.part ? null : materialOf("abs")));
+    const colour = row ? row.material.colour : material ? material.colour : "#8a8f98";
+    const part = entry.part ? partOf(entry.part) : null;
+    const size = entry.size_mm || (row && row.size_mm) || [40, 40, 40];
+    const width = Math.max(118, Math.min(240, (Number(size[0]) || 40) * 1.2));
+    const height = Math.max(44, Math.min(120, (Number(size[1]) || 40) * 0.9 + 30));
+    const states = [];
+    if (row) {
+      if (row.state) states.push(`st-${row.state}`);
+      if (row.verdict) states.push(`v-${row.verdict}`);
+      if (row.rusting) states.push("rusting");
+      if (part && row.state === "ok") states.push(`kind-${part.kind}`);
+    }
+    const hot = state.lastDesign && (state.lastDesign.checks || []).some((check) => check.name === "Heat" && !check.ok) && entry.role === "casing";
+    const light = finishName !== "glass" && isLight(colour);
+    const tile = h("div", {
+      class: `dtile fin-${finishName} ${states.join(" ")} ${hot ? "hot" : ""} ${light ? "light-mat" : ""}`,
+      style: `--mat:${colour};width:${width}px;min-height:${height}px`,
+      title: row ? row.how : entry.how || "",
+    }, [
+      h("button", {
+        class: "dtile-face",
+        type: "button",
+        "aria-label": `About ${entry.name || "component"}`,
+        onclick: () => componentCard(entry, row, material, part),
+      }, [
+        part ? h("span", { class: "dt-icon", text: part.icon }) : entry.assembly ? h("span", { class: "dt-icon", text: "📦" }) : null,
+        h("strong", { text: entry.name || (material ? material.name : "Component") }),
+        h("small", { text: entry.assembly ? "saved part" : `${material ? material.name : row ? row.material.name : ""}${entry.count > 1 ? ` × ${entry.count}` : ""}` }),
+        row && row.verdict ? h("small", { class: `verdict ${row.verdict}`, text: `${row.verdict}${row.safety_factor ? ` (${row.safety_factor}×)` : ""}` }) : null,
+      ]),
+      row && row.state === "burnt" ? h("span", { class: "smoke" }, [h("i"), h("i"), h("i")]) : null,
+      h("button", {
+        class: "dtile-remove ghost-button small",
+        type: "button",
+        "aria-label": `Remove ${entry.name || "component"}`,
+        text: "✕",
+        onclick: () => {
+          state.designParts.splice(index, 1);
+          state.lastDesign = null;
+          paintDesign(canvas, results);
+        },
+      }),
+    ]);
+    return tile;
+  }
+
+  function componentCard(entry, row, material, part) {
+    const facts = [];
+    if (material) facts.push(["Material", material.name], ["Strength", `${material.strength} MPa`], ["Density", `${material.density} g/cm³`], ["Melts", `${material.melts} °C`], ["Rusts", material.rusts]);
+    if (row) {
+      facts.push(["Weighs", `${row.mass_g} g`]);
+      if (row.stress_mpa != null) facts.push(["Stress", `${row.stress_mpa} MPa`], ["Margin", `${row.safety_factor}×`]);
+      if (row.state) facts.push(["Powered", row.state]);
+    }
+    modal(entry.name || "Component", clean([
+      h("p", { text: row ? row.how : entry.how || (part ? part.note : material ? material.uses : "") || "Check physics to see how it works." }),
+      part ? h("p", { class: "muted small", text: `${part.icon} ${part.name}: ${part.volts ? `${part.volts} V` : ""}${part.milliamps ? `, ${part.milliamps} mA` : ""}${part.note ? `. ${part.note}` : ""}` }) : null,
+      h("div", { class: "facts" }, facts.map(([label, value]) => h("div", { class: "fact" }, [h("span", { text: label }), h("strong", { text: String(value) })]))),
+      material && material.uses ? h("p", { class: "muted small", text: material.uses }) : null,
+    ]));
+  }
+
+  function paintDesign(canvas, results) {
+    canvas.classList.remove("spark");
+    const answer = state.lastDesign;
+    const rows = answer ? answer.components || [] : [];
+    if (!state.designParts.length) {
+      canvas.replaceChildren(...clean([h("p", { class: "muted", text: "Empty: add components, pick a saved part, try an example, or ask the Lab chat to design something." })]));
+      results.replaceChildren(...clean([h("h2", { text: "Physics" }), h("p", { class: "muted", text: "Weight, strength, heat, electronics, rust: press Check physics." })]));
+      return;
+    }
+    // Rows come back in the order of the expanded components (saved parts
+    // open into theirs), so they are matched by name and material.
+    const unused = [...rows];
+    const matched = state.designParts.map((entry) => {
+      if (entry.assembly) return null;
+      const at = unused.findIndex((row) => row.name === entry.name && (!entry.material || row.material.id === entry.material));
+      return at >= 0 ? unused.splice(at, 1)[0] : null;
+    });
+    canvas.className = `design-canvas ${answer ? (answer.works ? "live" : "fault") : ""} ${state.wet ? "wet" : ""}`;
+    const groups = ROLE_LABELS.map(([role, label]) => {
+      const tiles = state.designParts
+        .map((entry, index) => [entry, index])
+        .filter(([entry]) => (entry.assembly ? "other" : entry.role || "structure") === role)
+        .map(([entry, index]) => tileFor(entry, matched[index], index, canvas, results));
+      return tiles.length ? h("div", { class: "design-group" }, [h("h3", { text: label }), h("div", { class: "design-tiles" }, tiles)]) : null;
+    });
+    canvas.replaceChildren(...clean(groups));
+    if (!answer) {
+      results.replaceChildren(...clean([h("h2", { text: "Physics" }), h("p", { class: "muted", text: "Press Check physics." })]));
+      return;
+    }
+    const electronics = answer.electronics;
+    results.replaceChildren(...clean([
+      h("h2", { text: answer.verdict === "Would work" ? "✅ Would work" : "⚠ Needs changes" }),
+      h("div", { class: "facts" }, [
+        ["Weighs", `${answer.mass_g} g`],
+        electronics ? ["Supply", `${electronics.volts} V`] : null,
+        electronics ? ["Current", `${electronics.total_ma} mA`] : null,
+        electronics ? ["Runtime", electronics.runtime_text] : null,
+      ].filter(Boolean).map(([label, value]) => h("div", { class: "fact" }, [h("span", { text: label }), h("strong", { text: value })]))),
+      h("div", { class: "material-legend" }, (answer.materials || []).map((item) =>
+        h("span", { class: "legend-chip" }, [h("i", { class: `swatch fin-${item.finish}`, style: `--mat:${item.colour}` }), `${item.name} ${item.share_pct}%`])
+      )),
+      h("ul", { class: "observations" }, (answer.checks || []).map((check) => h("li", { text: `${check.ok ? "✅" : "⚠"} ${check.name}: ${check.detail}` }))),
+      (answer.warnings || []).length ? h("div", { class: "hazards" }, answer.warnings.map((text) => h("div", { class: "hazard-line warning", text }))) : null,
+      (answer.notes || []).length ? h("ul", { class: "observations" }, answer.notes.map((text) => h("li", { text }))) : null,
+      h("p", { class: "muted small", text: answer.estimate }),
+    ]));
+  }
+
   /* ------------------------------------------------------------ elements */
 
   function drawElements() {
@@ -1307,7 +1693,7 @@
       list.replaceChildren(...clean([h("p", { class: "muted", text: "Nothing made yet. Mix, make, forge, or build something, or ask in the Lab chat." })]));
       return;
     }
-    const icons = { product: "🧴", mix: "⚗", material: "🔩", build: "🔌" };
+    const icons = { product: "🧴", mix: "⚗", material: "🔩", build: "🔌", design: "🛠" };
     list.replaceChildren(...clean([
       ...projects.map((project) =>
         h("div", { class: "made-row" }, [
@@ -1317,6 +1703,36 @@
             type: "button",
             onclick: async () => openProject(await ctx.api(`/studio/api/lab/projects/${project.id}`), true),
           }, [h("strong", { text: project.name }), h("small", { class: "muted", text: ` ${project.kind} · by ${project.made_by} · ${new Date(project.created_at).toLocaleString()}` })]),
+          h("button", {
+            class: "ghost-button small",
+            type: "button",
+            "aria-label": `Copy ${project.name}`,
+            title: "Make a copy to change",
+            text: "⧉",
+            onclick: async () => {
+              await ctx.post(`/studio/api/lab/projects/${project.id}/copy`, {});
+              ctx.notify("Copied.");
+              drawMode();
+            },
+          }),
+          ["design", "build"].includes(project.kind)
+            ? h("button", {
+                class: "ghost-button small",
+                type: "button",
+                "aria-label": `Keep ${project.name} as a part`,
+                title: "Keep as a part to add to other designs",
+                text: "➕",
+                onclick: async () => {
+                  try {
+                    await ctx.post("/studio/api/lab/library", { project_id: project.id, name: project.name });
+                    state.library = null;
+                    ctx.notify("Kept as a part: add it from Design → Saved parts.");
+                  } catch (error) {
+                    ctx.notify(error.message);
+                  }
+                },
+              })
+            : null,
           h("button", {
             class: "ghost-button small",
             type: "button",

@@ -629,8 +629,8 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         route="/studio#lab",
         where=(
             "Lab in the tab bar (or MENU, Lab). Benches along the top: "
-            "Chemistry, Make, Materials, Tech, Elements, Made; the Lab chat "
-            "is on the right."
+            "Chemistry, Make, Materials, Tech, Design, Elements, Made; the Lab "
+            "chat is on the right."
         ),
         terms=(
             "lab",
@@ -649,6 +649,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "alloy",
             "circuit",
             "electronics",
+            "design",
+            "steel",
+            "iron",
+            "circuit board",
+            "physics",
+            "saved parts",
             "synthesise",
             "synthesize",
         ),
@@ -663,7 +669,12 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "bottle, and breaks the product down element by element. Materials: "
             "blend metals, plastics, and more, then run pull, float, heat, and "
             "electric tests. Tech: put parts on the board and Power on; it works "
-            "out volts, resistors, runtime, and what would burn out. Elements: "
+            "out volts, resistors, runtime, and what would burn out. Design: "
+            "build technology from real materials (steel, iron, copper, a "
+            "circuit board, glass, wood...), each drawn in its material; Check "
+            "physics weighs it and checks strength, heat, the electronics, rust "
+            "and floating, and each part says how it works. Keep as a part saves "
+            "a creation to add to other designs; Made can copy anything. Elements: "
             "all 118, tap one for its facts. Made keeps what you and the agents "
             "made. In the Lab chat, say 'Hey Jarvis, make a shampoo' and he "
             "makes it on the bench while you watch. The Lab won't make weapons, "

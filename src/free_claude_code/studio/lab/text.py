@@ -14,6 +14,8 @@ def describe_project(project: LabData) -> str:
         return f"Made {project.get('name')}."
     if project.get("kind") == "build":
         return describe_build(project)
+    if project.get("kind") == "design":
+        return describe_design(data)
     lines = [
         f"Made {data.get('name')} ({data.get('batch_g')} g batch, shown in a "
         f"{data.get('container')} on the Lab bench). Ingredients:"
@@ -93,6 +95,29 @@ def describe_build(result: LabData) -> str:
     lines.extend(f"Warning: {warning}" for warning in data.get("warnings") or [])
     lines.append(f"Parts cost about ${data.get('price')}, weigh {data.get('grams')} g.")
     return "\n".join(lines)
+
+
+def describe_design(result: LabData) -> str:
+    """A design's verdict, what it weighs and is made of, and why."""
+    lines = [
+        f"Designed {result.get('name')}: {result.get('verdict')}, "
+        f"{result.get('mass_g')} g, shown in its materials on the Lab's Design view."
+    ]
+    made_of = [
+        f"{row.get('name')} {row.get('share_pct')}%"
+        for row in (result.get("materials") or [])[:6]
+        if isinstance(row, dict)
+    ]
+    if made_of:
+        lines.append("Made of: " + ", ".join(made_of) + ".")
+    for row in result.get("checks") or []:
+        if isinstance(row, dict):
+            mark = "ok" if row.get("ok") else "PROBLEM"
+            lines.append(f"- {row.get('name')} ({mark}): {row.get('detail')}")
+    lines.extend(f"Warning: {text}" for text in result.get("warnings") or [])
+    lines.extend(f"Note: {text}" for text in result.get("notes") or [])
+    lines.append(str(result.get("estimate") or ""))
+    return "\n".join(line for line in lines if line)
 
 
 def describe_material(result: LabData) -> str:

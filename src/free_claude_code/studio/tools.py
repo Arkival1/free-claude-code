@@ -838,7 +838,18 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "amounts in mL or g; heat or flame optional) and see colours, gas, "
             "solids, heat, and pH. build: power electronics parts and see what "
             "works. material: blend materials into an alloy or composite and "
-            "test it. find: look up a chemical, element, material, or part "
+            "test it. design: a piece of technology drawn in its real "
+            "materials and checked against physics; give components, each "
+            "{name, material (a Materials shelf id: steel, iron, copper, "
+            "aluminium, stainless-steel, fr4 for circuit boards, abs, glass, "
+            "wood-oak, carbon-fibre...), shape (box, plate, board, rod, "
+            "cylinder, tube, sphere, wire), size_mm [w, h, d] (rods and tubes: "
+            "[diameter, length]), role (structure, casing, electronics, moving, "
+            "wiring, fastener), part (an electronics part id, for batteries, "
+            "motors, LEDs, boards), count, carries_kg (load on a frame member), "
+            "how (how it works)}; set wet for outdoor use. It reports weight, "
+            "strength margins, heat, the electronics, rust, and how each part "
+            "works. find: look up a chemical, element, material, or part "
             "(unknown chemicals are learned from PubChem). list: what has "
             "been made."
         ),
@@ -847,7 +858,15 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["make", "mix", "build", "material", "find", "list"],
+                    "enum": [
+                        "make",
+                        "mix",
+                        "build",
+                        "material",
+                        "design",
+                        "find",
+                        "list",
+                    ],
                 },
                 "request": {
                     "type": "string",
@@ -869,6 +888,15 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                     "description": "build: parts, e.g. {id: 'aa', count: 2}. "
                     "material: materials, e.g. {id: 'copper', percent: 88}.",
                     "items": {"type": "object"},
+                },
+                "components": {
+                    "type": "array",
+                    "description": "design: the components (see design).",
+                    "items": {"type": "object"},
+                },
+                "wet": {
+                    "type": "boolean",
+                    "description": "design: used outdoors or in water.",
                 },
                 "heat": {"type": "boolean"},
                 "flame": {"type": "boolean"},

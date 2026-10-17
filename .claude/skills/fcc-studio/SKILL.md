@@ -40,7 +40,7 @@ the user-facing description of every feature is the `## Studio` section of
 | Model Control (`#engine`) | Built-in llama.cpp engine (instead of LM Studio): GPU detection, Tune for my PC, speed test |
 | Tuning (`#tune`, `#job`, `#lora`) | Light tuning, and LoRA training on a rented GPU that installs the new model |
 | Classroom / Learn (`#learn`, `#class/<id>`) | A teacher model teaches a student model; Learn mode where Jarvis studies a topic |
-| Lab (`#lab`) | Chemistry, materials and tech sandbox with a lab chat |
+| Lab (`#lab`) | Chemistry, materials, tech and design sandbox with a lab chat; designs drawn in real materials with a physics check (`lab/design.py`), saved parts to reuse |
 | Content Farm (`#farm`) | Video channels, scripts, cartoons, beat edits, rendering. Don't touch unless asked |
 | HQ (`#hq`) | Pixel office showing the whole agent workflow live |
 | Trading Bank (`#trade`) | Five model seats debate trades (Desk with 3D arena and engine health, Debate, Risk, Orders with decision records and audit, Debriefs with learning and backtest, Setup); practice / alert-only / live-approve / live-auto; platforms (Alpaca, IBKR, Kraken, Coinbase, AU exchanges, Hyperliquid/Invo, webhook) |

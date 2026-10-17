@@ -127,3 +127,35 @@ def test_elephant_toothpaste_foams_over_the_top(
     expect(stage).to_have_class(re.compile("erupting"))
     expect(page.locator(".results")).to_contain_text("2H₂O₂(aq) → 2H₂O(l) + O₂↑")
     shot(page, "lab-foam")
+
+
+def test_a_design_shows_its_materials_checks_physics_and_is_kept(
+    page: Page, admin_base_url: str
+) -> None:
+    open_lab(page, admin_base_url, "design")
+    expect(page.get_by_role("heading", name="Add a component")).to_be_visible()
+    page.get_by_role("button", name="Robot cart (steel frame)").click()
+    # The frame is drawn in steel, the controller as a circuit board.
+    expect(page.locator(".dtile.fin-metal", has_text="Frame")).to_be_visible()
+    expect(
+        page.locator(".dtile.fin-board", has_text="Controller board")
+    ).to_be_visible()
+    expect(page.locator(".dtile.fin-rubber", has_text="Wheels")).to_be_visible()
+    page.get_by_role("button", name="⚙ Check physics").click()
+    results = page.locator(".design-results")
+    expect(results).to_contain_text("Would work")
+    expect(results).to_contain_text("Weighs")
+    expect(results).to_contain_text("Strength")
+    expect(page.locator(".legend-chip", has_text="Mild steel")).to_be_visible()
+    shot(page, "lab-design-physics")
+    # How a part works, from its tile.
+    page.locator(".dtile", has_text="Frame").locator(".dtile-face").click()
+    expect(page.locator(".lab-modal")).to_contain_text("carries the load")
+    page.locator(".lab-modal").get_by_role("button", name="Close").click()
+    # Kept as a part, and added to the design again from Saved parts.
+    page.get_by_role("button", name="Keep as a part").click()
+    library = page.locator(".design-library")
+    expect(library).to_contain_text("Robot cart (steel frame)")
+    library.get_by_role("button", name="Add").first.click()
+    expect(page.locator(".dtile.fin-group")).to_have_count(1)
+    shot(page, "lab-design")

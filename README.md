@@ -1242,7 +1242,7 @@ Most Compatible).
 </details>
 
 <details>
-<summary><strong>The Lab: mix, make, forge, and build with real results</strong></summary>
+<summary><strong>The Lab: mix, make, forge, build, and design with real results</strong></summary>
 
 Open **Lab** in the tab bar (or the HUD menu). It is a science sandbox that
 works like a game but answers with real chemistry and physics. Benches run
@@ -1289,13 +1289,35 @@ along the top, and the **Lab chat** with Jarvis sits on the right.
   lasts, and what would burn out, won't switch on, or needs a driver, and
   lights, spins, or smokes each part to match. Nine ready builds (flashlight,
   power bank, weather station, robot car, plant waterer…) are one tap away.
+- **Design.** Build a piece of technology from real materials: each
+  component has a material from the shelf (mild steel, cast iron, copper,
+  aluminium, a circuit board (FR-4), glass, oak, ABS, carbon fibre, …), a
+  shape, a size, a role (structure, casing, electronics, moving parts,
+  wiring, fasteners), and can be an electronics part. Each one is drawn in
+  its material, brushed steel, copper, a green board with gold tracks, wood
+  grain, rubber, glass, carbon weave, and tapping it says how it works.
+  **Check physics** weighs every part (casings are hollow), checks each
+  load-bearing member against its material's strength, runs the
+  electronics on the circuit bench, works out the heat and how hot the
+  casing gets, and warns about a metal case around live parts, rust in the
+  wet (**Outdoors / wet**), metals that corrode each other, and whether it
+  floats; parts then light up, spin, glow hot, rust, crack, or smoke to
+  match. Three examples (a steel-frame robot cart, an iron garden lamp, an
+  aluminium desk fan) are one tap away. These are estimates for a sketch
+  (straight loads, still air), not an engineer's sign-off.
+- **Keep and reuse.** **Keep as a part** (or ➕ on **Made**) saves a design or
+  a build as a part; **Saved parts** adds it to any other design, where it
+  opens into its components. **⧉** on **Made** copies anything to change
+  without losing the first.
 - **Elements** is the periodic table: tap an element for its facts, flame
   colour, and uses, and add it to the beaker. **Made** keeps everything you
   and the agents made.
 
 In the **Lab chat**, say *"Hey Jarvis, make a shampoo"*: Jarvis uses his `lab`
 tool, the bench shows the result as it arrives, and he tells you what's inside.
-He can mix, forge, build, and look things up the same way, and he can still
+He can mix, forge, build, design (*"design a robot cart with a steel frame"*:
+he picks the materials and parts, and the Design bench shows it), and look
+things up the same way, and he can still
 search the web, run deep research, learn a topic, and study videos when he
 needs to know more. The Lab refuses weapons, explosives, drugs, and poisons;
 dangerous household mixes (bleach with acid or ammonia) still simulate, with

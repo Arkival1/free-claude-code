@@ -411,6 +411,7 @@ def test_only_jarvis_gets_the_lab_by_default():
         "mix",
         "build",
         "material",
+        "design",
         "find",
         "list",
     ]

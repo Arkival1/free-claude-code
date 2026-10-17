@@ -3236,6 +3236,21 @@ class LabPartsPayload(BaseModel):
     save: bool = False
 
 
+class LabDesignPayload(BaseModel):
+    components: list[JsonObject] = Field(default_factory=list, max_length=80)
+    name: str = Field(default="", max_length=120)
+    wet: bool = False
+    series: bool = True
+    save: bool = False
+
+
+class LabKeepPayload(BaseModel):
+    name: str = Field(default="", max_length=120)
+    project_id: str = Field(default="", max_length=80)
+    components: list[JsonObject] = Field(default_factory=list, max_length=80)
+    note: str = Field(default="", max_length=300)
+
+
 class LabLookupPayload(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
@@ -3793,6 +3808,65 @@ async def lab_build(
         )
     except LabError as error:
         raise _lab_failed(error) from error
+
+
+@router.post("/studio/api/lab/design")
+async def lab_design(
+    payload: LabDesignPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Check a design in its real materials (and keep it when asked)."""
+    try:
+        return await studio.lab.design(
+            payload.components,
+            name=payload.name,
+            wet=payload.wet,
+            series=payload.series,
+            save=payload.save,
+        )
+    except LabError as error:
+        raise _lab_failed(error) from error
+
+
+@router.get("/studio/api/lab/library")
+async def lab_library(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Creations kept as parts, to add to other designs."""
+    return {"parts": await studio.lab.parts_kept()}
+
+
+@router.post("/studio/api/lab/library")
+async def lab_keep(
+    payload: LabKeepPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        return await studio.lab.keep_part(
+            payload.name,
+            project_id=payload.project_id,
+            components=payload.components,
+            note=payload.note,
+        )
+    except LabError as error:
+        raise _lab_failed(error) from error
+
+
+@router.delete("/studio/api/lab/library/{part_id}")
+async def lab_forget_part(
+    part_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"deleted": await studio.lab.delete_part(part_id)}
+
+
+@router.post("/studio/api/lab/projects/{project_id}/copy")
+async def lab_copy(
+    project_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """A copy of something made, to change without losing the first."""
+    return await studio.lab.copy(project_id)
 
 
 @router.post("/studio/api/lab/material")

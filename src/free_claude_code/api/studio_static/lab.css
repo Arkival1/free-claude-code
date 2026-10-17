@@ -968,3 +968,146 @@ body[data-page="lab"] .view {
 }
 
 .lab input[type="range"] { accent-color: var(--accent); }
+
+/* ------------------------------------------------------------ design: real materials */
+
+.design-canvas {
+  display: grid;
+  gap: 14px;
+  min-height: 160px;
+  padding: 12px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 30% 20%, rgba(64, 214, 255, 0.06), transparent 60%), rgba(8, 14, 22, 0.6);
+  border: 1px solid rgba(127, 169, 186, 0.2);
+  transition: box-shadow 0.4s;
+}
+.design-canvas.live { box-shadow: 0 0 24px rgba(77, 255, 166, 0.15) inset; }
+.design-canvas.fault { box-shadow: 0 0 24px rgba(255, 93, 108, 0.18) inset; }
+.design-canvas.wet { background: linear-gradient(180deg, rgba(64, 140, 255, 0.08), transparent 40%), rgba(8, 14, 22, 0.6); }
+.design-canvas.spark { animation: dazzle 0.3s; }
+.design-group h3 { margin: 0 0 6px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; }
+.design-tiles { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.design-form { display: grid; gap: 8px; }
+.design-form label { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 6px; align-items: center; white-space: nowrap; }
+.design-form label select { flex: 1 1 auto; min-width: 0; width: auto; }
+.design-form input.size-input { width: 76px; flex: 0 0 76px; min-width: 0; padding-left: 8px; padding-right: 4px; }
+.material-preview { display: flex; gap: 8px; align-items: center; }
+
+.dtile {
+  --mat: #8a8f98;
+  position: relative;
+  min-width: 118px;
+  max-width: 240px;
+  border-radius: 10px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+  background: var(--mat);
+}
+.dtile-face {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-height: inherit;
+  padding: 8px 22px 8px 8px;
+  cursor: pointer;
+}
+.dtile-face small { opacity: 0.9; }
+.dtile.light-mat { color: #16202a; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55); }
+.dtile.fin-board .dtile-face strong,
+.dtile.fin-board .dtile-face small,
+.dtile.fin-weave .dtile-face strong,
+.dtile.fin-weave .dtile-face small {
+  justify-self: start;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.dtile-remove { position: absolute; top: 2px; right: 2px; }
+.dt-icon { font-size: 1.3rem; display: inline-block; }
+.verdict.breaks, .verdict.risky { color: #ffb4bb; font-weight: 700; }
+.verdict.strong, .verdict.OK { color: #b9ffd9; }
+
+/* Finishes: how each kind of material looks. */
+.fin-metal {
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.06) 0 1px, transparent 1px 3px),
+    linear-gradient(135deg, color-mix(in srgb, var(--mat) 55%, #fff) 0%, var(--mat) 35%, color-mix(in srgb, var(--mat) 75%, #000) 60%, color-mix(in srgb, var(--mat) 70%, #fff) 100%);
+}
+.fin-plastic { background: linear-gradient(160deg, color-mix(in srgb, var(--mat) 80%, #fff), var(--mat) 45%, color-mix(in srgb, var(--mat) 85%, #000)); }
+.fin-rubber { background: radial-gradient(circle at 30% 30%, color-mix(in srgb, var(--mat) 80%, #555), var(--mat) 70%); filter: saturate(0.6); }
+.fin-board {
+  background:
+    radial-gradient(circle, #d8b25a 0 2px, transparent 2.5px) 0 0 / 14px 14px,
+    repeating-linear-gradient(0deg, transparent 0 9px, rgba(216, 178, 90, 0.75) 9px 10px, transparent 10px 22px),
+    repeating-linear-gradient(90deg, transparent 0 17px, rgba(216, 178, 90, 0.55) 17px 18px, transparent 18px 30px),
+    var(--mat);
+}
+.fin-wood {
+  background:
+    repeating-linear-gradient(100deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 7px, rgba(255, 255, 255, 0.06) 7px 8px, transparent 8px 13px),
+    linear-gradient(180deg, color-mix(in srgb, var(--mat) 85%, #fff), var(--mat));
+}
+.fin-glass {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.35), color-mix(in srgb, var(--mat) 35%, transparent) 40%, rgba(255, 255, 255, 0.08));
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(2px);
+}
+.fin-weave {
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.1) 0 4px, transparent 4px 8px),
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.35) 0 4px, transparent 4px 8px),
+    var(--mat);
+}
+.fin-ceramic { background: radial-gradient(circle at 20% 30%, rgba(0, 0, 0, 0.12) 0 1px, transparent 2px) 0 0 / 9px 9px, linear-gradient(160deg, color-mix(in srgb, var(--mat) 85%, #fff), var(--mat)); }
+.fin-stone { background: radial-gradient(circle, rgba(0, 0, 0, 0.25) 0 1px, transparent 1.5px) 0 0 / 6px 6px, var(--mat); }
+.fin-fibre { background: repeating-linear-gradient(80deg, rgba(255, 255, 255, 0.12) 0 1px, transparent 1px 4px), var(--mat); }
+.fin-wafer { background: linear-gradient(90deg, rgba(255, 255, 255, 0.15) 1px, transparent 1px) 0 0 / 10px 10px, linear-gradient(0deg, rgba(255, 255, 255, 0.15) 1px, transparent 1px) 0 0 / 10px 10px, linear-gradient(135deg, #2a3a8a, var(--mat) 50%, #6a3a9a); }
+.fin-gem { background: conic-gradient(from 20deg, #fff, var(--mat), #cfe8ff, var(--mat), #fff); }
+.fin-group { background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.06) 0 8px, transparent 8px 16px), #3a4552; border: 1px dashed rgba(255, 255, 255, 0.4); }
+
+.swatch {
+  --mat: #888;
+  display: inline-block;
+  width: 26px;
+  height: 18px;
+  border-radius: 4px;
+  vertical-align: middle;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+.material-legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.legend-chip { display: inline-flex; gap: 6px; align-items: center; font-size: 0.85rem; }
+
+/* Effects once powered and checked. */
+.dtile.kind-light { box-shadow: 0 0 18px 4px rgba(255, 240, 180, 0.75), inset 0 0 10px rgba(255, 255, 255, 0.6); }
+.dtile.kind-motion .dt-icon { animation: spin 0.9s linear infinite; }
+.dtile.kind-sound .dt-icon { animation: buzz 0.3s infinite; }
+@keyframes buzz { 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+.dtile.st-burnt { filter: grayscale(0.7) brightness(0.6); }
+.dtile.v-breaks, .dtile.v-risky { outline: 2px dashed #ff5d6c; outline-offset: 2px; }
+.dtile.v-breaks::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 46%, rgba(0, 0, 0, 0.8) 47%, transparent 49%);
+  pointer-events: none;
+}
+.dtile.rusting::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 70%, rgba(150, 70, 20, 0.7) 0 6px, transparent 12px),
+    radial-gradient(circle at 70% 30%, rgba(170, 85, 30, 0.6) 0 4px, transparent 10px),
+    radial-gradient(circle at 50% 90%, rgba(120, 55, 15, 0.6) 0 8px, transparent 16px);
+  pointer-events: none;
+}
+.dtile.hot { animation: heat-glow 1.6s ease-in-out infinite alternate; }
+@keyframes heat-glow { to { box-shadow: 0 0 22px 6px rgba(255, 106, 42, 0.65); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .dtile .dt-icon, .dtile.hot { animation: none; }
+}

@@ -13,9 +13,9 @@ import httpx
 from loguru import logger
 
 from ..jsonish import extract_object
-from ..models import LabChemical, LabProject, now_ms
+from ..models import LabChemical, LabPart, LabProject, now_ms
 from ..store import StudioStore
-from . import chemicals, materials, recipes, tech
+from . import chemicals, design, materials, recipes, tech
 from .chemicals import Chemical
 from .data import LabData
 from .elements import ELEMENTS
@@ -33,8 +33,11 @@ LAB_PROMPT = (
     "bench. For anything they want to make, mix, test, or build, use the lab "
     "tool: make for a product or gadget (shampoo, soap, a flashlight), mix to "
     "pour chemicals together and see what really happens, build to power "
-    "electronics parts, material to blend and test materials, find to look "
-    "something up. The bench animates what the tool makes. Then tell the "
+    "electronics parts, material to blend and test materials, design for a "
+    "piece of technology built from named materials (a steel frame, an "
+    "aluminium case, a circuit board, copper wiring, with its electronics "
+    "parts), which is drawn in those materials and checked against physics, "
+    "find to look something up. The bench animates what the tool makes. Then tell the "
     "user briefly what is inside and what happened, with any safety "
     "warning. Never help make weapons, explosives, drugs, or poisons."
 )
@@ -334,6 +337,114 @@ class LabBench:
             )
         return result
 
+    # ------------------------------------------------------------ designs
+
+    async def design(
+        self,
+        components: list[LabData],
+        *,
+        name: str = "",
+        wet: bool = False,
+        series: bool = True,
+        save: bool = False,
+        request: str = "",
+        made_by: str = "You",
+    ) -> LabData:
+        """Check a design (saved parts are expanded into their components)
+        and, when asked, keep it in Made."""
+        blocked = refusal(f"{name} {request}")
+        if blocked:
+            raise LabError(blocked)
+        expanded = await self._expand(components)
+        result = design.check(
+            expanded, name=name or "My design", wet=wet, series=series
+        )
+        result["spec"] = expanded
+        if save:
+            return await self._save(
+                str(result["name"]), "design", request or name, result, made_by
+            )
+        return result
+
+    async def _expand(self, components: list[LabData]) -> list[LabData]:
+        expanded: list[LabData] = []
+        for entry in components:
+            saved = str(entry.get("assembly") or "").strip()
+            if not saved:
+                expanded.append(dict(entry))
+                continue
+            found = await self._store.get(LabPart, saved)
+            if found is None:
+                raise LabError("That saved part is gone.")
+            raw = entry.get("count")
+            times = int(raw) if isinstance(raw, int | float) and raw >= 1 else 1
+            inside = found.data.get("components")
+            for inner in inside if isinstance(inside, list) else []:
+                if not isinstance(inner, dict):
+                    continue
+                count = inner.get("count")
+                each = (
+                    int(count) if isinstance(count, int | float) and count >= 1 else 1
+                )
+                expanded.append({**inner, "count": each * times, "from": found.name})
+        return expanded
+
+    async def copy(self, project_id: str, *, made_by: str = "You") -> LabData:
+        """A copy of something made, to change without losing the first."""
+        row = await self._store.require(LabProject, project_id)
+        return await self._save(
+            f"Copy of {row.name}"[:80], row.kind, row.request, dict(row.data), made_by
+        )
+
+    async def keep_part(
+        self,
+        name: str,
+        *,
+        project_id: str = "",
+        components: list[LabData] | None = None,
+        note: str = "",
+    ) -> LabData:
+        """Keep a creation (a design, a build, or chosen components) as a
+        part to add to other designs."""
+        found: list[LabData] = list(components or [])
+        source = ""
+        if project_id:
+            row = await self._store.require(LabProject, project_id)
+            source = row.name
+            if row.kind == "design":
+                spec = row.data.get("spec")
+                found = (
+                    [dict(item) for item in spec if isinstance(item, dict)]
+                    if isinstance(spec, list)
+                    else []
+                )
+            elif row.kind == "build":
+                bill = row.data.get("bill")
+                found = [
+                    {"part": str(item.get("id")), "count": item.get("count") or 1}
+                    for item in (bill if isinstance(bill, list) else [])
+                    if isinstance(item, dict)
+                ]
+            else:
+                raise LabError("Keep a design or a build as a part.")
+        if not found:
+            raise LabError("There is nothing in it to keep.")
+        # Checked now, so a saved part always opens.
+        design.check(found, name=name or source or "Part")
+        part = LabPart(
+            name=(name.strip() or source or "My part")[:80],
+            data={"components": found, "source": source, "note": note[:300]},
+        )
+        await self._store.put(part)
+        return part_view(part)
+
+    async def parts_kept(self) -> list[LabData]:
+        rows = await self._store.find(LabPart, order_by="created_at DESC")
+        return [part_view(row) for row in rows]
+
+    async def delete_part(self, part_id: str) -> bool:
+        return await self._store.delete(LabPart, part_id)
+
     # ------------------------------------------------------------ projects
 
     async def _save(
@@ -357,8 +468,8 @@ class LabBench:
         request: str = "",
         made_by: str = "You",
     ) -> LabData:
-        if kind not in {"mix", "product", "material", "build"}:
-            raise LabError("Save a mix, product, material, or build.")
+        if kind not in {"mix", "product", "material", "build", "design"}:
+            raise LabError("Save a mix, product, material, build, or design.")
         return await self._save(
             name.strip() or "Untitled", kind, request, dict(data), made_by
         )
@@ -380,6 +491,20 @@ class LabBench:
         )
         await self._store.put(updated)
         return project_view(updated)
+
+
+def part_view(part: LabPart) -> LabData:
+    components = part.data.get("components")
+    listed = components if isinstance(components, list) else []
+    return {
+        "id": part.id,
+        "name": part.name,
+        "components": listed,
+        "count": len(listed),
+        "source": part.data.get("source", ""),
+        "note": part.data.get("note", ""),
+        "created_at": part.created_at,
+    }
 
 
 def project_view(project: LabProject, *, full: bool = True) -> LabData:
