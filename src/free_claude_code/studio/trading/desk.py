@@ -24,7 +24,7 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -42,6 +42,7 @@ from ..search import StudioSearch
 from ..store import StudioStore
 from ..workers import WorkerPool
 from .assessment import Holdings, recheck, resize, risk_report, risk_round
+from .breaks import Budget, Findings
 from .briefing import Briefing, build_briefing
 from .brokers.base import Broker, Holding, OrderRequest, OrderResult
 from .brokers.catalog import ensure_catalog
@@ -56,19 +57,32 @@ from .data import (
     quote_snapshot,
     sizing_snapshot,
 )
-from .debate import Debate, DebateResult
+from .debate import Debate, DebateResult, DebateTools
 from .debrief import SUGGESTIBLE, Debriefs
-from .evidence import EvidencePack, PortfolioFacts, build_pack
+from .evidence import (
+    EvidencePack,
+    PortfolioFacts,
+    build_pack,
+    price_fact,
+    reading_item,
+)
 from .forecasts import due_at, records, score
 from .indicators import true_ranges
-from .information import PROVIDER_DELAY_MINUTES, NewsItem, QuoteSnapshot
+from .information import PROVIDER_DELAY_MINUTES, InfoItem, NewsItem, QuoteSnapshot
 from .instruments import Instrument, SymbolError, parse_symbol, universe
 from .ledger import build_ledger, tax_csv
 from .log import Feed, event_view
 from .news import judge
 from .precheck import pre_trade_check
 from .providers.news import NewsFeeds
-from .quality import QualityCheck, QualityReport, assess, failed_report, profile_of
+from .quality import (
+    QualityCheck,
+    QualityReport,
+    assess,
+    failed_report,
+    freshest,
+    profile_of,
+)
 from .records import (
     OPEN_ORDER_STATUSES,
     TradeDebrief,
@@ -91,7 +105,11 @@ ACCOUNT_SECONDS = 30.0
 DEBRIEF_LATE_HOURS = 12.0
 """A session debrief more than this late (Studio was closed) is skipped."""
 ROUND_SECONDS = 45 * 60.0
-"""A round still going after this long is stopped."""
+"""A round still going after this long is stopped (two debate rounds)."""
+EXTRA_DEBATE_ROUND_SECONDS = 15 * 60.0
+"""More time for each debate round past two, for each debate in the round."""
+PAGE_EXCERPT = 600
+"""Characters kept from a page read between debate rounds."""
 MEMORY_AREA = "trading:desk"
 EXIT_RETRY_SECONDS = 600.0
 """A stop or target exit the checks blocked is tried again after this."""
@@ -423,8 +441,10 @@ class TradingDesk:
 
     async def _round(self) -> None:
         """One round: chores first (debriefs), then requests, then a scan."""
+        start = self.config()
+        debates = 1 if self._requests else start.candidates
         try:
-            async with asyncio.timeout(ROUND_SECONDS):
+            async with asyncio.timeout(round_seconds(start, debates)):
                 while self._chores:
                     chore = self._chores.pop(0)
                     try:
@@ -581,6 +601,7 @@ class TradingDesk:
         if sizing is not briefing.quote:
             briefing = replace(briefing, quote=sizing)
         evidence: JsonObject = {}
+        pack: EvidencePack | None = None
         try:
             pack = await self._evidence(
                 briefing, quality, news_problems, config, record.id
@@ -620,6 +641,14 @@ class TradingDesk:
             )
             return
         weights = {seat: found.weight for seat, found in seat_records.items()}
+        checked = briefing
+
+        async def look_up(questions: Sequence[str], budget: Budget) -> Findings:
+            return await self._look_up(checked, config, questions, budget)
+
+        async def latest() -> QuoteSnapshot | None:
+            return await self._latest(checked, config)
+
         debate = Debate(
             think=self._think,
             feed=self.feed,
@@ -631,8 +660,23 @@ class TradingDesk:
             on_stage=lambda stage, seat: self._activity.update(
                 {"stage": stage, "seat": seat, "since": now_ms()}
             ),
+            tools=DebateTools(
+                pack=pack,
+                clock=self._clock,
+                look_up=look_up,
+                latest=latest,
+                keep_pack=self._keep_pack,
+                data=config.data,
+                profile=profile_of(instrument),
+                cost_pct=_round_trip_pct(config, quality),
+            ),
         )
         result = await debate.run()
+        if result.pack_id:
+            evidence["final_id"] = result.pack_id
+        if result.evidence_text:
+            # The risk period reads the pack the decision was made on.
+            briefing = replace(briefing, evidence_text=result.evidence_text)
         await self._save_forecasts(record, briefing, result)
         data: JsonObject = {
             "briefing": {
@@ -652,10 +696,14 @@ class TradingDesk:
             "regime": briefing.regime.label,
             "quality": quality.view(),
             "evidence": evidence,
+            "debate": result.record(),
         }
         record = record.model_copy(update={"consensus": result.consensus, "data": data})
         decision = result.decision
         if decision is None or decision.action == "hold":
+            if result.blocked:
+                await self._close_round(record, "blocked", result.blocked)
+                return
             await self._close_round(
                 record, "held", decision.rationale if decision else "No decision."
             )
@@ -866,6 +914,92 @@ class TradingDesk:
             ),
             trades_today=trades,
             day_change_pct=day_change,
+        )
+
+    async def _keep_pack(self, pack: EvidencePack) -> None:
+        """Keep each new version of the pack, so every answer can be traced
+        to exactly what its seat saw."""
+        await self._store.put(pack.record())
+
+    async def _latest(
+        self, briefing: Briefing, config: DeskConfig
+    ) -> QuoteSnapshot | None:
+        """The most reliable fresh price right now, or None (never an old
+        price passed off as current)."""
+        instrument = briefing.instrument
+        snapshots = await self._data.snapshots(instrument)
+        return freshest(
+            [snap for snap in snapshots if snap.currency == briefing.quote.currency],
+            now=self._clock(),
+            limits=config.data,
+            profile=profile_of(instrument),
+        )
+
+    async def _look_up(
+        self,
+        briefing: Briefing,
+        config: DeskConfig,
+        questions: Sequence[str],
+        budget: Budget,
+    ) -> Findings:
+        """Between debate rounds: the latest prices, fresh dated news, and
+        the seats' open questions searched on the web (within the budget)."""
+        instrument = briefing.instrument
+        problems: list[str] = []
+        facts: list[InfoItem] = []
+        try:
+            snapshots = await self._data.snapshots(instrument)
+        except (ServiceError, MarketDataError, ValueError) as error:
+            problems.append(f"the prices couldn't be read again ({error})")
+        else:
+            facts = [
+                price_fact(
+                    snap,
+                    label=f"Price on {snap.provider}, read again",
+                    symbol=instrument.symbol,
+                )
+                for snap in snapshots
+                if snap.last
+            ]
+        news: list[NewsItem] = []
+        try:
+            raw, missing = await self._news.for_instrument(instrument)
+        except (ServiceError, ValueError) as error:
+            problems.append(f"dated news couldn't be read ({error})")
+        else:
+            problems.extend(missing)
+            news = judge(
+                raw,
+                symbol=instrument.symbol,
+                now=self._clock(),
+                bars=briefing.daily,
+                atr=briefing.tech.atr,
+                max_age_days=config.data.news_max_age_days,
+            )
+        reading: list[InfoItem] = []
+        searched: tuple[str, ...] = ()
+        if questions and budget.searches > 0:
+            found = await self._research.look_up(
+                instrument,
+                list(questions),
+                searches=budget.searches,
+                pages=budget.pages,
+            )
+            searched = found.queries
+            problems.extend(found.notes)
+            for hit in found.headlines:
+                text = hit.title + (f" — {hit.snippet}" if hit.snippet else "")
+                reading.append(reading_item(text, hit.url, label="Web search result"))
+            for link, piece in found.pages:
+                reading.append(
+                    reading_item(piece, link, label="From a page", limit=PAGE_EXCERPT)
+                )
+        return Findings(
+            facts=tuple(facts),
+            news=tuple(news),
+            reading=tuple(reading),
+            problems=tuple(problems),
+            searched=searched,
         )
 
     async def _close_round(self, record: TradeRound, status: str, note: str) -> None:
@@ -2437,6 +2571,21 @@ def _mode_label(config: DeskConfig) -> str:
 def _broker_name(config: DeskConfig) -> str:
     spec = BROKERS.get("paper" if config.mode == "paper" else config.broker)
     return spec.name if spec is not None else config.broker
+
+
+def round_seconds(config: DeskConfig, debates: int) -> float:
+    """How long one round may run: longer debates get more time."""
+    extra = max(0, config.debate_rounds - 2) * EXTRA_DEBATE_ROUND_SECONDS
+    return ROUND_SECONDS + extra * max(1, debates)
+
+
+def _round_trip_pct(config: DeskConfig, quality: QualityReport) -> float:
+    """Fees both ways plus the tightest bid/ask spread seen (0.1% when no
+    source gave one), in % of the position: the simulations' costs."""
+    spreads = [
+        snap.spread_pct for snap in quality.snapshots if snap.spread_pct is not None
+    ]
+    return round(2 * config.fee_pct + (min(spreads) if spreads else 0.1), 4)
 
 
 def _limits_text(config: DeskConfig) -> str:

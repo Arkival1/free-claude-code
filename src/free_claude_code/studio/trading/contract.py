@@ -18,6 +18,7 @@ and the reason is recorded. Model names and versions are filled in by code,
 never taken from the answer.
 """
 
+import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -31,9 +32,9 @@ from ..jsonish import lenient_object
 from ..llm import strip_thinking
 from .config import SeatConfig
 from .instruments import Instrument
-from .seats import Think, system_for
+from .seats import Answer, Event, Think, system_for
 
-PROMPT_VERSION = "2026-10-16.1"
+PROMPT_VERSION = "2026-10-16.2"
 """Changes whenever the contract or its prompts change; kept with every call."""
 
 ENTRY_BAND_PCT = 5.0
@@ -72,6 +73,12 @@ _ORDER_TYPES: dict[str, str] = {
 _LEVELS = {"low", "medium", "high", "unknown"}
 
 TRADES = frozenset({"long", "short"})
+ENTRY_ORDERS = frozenset({"market", "limit"})
+"""The entry orders the desk places today (stop entries come later)."""
+LIMIT_ABOVE_PRICE = 1.02
+"""A limit buy may pay at most this much over the price now (the old rule)."""
+MARKET_SLACK = 0.01
+"""A market order's entry range must include the price now, give or take 1%."""
 FACT_PREFIXES = frozenset("FMCNPR")
 """Evidence a trade can rest on: facts, market, calculations, news,
 portfolio, rules. Opinions (O) and web reading (W) can't carry a trade."""
@@ -164,6 +171,16 @@ class TradePlan(BaseModel):
         return None if value in (None, "") else _word(value, _ORDER_TYPES, "order_type")
 
 
+def _date(value: object) -> object:
+    """A YYYY-MM-DD date found in the text, or empty: never a guess."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        found = re.search(r"\d{4}-\d{2}-\d{2}", value)
+        return found.group() if found else ""
+    return value
+
+
 class SeatCall(TradePlan):
     symbol: str = Field(min_length=1, max_length=40)
     asset_class: Literal["equity", "crypto"]
@@ -171,13 +188,19 @@ class SeatCall(TradePlan):
     confidence: int = Field(ge=0, le=100)
     p_up: float = Field(ge=0, le=1)
     """The chance the price is higher at the end of the holding period."""
+    p_target: float | None = Field(default=None, ge=0, le=1)
+    """The chance the target comes before the stop."""
+    expected_move_pct: float | None = Field(default=None, ge=-95, le=500)
     main_reason: str = Field(min_length=3, max_length=400)
     thesis: str = Field(min_length=3, max_length=1500)
     prove_wrong: list[str] = Field(default_factory=list, max_length=5)
     """What would prove the call wrong (its invalidation conditions)."""
     evidence: list[str] = Field(default_factory=list, max_length=20)
     facts: list[Fact] = Field(default_factory=list, max_length=8)
-    upcoming_events: list[str] = Field(default_factory=list, max_length=6)
+    events: list[Event] = Field(default_factory=list, max_length=6)
+    """Dated events ahead (rate decisions, results, unlocks)."""
+    next_earnings: str = ""
+    """The next results date, YYYY-MM-DD, or empty when the pack doesn't say."""
     liquidity_risk: Level = "unknown"
     spread_risk: Level = "unknown"
     gap_risk: Level = "unknown"
@@ -227,7 +250,12 @@ class SeatCall(TradePlan):
     def _text(cls, value: object) -> object:
         return _clean_text(value)
 
-    @field_validator("prove_wrong", "upcoming_events", "open_questions", mode="before")
+    @field_validator("next_earnings", mode="before")
+    @classmethod
+    def _earnings(cls, value: object) -> object:
+        return _date(value)
+
+    @field_validator("prove_wrong", "open_questions", mode="before")
     @classmethod
     def _texts(cls, value: object) -> object:
         if isinstance(value, str):
@@ -246,7 +274,7 @@ class PMDecision(TradePlan):
     the hard limits in code."""
 
     action: Direction
-    size_pct: float = Field(default=100.0, gt=0, le=100)
+    size_pct: float = Field(default=100.0, ge=0, le=100)
     """The share of the size the limits allow that the PM wants."""
     confidence: int = Field(ge=0, le=100)
     p_up: float = Field(ge=0, le=1)
@@ -256,6 +284,8 @@ class PMDecision(TradePlan):
     supporting: list[str] = Field(default_factory=list, max_length=20)
     opposing: list[str] = Field(default_factory=list, max_length=20)
     prove_wrong: list[str] = Field(default_factory=list, max_length=5)
+    answers: list[Answer] = Field(default_factory=list, max_length=12)
+    """An answer to each unresolved blocking objection, by its number."""
     data_timestamp: str = Field(min_length=1, max_length=80)
 
     @field_validator("action", mode="before")
@@ -368,6 +398,34 @@ class EvidenceAttack(BaseModel):
     items: list[AttackItem] = Field(min_length=1, max_length=20)
     still_buy_without_strongest: bool
     note: str = Field(default="", max_length=600)
+
+
+class FinalCheck(BaseModel):
+    """The Risk Guardian's last word on the exact order: clear it or block it."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    verdict: Literal["clear", "block"]
+    point: str = Field(default="", max_length=400)
+
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def _verdict(cls, value: object) -> object:
+        return _word(
+            value,
+            {
+                "clear": "clear",
+                "cleared": "clear",
+                "block": "block",
+                "blocked": "block",
+            },
+            "verdict",
+        )
+
+    @field_validator("point", mode="before")
+    @classmethod
+    def _point(cls, value: object) -> object:
+        return _clean_text(value)
 
 
 # ---------------------------------------------------------------- checks
@@ -501,7 +559,12 @@ def check_decision(
     price: float,
     held: bool,
     shorts_allowed: bool,
+    order_types: frozenset[str] | None = None,
+    blocking: int = 0,
 ) -> list[str]:
+    """Everything wrong with the Portfolio Manager's decision. ``order_types``
+    are the entry orders the desk can place; ``blocking`` is how many
+    unresolved blocking objections a trade must answer."""
     found = _stamp_problem(decision.data_timestamp, pack)
     found += _ref_problems(decision.supporting, pack, "supporting")
     found += _ref_problems(decision.opposing, pack, "opposing")
@@ -516,7 +579,59 @@ def check_decision(
             found.append("a trade can't rest only on opinions (O) or web reading (W)")
         if not decision.prove_wrong:
             found.append("say what would prove the decision wrong (prove_wrong)")
+        if decision.size_pct <= 0:
+            found.append("size_pct must be above 0 for a trade")
+        if (
+            order_types is not None
+            and decision.order_type is not None
+            and decision.order_type not in order_types
+        ):
+            found.append(
+                f"the desk places {' or '.join(sorted(order_types))} entries; "
+                f"not {decision.order_type}"
+            )
+        if len(decision.answers) < blocking:
+            found.append(
+                f"answer every unresolved blocking objection by its number "
+                f"({len(decision.answers)} of {blocking} answered)"
+            )
     found += plan_problems(decision, decision.action, price=price)
+    if decision.action == "long" and None not in (
+        decision.entry_low,
+        decision.entry_high,
+        decision.order_type,
+        decision.stop_loss,
+        decision.take_profit,
+    ):
+        found += _long_order_problems(decision, price)
+    return found
+
+
+def _long_order_problems(decision: PMDecision, price: float) -> list[str]:
+    """The rules the desk's buy orders always had, kept as they were: the
+    stop below the price, the target above it, a limit no more than 2%
+    over it; and a market order's entry range must include the price."""
+    found: list[str] = []
+    stop, target = decision.stop_loss or 0.0, decision.take_profit or 0.0
+    low, high = decision.entry_low or 0.0, decision.entry_high or 0.0
+    if stop >= price:
+        found.append(f"the stop_loss ({stop:g}) must be below the price ({price:g})")
+    if target <= price:
+        found.append(
+            f"the take_profit ({target:g}) must be above the price ({price:g})"
+        )
+    if decision.order_type == "limit" and high > price * LIMIT_ABOVE_PRICE:
+        found.append(
+            f"a limit buy pays at most entry_high ({high:g}), which must be at "
+            f"or below {price * LIMIT_ABOVE_PRICE:g} (2% over the price)"
+        )
+    if decision.order_type == "market" and not (
+        low <= price * (1 + MARKET_SLACK) and high >= price * (1 - MARKET_SLACK)
+    ):
+        found.append(
+            f"a market order fills near the price ({price:g}); the entry range "
+            f"{low:g}-{high:g} must include it"
+        )
     return found
 
 
@@ -526,6 +641,12 @@ def check_review(review: GuardianReview, *, pack: PackView) -> list[str]:
     if review.verdict == "approved_smaller" and review.size_factor >= 1:
         found.append("approved_smaller needs a size_factor below 1")
     return found
+
+
+def check_final(found: FinalCheck) -> list[str]:
+    if found.verdict == "block" and not found.point.strip():
+        return ["say what is wrong with the order (point)"]
+    return []
 
 
 def check_attack(attack: EvidenceAttack, *, wanted: Sequence[str]) -> list[str]:

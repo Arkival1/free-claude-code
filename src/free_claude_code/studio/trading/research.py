@@ -35,6 +35,18 @@ class Headline:
 
 
 @dataclass(frozen=True, slots=True)
+class LookedUp:
+    """What a between-rounds look-up found: search hits and page excerpts,
+    each with its link, and what went wrong."""
+
+    queries: tuple[str, ...] = ()
+    headlines: tuple[Headline, ...] = ()
+    pages: tuple[tuple[str, str], ...] = ()
+    """(link, excerpt) for each page read."""
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ResearchPack:
     subject: str
     headlines: tuple[Headline, ...] = ()
@@ -83,6 +95,17 @@ def _queries(instrument: Instrument) -> list[str]:
     return [f"{code} crypto news today"]
 
 
+def _subject(instrument: Instrument) -> str:
+    code = instrument.code
+    if instrument.market == "asx":
+        return f"{code} ASX"
+    if instrument.market == "us":
+        return f"{code} stock"
+    if instrument.market == "dex":
+        return f"{instrument.address} token"
+    return f"{code} crypto"
+
+
 MACRO_QUERIES: dict[str, list[str]] = {
     "asx": [
         "RBA cash rate decision next meeting date",
@@ -121,6 +144,63 @@ class DeskResearch:
             f"macro:{key}",
             MACRO_SECONDS,
             lambda: self._look(f"{key} macro", MACRO_QUERIES.get(key, []), read=False),
+        )
+
+    async def look_up(
+        self,
+        instrument: Instrument,
+        questions: list[str],
+        *,
+        searches: int,
+        pages: int,
+    ) -> LookedUp:
+        """Search for the seats' open questions between debate rounds: at
+        most ``searches`` searches and ``pages`` page reads. Each query's
+        hits are kept 45 minutes, so a repeated question costs nothing."""
+        searcher = self._search()
+        if searcher is None:
+            return LookedUp(notes=("web search isn't set up",))
+        subject = _subject(instrument)
+        queries = [
+            " ".join(f"{subject} {question}".split())[:160]
+            for question in questions[: max(0, searches)]
+        ]
+        notes: list[str] = []
+        problem = searcher.problem()
+        if problem:
+            notes.append(problem)
+        headlines: dict[str, Headline] = {}
+        for query in queries:
+            key = f"query:{query.casefold()}"
+            now = self._clock()
+            kept = self._kept.get(key)
+            if kept is not None and now - kept[0] < SYMBOL_SECONDS:
+                found = kept[1].headlines
+            else:
+                try:
+                    report = await searcher.search(query, limit=5)
+                except SearchError as error:
+                    notes.append(str(error))
+                    continue
+                found = tuple(
+                    Headline(hit.title, hit.url, " ".join(hit.snippet.split()))
+                    for hit in report.hits
+                )
+                self._kept[key] = (now, ResearchPack(query, found, at=time.time()))
+            for item in found:
+                headlines.setdefault(item.url, item)
+        read: list[tuple[str, str]] = []
+        if pages > 0 and self._read_page is not None and headlines:
+            terms = [word.lower() for word in instrument.code.replace(".", " ").split()]
+            links = [item.url for item in headlines.values()][:pages]
+            texts = await asyncio.gather(*(self._page(link) for link in links))
+            for link, text in zip(links, texts, strict=True):
+                if text.strip():
+                    piece = excerpt(text, terms, size=EXCERPT_SIZE)
+                    if piece:
+                        read.append((link, piece))
+        return LookedUp(
+            tuple(queries), tuple(headlines.values())[:8], tuple(read), tuple(notes)
         )
 
     async def fresh_titles(self, instrument: Instrument) -> frozenset[str] | None:

@@ -19,6 +19,8 @@ GRADES: tuple[str, ...] = ("A", "B", "C", "D", "E", "F")
 
 REBUTTAL_ROUNDS: dict[str, int] = {"fast": 1, "balanced": 2, "max": 4}
 """The most rebuttal rounds each prediction depth allows."""
+ANSWER_LENGTH: dict[str, float] = {"fast": 0.75, "balanced": 1.0, "max": 1.5}
+"""How long each answer may be, relative to the usual length."""
 OPENING_SAMPLES: dict[str, int] = {"fast": 1, "balanced": 1, "max": 3}
 """How many times each analyst's opening is asked and averaged."""
 
@@ -167,6 +169,9 @@ class DeskConfig(BaseModel):
     scan_minutes: int = Field(default=15, ge=5, le=1440)
     candidates: int = Field(default=2, ge=1, le=5)
     depth: Depth = "balanced"
+    debate_rounds: int = Field(default=4, ge=1, le=6)
+    """How many rounds each debate runs, with research, brainstorming, and
+    simulating between them."""
     seats: list[SeatConfig] = Field(default_factory=lambda: list(DEFAULT_SEATS))
     risk: RiskLimits = Field(default_factory=RiskLimits)
     assessment: AssessmentLimits = Field(default_factory=AssessmentLimits)

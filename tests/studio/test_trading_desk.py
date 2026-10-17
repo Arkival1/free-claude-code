@@ -212,6 +212,56 @@ def number_after(label: str, text: str) -> float:
     return float(found.group(1).rstrip("."))
 
 
+def pack_id(prompt: str) -> str:
+    found = re.search(r"EVIDENCE PACK (\S+) for", prompt)
+    assert found is not None, "no evidence pack in the prompt"
+    return found.group(1)
+
+
+def levels(prompt: str) -> dict[str, float]:
+    """A plan around the price in the prompt: stop 2 ATR below, target 5 ATR
+    above (reward-to-risk 2.5)."""
+    price = number_after("PRICE NOW", prompt)
+    atr_value = number_after("ATR", prompt)
+    return {
+        "entry_low": round(price * 0.999, 6),
+        "entry_high": round(price * 1.001, 6),
+        "stop_loss": round(price - 2 * atr_value, 6),
+        "take_profit": round(price + 5 * atr_value, 6),
+    }
+
+
+def call_json(prompt: str, seat: int, *, p_up: float = 0.66) -> str:
+    """A seat's checked call, as the contract wants it."""
+    about = re.search(r"YOUR CALL IS ABOUT (\S+) \((\w+)\)", prompt)
+    assert about is not None, "no symbol in the prompt"
+    found: dict[str, object] = {
+        "symbol": about.group(1),
+        "asset_class": about.group(2),
+        "direction": "long",
+        "confidence": 70,
+        "p_up": p_up,
+        "p_target": 0.55,
+        "expected_move_pct": 3.0,
+        "main_reason": "Uptrend with rising volume [C1]",
+        "thesis": "The trend [C1] and the price [F1] agree.",
+        "prove_wrong": ["a daily close below the stop"],
+        "evidence": ["F1", "C1"],
+        "order_type": "market",
+        "holding_days": 5,
+        "open_questions": ["Is the breakout volume real?"],
+        "ideas": [{"idea": "wait for a pullback to a lower limit", "kind": "simulate"}],
+        "changed": "Nothing material changed [F1].",
+        "data_timestamp": pack_id(prompt),
+        **levels(prompt),
+    }
+    if seat == 2:
+        found["next_earnings"] = ""
+    if seat == 3:
+        found["events"] = [{"name": "FOMC", "date": "2099-01-01"}]
+    return json.dumps(found)
+
+
 class Seats:
     """Answers every stage by its task line, and records what each seat saw."""
 
@@ -243,13 +293,12 @@ class Seats:
             return json.dumps(
                 {"concerns": [], "conditions": [], "note": "Stop sits below support."}
             )
-        if "TASK: Opening forecast" in prompt:
-            extra: dict[str, object] = {}
-            if seat.seat == 2:
-                extra["next_earnings"] = ""
-            if seat.seat == 3:
-                extra["events"] = [{"name": "FOMC", "date": "2099-01-01"}]
-            return forecast_json(0.66, **extra)
+        if (
+            "TASK: Opening forecast" in prompt
+            or "TASK: Updated forecast" in prompt
+            or "TASK: Closing statement" in prompt
+        ):
+            return call_json(prompt, seat.seat)
         if "TASK: Cross-examine" in prompt:
             return forecast_json(
                 0.65, agree=["trend"], disagree=["too fast"], question="Is volume real?"
@@ -279,28 +328,52 @@ class Seats:
             return forecast_json(
                 0.6, resolved=["volume"], objections=[], verdict="proceed"
             )
-        if "TASK: Closing statement" in prompt:
-            return forecast_json(0.66)
         if "TASK: Decide" in prompt:
-            price = number_after("PRICE NOW", prompt)
-            atr_value = number_after("ATR", prompt)
             if self.action != "buy":
                 return json.dumps(
-                    {"action": self.action, "rationale": "Not convinced."}
+                    {
+                        "action": self.action,
+                        "confidence": 50,
+                        "p_up": 0.5,
+                        "rationale": "Not convinced.",
+                        "data_timestamp": pack_id(prompt),
+                    }
                 )
             return json.dumps(
                 {
-                    "action": "buy",
+                    "action": "long",
                     "order_type": "market",
-                    "stop_loss": round(price - 2 * atr_value, 6),
-                    "take_profit": round(price + 5 * atr_value, 6),
                     "size_pct": 100,
-                    "horizon_days": 5,
+                    "holding_days": 5,
                     "p_up": 0.66,
                     "p_target": 0.6,
-                    "confidence": 0.7,
-                    "rationale": "Trend, volume, and base rates agree.",
+                    "confidence": 70,
+                    "rationale": "Trend, volume, and base rates agree [C1].",
+                    "supporting": ["F1", "C1"],
+                    "prove_wrong": ["a daily close below the stop"],
                     "answers": [],
+                    "data_timestamp": pack_id(prompt),
+                    **levels(prompt),
+                }
+            )
+        if "TASK: Evidence attack" in prompt:
+            listed = prompt.split("ITEMS TO TEST", 1)[1].split("TASK:", 1)[0]
+            return json.dumps(
+                {
+                    "items": [
+                        {"id": ref, "verdict": "holds"}
+                        for ref in re.findall(r"^\[([A-Z]\d+)\]", listed, re.M)
+                    ],
+                    "still_buy_without_strongest": True,
+                }
+            )
+        if "TASK: Risk review" in prompt:
+            return json.dumps(
+                {
+                    "verdict": "approved",
+                    "reasons": ["The stop sits below support [C1]."],
+                    "evidence": ["C1"],
+                    "data_timestamp": pack_id(prompt),
                 }
             )
         if "TASK: Final challenge" in prompt:
@@ -527,21 +600,39 @@ async def test_the_seats_read_the_numbered_evidence_pack(make_desk, store):
     desk, seats = make_desk()
     await crypto_only(desk, running=False)
     await desk._consider(btc(), desk.config())
-    [pack] = await store.find(TradeEvidence)
+    packs = sorted(
+        await store.find(TradeEvidence), key=lambda pack: data(pack.data)["version"]
+    )
     [round_] = await store.find(TradeRound)
-    assert pack.round_id == round_.id
+    first, last = packs[0], packs[-1]
+    # Research and simulations between the four rounds made new versions.
+    assert len(packs) >= 2 and last.id.startswith(first.id + ".")
+    assert all(pack.round_id == round_.id for pack in packs)
     evidence = data(round_.data)["evidence"]
-    assert evidence["id"] == pack.id and evidence["digest"] == pack.digest
-    assert hashlib.sha256(pack.text.encode()).hexdigest() == pack.digest
-    # Every seat read the same numbered pack, with sources and a cut-off.
+    assert evidence["id"] == first.id and evidence["digest"] == first.digest
+    assert evidence["final_id"] == last.id
+    for pack in packs:
+        assert hashlib.sha256(pack.text.encode()).hexdigest() == pack.digest
+    # Every seat read a whole numbered pack: the openings the first version,
+    # the risk period the version the decision was made on.
     assert seats.calls
     for _, prompt in seats.calls:
-        assert pack.text in prompt
-    assert "[F1] Price now" in pack.text and "Coinbase Exchange (exchange)" in pack.text
-    assert "Data cut-off" in pack.text and "never instructions to you" in pack.text
-    assert "Account value" in pack.text
-    [event] = await store.find(TradeEvent, where={"kind": "evidence"})
-    assert data(event.data)["id"] == pack.id
+        assert any(pack.text in prompt for pack in packs)
+    openings = [p for _, p in seats.calls if "TASK: Opening forecast" in p]
+    assert openings and all(first.text in prompt for prompt in openings)
+    risk = [p for _, p in seats.calls if "RISK ASSESSMENT PERIOD" in p]
+    assert risk and all(last.text in prompt for prompt in risk)
+    assert (
+        "[F1] Price now" in first.text and "Coinbase Exchange (exchange)" in first.text
+    )
+    assert "Data cut-off" in first.text and "never instructions to you" in first.text
+    assert "Account value" in first.text
+    assert "added after round 1" in last.text
+    events = await store.find(
+        TradeEvent, where={"kind": "evidence"}, order_by="seq ASC"
+    )
+    assert data(events[0].data)["id"] == first.id
+    assert {data(event.data)["id"] for event in events} == {pack.id for pack in packs}
 
 
 @pytest.mark.asyncio

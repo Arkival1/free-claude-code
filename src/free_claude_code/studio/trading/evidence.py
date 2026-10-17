@@ -103,6 +103,15 @@ class EvidencePack:
     text: str
     digest: str
     reading: tuple[InfoItem, ...] = field(default=())
+    label: str = ""
+    """What the symbol is (US share, coin, ...), for the heading."""
+    quality_line: str = ""
+    """The data checks' score and summary, as shown at the top."""
+    base_id: str = ""
+    """The first version's id; later versions are ``{base_id}.{version}``."""
+    version: int = 1
+    added: tuple[tuple[str, int], ...] = ()
+    """Items added between debate rounds: (number, round)."""
 
     @property
     def refs(self) -> frozenset[str]:
@@ -121,6 +130,16 @@ class EvidencePack:
             if story.ref == wanted:
                 return story
         return None
+
+    def line(self, ref: str) -> str:
+        """One item exactly as the seats see it in the pack."""
+        found = self.find(ref)
+        added = dict(self.added)
+        if isinstance(found, NewsItem):
+            return _news_line(found, added=added.get(found.ref))
+        if isinstance(found, InfoItem):
+            return _item_line(found, added=added.get(found.ref))
+        return f"[{ref}] (not in this pack)"
 
     def for_seat(self, record_line: str = "") -> str:
         """The pack plus the seat's own track record (seen by that seat only)."""
@@ -142,6 +161,9 @@ class EvidencePack:
             "reading": [item.view() for item in self.reading],
             "missing": list(self.missing),
             "warnings": list(self.warnings),
+            "base_id": self.base_id or self.id,
+            "version": self.version,
+            "added": dict(self.added),
         }
 
     def record(self) -> TradeEvidence:
@@ -707,12 +729,14 @@ def build_pack(
 
     warnings = tuple(check.line() for check in quality.checks if not check.ok)
     pack = pack_id or new_id("evp")
+    label = _label(briefing)
+    quality_line = f"DATA QUALITY: {quality.score}/100. {quality.summary()}"
     text = _render(
         pack,
         symbol=symbol,
-        label=_label(briefing),
+        label=label,
         cutoff=now,
-        quality=quality,
+        quality_line=quality_line,
         items=numbered,
         news=news,
         reading=reading,
@@ -732,6 +756,120 @@ def build_pack(
         text=text,
         digest=hashlib.sha256(text.encode()).hexdigest(),
         reading=tuple(reading),
+        label=label,
+        quality_line=quality_line,
+        base_id=pack,
+    )
+
+
+_NUMBER = re.compile(r"([A-Z])(\d+)$")
+
+
+def extend_pack(
+    pack: EvidencePack,
+    *,
+    now: float,
+    round_no: int,
+    facts: Sequence[InfoItem] = (),
+    calcs: Sequence[InfoItem] = (),
+    news: Sequence[NewsItem] = (),
+    reading: Sequence[InfoItem] = (),
+    missing: Sequence[str] = (),
+) -> EvidencePack:
+    """A new version of the pack with what was found after debate round
+    ``round_no``: earlier items keep their numbers, new ones continue the
+    count and are marked "added after round N". The new version has its own
+    id, cut-off, and hash, so an answer can be tied to exactly what its seat
+    saw."""
+    counts: dict[str, int] = {}
+    for ref in pack.refs:
+        found = _NUMBER.match(ref)
+        if found is not None:
+            prefix, number = found.group(1), int(found.group(2))
+            counts[prefix] = max(counts.get(prefix, 0), number)
+    refs = Refs(counts)
+    new_items = [item.with_ref(refs.next("F")) for item in facts]
+    new_items += [item.with_ref(refs.next("C")) for item in calcs]
+    new_news = [_with_ref(story, refs.next("N")) for story in news]
+    new_reading = [item.with_ref(refs.next("W")) for item in reading]
+    added = dict(pack.added)
+    for ref in (
+        *(item.ref for item in new_items),
+        *(story.ref for story in new_news),
+        *(item.ref for item in new_reading),
+    ):
+        added[ref] = round_no
+    kept_missing = [
+        entry
+        for entry in pack.missing
+        if not (new_news and entry.startswith("Dated news:"))
+    ]
+    all_missing = (*kept_missing, *missing)
+    base = pack.base_id or pack.id
+    version = pack.version + 1
+    pack_id = f"{base}.{version}"
+    items = (*pack.items, *new_items)
+    stories = (*pack.news, *new_news)
+    pages = (*pack.reading, *new_reading)
+    added_pairs = tuple(sorted(added.items()))
+    text = _render(
+        pack_id,
+        symbol=pack.symbol,
+        label=pack.label,
+        cutoff=now,
+        quality_line=pack.quality_line,
+        items=items,
+        news=stories,
+        reading=pages,
+        missing=all_missing,
+        added=dict(added_pairs),
+    )
+    return replace(
+        pack,
+        id=pack_id,
+        cutoff=now,
+        items=items,
+        news=stories,
+        missing=tuple(all_missing),
+        text=text,
+        digest=hashlib.sha256(text.encode()).hexdigest(),
+        reading=pages,
+        base_id=base,
+        version=version,
+        added=added_pairs,
+    )
+
+
+def price_fact(snap: QuoteSnapshot, *, label: str, symbol: str) -> InfoItem:
+    """One source's price as a fact, with its source, time, and flags."""
+    return InfoItem(
+        kind="fact",
+        topic="price",
+        label=label,
+        value=snap.last,
+        source=_source(snap),
+        as_of=snap.timestamp,
+        symbol=symbol,
+        unit=snap.currency,
+        realtime=snap.realtime,
+        status=_status(snap.delayed_minutes),
+        note=_snapshot_note(snap),
+    )
+
+
+def reading_item(
+    text: str, url: str, *, label: str, limit: int = MAX_FENCED
+) -> InfoItem:
+    """Web text as undated reading, fenced: never a fact."""
+    return InfoItem(
+        kind="opinion",
+        topic="reading",
+        label=label,
+        value=fence(text, limit=limit),
+        source=_host(url) or "web search",
+        as_of=None,
+        source_id=url,
+        status="undated",
     )
 
 
@@ -753,17 +891,19 @@ def _render(
     symbol: str,
     label: str,
     cutoff: float,
-    quality: QualityReport,
+    quality_line: str,
     items: Sequence[InfoItem],
     news: Sequence[NewsItem],
     reading: Sequence[InfoItem],
     missing: Sequence[str],
+    added: dict[str, int] | None = None,
 ) -> str:
+    added = added or {}
     lines = [
         f"EVIDENCE PACK {pack_id} for {symbol} ({label}). Data cut-off "
         f"{iso(cutoff)}: nothing after this time was used.",
         PACK_RULES,
-        f"DATA QUALITY: {quality.score}/100. {quality.summary()}",
+        quality_line,
     ]
     if missing:
         lines.append("MISSING (not known; don't assume):")
@@ -778,10 +918,12 @@ def _render(
         repeat = brief and previous.get(prefix) == item.source
         previous[prefix] = item.source
         by_prefix.setdefault(prefix, []).append(
-            _item_line(item, source=not repeat, time=not brief)
+            _item_line(
+                item, source=not repeat, time=not brief, added=added.get(item.ref)
+            )
         )
-    by_prefix["N"] = [_news_line(story) for story in news]
-    by_prefix["W"] = [_item_line(item) for item in reading]
+    by_prefix["N"] = [_news_line(story, added=added.get(story.ref)) for story in news]
+    by_prefix["W"] = [_item_line(item, added=added.get(item.ref)) for item in reading]
     for prefix, title in SECTIONS:
         rows = by_prefix.get(prefix)
         if rows:
@@ -790,7 +932,13 @@ def _render(
     return "\n".join(lines)
 
 
-def _item_line(item: InfoItem, *, source: bool = True, time: bool = True) -> str:
+def _item_line(
+    item: InfoItem,
+    *,
+    source: bool = True,
+    time: bool = True,
+    added: int | None = None,
+) -> str:
     where = [item.source] if source else []
     if item.realtime is True:
         where.append("real time")
@@ -803,11 +951,13 @@ def _item_line(item: InfoItem, *, source: bool = True, time: bool = True) -> str
             where.append("time not given")
     if item.note:
         where.append(item.note)
+    if added is not None:
+        where.append(f"added after round {added}")
     tail = f" ({'; '.join(where)})" if where else ""
     return f"[{item.ref}] {item.text()}{tail}"
 
 
-def _news_line(story: NewsItem) -> str:
+def _news_line(story: NewsItem, *, added: int | None = None) -> str:
     flags = [
         story.source,
         story.source_kind,
@@ -821,6 +971,8 @@ def _news_line(story: NewsItem) -> str:
         flags.append("ASX price-sensitive")
     if story.duplicates:
         flags.append(f"told {story.duplicates + 1} times")
+    if added is not None:
+        flags.append(f"added after round {added}")
     return f"[{story.ref}] {fence(story.headline)} ({'; '.join(flags)})"
 
 
@@ -844,7 +996,10 @@ def _status(delayed_minutes: int) -> DataStatus:
 
 
 def _host(url: str) -> str:
-    return (urlsplit(url).hostname or "").removeprefix("www.")
+    try:
+        return (urlsplit(url).hostname or "").removeprefix("www.")
+    except ValueError:
+        return ""
 
 
 def _label(briefing: Briefing) -> str:

@@ -545,6 +545,25 @@ def _venue(venue: VenueStatus) -> QualityCheck:
     return QualityCheck("venue", name, True, True, measured="online")
 
 
+def freshest(
+    snapshots: Sequence[QuoteSnapshot],
+    *,
+    now: float,
+    limits: DataQualityLimits,
+    profile: str,
+) -> QuoteSnapshot | None:
+    """The most reliable price that is fresh right now, or None when no
+    source has a fresh one (never an old price passed off as current)."""
+    priced = [snap for snap in snapshots if snap.last]
+    best = _preferred(priced, now, limits, profile)
+    if best is None:
+        return None
+    age = best.age_s(now)
+    if age is None or best.in_future(now) or age > _age_limit(best, limits, profile):
+        return None
+    return best
+
+
 def _age_limit(snap: QuoteSnapshot, limits: DataQualityLimits, profile: str) -> float:
     if snap.delayed_minutes:
         return snap.delayed_minutes * 60 + limits.delayed_grace_s

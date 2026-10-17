@@ -38,9 +38,9 @@
     ["live_auto", "Live: automatic", "Real orders go through on their own, still inside every hard limit."],
   ];
   const DEPTHS = [
-    ["fast", "Fast", "Openings, pre-mortem, 1 rebuttal round, decision. Fewest model calls."],
-    ["balanced", "Balanced", "Adds cross-examination, up to 2 rebuttal rounds, and closing statements."],
-    ["max", "Max", "Each opening asked 3 times and averaged, up to 4 rebuttal rounds. Best with server models."],
+    ["fast", "Fast", "Shorter answers, 1 rebuttal round, 1 web search between rounds, no closing statements. Fewest model calls."],
+    ["balanced", "Balanced", "Cross-examination, up to 2 rebuttal rounds, closing statements, 3 web searches and 1 page read between rounds."],
+    ["max", "Max", "Longest answers, each opening asked 3 times and averaged, up to 4 rebuttal rounds, 2 page reads between rounds. Best with server models."],
   ];
   const MARKETS = [
     ["asx", "ASX shares"],
@@ -1051,6 +1051,7 @@
     watch.value = (config.watchlist || []).join(", ");
     const scan = el("input", { type: "number", min: "5", max: "1440", value: String(config.scan_minutes), "aria-label": "Scan every (minutes)" });
     const candidates = el("input", { type: "number", min: "1", max: "5", value: String(config.candidates), "aria-label": "Debates per scan" });
+    const rounds = el("input", { type: "number", min: "1", max: "6", value: String(config.debate_rounds ?? 4), "aria-label": "Debate rounds" });
     const depth = el(
       "div",
       { class: "mode-choices" },
@@ -1066,7 +1067,8 @@
       el("h2", { text: "Markets and prediction depth" }),
       el("div", { class: "row wrap" }, toggles),
       el("label", {}, ["Watchlist (always scanned first)", watch]),
-      el("div", { class: "row wrap" }, [el("label", {}, ["Scan every (min) ", scan]), el("label", {}, ["Debates per scan ", candidates])]),
+      el("div", { class: "row wrap" }, [el("label", {}, ["Scan every (min) ", scan]), el("label", {}, ["Debates per scan ", candidates]), el("label", {}, ["Debate rounds ", rounds])]),
+      el("p", { class: "muted", text: "Each debate runs this many rounds. Between rounds the seats' questions are researched, their ideas sorted, and their plans simulated on past prices (not a prediction)." }),
       depth,
       el("button", {
         class: "primary",
@@ -1079,6 +1081,7 @@
             watchlist: watch.value,
             scan_minutes: Number(scan.value),
             candidates: Number(candidates.value),
+            debate_rounds: Number(rounds.value),
             depth: depth.querySelector("input:checked")?.value || "balanced",
           });
         },
