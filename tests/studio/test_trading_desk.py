@@ -2,11 +2,14 @@
 the debate, the risk period, cooling-off, the hard limits, the account check,
 and the order modes; plus exits, debriefs, the kill switch, and restarts."""
 
+import csv
 import hashlib
+import io
 import json
 import math
 import re
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +20,7 @@ import pytest
 
 from free_claude_code.studio.connectors import ConnectorStore
 from free_claude_code.studio.memory import MemoryService
+from free_claude_code.studio.models import now_ms
 from free_claude_code.studio.resilience import ServiceError
 from free_claude_code.studio.trading.brokers import registry
 from free_claude_code.studio.trading.brokers.base import (
@@ -30,10 +34,13 @@ from free_claude_code.studio.trading.brokers.base import (
 from free_claude_code.studio.trading.brokers.registry import BrokerSpec, KeyField
 from free_claude_code.studio.trading.config import LIVE_AUTO_PHRASE, SeatConfig
 from free_claude_code.studio.trading.data import Quote
+from free_claude_code.studio.trading.decisions import config_version, decision_id
 from free_claude_code.studio.trading.desk import ASKED, TradingDesk, TradingError
 from free_claude_code.studio.trading.instruments import Instrument, parse_symbol
 from free_claude_code.studio.trading.records import (
+    TradeAudit,
     TradeDebrief,
+    TradeDecision,
     TradeEvent,
     TradeEvidence,
     TradeForecast,
@@ -1112,4 +1119,167 @@ async def test_the_tax_export_and_summary(make_desk, store):
     assert text.count("\n") == 2 and "BTC" in text
     summary = data(await desk.summary())
     assert summary["closed_trades"] == 1
+    await desk.close()
+
+
+# ------------------------------------------------------------ decision records and audit
+
+
+@pytest.mark.asyncio
+async def test_a_trade_keeps_a_complete_decision_record(make_desk, store):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    [record] = await store.find(TradeDecision)
+    [round_] = await store.find(TradeRound)
+    assert record.id == decision_id(round_.id) and record.round_id == round_.id
+    assert record.status == "position_open" and record.order_submitted
+    assert record.config_version == config_version(desk.config())
+    assert record.pack_id and record.order_id
+    found = data(record.data)
+    for key in (
+        "cycle_id",
+        "evidence",
+        "data_sources",
+        "data_timestamps",
+        "facts",
+        "calculations",
+        "seat_outputs",
+        "conflicts",
+        "final_decision",
+        "risk_checks",
+        "models",
+        "prompt_version",
+        "transcript",
+    ):
+        assert key in found, key
+    assert {"Coinbase Exchange", "Yahoo Finance"} <= set(found["data_sources"])
+    assert found["facts"] and found["calculations"]
+    assert set(found["seat_outputs"]["closing"]) == {"1", "2", "3", "4"}
+    assert found["seat_outputs"]["plan"]["action"] == "long"
+    assert found["final_decision"]["action"] == "buy"
+    assert any(rule["rule"].startswith("Stop far") for rule in found["risk_checks"])
+    timing = found["timing"]
+    for key in (
+        "cycle_start",
+        "pack_created",
+        "seat_responses",
+        "final_decision",
+        "order_decision",
+        "final_check",
+        "submitted",
+        "fill",
+    ):
+        assert timing.get(key), key
+    assert timing["cycle_start"] <= timing["final_decision"] <= timing["fill"]
+    prices = found["prices"]
+    for key in ("analysis", "final_check", "submission", "fill"):
+        assert prices.get(key), key
+    assert any(line["kind"] == "decision" for line in found["transcript"])
+
+    # Closing the position records the result.
+    position = await store.get(TradePosition, "paper:BTC")
+    assert position is not None
+    await store.put(position.model_copy(update={"stop_loss": position.avg_price * 2}))
+    await desk.tick()
+    record = await store.get(TradeDecision, record.id)
+    assert record is not None and record.status == "position_closed"
+    assert record.pnl is not None and data(record.data)["result"]["exit"]
+    # The record can be found again by symbol, status, and words.
+    assert await desk.decisions(symbol="BTC", status="position_closed")
+    assert await desk.decisions(text="btc closed")
+    assert not await desk.decisions(symbol="ETH")
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_information_to_a_no_trade_with_its_record(make_desk, store):
+    """The end-to-end information run: data in, quality checked, a pack
+    built, all five seats asked, a conflict found, the checks run, no trade,
+    and the complete record kept."""
+    desk, seats = make_desk(Seats(action="no_trade"))
+    await crypto_only(desk)
+    KRAKEN_SHIFT["factor"] = 1.01
+    try:
+        await desk._consider(btc(), desk.config())
+    finally:
+        KRAKEN_SHIFT["factor"] = 1.0
+    assert {seat for seat, _ in seats.calls} == {1, 2, 3, 4, 5}
+    [record] = await store.find(TradeDecision)
+    assert record.status == "no_trade" and not record.order_submitted
+    found = data(record.data)
+    assert any(item["kind"] == "price" for item in found["conflicts"])
+    assert found["quality"]["summary"] and found["evidence"]["first_id"]
+    assert found["final_decision"]["action"] == "hold"
+    assert found["seat_outputs"]["plan"]["action"] == "no_trade"
+    assert found["transcript"] and found["timing"]["final_decision"]
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stale_decision_is_discarded_and_analysed_again(
+    make_desk, store, monkeypatch
+):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    real = desk._latest
+
+    async def moved(briefing, config):
+        found = await real(briefing, config)
+        assert found is not None
+        # 1.2%: past the 1% entry band, but not so far that the evidence
+        # test fails the price first (it fails at 1.5%).
+        return replace(found, last=(found.last or 0) * 1.012)
+
+    monkeypatch.setattr(desk, "_latest", moved)
+    await desk._consider(btc(), desk.config())
+    [round_] = await store.find(TradeRound)
+    assert round_.status == "discarded" and "moved" in round_.note
+    [record] = await store.find(TradeDecision)
+    assert record.status == "discarded"
+    assert desk._rechecks == ["BTC"]
+    # Analysed again at most once in a while.
+    await desk._consider(btc(), desk.config())
+    assert desk._rechecks == ["BTC"]
+
+    # A decision that took too long is discarded too.
+    old = TradeRound(symbol="BTC", created_at=now_ms() - 2 * 3600 * 1000)
+    why = await desk._stale(data(None), desk.config(), old)
+    assert "took 120 min" in why
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_the_audit_trail_keeps_orders_settings_and_the_kill_switch(
+    make_desk, store
+):
+    desk, _ = make_desk()
+    await crypto_only(desk)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._consider(btc(), desk.config())
+    await desk.tick()
+    await desk.update_config({"candidates": 3}, on_pc=True)
+    await desk.kill()
+    kinds = {line.kind for line in await store.find(TradeAudit)}
+    for kind in (
+        "decision",
+        "engine",
+        "order",
+        "fill",
+        "check",
+        "cooling",
+        "settings",
+        "kill",
+    ):
+        assert kind in kinds, kind
+    settings = (await desk.audit_trail(kind="settings"))[0]
+    assert settings["config_version"] == config_version(desk.config())
+    assert await desk.audit_trail(kind="order", symbol="BTC")
+    assert await desk.audit_trail(text="kill switch")
+    table = list(csv.reader(io.StringIO(await desk.audit_csv(kind="fill"))))
+    assert table[0][:3] == ["time_utc", "kind", "symbol"] and len(table) >= 2
+    assert all(row[1] == "fill" for row in table[1:])
     await desk.close()

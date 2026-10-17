@@ -208,6 +208,7 @@ class DebateResult:
     """The evidence pack version the decision was made on."""
     evidence_text: str = ""
     """That version's text, for the steps after the debate."""
+    final_pack: EvidencePack | None = None
     calls: list[JsonObject] = field(default_factory=list)
     """Every checked answer: who, which model, repaired or left out, why."""
     breaks: list[JsonObject] = field(default_factory=list)
@@ -540,6 +541,7 @@ class Debate:
         self.result.rounds = rounds
         self.result.pack_id = self._pack.id if self._pack is not None else ""
         self.result.evidence_text = self._brief.evidence_text
+        self.result.final_pack = self._pack
         self._settle_dates()
         return self.result
 

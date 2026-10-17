@@ -20,6 +20,8 @@ After FCC restarts, only paper trading resumes by itself.
 
 import asyncio
 import contextlib
+import csv
+import io
 import json
 import os
 import time
@@ -58,7 +60,7 @@ from .brokers.paper import PaperBroker
 from .brokers.registry import BROKERS, BrokerSetupError, check_values, make_broker
 from .config import LIVE_AUTO_PHRASE, DeskConfig, DeskConfigStore
 from .conflicts import applied, data_conflicts, seat_conflicts
-from .contract import PMDecision
+from .contract import PROMPT_VERSION, PMDecision
 from .data import (
     DATA_LIMITS,
     MarketData,
@@ -69,6 +71,7 @@ from .data import (
 )
 from .debate import Debate, DebateResult, DebateTools
 from .debrief import SUGGESTIBLE, Debriefs
+from .decisions import DecisionBook, audit_view, config_version, decision_view
 from .engine import BuyFacts, buy_rules
 from .engine import blockers as rule_blockers
 from .evidence import (
@@ -100,6 +103,7 @@ from .quality import (
 from .records import (
     OPEN_ORDER_STATUSES,
     TradeDebrief,
+    TradeDecision,
     TradeForecast,
     TradeOrder,
     TradePosition,
@@ -118,6 +122,9 @@ from .stress import StressInput, StressReport, stress_test
 TICK_SECONDS = 10.0
 ASKED = "asked by you"
 """The tag on a debate the owner asked for."""
+FRESH = "fresh analysis after a stale decision"
+RECHECK_SECONDS = 2 * 3600.0
+"""A symbol is analysed again after a stale decision at most this often."""
 SCORE_SECONDS = 300.0
 ACCOUNT_SECONDS = 30.0
 DEBRIEF_LATE_HOURS = 12.0
@@ -191,6 +198,10 @@ class TradingDesk:
             wall=clock,
         )
         self.feed = Feed(store, root / "logs")
+        self._decisions = DecisionBook(store, clock)
+        self._rechecks: list[str] = []
+        """Symbols whose decision went stale: analysed again from scratch."""
+        self._rechecked: dict[str, float] = {}
         self._research = DeskResearch(search=search, read_page=read_page)
         self._news = NewsFeeds(self._web, wall=clock)
         self._debriefs = Debriefs(
@@ -220,6 +231,7 @@ class TradingDesk:
 
     def _save(self, config: DeskConfig) -> None:
         self._configs.save(config)
+        self.feed.config_version = config_version(config)
 
     def _state(self) -> dict[str, object]:
         try:
@@ -252,9 +264,27 @@ class TradingDesk:
             wanted = self._check_mode(current, wanted, on_pc=on_pc, confirm=confirm)
         self._save(wanted)
         changed = sorted(key for key in values if key not in {"accounts", "running"})
+        version = config_version(wanted)
         await self.feed.emit(
-            "info", f"Settings changed: {', '.join(changed) or 'none'}."
+            "settings",
+            f"Settings changed: {', '.join(changed) or 'none'} (settings version "
+            f"{version}).",
+            data={"changed": list(changed), "config_version": version},
         )
+        if wanted.mode != current.mode or wanted.broker != current.broker:
+            await self.feed.emit(
+                "mode",
+                f"Mode changed from {current.mode} on {current.broker} to "
+                f"{wanted.mode} on {wanted.broker}"
+                + (" from the PC" if on_pc else "")
+                + f" (settings version {version}).",
+                data={
+                    "from": {"mode": current.mode, "broker": current.broker},
+                    "to": {"mode": wanted.mode, "broker": wanted.broker},
+                    "config_version": version,
+                    "on_pc": on_pc,
+                },
+            )
         return wanted
 
     def _check_mode(
@@ -351,10 +381,11 @@ class TradingDesk:
                 await self._exit(position, "the kill switch", config, force=True)
                 sold += 1
         await self.feed.emit(
-            "info",
+            "kill",
             f"Kill switch: {cancelled} orders cancelled"
             + (f", {sold} holdings sold" if flatten else "")
             + ".",
+            data={"cancelled": cancelled, "sold": sold, "flatten": flatten},
         )
         return await self.status()
 
@@ -463,7 +494,8 @@ class TradingDesk:
         now = self._clock()
         due = now - self._last_scan >= config.scan_minutes * 60
         free = self._round_task is None or self._round_task.done()
-        if free and (self._requests or self._chores or (config.running and due)):
+        waiting = self._requests or self._chores or (config.running and self._rechecks)
+        if free and (waiting or (config.running and due)):
             if due and config.running:
                 self._last_scan = now
             self._round_task = asyncio.ensure_future(self._round())
@@ -487,6 +519,9 @@ class TradingDesk:
                 if self._requests:
                     symbol = self._requests.pop(0)
                     await self._debate_symbol(symbol, config)
+                elif self._rechecks and config.running:
+                    symbol = self._rechecks.pop(0)
+                    await self._debate_symbol(symbol, config, tags=(FRESH,))
                 elif config.running:
                     await self._scan_and_debate(config)
         except TimeoutError:
@@ -571,7 +606,9 @@ class TradingDesk:
         for candidate in candidates:
             await self._consider(candidate, config)
 
-    async def _debate_symbol(self, symbol: str, config: DeskConfig) -> None:
+    async def _debate_symbol(
+        self, symbol: str, config: DeskConfig, *, tags: tuple[str, ...] = (ASKED,)
+    ) -> None:
         try:
             instrument = parse_symbol(symbol)
         except SymbolError as error:
@@ -580,7 +617,7 @@ class TradingDesk:
         broker = self._broker(config)
         held = {holding.symbol for holding in await self._holdings(broker)}
         await self._consider(
-            Candidate(instrument, 0.0, (ASKED,), held=instrument.symbol in held),
+            Candidate(instrument, 0.0, tags, held=instrument.symbol in held),
             config,
         )
 
@@ -590,6 +627,8 @@ class TradingDesk:
             symbol=instrument.symbol, market=instrument.market, depth=config.depth
         )
         await self._store.put(record)
+        self.feed.config_version = config_version(config)
+        await self._decisions.start(record, config=config, tags=candidate.tags)
         self._activity = {
             "stage": "Briefing",
             "symbol": instrument.symbol,
@@ -732,6 +771,31 @@ class TradingDesk:
             "debate": result.record(),
         }
         record = record.model_copy(update={"consensus": result.consensus, "data": data})
+        await self._decisions.update(
+            record.id,
+            pack_id=result.pack_id or str(evidence.get("id") or ""),
+            data=_decision_data(briefing, quality, evidence, result, self._clock()),
+        )
+        try:
+            await self._settle_round(
+                record, briefing, result, position, config, quality
+            )
+        finally:
+            await self._decisions.transcript(
+                record.id, await self.feed.for_round(record.id)
+            )
+
+    async def _settle_round(
+        self,
+        record: TradeRound,
+        briefing: Briefing,
+        result: DebateResult,
+        position: TradePosition | None,
+        config: DeskConfig,
+        quality: QualityReport,
+    ) -> None:
+        """Act on the debate: hold, sell what we hold, or take a buy through
+        the freshness check and the risk period."""
         decision = result.decision
         if decision is None or decision.action == "hold":
             if result.blocked:
@@ -765,7 +829,63 @@ class TradingDesk:
                 record, "blocked", f"Buy decided, but {quality.summary()}"
             )
             return
+        stale = await self._stale(briefing, config, record)
+        if stale:
+            # An old decision never places a new order: it is set aside and
+            # the symbol is analysed again from scratch.
+            await self._close_round(record, "discarded", f"Decision discarded: {stale}")
+            queued = self._recheck(briefing.symbol)
+            await self.feed.emit(
+                "stale",
+                f"Decision discarded: {stale}"
+                + (
+                    " A fresh analysis is queued."
+                    if queued
+                    else " It was re-analysed recently, so the next scan decides."
+                ),
+                round_id=record.id,
+                symbol=briefing.symbol,
+            )
+            return
         await self._buy(record, briefing, result, decision, config, quality)
+
+    async def _stale(
+        self, briefing: Briefing, config: DeskConfig, record: TradeRound
+    ) -> str:
+        """Why a buy decision is too old to act on, or "": it took longer than
+        the limit, or the price left the band since the analysis."""
+        minutes = (self._clock() - record.created_at / 1000) / 60
+        limit = config.assessment.max_decision_minutes
+        if minutes > limit:
+            return f"the decision took {minutes:.0f} min (limit {limit:g} min)."
+        latest: QuoteSnapshot | None = None
+        try:
+            latest = await self._latest(briefing, config)
+        except (MarketDataError, ServiceError, ValueError) as error:
+            logger.info("Trading: no price to check the decision against: {}", error)
+        if latest is None or not latest.last:
+            return "there was no fresh price to check the decision against."
+        moved = abs(latest.last / briefing.price - 1) * 100
+        band = config.assessment.entry_band_pct
+        await self._decisions.update(
+            record.id,
+            data={
+                "prices": {"final_decision": latest.last},
+                "timing": {"freshness_check": self._clock()},
+            },
+        )
+        if moved > band:
+            return f"the price moved {moved:.2f}% since the analysis (band {band:g}%)."
+        return ""
+
+    def _recheck(self, symbol: str) -> bool:
+        now = self._clock()
+        if now - self._rechecked.get(symbol, -RECHECK_SECONDS) < RECHECK_SECONDS:
+            return False
+        self._rechecked[symbol] = now
+        if symbol not in self._rechecks:
+            self._rechecks.append(symbol)
+        return True
 
     async def _check_data(
         self,
@@ -1356,6 +1476,7 @@ class TradingDesk:
                 update={"status": status, "note": note[:500], "updated_at": now_ms()}
             )
         )
+        await self._decisions.closed(record.id, status, note)
 
     async def _save_forecasts(
         self, record: TradeRound, briefing: Briefing, result: DebateResult
@@ -1530,6 +1651,24 @@ class TradingDesk:
         data = dict(record.data)
         data["assessment"] = assessment.view()
         record = record.model_copy(update={"data": data})
+        await self._decisions.update(
+            record.id,
+            data={
+                "risk_checks": assessment.rules,
+                "risk_blockers": list(assessment.blockers),
+                "stress_test": assessment.stress_test,
+                "scorecard": assessment.scorecard,
+                "assessment": {
+                    "grade": assessment.grade,
+                    "qty": assessment.qty,
+                    "value": assessment.value,
+                    "at_risk": assessment.at_risk,
+                    "reward_risk": assessment.reward_risk,
+                    "confidence": assessment.confidence,
+                },
+                "timing": {"order_decision": self._clock()},
+            },
+        )
         if not assessment.passed:
             why = (
                 "deferred by the Portfolio Manager"
@@ -1614,6 +1753,13 @@ class TradingDesk:
             quote = None
             with contextlib.suppress(MarketDataError):
                 quote = await self._data.quote(instrument)
+            await self._decisions.update(
+                order.round_id,
+                data={
+                    "prices": {"final_check": quote.price if quote else None},
+                    "timing": {"final_check": self._clock()},
+                },
+            )
             jump = await self._volatility_jump(instrument)
             assessment = order.data.get("assessment")
             then = dict(assessment) if isinstance(assessment, dict) else {}
@@ -1732,6 +1878,7 @@ class TradingDesk:
             )
             return
         quote = await self._quote_in(broker, instrument, order.currency)
+        data["submission_price"] = quote.price if quote is not None else None
         report = await pre_trade_check(
             broker=broker,
             order=_request(order, instrument),
@@ -1866,6 +2013,19 @@ class TradingDesk:
         instrument = parse_symbol(order.symbol)
         request = _request(order, instrument)
         order = await self._set(order, status="submitting")
+        buying = order.side == "buy"
+        await self._decisions.update(
+            order.round_id,
+            status="order_submitted" if buying else "exit_pending",
+            order_submitted=True,
+            **({"order_id": order.id} if buying else {}),
+            data={
+                "prices": {"submission": order.data.get("submission_price")}
+                if buying
+                else {"exit_submission": order.data.get("submission_price")},
+                "timing": {"submitted" if buying else "exit_submitted": self._clock()},
+            },
+        )
         await self.feed.emit(
             "order",
             f"Sending {order.side} {order.qty:g} {order.symbol} ({order.order_type}) to {broker.name}.",
@@ -1955,6 +2115,17 @@ class TradingDesk:
                 data={"order": order_view(updated)},
             )
             if order.side == "buy":
+                await self._decisions.update(
+                    order.round_id,
+                    status="position_open"
+                    if status == "filled"
+                    else "partially_filled",
+                    data={
+                        "prices": {"fill": price},
+                        "timing": {"fill": self._clock()},
+                        "fill": {"qty": result.filled_qty, "fees": fees},
+                    },
+                )
                 await self._round_status(order.round_id, "traded", "Bought.")
                 await self._mark_traded(order.round_id)
                 if order.broker != "paper":
@@ -2195,6 +2366,25 @@ class TradingDesk:
             order.updated_at - (opening.updated_at if opening else order.updated_at)
         ) / DAY_MS
         reason = str(order.data.get("exit") or "the desk sold")
+        if opening is not None and opening.round_id:
+            await self._decisions.update(
+                opening.round_id,
+                status="position_closed",
+                reason=f"Closed: {reason}",
+                pnl=round(gain, 2),
+                data={
+                    "prices": {"exit_fill": order.fill_price},
+                    "timing": {"closed": self._clock()},
+                    "result": {
+                        "pnl": round(gain, 2),
+                        "currency": config.currency,
+                        "exit": reason,
+                        "entry": entry,
+                        "exit_price": order.fill_price,
+                        "held_days": round(held_days, 2),
+                    },
+                },
+            )
         setup = ""
         regime = ""
         if round_record is not None:
@@ -2791,6 +2981,103 @@ class TradingDesk:
             )
         return found
 
+    async def decisions(
+        self,
+        *,
+        symbol: str = "",
+        status: str = "",
+        text: str = "",
+        since_ms: int | None = None,
+        until_ms: int | None = None,
+        limit: int = 100,
+    ) -> list[JsonObject]:
+        """Decision records, newest first, by symbol, status, words, dates."""
+        found = await self._decisions.search(
+            symbol=symbol,
+            status=status,
+            text=text,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            limit=limit,
+        )
+        return [_decision_summary(item) for item in found]
+
+    async def decision(self, decision_id: str) -> JsonObject:
+        found = await self._store.get(TradeDecision, decision_id)
+        if found is None:
+            raise TradingError("No such decision.")
+        return decision_view(found)
+
+    async def audit_trail(
+        self,
+        *,
+        kind: str = "",
+        symbol: str = "",
+        text: str = "",
+        since_ms: int | None = None,
+        until_ms: int | None = None,
+        limit: int = 200,
+    ) -> list[JsonObject]:
+        found = await self._decisions.trail(
+            kind=kind,
+            symbol=symbol,
+            text=text,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            limit=limit,
+        )
+        return [audit_view(item) for item in found]
+
+    async def audit_csv(
+        self,
+        *,
+        kind: str = "",
+        symbol: str = "",
+        text: str = "",
+        since_ms: int | None = None,
+        until_ms: int | None = None,
+    ) -> str:
+        """The audit trail as CSV (one line per entry), for keeping or
+        checking elsewhere."""
+        rows = await self._decisions.trail(
+            kind=kind,
+            symbol=symbol,
+            text=text,
+            since_ms=since_ms,
+            until_ms=until_ms,
+            limit=5000,
+        )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "time_utc",
+                "kind",
+                "symbol",
+                "round_id",
+                "order_id",
+                "text",
+                "config_version",
+                "system_version",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    datetime.fromtimestamp(row.created_at / 1000, tz=UTC).isoformat(
+                        timespec="seconds"
+                    ),
+                    row.kind,
+                    row.symbol,
+                    row.round_id,
+                    row.order_id,
+                    row.text,
+                    row.config_version,
+                    row.system_version,
+                ]
+            )
+        return buffer.getvalue()
+
     async def rounds(self, limit: int = 30) -> list[JsonObject]:
         return [
             {
@@ -2970,6 +3257,121 @@ def _round_trip_pct(config: DeskConfig, quality: QualityReport) -> float:
         snap.spread_pct for snap in quality.snapshots if snap.spread_pct is not None
     ]
     return round(2 * config.fee_pct + (min(spreads) if spreads else 0.1), 4)
+
+
+def _decision_summary(record: TradeDecision) -> JsonObject:
+    decision = record.data.get("final_decision")
+    return {
+        "id": record.id,
+        "round_id": record.round_id,
+        "symbol": record.symbol,
+        "market": record.market,
+        "mode": record.mode,
+        "status": record.status,
+        "reason": record.reason,
+        "action": decision.get("action") if isinstance(decision, dict) else None,
+        "order_id": record.order_id,
+        "order_submitted": record.order_submitted,
+        "pnl": record.pnl,
+        "pack_id": record.pack_id,
+        "config_version": record.config_version,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+    }
+
+
+def _decision_data(
+    briefing: Briefing,
+    quality: QualityReport,
+    evidence: JsonObject,
+    result: DebateResult,
+    now: float,
+) -> JsonObject:
+    """What the decision record keeps once the debate is over."""
+    pack = result.final_pack
+    facts: list[JsonObject] = []
+    calculations: list[JsonObject] = []
+    if pack is not None:
+        for item in pack.items:
+            row: JsonObject = {
+                "ref": item.ref,
+                "label": item.label,
+                "value": item.value,
+                "unit": item.unit,
+                "source": item.source,
+                "as_of": item.as_of,
+                "status": item.status,
+            }
+            (calculations if item.kind == "calculation" else facts).append(row)
+        facts.extend(
+            {
+                "ref": story.ref,
+                "label": "news",
+                "value": story.headline,
+                "source": story.source,
+                "as_of": story.published_at,
+                "status": story.status,
+            }
+            for story in pack.news
+        )
+    sources = sorted(
+        {snap.provider for snap in quality.snapshots}
+        | {story.source for story in quality.news if story.usable}
+    )
+    models = {
+        str(call.get("seat")): call.get("model_name")
+        for call in result.calls
+        if call.get("model_name")
+    }
+    return {
+        "evidence": {
+            "first_id": evidence.get("id"),
+            "final_id": result.pack_id,
+            "digest": evidence.get("digest"),
+        },
+        "data_sources": list(sources),
+        "data_timestamps": {
+            snap.provider: snap.timestamp for snap in quality.snapshots
+        },
+        "facts": facts,
+        "calculations": calculations,
+        "quality": {
+            "score": quality.score,
+            "ok": quality.ok,
+            "summary": quality.summary(),
+        },
+        "conflicts": [item.view() for item in quality.conflicts],
+        "seat_outputs": {
+            "closing": {
+                str(seat): view.model_dump() for seat, view in result.closing.items()
+            },
+            "plan": result.plan.model_dump() if result.plan is not None else None,
+            "info_test": result.info_test.view() if result.info_test else None,
+            "review": result.review.model_dump() if result.review else None,
+            "challenge": result.challenge.model_dump() if result.challenge else None,
+            "calls": result.calls,
+            "abstained": sorted(set(result.abstained)),
+        },
+        "models": models,
+        "prompt_version": PROMPT_VERSION,
+        "final_decision": result.decision.model_dump()
+        if result.decision is not None
+        else None,
+        "blocked": result.blocked,
+        "timing": {
+            "pack_created": evidence.get("cutoff"),
+            "seat_responses": [
+                {
+                    "stage": call.get("stage"),
+                    "seat": call.get("seat"),
+                    "at": call.get("at"),
+                }
+                for call in result.calls
+            ],
+            "final_decision": now,
+        },
+        "prices": {"analysis": briefing.price},
+    }
 
 
 def _limits_text(config: DeskConfig) -> str:

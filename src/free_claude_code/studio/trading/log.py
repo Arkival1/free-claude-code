@@ -16,7 +16,8 @@ from free_claude_code.core.json_types import JsonObject
 
 from ..models import now_ms
 from ..store import StudioStore
-from .records import TradeEvent
+from .decisions import AUDIT_KINDS, system_version
+from .records import TradeAudit, TradeEvent
 
 KEEP_EVENTS = 20_000
 """Older feed lines are dropped from the database (the log files keep them)."""
@@ -42,6 +43,9 @@ class Feed:
         self._ready = asyncio.Lock()
         self._written = 0
         self._pruned_day = ""
+        self.config_version = ""
+        """The settings' version, kept with every audit line."""
+        self._system = system_version()
 
     async def _next(self) -> int:
         if self._seq is None:
@@ -77,6 +81,20 @@ class Feed:
             created_at=now_ms(),
         )
         await self._store.put(event)
+        if kind in AUDIT_KINDS:
+            await self._store.put(
+                TradeAudit(
+                    kind=kind,
+                    text=event.text,
+                    symbol=symbol,
+                    round_id=round_id,
+                    order_id=str((data or {}).get("order_id") or ""),
+                    config_version=self.config_version,
+                    system_version=self._system,
+                    data=data or {},
+                    created_at=event.created_at,
+                )
+            )
         self._write_line(event)
         if kind in LOUD_KINDS:
             logger.info("Trading: {} {}", symbol or "", event.text[:300])

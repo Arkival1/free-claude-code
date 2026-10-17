@@ -113,6 +113,8 @@ class AssessmentLimits(BaseModel):
     """The worst stressed loss of the whole account with the trade, in %."""
     min_stop_atr: float = Field(default=1.0, ge=0.25, le=5.0)
     """A buy's stop must be at least this many ATRs below the entry."""
+    max_decision_minutes: float = Field(default=60.0, ge=5.0, le=240.0)
+    """A decision older than this is discarded and analysed again."""
 
 
 class DataQualityLimits(BaseModel):

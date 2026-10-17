@@ -16,7 +16,7 @@ from typing import Literal, cast
 from urllib.parse import urlsplit
 
 import anyio
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -3413,6 +3413,84 @@ async def trading_round(
         return await studio.trading.round(round_id)
     except TradingError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/studio/api/trading/decisions")
+async def trading_decisions(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+    symbol: str = Query("", max_length=40),
+    status: str = Query("", max_length=40),
+    q: str = Query("", max_length=200),
+    since: int | None = Query(None, ge=0),
+    until: int | None = Query(None, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+) -> JsonObject:
+    """Decision records, newest first: by symbol, status, words, and dates
+    (Unix ms)."""
+    return {
+        "decisions": await studio.trading.decisions(
+            symbol=symbol,
+            status=status,
+            text=q,
+            since_ms=since,
+            until_ms=until,
+            limit=limit,
+        )
+    }
+
+
+@router.get("/studio/api/trading/decisions/{decision_id}")
+async def trading_decision(
+    decision_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    try:
+        return await studio.trading.decision(decision_id)
+    except TradingError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/studio/api/trading/audit")
+async def trading_audit(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+    kind: str = Query("", max_length=40),
+    symbol: str = Query("", max_length=40),
+    q: str = Query("", max_length=200),
+    since: int | None = Query(None, ge=0),
+    until: int | None = Query(None, ge=0),
+    limit: int = Query(200, ge=1, le=2000),
+) -> JsonObject:
+    """The audit trail, newest first, filtered by kind, symbol, words, dates."""
+    return {
+        "audit": await studio.trading.audit_trail(
+            kind=kind,
+            symbol=symbol,
+            text=q,
+            since_ms=since,
+            until_ms=until,
+            limit=limit,
+        )
+    }
+
+
+@router.get("/studio/api/trading/audit.csv")
+async def trading_audit_csv(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+    kind: str = Query("", max_length=40),
+    symbol: str = Query("", max_length=40),
+    q: str = Query("", max_length=200),
+    since: int | None = Query(None, ge=0),
+    until: int | None = Query(None, ge=0),
+) -> Response:
+    return Response(
+        await studio.trading.audit_csv(
+            kind=kind, symbol=symbol, text=q, since_ms=since, until_ms=until
+        ),
+        media_type="text/csv",
+        headers={"content-disposition": 'attachment; filename="fcc-audit.csv"'},
+    )
 
 
 @router.get("/studio/api/trading/orders")

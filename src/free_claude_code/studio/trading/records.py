@@ -67,6 +67,51 @@ class TradeEvidence(Record):
     created_at: int = Field(default_factory=now_ms)
 
 
+class TradeDecision(Record):
+    """One cycle's complete decision record: when each step happened and at
+    what price, what was known, what every seat said, what the checks
+    found, and what came of it. Kept for good and searchable."""
+
+    id: str = Field(default_factory=lambda: new_id("dec"))
+    round_id: str = ""
+    symbol: str = ""
+    market: str = ""
+    mode: str = "paper"
+    status: str = "analysis"
+    """analysis, advice, no_trade, blocked, discarded, failed, approved,
+    rejected, order_submitted, partially_filled, position_open,
+    exit_pending, or position_closed."""
+    reason: str = ""
+    order_id: str = ""
+    pack_id: str = ""
+    config_version: str = ""
+    system_version: str = ""
+    pnl: float | None = None
+    order_submitted: bool = False
+    search: str = ""
+    """Lower-case words to search on: symbol, status, reasons, decision."""
+    data: JsonObject = Field(default_factory=dict)
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
+class TradeAudit(Record):
+    """One line of the audit trail: decisions, checks, orders, broker
+    answers, fills, exits, errors, settings and mode changes, and the kill
+    switch. Never pruned."""
+
+    id: str = Field(default_factory=lambda: new_id("aud"))
+    kind: str
+    text: str
+    symbol: str = ""
+    round_id: str = ""
+    order_id: str = ""
+    config_version: str = ""
+    system_version: str = ""
+    data: JsonObject = Field(default_factory=dict)
+    created_at: int = Field(default_factory=now_ms)
+
+
 class TradeEvent(Record):
     """One line of the live feed: a seat speaking, a check, an order, a fill."""
 

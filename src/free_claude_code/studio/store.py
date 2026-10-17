@@ -46,7 +46,9 @@ from .models import (
     now_ms,
 )
 from .trading.records import (
+    TradeAudit,
     TradeDebrief,
+    TradeDecision,
     TradeEvent,
     TradeEvidence,
     TradeForecast,
@@ -121,6 +123,8 @@ TABLES: Mapping[type[Record], str] = {
     TradeForecast: "studio_trade_forecasts",
     TradeDebrief: "studio_trade_debriefs",
     TradeEvidence: "studio_trade_evidence",
+    TradeDecision: "studio_trade_decisions",
+    TradeAudit: "studio_trade_audit",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (
@@ -138,6 +142,10 @@ _INDEXES: tuple[tuple[str, str, str], ...] = (
     ("studio_trade_orders_status", "studio_trade_orders", "status, updated_at"),
     ("studio_trade_forecasts_due", "studio_trade_forecasts", "status, due_at"),
     ("studio_trade_evidence_round", "studio_trade_evidence", "round_id"),
+    ("studio_trade_decisions_when", "studio_trade_decisions", "created_at"),
+    ("studio_trade_decisions_symbol", "studio_trade_decisions", "symbol, created_at"),
+    ("studio_trade_audit_when", "studio_trade_audit", "created_at"),
+    ("studio_trade_audit_kind", "studio_trade_audit", "kind, created_at"),
 )
 
 
@@ -372,6 +380,58 @@ class StudioStore:
                 f"DELETE FROM {table} WHERE id = ?", (record_id,)
             )
             return cursor.rowcount > 0
+
+        return await self._call(work)
+
+    async def find_matching[T: Record](
+        self,
+        model: type[T],
+        *,
+        where: Mapping[str, object] | None = None,
+        contains: tuple[str, str] | None = None,
+        since: tuple[str, object] | None = None,
+        until: tuple[str, object] | None = None,
+        newest_first: bool = True,
+        limit: int = 200,
+    ) -> tuple[T, ...]:
+        """Records matching an equality filter, a text ``(column, words)``
+        (every word must appear, any case), and a range on a column, newest
+        first by ``created_at`` unless told otherwise."""
+        table = _table(model)
+        criteria = dict(where or {})
+        named = [
+            *criteria,
+            *([contains[0]] if contains else []),
+            *([since[0]] if since else []),
+            *([until[0]] if until else []),
+        ]
+        for key in named:
+            if key not in model.model_fields:
+                raise StudioStoreError(f"Unknown filter column '{key}'.")
+        if "created_at" not in model.model_fields:
+            raise StudioStoreError(f"{model.__name__} has no created_at to order by.")
+        parts = [f"{key} IS ?" for key in criteria]
+        params: list[object] = list(criteria.values())
+        if contains:
+            for word in contains[1].lower().split()[:8]:
+                parts.append(f"LOWER({contains[0]}) LIKE ?")
+                params.append(f"%{word}%")
+        if since:
+            parts.append(f"{since[0]} >= ?")
+            params.append(since[1])
+        if until:
+            parts.append(f"{until[0]} <= ?")
+            params.append(until[1])
+        clause = " WHERE " + " AND ".join(parts) if parts else ""
+        order = "DESC" if newest_first else "ASC"
+        sql = (
+            f"SELECT * FROM {table}{clause} ORDER BY created_at {order} "
+            f"LIMIT {max(1, min(int(limit), 5000))}"
+        )
+
+        def work(connection: sqlite3.Connection) -> tuple[T, ...]:
+            rows = connection.execute(sql, tuple(params)).fetchall()
+            return tuple(_decode(model, row) for row in rows)
 
         return await self._call(work)
 
