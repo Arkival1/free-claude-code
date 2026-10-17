@@ -98,6 +98,24 @@ class TradeDecision(Record):
     updated_at: int = Field(default_factory=now_ms)
 
 
+class TradeWeights(Record):
+    """One version of the seats' vote weights (see ``learning``). Every
+    version is kept: active, retired, rejected, or rolled back."""
+
+    id: str = Field(default_factory=lambda: new_id("twv"))
+    version: int
+    weights: dict[str, float] = Field(default_factory=dict)
+    status: str = "active"
+    """active, retired, rejected, or rolled_back."""
+    reason: str = ""
+    evidence: JsonObject = Field(default_factory=dict)
+    """The test it passed or failed: Brier and direction on held-back
+    forecasts, and how many forecasts each seat had."""
+    previous_id: str = ""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
 class TradeAudit(Record):
     """One line of the audit trail: decisions, checks, orders, broker
     answers, fills, exits, errors, settings and mode changes, and the kill

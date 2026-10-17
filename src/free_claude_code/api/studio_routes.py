@@ -3358,6 +3358,24 @@ async def trading_release_kill(
         raise _trading_failed(error) from error
 
 
+@router.get("/studio/api/trading/learning")
+async def trading_learning(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return await studio.trading.learning()
+
+
+@router.post("/studio/api/trading/learning/rollback")
+async def trading_learning_rollback(
+    request: Request, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Undo the active learned vote weights (PC only)."""
+    try:
+        return await studio.trading.rollback_weights(on_pc=_from_pc(request))
+    except TradingError as error:
+        raise _trading_failed(error) from error
+
+
 @router.post("/studio/api/trading/breaker/reset")
 async def trading_reset_breaker(
     request: Request, studio: StudioService = Depends(get_studio), _: None = Access

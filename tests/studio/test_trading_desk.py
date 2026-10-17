@@ -50,6 +50,7 @@ from free_claude_code.studio.trading.records import (
     TradeOrder,
     TradePosition,
     TradeRound,
+    TradeWeights,
 )
 from free_claude_code.studio.trading.scanner import Candidate
 from free_claude_code.studio.workers import WorkerPool
@@ -1743,4 +1744,31 @@ async def test_a_failing_debrief_is_retried_then_set_aside(make_desk, store):
     health = await desk.health()
     assert health["dead_letters"] and health["heartbeat_age_s"] is not None
     assert "dead_letter" in {line.kind for line in await store.find(TradeAudit)}
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_learned_weights_are_versioned_and_the_owner_can_undo_them(
+    make_desk, store
+):
+    desk, _ = make_desk()
+    report = await desk.learning()
+    assert report["active_version"] == 0 and report["weights"]["1"] == 1.0
+    await store.put(
+        TradeWeights(version=1, weights={"1": 1.1, "2": 0.9}, reason="test")
+    )
+    _, weights = await desk._active_weights()
+    assert weights[1] == 1.1 and weights[3] == 1.0
+    scored = await desk._seat_records([])
+    assert scored[1].weight == 1.1
+    with pytest.raises(TradingError):
+        await desk.rollback_weights(on_pc=False)
+    undone = await desk.rollback_weights(on_pc=True)
+    assert undone["active_version"] == 0
+    [version] = undone["versions"]
+    assert version["status"] == "rolled_back"
+    # Nothing to learn from yet: the attempt is kept as rejected, with why.
+    await desk._learn(desk.config())
+    newest = (await desk.learning())["versions"][0]
+    assert newest["status"] == "rejected" and "50 scored" in newest["reason"]
     await desk.close()

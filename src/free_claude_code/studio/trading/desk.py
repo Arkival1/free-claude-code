@@ -81,10 +81,11 @@ from .evidence import (
     price_fact,
     reading_item,
 )
-from .forecasts import due_at, records, score
+from .forecasts import SeatRecord, due_at, records, score
 from .indicators import Bar, true_ranges
 from .information import PROVIDER_DELAY_MINUTES, InfoItem, NewsItem, QuoteSnapshot
 from .instruments import Instrument, SymbolError, parse_symbol, universe
+from .learning import propose, trade_results, windows, worse_than_before
 from .ledger import build_ledger, tax_csv
 from .log import Feed, event_view
 from .news import judge
@@ -112,6 +113,7 @@ from .records import (
     TradeOrder,
     TradePosition,
     TradeRound,
+    TradeWeights,
 )
 from .regime import policy_for
 from .research import DeskResearch, ReadPage
@@ -149,6 +151,8 @@ PROBLEM_REPEAT_SECONDS = 600.0
 """The same problem goes to the feed at most this often."""
 RECONCILE_SECONDS = 300.0
 STALL_SECONDS = 120.0
+LEARN_SECONDS = 6 * 3600.0
+"""How often the desk looks at whether the seats' vote weights should move."""
 """A loop that hasn't finished a pass for this long shows as stalled."""
 """How often orders not yet matched with their account are asked about."""
 DAY_MS = 86_400_000
@@ -238,6 +242,7 @@ class TradingDesk:
         """Why this FCC isn't running the loop (another one holds it)."""
         self._steps = Steps()
         self._heartbeat = 0.0
+        self._last_learn = 0.0
         self._activity: JsonObject = {}
         self._last_scan = 0.0
         self._last_score = 0.0
@@ -711,6 +716,7 @@ class TradingDesk:
             self._finish_cooling,
             self._expire_approvals,
             self._score_forecasts,
+            self._learn,
             self._schedule_debriefs,
         ):
             name = step.__name__.strip("_").replace("_", " ")
@@ -954,7 +960,7 @@ class TradingDesk:
             TradePosition, f"{broker.id}:{instrument.symbol}"
         )
         scored = await self._scored()
-        seat_records = records(scored, market=instrument.market)
+        seat_records = await self._seat_records(scored, market=instrument.market)
         try:
             briefing = await build_briefing(
                 instrument,
@@ -3181,6 +3187,173 @@ class TradingDesk:
 
     # ------------------------------------------------------------ forecasts and debriefs
 
+    async def _active_weights(self) -> tuple[TradeWeights | None, dict[int, float]]:
+        """The vote weights in use: the active learned version, else every
+        seat counts the same."""
+        found = await self._store.find(
+            TradeWeights, where={"status": "active"}, order_by="version DESC", limit=1
+        )
+        active = found[0] if found else None
+        weights = dict.fromkeys(range(1, 6), 1.0)
+        if active is not None:
+            for key, value in active.weights.items():
+                if key.isdigit() and int(key) in weights:
+                    weights[int(key)] = float(value)
+        return active, weights
+
+    async def _seat_records(
+        self, scored: Sequence[TradeForecast], *, market: str = ""
+    ) -> dict[int, SeatRecord]:
+        """Track records with the vote weight actually in use (the learned
+        version, which moves only in checked steps)."""
+        _, weights = await self._active_weights()
+        return {
+            seat: replace(found, weight=weights.get(seat, 1.0))
+            for seat, found in records(scored, market=market).items()
+        }
+
+    async def _learn(self, config: DeskConfig) -> None:
+        """Every few hours: roll back a learned version that has done worse
+        than the one before it, else see whether a new one passes its test.
+        Only vote weights change; no limit or safety setting is touched."""
+        if self._clock() - self._last_learn < LEARN_SECONDS:
+            return
+        self._last_learn = self._clock()
+        scored = await self._scored()
+        active, weights = await self._active_weights()
+        if active is not None and active.previous_id:
+            previous = await self._store.get(TradeWeights, active.previous_id)
+            if previous is not None:
+                why = worse_than_before(
+                    scored,
+                    weights,
+                    {int(k): v for k, v in previous.weights.items() if k.isdigit()},
+                    since_ms=active.created_at,
+                )
+                if why:
+                    await self._roll_back(active, previous, why)
+                    return
+        proposal = propose(scored, weights, now_ms=now_ms())
+        versions = await self._store.find(
+            TradeWeights, order_by="version DESC", limit=1
+        )
+        number = (versions[0].version if versions else 0) + 1
+        record = TradeWeights(
+            version=number,
+            weights={str(seat): w for seat, w in proposal.weights.items()},
+            status="active" if proposal.accepted else "rejected",
+            reason=proposal.reason,
+            evidence=proposal.view(),
+            previous_id=active.id if active is not None else "",
+        )
+        if not proposal.accepted and versions and versions[0].reason == record.reason:
+            return  # the same answer as last time: nothing new to keep
+        if proposal.accepted and active is not None:
+            await self._store.put(
+                active.model_copy(update={"status": "retired", "updated_at": now_ms()})
+            )
+        await self._store.put(record)
+        await self.feed.emit(
+            "learning",
+            f"Vote weights v{number} "
+            + ("adopted: " if proposal.accepted else "not adopted: ")
+            + proposal.reason
+            + ".",
+            data={"version": number, "evidence": proposal.view()},
+        )
+
+    async def _roll_back(
+        self, active: TradeWeights, previous: TradeWeights, why: str
+    ) -> None:
+        await self._store.put(
+            active.model_copy(
+                update={
+                    "status": "rolled_back",
+                    "reason": f"{active.reason} | rolled back: {why}",
+                    "updated_at": now_ms(),
+                }
+            )
+        )
+        await self._store.put(
+            previous.model_copy(update={"status": "active", "updated_at": now_ms()})
+        )
+        await self.feed.emit(
+            "learning",
+            f"Vote weights v{active.version} rolled back to v{previous.version}: "
+            f"{why}.",
+            data={"from": active.version, "to": previous.version},
+        )
+
+    async def rollback_weights(self, *, on_pc: bool) -> JsonObject:
+        """The owner's undo (PC only): back to the version before the active
+        one, or to equal votes when there was none."""
+        if not on_pc:
+            raise TradingError("Learning can only be rolled back from the PC.")
+        active, _ = await self._active_weights()
+        if active is None:
+            raise TradingError("No learned vote weights are in use.")
+        previous = (
+            await self._store.get(TradeWeights, active.previous_id)
+            if active.previous_id
+            else None
+        )
+        if previous is None:
+            await self._store.put(
+                active.model_copy(
+                    update={
+                        "status": "rolled_back",
+                        "reason": f"{active.reason} | rolled back by you on the PC",
+                        "updated_at": now_ms(),
+                    }
+                )
+            )
+            await self.feed.emit(
+                "learning",
+                f"Vote weights v{active.version} rolled back by you: every seat "
+                "counts the same again.",
+            )
+        else:
+            await self._roll_back(active, previous, "you rolled it back on the PC")
+        return await self.learning()
+
+    async def learning(self) -> JsonObject:
+        """What the desk has learned and how it checked it."""
+        scored = await self._scored()
+        active, weights = await self._active_weights()
+        versions = await self._store.find(
+            TradeWeights, order_by="version DESC", limit=50
+        )
+        closed = {
+            record.round_id: record.pnl
+            for record in await self._store.find(
+                TradeDecision, where={"status": "position_closed"}, limit=1000
+            )
+            if record.pnl is not None
+        }
+        return {
+            "active_version": active.version if active is not None else 0,
+            "weights": {str(seat): w for seat, w in weights.items()},
+            "versions": [
+                {
+                    "version": item.version,
+                    "status": item.status,
+                    "reason": item.reason,
+                    "weights": dict(item.weights),
+                    "evidence": item.evidence,
+                    "created_at": item.created_at,
+                }
+                for item in versions
+            ],
+            "windows": windows(scored),
+            "trade_results": trade_results(scored, closed),
+            "rules": (
+                "Weights move only for seats with 50+ scored forecasts, at most "
+                "10% per version, between 0.5x and 2x, and only when they beat "
+                "the current ones on the newest 30% of forecasts (held back). "
+                "Learning never changes limits, safety rules, money or keys."
+            ),
+        }
+
     async def _scored(self) -> list[TradeForecast]:
         return list(
             await self._store.find(
@@ -3660,7 +3833,7 @@ class TradingDesk:
             in {"cooling", "awaiting_approval", "submitting", "submitted"}
         ]
         scored = await self._scored()
-        seat_records = records(scored)
+        seat_records = await self._seat_records(scored)
         now = datetime.fromtimestamp(self._clock(), tz=UTC)
         state = self._state()
         killed = state.get("kill")
@@ -3902,14 +4075,16 @@ class TradingDesk:
         scored = await self._scored()
         config = self.config()
         by_market = {
-            market: records(scored, market=market) for market in ("asx", "us", "crypto")
+            market: await self._seat_records(scored, market=market)
+            for market in ("asx", "us", "crypto")
         }
+        overall = await self._seat_records(scored)
         return {
             "seats": [
                 {
                     "seat": seat.seat,
                     "name": seat.name,
-                    "all": records(scored)[seat.seat].view(),
+                    "all": overall[seat.seat].view(),
                     "markets": {
                         market: found[seat.seat].view()
                         for market, found in by_market.items()

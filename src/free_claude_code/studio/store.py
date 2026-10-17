@@ -56,6 +56,7 @@ from .trading.records import (
     TradeOrder,
     TradePosition,
     TradeRound,
+    TradeWeights,
 )
 
 _JSON_FIELDS = frozenset(
@@ -81,6 +82,8 @@ _JSON_FIELDS = frozenset(
         "quiz",
         "cast",
         "loaded",
+        "weights",
+        "evidence",
     }
 )
 
@@ -127,6 +130,7 @@ TABLES: Mapping[type[Record], str] = {
     TradeDecision: "studio_trade_decisions",
     TradeAudit: "studio_trade_audit",
     TradeFill: "studio_trade_fills",
+    TradeWeights: "studio_trade_weights",
 }
 
 _INDEXES: tuple[tuple[str, str, str], ...] = (
@@ -149,6 +153,7 @@ _INDEXES: tuple[tuple[str, str, str], ...] = (
     ("studio_trade_audit_when", "studio_trade_audit", "created_at"),
     ("studio_trade_audit_kind", "studio_trade_audit", "kind, created_at"),
     ("studio_trade_fills_order", "studio_trade_fills", "order_id, created_at"),
+    ("studio_trade_weights_when", "studio_trade_weights", "created_at"),
 )
 
 
