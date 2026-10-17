@@ -31,7 +31,6 @@ from .base import (
     Rules,
     Sent,
     fingerprint,
-    masked,
 )
 from .common import items, make_web, number, obj, text
 
@@ -140,7 +139,7 @@ class SwyftxBroker:
                 quote = await self.quote_code(code)
                 equity += amount * (quote or 0.0)
         return Account(
-            number=masked(self._key),
+            number=fingerprint(self.id + (":demo" if self._demo else ""), self._key),
             fingerprint=fingerprint(
                 self.id + (":demo" if self._demo else ""), self._key
             ),

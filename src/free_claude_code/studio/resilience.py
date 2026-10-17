@@ -303,7 +303,10 @@ class Web:
         verify: bool | str = True,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        guard: Callable[[str, str], None] | None = None,
     ) -> None:
+        self._guard = guard
+        """Checks every request first (method, URL); raises to refuse it."""
         self._transport = transport
         self._limits = dict(limits or {})
         self._default_limit = default_limit
@@ -383,6 +386,8 @@ class Web:
         what: str = "",
     ) -> httpx.Response:
         """Send one request; 4xx/5xx and dropped connections raise ServiceError."""
+        if self._guard is not None:
+            self._guard(method, url)
         host = urlsplit(url).hostname or ""
 
         async def once() -> httpx.Response:

@@ -25,7 +25,6 @@ from .base import (
     OrderResult,
     Rules,
     fingerprint,
-    masked,
 )
 from .common import Nonce, items, make_web, number, obj, text
 
@@ -130,7 +129,7 @@ class IndependentReserveBroker:
                 price = await self._last(code)
                 equity += total * (price or 0.0)
         return Account(
-            number=masked(guid or self._key),
+            number=guid or fingerprint(self.id, self._key),
             fingerprint=fingerprint(self.id, guid or self._key),
             currency="AUD",
             equity=equity,

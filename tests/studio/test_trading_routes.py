@@ -6,11 +6,12 @@ from typing import Any
 import httpx
 import pytest
 
+from free_claude_code.studio import service as service_module
 from free_claude_code.studio.trading.brokers import registry
 from free_claude_code.studio.trading.brokers.registry import BrokerSpec, KeyField
 from tests.api.support import create_test_app
 
-from .test_trading_desk import FakeLive
+from .test_trading_desk import FakeLive, FakeLock
 
 
 def data(value: object) -> Any:
@@ -19,6 +20,8 @@ def data(value: object) -> Any:
 
 @pytest.fixture
 def fake_platform(monkeypatch):
+    # Windows' key protection doesn't exist here: a test lock stands in.
+    monkeypatch.setattr(service_module, "default_protector", FakeLock)
     broker = FakeLive()
     monkeypatch.setitem(
         registry.BROKERS,

@@ -36,7 +36,6 @@ from loguru import logger
 
 from free_claude_code.core.json_types import JsonObject
 
-from ..connectors import ConnectorStore
 from ..memory import MemoryService
 from ..models import now_ms
 from ..resilience import ServiceError, Unconfirmed, Web, submit_once
@@ -60,7 +59,14 @@ from .briefing import Briefing, build_briefing
 from .brokers.base import Broker, Holding, OrderRequest, OrderResult, Rules, Sent
 from .brokers.catalog import ensure_catalog
 from .brokers.paper import PaperBroker
-from .brokers.registry import BROKERS, BrokerSetupError, check_values, make_broker
+from .brokers.registry import (
+    BROKERS,
+    BrokerSetupError,
+    check_values,
+    environment_of,
+    make_broker,
+    secret_fields,
+)
 from .config import LIVE_AUTO_PHRASE, DeskConfig, DeskConfigStore
 from .conflicts import applied, data_conflicts, seat_conflicts
 from .contract import PROMPT_VERSION, PMDecision
@@ -88,6 +94,7 @@ from .forecasts import SeatRecord, due_at, records, score
 from .indicators import Bar, true_ranges
 from .information import PROVIDER_DELAY_MINUTES, InfoItem, NewsItem, QuoteSnapshot
 from .instruments import Instrument, SymbolError, parse_symbol, universe
+from .keyvault import KeyVault, VaultError, redact
 from .learning import propose, trade_results, windows, worse_than_before
 from .ledger import build_ledger, tax_csv
 from .log import Feed, event_view
@@ -155,6 +162,8 @@ PROBLEM_REPEAT_SECONDS = 600.0
 RECONCILE_SECONDS = 300.0
 STALL_SECONDS = 120.0
 LEARN_SECONDS = 6 * 3600.0
+CREDENTIAL_SECONDS = 600.0
+"""How often real-money accounts' keys are checked while live."""
 """How often the desk looks at whether the seats' vote weights should move."""
 """A loop that hasn't finished a pass for this long shows as stalled."""
 """How often orders not yet matched with their account are asked about."""
@@ -185,7 +194,7 @@ class TradingDesk:
         think: Think,
         search: Callable[[], StudioSearch | None],
         memory: Callable[[], MemoryService],
-        keys: ConnectorStore,
+        keys: KeyVault,
         workers: WorkerPool,
         online: Callable[[], Awaitable[bool]],
         read_page: ReadPage | None = None,
@@ -246,6 +255,9 @@ class TradingDesk:
         self._steps = Steps()
         self._heartbeat = 0.0
         self._last_learn = 0.0
+        self._last_credentials = 0.0
+        self._secrets: set[str] | None = None
+        self.feed.redact = self._redact
         self._activity: JsonObject = {}
         self._last_scan = 0.0
         self._last_score = 0.0
@@ -334,6 +346,15 @@ class TradingDesk:
             return wanted.model_copy(update={"live_auto_confirmed_at": 0})
         if not on_pc:
             raise TradingError("Live trading can only be switched on from the PC.")
+        if not self._keys.available:
+            raise TradingError(self._keys.why_unavailable)
+        for name in {wanted.broker, *wanted.routes.values()} - {"", "paper"}:
+            if self._keys.info(name).get("environment") == "practice":
+                found = BROKERS.get(name)
+                raise TradingError(
+                    f"The {found.name if found else name} keys are for a practice "
+                    "account; real money needs that platform's real keys."
+                )
         for routed in wanted.routes.values():
             if routed in {"", "paper"}:
                 continue
@@ -720,6 +741,7 @@ class TradingDesk:
             self._expire_approvals,
             self._score_forecasts,
             self._learn,
+            self._check_credentials,
             self._schedule_debriefs,
         ):
             name = step.__name__.strip("_").replace("_", " ")
@@ -3190,6 +3212,56 @@ class TradingDesk:
 
     # ------------------------------------------------------------ forecasts and debriefs
 
+    def _redact(self, text: str) -> str:
+        if self._secrets is None:
+            self._secrets = self._keys.secret_values(secret_fields())
+        return redact(text, self._secrets)
+
+    async def _check_credentials(self, config: DeskConfig) -> None:
+        """While real money is on, check each real account's keys every few
+        minutes; keys that fail (refused, account blocked, rights to move
+        money, or a different account) switch real money off at once."""
+        if not config.live:
+            return
+        if self._clock() - self._last_credentials < CREDENTIAL_SECONDS:
+            return
+        self._last_credentials = self._clock()
+        problem = ""
+        if not self._keys.available:
+            problem = self._keys.why_unavailable
+        for name in config.live_brokers():
+            if problem:
+                break
+            try:
+                broker = self._live_broker(name)
+                account = await broker.account()
+            except TradingError as error:
+                problem = f"{name}: {error}"
+                break
+            except ServiceError as error:
+                if error.status in {401, 403}:
+                    problem = f"{name} refused its keys ({self._redact(str(error))})"
+                continue  # a passing outage is the circuit breaker's call
+            if account.status == "blocked":
+                problem = f"the {broker.name} account is blocked"
+            elif account.permissions is not None and "transfer" in account.permissions:
+                problem = f"the {broker.name} key can move money out"
+            elif account.fingerprint != config.accounts.get(name):
+                problem = f"the {broker.name} keys now reach a different account"
+        if not problem:
+            return
+        self._save(
+            config.model_copy(
+                update={"mode": "paper", "running": False, "live_auto_confirmed_at": 0}
+            )
+        )
+        await self.feed.emit(
+            "mode",
+            f"Real-money trading switched off: {problem}. Positions are still "
+            "watched; fix the keys on the PC, then switch it on again.",
+            data={"reason": problem},
+        )
+
     async def _active_weights(self) -> tuple[TradeWeights | None, dict[int, float]]:
         """The vote weights in use: the active learned version, else every
         seat counts the same."""
@@ -3729,6 +3801,7 @@ class TradingDesk:
         return [
             {
                 **spec.view(self._keys.values(spec.id)),
+                "keys": self._keys.info(spec.id),
                 "verified": bool(config.accounts.get(spec.id)) or spec.id == "paper",
                 "ready": spec.id == "paper" or spec.factory is not None,
             }
@@ -3738,13 +3811,32 @@ class TradingDesk:
     async def save_keys(self, broker_id: str, values: Mapping[str, str]) -> JsonObject:
         if broker_id == "paper":
             raise TradingError("The paper account needs no keys.")
+        if not self._keys.available:
+            raise TradingError(self._keys.why_unavailable)
         try:
             cleaned = check_values(broker_id, values)
         except BrokerSetupError as error:
             raise TradingError(str(error)) from error
         kept = self._keys.values(broker_id)
         merged = {**kept, **cleaned}
-        self._keys.save(broker_id, merged)
+        environment = environment_of(broker_id, merged)
+        before = self._keys.info(broker_id).get("environment")
+        secret = secret_fields().get(broker_id, set())
+        if (
+            before
+            and before != environment
+            and not all(cleaned.get(name) for name in secret if kept.get(name))
+        ):
+            # Practice and real keys are never the same stored secret.
+            raise TradingError(
+                "Switching between practice and real keys needs the keys typed "
+                "again (they are kept apart)."
+            )
+        try:
+            self._keys.save(broker_id, merged, environment=environment)
+        except VaultError as error:
+            raise TradingError(str(error)) from error
+        self._secrets = None
         config = self.config()
         if broker_id in config.accounts:
             accounts = dict(config.accounts)
@@ -3752,13 +3844,17 @@ class TradingDesk:
             self._save(config.model_copy(update={"accounts": accounts}))
         self._live.pop(broker_id, None)
         await self.feed.emit(
-            "info",
-            f"Keys saved for {BROKERS[broker_id].name}; verify the account next.",
+            "credentials",
+            f"{'Replaced' if kept else 'Saved'} the {BROKERS[broker_id].name} keys "
+            f"({'practice' if environment == 'practice' else 'real money'} "
+            "account), encrypted on this PC; verify the account next.",
+            data={"broker": broker_id, "environment": environment},
         )
         return BROKERS[broker_id].view(merged)
 
     async def remove_keys(self, broker_id: str) -> None:
         self._keys.remove(broker_id)
+        self._secrets = None
         self._live.pop(broker_id, None)
         config = self.config()
         accounts = dict(config.accounts)
@@ -3767,6 +3863,12 @@ class TradingDesk:
         if config.broker == broker_id and config.live:
             update.update({"mode": "paper", "live_auto_confirmed_at": 0})
         self._save(config.model_copy(update=update))
+        spec = BROKERS.get(broker_id)
+        await self.feed.emit(
+            "credentials",
+            f"Removed the {spec.name if spec else broker_id} keys.",
+            data={"broker": broker_id},
+        )
 
     async def test_broker(self, broker_id: str) -> JsonObject:
         """Connect and read the account (shown masked) for the owner to check."""
@@ -3779,7 +3881,12 @@ class TradingDesk:
         try:
             account = await broker.account()
         except ServiceError as error:
-            raise TradingError(f"{broker.name}: {error}") from error
+            raise TradingError(f"{broker.name}: {self._redact(str(error))}") from error
+        if account.permissions is not None and "transfer" in account.permissions:
+            raise TradingError(
+                f"This {broker.name} key can move money out of the account. Make a "
+                "key that can only view and trade; FCC never needs more."
+            )
         return {"account": account.view(), "broker": broker.name, "live": broker.live}
 
     async def confirm_account(self, broker_id: str, fingerprint: str) -> JsonObject:
@@ -3848,6 +3955,11 @@ class TradingDesk:
             "kill": dict(killed) if isinstance(killed, dict) else None,
             "breaker": breaker.view() if breaker is not None else None,
             "unmatched": list(self._unmatched.values()),
+            "vault": {
+                "available": self._keys.available,
+                "protection": self._keys.protection,
+                "note": self._keys.why_unavailable,
+            },
             "heartbeat_age_s": round(self._clock() - self._heartbeat, 1)
             if self._heartbeat
             else None,

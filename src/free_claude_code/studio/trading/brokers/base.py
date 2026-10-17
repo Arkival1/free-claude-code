@@ -47,6 +47,9 @@ class Account:
     day_trades: int | None = None
     pattern_day_trader: bool = False
     note: str = ""
+    permissions: tuple[str, ...] | None = None
+    """What the key may do (view, trade, transfer), when the platform says;
+    None when it doesn't."""
 
     def view(self) -> JsonObject:
         return {
@@ -61,6 +64,9 @@ class Account:
             "day_trades": self.day_trades,
             "pattern_day_trader": self.pattern_day_trader,
             "note": self.note,
+            "permissions": list(self.permissions)
+            if self.permissions is not None
+            else None,
         }
 
 

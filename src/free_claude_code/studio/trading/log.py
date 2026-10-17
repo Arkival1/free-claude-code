@@ -7,6 +7,7 @@ line, 30 days kept) that can be read without the app.
 
 import asyncio
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -44,6 +45,8 @@ class Feed:
         self._written = 0
         self._pruned_day = ""
         self.config_version = ""
+        self.redact: Callable[[str], str] = lambda text: text
+        """Blanks out saved secrets before a line is kept anywhere."""
         """The settings' version, kept with every audit line."""
         self._system = system_version()
 
@@ -69,6 +72,12 @@ class Feed:
         stage: str = "",
         data: JsonObject | None = None,
     ) -> TradeEvent:
+        text = self.redact(text)
+        if data:
+            data = {
+                key: self.redact(value) if isinstance(value, str) else value
+                for key, value in data.items()
+            }
         event = TradeEvent(
             seq=await self._next(),
             round_id=round_id,

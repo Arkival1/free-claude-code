@@ -1,7 +1,9 @@
 """Small helpers every platform adapter shares."""
 
+import re
 import time
 from collections.abc import Callable, Mapping
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -48,6 +50,29 @@ def coin(instrument: Instrument) -> str:
     return instrument.symbol.upper()
 
 
+MONEY_MOVES = re.compile(
+    r"withdraw|transfer|payout|/send\b|/sends?/|walletsend|/transactions\b"
+    r"|api[-_]?keys?\b|/permissions\b",
+    re.IGNORECASE,
+)
+"""Calls that move money out of an account or change a key's rights."""
+
+
+def forbid_money_moves(method: str, url: str) -> None:
+    """FCC trades and reads, nothing else: a call that could withdraw,
+    transfer, send money or change a key's permissions is refused before it
+    leaves this PC. (Reading a key's own permissions is allowed.)"""
+    path = urlsplit(url).path
+    if method.upper() == "GET" and path.rstrip("/").endswith("key_permissions"):
+        return
+    if MONEY_MOVES.search(path):
+        raise ServiceError(
+            f"FCC never moves money or changes key rights; refused {method} {path}.",
+            transient=False,
+            sent=False,
+        )
+
+
 def make_web(
     transport: httpx.AsyncBaseTransport | None,
     host: str,
@@ -67,6 +92,7 @@ def make_web(
         timeout=timeout,
         breaker_failures=4,
         breaker_cooldown=60.0,
+        guard=forbid_money_moves,
     )
 
 

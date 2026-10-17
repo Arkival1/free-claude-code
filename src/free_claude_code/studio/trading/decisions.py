@@ -62,6 +62,7 @@ AUDIT_KINDS = frozenset(
         "position",
         "dead_letter",
         "learning",
+        "credentials",
     }
 )
 """Feed kinds that also go to the audit trail."""

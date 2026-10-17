@@ -19,7 +19,6 @@ import httpx
 import pytest
 
 from free_claude_code.studio import resilience
-from free_claude_code.studio.connectors import ConnectorStore
 from free_claude_code.studio.memory import MemoryService
 from free_claude_code.studio.models import now_ms
 from free_claude_code.studio.resilience import ServiceError
@@ -38,6 +37,7 @@ from free_claude_code.studio.trading.data import Quote
 from free_claude_code.studio.trading.decisions import config_version, decision_id
 from free_claude_code.studio.trading.desk import ASKED, TradingDesk, TradingError
 from free_claude_code.studio.trading.instruments import Instrument, parse_symbol
+from free_claude_code.studio.trading.keyvault import KeyVault
 from free_claude_code.studio.trading.positions import Plan
 from free_claude_code.studio.trading.records import (
     TradeAudit,
@@ -444,11 +444,16 @@ class FakeLive:
         """Fill only this share of an order at first (the rest stays open)."""
         self.unsure = False
         """Lookups can't say whether an order arrived."""
+        self.permissions: tuple[str, ...] | None = None
+        self.refuse = False
+        """The platform refuses the keys (they were revoked)."""
 
     def markets(self) -> frozenset[str]:
         return frozenset({"us", "asx", "crypto"})
 
     async def account(self) -> Account:
+        if self.refuse:
+            raise ServiceError("401 unauthorized: bad token secret-token", status=401)
         return Account(
             number="U1234567",
             fingerprint=fingerprint("fake", "U1234567"),
@@ -457,6 +462,7 @@ class FakeLive:
             cash=self.cash,
             buying_power=self.cash,
             live=True,
+            permissions=self.permissions,
         )
 
     async def positions(self) -> list[Holding]:
@@ -519,6 +525,18 @@ class FakeLive:
         return None
 
 
+class FakeLock:
+    """Stands in for Windows' protection in tests (a fixed wrapping key)."""
+
+    name = "test lock"
+
+    def wrap(self, key: bytes) -> bytes:
+        return bytes(b ^ 0x5A for b in key)
+
+    def unwrap(self, blob: bytes) -> bytes:
+        return bytes(b ^ 0x5A for b in blob)
+
+
 @pytest.fixture
 def make_desk(tmp_path: Path, store):
     built: list[TradingDesk] = []
@@ -537,7 +555,7 @@ def make_desk(tmp_path: Path, store):
             think=script,
             search=lambda: None,
             memory=lambda: MemoryService(store),
-            keys=ConnectorStore(tmp_path / "trading-keys.json"),
+            keys=KeyVault(tmp_path / "trading-keys.vault", protector=FakeLock()),
             workers=WorkerPool(cpu=lambda: None),
             online=online,
             transport=MARKET,
@@ -1783,4 +1801,69 @@ async def test_a_backtest_runs_on_past_prices_and_is_kept(make_desk):
     assert kept["id"] == result["id"]
     with pytest.raises(TradingError):
         await desk.backtest(market="forex")
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_a_key_that_can_move_money_is_never_verified(make_desk, fake_platform):
+    desk, _ = make_desk()
+    await desk.save_keys("fake", {"token": "secret-token"})
+    fake_platform.permissions = ("view", "trade", "transfer")
+    with pytest.raises(TradingError, match="move money"):
+        await desk.test_broker("fake")
+    fake_platform.permissions = ("view", "trade")
+    assert data(await desk.test_broker("fake"))["account"]["permissions"] == [
+        "view",
+        "trade",
+    ]
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_keys_that_fail_their_check_switch_real_money_off(
+    make_desk, store, fake_platform
+):
+    desk, _ = make_desk()
+    await go_live(desk, "live_auto", LIVE_AUTO_PHRASE)
+    desk._save(desk.config().model_copy(update={"running": True}))
+    await desk._check_credentials(desk.config())
+    assert desk.config().live
+    fake_platform.refuse = True
+    desk._last_credentials = 0.0
+    await desk._check_credentials(desk.config())
+    config = desk.config()
+    assert config.mode == "paper" and not config.running
+    line = (await desk.audit_trail(kind="mode"))[0]
+    assert "switched off" in str(line["text"])
+    # The secret the platform echoed back never reaches the record.
+    assert "secret-token" not in str(line["text"])
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_saved_secrets_never_reach_the_feed(make_desk, store, fake_platform):
+    desk, _ = make_desk()
+    await desk.save_keys("fake", {"token": "secret-token"})
+    await desk.feed.emit("error", "Fake Broker said: token secret-token is wrong")
+    texts = [event.text for event in await store.find(TradeEvent)]
+    assert texts and not any("secret-token" in text for text in texts)
+    trail = [line.text for line in await store.find(TradeAudit)]
+    assert any("Saved the Fake Broker keys" in text for text in trail)
+    await desk.close()
+
+
+@pytest.mark.asyncio
+async def test_practice_keys_never_trade_real_money(
+    make_desk, monkeypatch, fake_platform
+):
+    desk, _ = make_desk()
+    monkeypatch.setattr(
+        "free_claude_code.studio.trading.desk.environment_of",
+        lambda broker_id, values: "practice",
+    )
+    await desk.save_keys("fake", {"token": "secret-token"})
+    shown = data(await desk.test_broker("fake"))
+    await desk.confirm_account("fake", shown["account"]["fingerprint"])
+    with pytest.raises(TradingError, match="practice account"):
+        await desk.update_config({"mode": "live_approve", "broker": "fake"}, on_pc=True)
     await desk.close()

@@ -303,8 +303,10 @@ from .tools import (
     ToolOutcome,
     tool_tokens,
 )
+from .trading.brokers.registry import environment_of
 from .trading.config import SeatConfig
 from .trading.desk import TradingDesk
+from .trading.keyvault import KeyVault, default_protector
 from .tuning import CloudTuner, LightTuner, TuningError
 from .vault import RepoVault
 from .video_ears import Fetch, Hear, VideoEars, VideoEarsError, ytdlp_fetch
@@ -892,7 +894,7 @@ class StudioService:
             think=self._trading_think,
             search=self._search,
             memory=self._memory,
-            keys=ConnectorStore(self._data_root / "trading-keys.json"),
+            keys=self._trading_keys(),
             workers=self.workers,
             online=self._connectivity.check,
             read_page=self._trading_read_page,
@@ -2428,6 +2430,18 @@ class StudioService:
             "low_power": self.settings.studio_low_power,
             "at": now_ms(),
         }
+
+    def _trading_keys(self) -> KeyVault:
+        """Trading keys, encrypted (Windows' own protection); keys an older
+        FCC kept in plain text move in."""
+        vault = KeyVault(
+            self._data_root / "trading-keys.vault", protector=default_protector()
+        )
+        try:
+            vault.migrate(self._data_root / "trading-keys.json", environment_of)
+        except Exception:
+            logger.opt(exception=True).warning("Trading keys: couldn't move in")
+        return vault
 
     async def _trading_think(
         self, seat: SeatConfig, system: str, prompt: str, max_tokens: int

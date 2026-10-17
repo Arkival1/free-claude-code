@@ -37,7 +37,6 @@ from .base import (
     Rules,
     Sent,
     fingerprint,
-    masked,
 )
 from .common import Nonce, items, make_web, number, obj, text
 
@@ -128,7 +127,7 @@ class CoinSpotBroker:
                 if code.upper() == "AUD":
                     cash = number(info.get("balance"))
         return Account(
-            number=masked(self._key),
+            number=fingerprint(self.id, self._key),
             fingerprint=fingerprint(self.id, self._key),
             currency="AUD",
             equity=equity,

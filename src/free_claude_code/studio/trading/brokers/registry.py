@@ -117,6 +117,24 @@ def make_broker(
         raise BrokerSetupError(f"{spec.name}: {error}") from error
 
 
+def environment_of(broker_id: str, values: Mapping[str, str]) -> str:
+    """Whether a key set is for a practice (demo or paper) account or a real
+    one, from the platform's own setting."""
+    if broker_id == "alpaca" and values.get("account", "paper") != "live":
+        return "practice"
+    if broker_id == "swyftx" and values.get("environment", "demo") != "live":
+        return "practice"
+    return "live"
+
+
+def secret_fields() -> dict[str, set[str]]:
+    """Each platform's secret field names (for blanking out of the feed)."""
+    return {
+        spec.id: {item.key for item in spec.fields if item.secret}
+        for spec in BROKERS.values()
+    }
+
+
 def check_values(broker_id: str, values: Mapping[str, str]) -> dict[str, str]:
     """Keep only the platform's own fields, trimmed; choices must be valid."""
     spec = BROKERS.get(broker_id)

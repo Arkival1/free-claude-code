@@ -105,7 +105,8 @@ class AlpacaBroker:
             cash=number(body.get("cash")),
             buying_power=number(body.get("buying_power")),
             status=status,
-            live=True,
+            # The paper account is practice money, whatever the market.
+            live=not self._paper,
             day_trades=int(number(body.get("daytrade_count"))),
             pattern_day_trader=bool(body.get("pattern_day_trader")),
             note="Paper account (practice money)." if self._paper else "Live account.",

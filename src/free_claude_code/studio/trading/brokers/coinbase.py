@@ -29,7 +29,6 @@ from .base import (
     OrderResult,
     Rules,
     fingerprint,
-    masked,
 )
 from .common import items, make_web, number, obj, text
 
@@ -177,9 +176,21 @@ class CoinbaseBroker:
                     equity += amount * number(product.get("price"))
                 except ServiceError:
                     continue
+        permissions: tuple[str, ...] | None = None
+        try:
+            granted = await self._get("/api/v3/brokerage/key_permissions")
+        except ServiceError:
+            granted = {}
+        if granted:
+            permissions = tuple(
+                name
+                for name in ("view", "trade", "transfer")
+                if granted.get(f"can_{name}") is True
+            )
         return Account(
-            number=masked(self._key_name.rsplit("/", 1)[-1]),
+            number=fingerprint(self.id, self._key_name),
             fingerprint=fingerprint(self.id, self._key_name),
+            permissions=permissions,
             currency="USD" if self._quote == "USDC" else self._quote,
             equity=equity,
             cash=cash,

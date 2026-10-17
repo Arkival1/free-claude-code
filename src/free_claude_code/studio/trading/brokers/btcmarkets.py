@@ -27,7 +27,6 @@ from .base import (
     OrderResult,
     Rules,
     fingerprint,
-    masked,
 )
 from .common import Nonce, items, make_web, number, obj, text
 
@@ -126,7 +125,7 @@ class BtcMarketsBroker:
                 quote = await self._ticker(f"{asset}-AUD")
                 equity += balance * (quote or 0.0)
         return Account(
-            number=masked(self._key),
+            number=fingerprint(self.id, self._key),
             fingerprint=fingerprint(self.id, self._key),
             currency="AUD",
             equity=equity,
