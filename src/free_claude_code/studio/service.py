@@ -363,6 +363,8 @@ CHANGER_COPY_NAME = "FCC (Changer copy)"
 CHANGER_PLANNER_NAME = "Changer Planner"
 CHANGER_REVIEWER_NAME = "Changer Reviewer"
 CHANGER_SECURITY_NAME = "Changer Security"
+OWNER_HOLDS = frozenset({"paused", "cancelled"})
+"""Statuses only the owner's buttons change."""
 CHANGER_TEAM = frozenset(
     {"Changer", CHANGER_PLANNER_NAME, CHANGER_REVIEWER_NAME, CHANGER_SECURITY_NAME}
 )
@@ -2663,9 +2665,19 @@ class StudioService:
         return found[0] if found else None
 
     async def _save_project(
-        self, project: ChangeProject, **changes: object
+        self, project: ChangeProject, *, owner: bool = False, **changes: object
     ) -> ChangeProject:
-        updated = project.model_copy(update={**changes, "updated_at": now_ms()})
+        """Apply changes to the project as it is now in the store (not an old
+        copy). The driver never undoes the owner's pause or cancel: only the
+        owner's own buttons (owner=True) change a held project's status."""
+        latest = await self._store.get(ChangeProject, project.id) or project
+        if (
+            not owner
+            and latest.status in OWNER_HOLDS
+            and changes.get("status", latest.status) != latest.status
+        ):
+            changes = {key: value for key, value in changes.items() if key != "status"}
+        updated = latest.model_copy(update={**changes, "updated_at": now_ms()})
         await self._store.put(updated)
         return updated
 
@@ -2706,14 +2718,29 @@ class StudioService:
         if action == "approve":
             if project.status != "awaiting_plan":
                 raise StudioError("There's no plan waiting for approval.")
-            project = await self._save_project(project, status="building", note="")
+            project = await self._save_project(
+                project,
+                owner=True,
+                status="building",
+                note="",
+                plan={**project.plan, "approved": True},
+            )
             self._drive(project.id)
         elif action == "replan":
             if project.status in ACTIVE:
                 raise StudioError("Pause the project before changing its plan.")
+            if project.status in FINISHED or project.status == "awaiting_release":
+                raise StudioError(
+                    "This project has finished; start a new change instead."
+                )
             feedback = str(options.get("feedback", "")).strip()
             project = await self._save_project(
-                project, status="planning", plan={}, milestone=0, note=feedback[:2000]
+                project,
+                owner=True,
+                status="planning",
+                plan={},
+                milestone=0,
+                note=feedback[:2000],
             )
             self._drive(project.id)
         elif action == "choose":
@@ -2730,7 +2757,12 @@ class StudioService:
             assert isinstance(chosen, dict)
             request = f"{chosen.get('title', '')}: {chosen.get('why', '')}"
             project = await self._save_project(
-                project, request=request, status="planning", plan={}, note=""
+                project,
+                owner=True,
+                request=request,
+                status="planning",
+                plan={},
+                note="",
             )
             self._drive(project.id)
         elif action == "pause":
@@ -2738,17 +2770,24 @@ class StudioService:
                 raise StudioError("The project isn't running.")
             project = await self._save_project(
                 project,
+                owner=True,
                 status="paused",
                 note="Paused by you; it stops after the step it's on. Press Resume.",
             )
         elif action == "resume":
             if project.status != "paused":
                 raise StudioError("The project isn't paused.")
+            if not project.plan.get("milestones"):
+                resumed = "planning"
+            elif project.plan.get("approved"):
+                resumed = "building"
+            else:
+                resumed = "awaiting_plan"
             project = await self._save_project(
-                project,
-                status="building" if project.plan.get("milestones") else "planning",
-                note="",
+                project, owner=True, status=resumed, note=""
             )
+            if resumed == "awaiting_plan":
+                return await self.changer_view()
             self._drive(project.id)
         elif action == "cancel":
             if project.status in FINISHED:
@@ -2762,7 +2801,7 @@ class StudioService:
                 for agent in await self._store.find(Agent, where={"name": name}):
                     await self.stop_agent_work(agent.id)
             project = await self._save_project(
-                project, status="cancelled", note="Cancelled by you."
+                project, owner=True, status="cancelled", note="Cancelled by you."
             )
         elif action == "rollback":
             if project.status in ACTIVE:
@@ -2781,16 +2820,19 @@ class StudioService:
             raw_back = saved.get("milestone", 0)
             back_to = raw_back if isinstance(raw_back, int) else 0
             milestones = [
-                {**m, "status": "waiting", "review": "", "fixes": 0}
+                {**m, "status": "waiting", "review": "", "fixes": 0, "checkpoint": ""}
                 if isinstance(m, dict) and number >= back_to
                 else m
                 for number, m in enumerate(_items(project.plan.get("milestones")))
             ]
             project = await self._save_project(
                 project,
+                owner=True,
                 plan={**project.plan, "milestones": milestones},
                 milestone=back_to,
-                status="paused" if milestones else project.status,
+                status="paused"
+                if milestones and project.status not in FINISHED
+                else project.status,
                 note=f"Rolled back to '{saved.get('label', point)}' ({touched} files). "
                 "Press Resume to build from there.",
             )
@@ -2847,7 +2889,8 @@ class StudioService:
             "milestone": milestone,
             "files": list(files),
         }
-        project = await self._save_project(project, tasks=[*project.tasks, task])
+        latest = await self._store.require(ChangeProject, project.id)
+        project = await self._save_project(latest, tasks=[*latest.tasks, task])
         job = self._run_jobs.get(run.id)
         if job is not None:
             await asyncio.shield(job)
@@ -2925,6 +2968,7 @@ class StudioService:
             )
         waiting = needs_approval(plan)
         protected = protected_files(plan)
+        plan = {**plan, "approved": not waiting}
         return await self._save_project(
             project,
             plan=plan,
@@ -2978,12 +3022,15 @@ class StudioService:
         )
         point["milestone"] = number
         milestone["status"] = "building"
+        milestone["fixes"] = 0
         milestones[number] = milestone
         project = await self._save_project(
             project,
             checkpoints=[*project.checkpoints, point],
             plan={**project.plan, "milestones": milestones},
         )
+        if project.status != "building":
+            return project
         files = [str(f) for f in _items(milestone.get("files"))]
         project, _run, _ = await self._changer_step(
             project,
@@ -3001,10 +3048,16 @@ class StudioService:
             self._changer_last["check"] = report.view()
             problems = "" if report.passed else "\n".join(report.problems)
             if not problems:
-                problems, verdicts = await self._changer_reviews(
+                problems, verdicts, blocked = await self._changer_reviews(
                     project, number, target
                 )
                 project = await self._store.require(ChangeProject, project.id)
+                if blocked:
+                    return await self._save_project(
+                        project,
+                        status="paused",
+                        note=f"The review couldn't run: {blocked}",
+                    )
             if not problems:
                 break
             raw_fixes = milestone.get("fixes", 0)
@@ -3019,6 +3072,15 @@ class StudioService:
                     status="paused",
                     note=f"Milestone {number + 1} still has problems after "
                     f"{fixes} fixes. Read them, then Resume, change the plan, or roll back.",
+                )
+            used = await self._changer_tokens(project)
+            if used > project.budget:
+                return await self._save_project(
+                    project,
+                    status="paused",
+                    note=f"Ran out of budget during milestone {number + 1}: about "
+                    f"{used:,} tokens used of {project.budget:,}. Raise the budget "
+                    "or press Resume.",
                 )
             milestone["fixes"] = fixes + 1
             milestones[number] = milestone
@@ -3066,10 +3128,11 @@ class StudioService:
 
     async def _changer_reviews(
         self, project: ChangeProject, number: int, target: Path
-    ) -> tuple[str, list[str]]:
+    ) -> tuple[str, list[str], str]:
         """A different agent reviews the milestone (and the security reviewer
-        when protected files changed). Returns the problems ('' when it
-        passes) and a line per verdict."""
+        when protected files changed). Returns the code problems ('' when it
+        passes), a line per verdict, and why a review couldn't run ('' when it
+        ran): a reviewer whose model is down is not a code problem."""
         changes = await asyncio.to_thread(self._changer.changes, target)
         touched = [*changes["changed"], *changes["added"]]
         diff = "\n".join(
@@ -3088,8 +3151,7 @@ class StudioService:
                 raise StudioError("The reviewer can't be the agent that built it.")
             problem = await self._changer_model_problem(reviewer)
             if problem:
-                problems.append(problem)
-                continue
+                return "", verdicts, problem
             project, _run, task = await self._changer_step(
                 project,
                 reviewer,
@@ -3110,7 +3172,7 @@ class StudioService:
                     f"{reviewer.name} found: "
                     + json.dumps(findings, ensure_ascii=False)[:3000]
                 )
-        return "\n".join(problems), verdicts
+        return "\n".join(problems), verdicts, ""
 
     async def changer_view(self) -> JsonObject:
         """Everything the Changer page shows."""
@@ -3134,6 +3196,7 @@ class StudioService:
             # FCC stopped while it worked (a restart): it waits to be resumed.
             project = await self._save_project(
                 project,
+                owner=True,
                 status="paused",
                 note="FCC stopped while the Changer was working. Press Resume to carry on.",
             )

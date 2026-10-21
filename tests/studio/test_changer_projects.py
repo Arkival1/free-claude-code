@@ -357,3 +357,77 @@ async def test_only_the_right_agent_submits_and_helpers_own_their_files(
         ToolContext(agent_id="a", chat_id="c-build", site_id=copy.id),
     )
     assert packed.failed and "release step" in packed.text
+
+
+@pytest.mark.asyncio
+async def test_the_driver_never_undoes_the_owners_pause_or_cancel(
+    make_studio, tmp_path
+):
+    studio, _ = make_studio([])
+    wire(studio, tmp_path)
+    project = ChangeProject(request="x", status="building")
+    await studio._store.put(project)
+    stale = project  # the driver's old copy
+    await studio._save_project(project, owner=True, status="paused")
+    kept = await studio._save_project(stale, status="building", note="driver")
+    assert kept.status == "paused" and kept.note == "driver"
+    await studio._save_project(kept, owner=True, status="cancelled")
+    still = await studio._save_project(stale, status="awaiting_release")
+    assert still.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_finished_projects_cant_be_restarted(make_studio, tmp_path):
+    studio, _ = make_studio([])
+    wire(studio, tmp_path)
+    for status in ("done", "cancelled", "failed", "awaiting_release"):
+        await studio._store.put(ChangeProject(request=status, status=status))
+        with pytest.raises(Exception, match="finished"):
+            await studio.changer_act("replan", feedback="again")
+
+
+@pytest.mark.asyncio
+async def test_resume_of_an_unapproved_plan_waits_for_approval(make_studio, tmp_path):
+    studio, _ = make_studio([])
+    wire(studio, tmp_path)
+    plan = read_plan(quick_plan(size="project"))
+    await studio._store.put(
+        ChangeProject(request="x", status="paused", plan={**plan, "approved": False})
+    )
+    await studio.changer_act("resume")
+    project = await studio._change_project()
+    assert project is not None and project.status == "awaiting_plan"
+
+
+@pytest.mark.asyncio
+async def test_a_reviewer_that_cant_run_pauses_instead_of_spending_fixes(
+    make_studio, tmp_path, monkeypatch
+):
+    studio, _ = make_studio(team(quick_plan()))
+    wire(studio, tmp_path)
+    real = studio._changer_model_problem
+
+    async def reviewer_down(agent):
+        if "Reviewer" in agent.name:
+            return f"{agent.name}'s model didn't answer"
+        return await real(agent)
+
+    monkeypatch.setattr(studio, "_changer_model_problem", reviewer_down)
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "paused" and "review couldn't run" in project.note
+    assert [t["kind"] for t in project.tasks] == ["plan", "build"]  # no fix round
+
+
+@pytest.mark.asyncio
+async def test_resume_after_needs_you_gets_a_fresh_fix_budget(make_studio, tmp_path):
+    studio, _ = make_studio(
+        team(quick_plan(), verdicts=["fail", "fail", "fail", "pass"])
+    )
+    wire(studio, tmp_path)
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "paused" and "still has problems" in project.note
+    await studio.changer_act("resume")
+    project = await settle(studio)
+    assert project.status == "awaiting_release", project.note
