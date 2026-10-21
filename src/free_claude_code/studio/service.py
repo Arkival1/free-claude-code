@@ -38,6 +38,7 @@ from .agents import (
     TurnResult,
     step_budget,
     worth_another_go,
+    writes_like_builder,
 )
 from .assistant_tools import describe_time, now_line, parse_when
 from .changer import Changer, ChangerError, app_root
@@ -102,6 +103,7 @@ from .desk import (
 from .downloads import CURATED_MODELS, ModelLibrary
 from .engine import ENGINE_ARCHIVE, Engine, EngineError, not_a_model
 from .extensions import (
+    BUILTIN_ID,
     UPLOAD_OWNER,
     Extension,
     ExtensionError,
@@ -377,6 +379,8 @@ CHANGER_REVIEWER_NAME = "Changer Reviewer"
 CHANGER_SECURITY_NAME = "Changer Security"
 OWNER_HOLDS = frozenset({"paused", "cancelled"})
 """Statuses only the owner's buttons change."""
+WEB_SKILL = "web-design-engineer"
+APP_SKILL = "app-developer-engineer"
 CHANGER_PING_TRIES = 3
 """Checks of a model before a job, waiting between them after a brief rate
 limit."""
@@ -906,6 +910,8 @@ class StudioService:
         self._changer_driver: asyncio.Task[object] | None = None
         self._changer_models_ok: set[str] = set()
         self._carry_on_wait = 20.0
+        self._builtin_checked = False
+        self._builtin_lock = asyncio.Lock()
         """Seconds before a task that hit a brief rate limit carries on."""
         self._lab_busy = 0
         self._lab_error: str | None = None
@@ -5206,6 +5212,8 @@ class StudioService:
             chat = await self._store.require(Chat, chat_id)
             run = await self._store.require(AgentRun, run_id)
             note = await self._room_note(run) if chat.parent_chat_id else ""
+            brief = await self._skill_brief(agent, run.goal)
+            note = "\n\n".join(part for part in (note, brief) if part)
             helpers = await self._helpers_for(agent, run)
             for helper in helpers:
                 if when(helper.role) == "during":
@@ -6888,7 +6896,9 @@ class StudioService:
     # ----------------------------------------------------------- extensions
 
     async def extensions(self) -> list[Extension]:
-        """Every repo added from GitHub, plus servers added by hand."""
+        """Every repo added from GitHub, plus servers added by hand, and
+        FCC's own skills."""
+        await self._builtin_skills()
         return await self._extensions.all()
 
     async def add_extension(self, link: str) -> Extension:
@@ -6897,6 +6907,56 @@ class StudioService:
         except ExtensionError as error:
             raise StudioError(str(error)) from error
 
+    async def _builtin_skills(self) -> Extension | None:
+        """FCC's own skills, installed or refreshed once per start (one
+        install at a time; tried again on the next use if it failed)."""
+        async with self._builtin_lock:
+            if not self._builtin_checked:
+                try:
+                    await self._extensions.install_builtin()
+                    self._builtin_checked = True
+                except (OSError, ValueError, ExtensionError) as error:
+                    logger.warning("FCC's own skills couldn't be refreshed: {}", error)
+        with contextlib.suppress(StudioNotFoundError, ExtensionError, OSError):
+            return await self._extensions.get(BUILTIN_ID)
+        return None
+
+    async def _skill_brief(self, agent: Agent, goal: str) -> str:
+        """The built-in skills this agent follows on a task, in full: the
+        Builder (and repo agents that write like it) the website design
+        engineer, the Coder, Developer and Tester the app developer engineer,
+        each also the other when the job calls for it."""
+        if agent.name in CHANGER_TEAM:
+            return ""
+        web = agent.role == "builder" or writes_like_builder(agent)
+        app = agent.role in {"coder", "developer", "tester"}
+        if not (web or app):
+            return ""
+        wanted: list[str] = []
+        if web or re.search(r"\b(site|page|landing|ui|design|css|html)\b", goal, re.I):
+            wanted.append(WEB_SKILL)
+        if app or re.search(
+            r"\b(app|tool|game|api|dashboard|calculator|tracker|script)\b", goal, re.I
+        ):
+            wanted.append(APP_SKILL)
+        builtin = await self._builtin_skills()
+        if builtin is None or not builtin.enabled:
+            return ""
+        parts: list[str] = []
+        for skill in builtin.skills:
+            if skill.name in wanted:
+                try:
+                    parts.append(await self._extensions.skill_text(builtin, skill))
+                except (OSError, ExtensionError) as error:
+                    logger.warning("Skill {} couldn't be read: {}", skill.name, error)
+        if not parts:
+            return ""
+        return (
+            "Skills to follow on this job (FCC's built-in skills; do every step, "
+            "and check your work against them before you finish):\n\n"
+            + "\n\n".join(parts)
+        )
+
     async def ensure_starters(self) -> list[Extension]:
         """Add every starter repo not added before; a removed one stays removed.
 
@@ -6904,6 +6964,7 @@ class StudioService:
         download. One whose licence keeps it out of FCC comes from GitHub and
         is kept in the vault; if GitHub can't be reached it is tried again on
         the next load."""
+        await self._builtin_skills()
         if self._starter_folder is None or self._starters_checked:
             return []
         async with self._starters_lock:

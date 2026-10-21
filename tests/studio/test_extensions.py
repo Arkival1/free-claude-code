@@ -326,7 +326,7 @@ async def test_extensions_through_the_routes(make_studio, tmp_path: Path):
             gone = await client.delete(f"/studio/api/extensions/{ext_id}")
             assert gone.json() == {"removed": True}
             left = (await client.get("/studio/api/extensions")).json()["extensions"]
-            assert [item["name"] for item in left] == ["Added by hand"]
+            assert [item["name"] for item in left] == ["Added by hand", "FCC skills"]
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()

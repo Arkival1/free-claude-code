@@ -55,6 +55,9 @@ button, input, select, textarea { font: inherit; }
 .card { background: var(--surface); border-radius: var(--radius); padding: var(--gap); }
 .grid { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .muted { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
 """
 
 _WEBSITE = {

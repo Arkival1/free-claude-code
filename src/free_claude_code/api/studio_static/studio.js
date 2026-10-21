@@ -3957,6 +3957,62 @@
 
   // The user's to-do list. Jarvis and the Helper add to it too, and Jarvis
   // announces reminders on the HUD when they are due.
+  // Everything switched on right now, and what each one does, in one place.
+  function activePluginsCard(list) {
+    const on = list.filter((item) => item.enabled);
+    const usedBy = {
+      "web-design-engineer": "the Builder, on every job",
+      "app-developer-engineer": "the Coder, Developer and Tester, on every job",
+    };
+    const what = (item) =>
+      item.description ||
+      item.skills
+        .slice(0, 3)
+        .map((skill) => skill.description || skill.name)
+        .join(" · ") ||
+      "No description.";
+    const rows = on.map((item) =>
+      el("div", { class: "list-item active-plugin" }, [
+        el("div", { class: "row" }, [
+          el("strong", { class: "grow", text: item.name }),
+          el("span", {
+            class: "pill good",
+            text: item.origin === "builtin" ? "Built into FCC" : item.origin === "bundled" ? "Comes with FCC" : item.origin === "upload" ? "Uploaded" : "From GitHub",
+          }),
+        ]),
+        el("p", { class: "muted", text: what(item) }),
+        el("p", {
+          class: "muted small",
+          text: [
+            `${item.skills.length} skill(s)`,
+            item.agents.length ? `${item.agents.length} agent(s) you can add` : "",
+            `${item.servers.filter((server) => server.enabled).length} of ${item.servers.length} MCP server(s) on`,
+          ].filter(Boolean).join(" · "),
+        }),
+        item.origin === "builtin"
+          ? el(
+              "ul",
+              {},
+              item.skills.map((skill) =>
+                el("li", { text: `${skill.name}: ${skill.description}${usedBy[skill.name] ? ` Used by ${usedBy[skill.name]}.` : ""}` })
+              )
+            )
+          : null,
+        ...item.servers
+          .filter((server) => server.enabled)
+          .map((server) => el("p", { class: "small" }, [el("strong", { text: `MCP ${server.name} runs: ` }), el("code", { text: server.shown })])),
+      ])
+    );
+    return card(`Active plug-ins (${on.length})`, [
+      el("p", {
+        class: "muted",
+        text: "Everything switched on right now and what it does. Agents read these skills with the skill tool and use switched-on MCP servers. Turn any of them on or off under Add from GitHub.",
+      }),
+      ...(rows.length ? rows : [el("p", { class: "muted", text: "No plug-ins are on." })]),
+      list.length > on.length ? el("p", { class: "muted small", text: `${list.length - on.length} more added but switched off.` }) : null,
+    ]);
+  }
+
   function extensionsCard(list, starters = []) {
     const status = el("p", { class: "muted", hidden: true });
     const say = (text) => {
@@ -4162,8 +4218,9 @@
             item.source && item.source.startsWith("https://") ? el("a", { class: "pill", href: item.source, target: "_blank", rel: "noopener", text: "GitHub" }) : null,
             item.vaulted && item.origin !== "upload" ? el("span", { class: "pill", title: "GitHub no longer had it, so this came from the repo vault", text: "From the vault" }) : null,
             item.origin === "bundled" ? el("span", { class: "pill good", title: "FCC keeps a checked copy of this repo, so it works even if GitHub loses it", text: "Comes with FCC" }) : null,
+            item.origin === "builtin" ? el("span", { class: "pill good", title: "FCC's own skills: they come with the app and update with it", text: "Built into FCC" }) : null,
             item.origin === "upload" ? el("span", { class: "pill", title: "Added from a zip on this PC; the zip is kept in the repo vault", text: "Uploaded" }) : null,
-            el("button", {
+            item.origin === "builtin" ? null : el("button", {
               class: "secondary",
               type: "button",
               text: "Remove",
@@ -5171,6 +5228,7 @@
     view.replaceChildren(
       finder,
       nothing,
+      activePluginsCard(added.extensions || []),
       card("Settings", [
         el("p", {
           class: "muted",

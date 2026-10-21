@@ -54,6 +54,16 @@ _SHORT = re.compile(r"^(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)$")
 _NAME = re.compile(r"[^a-z0-9]+")
 
 
+BUILTIN_ID = "ext_fcc_skills"
+BUILTIN_SKILLS = Path(__file__).resolve().parent / "builtin_skills"
+"""FCC's own skills (website design engineer, app developer engineer): they
+come with the app, refresh on every start, and are on unless turned off."""
+BUILTIN_ABOUT = (
+    "FCC's own skills. The Builder follows the website design engineer on every "
+    "job; the Coder, Developer and Tester follow the app developer engineer."
+)
+
+
 class ExtensionError(ValueError):
     """A repo couldn't be fetched or read."""
 
@@ -617,6 +627,44 @@ class ExtensionLibrary:
             raise ExtensionError("That repo is too big to add (over 80 MB).")
         return response.content
 
+    async def install_builtin(self, source: Path = BUILTIN_SKILLS) -> Extension | None:
+        """Install (or refresh) FCC's own skills, keeping the user's on/off."""
+
+        def work() -> Extension | None:
+            if not source.is_dir():
+                return None
+            home = self._folder / BUILTIN_ID
+            old = _read_json(home / MANIFEST)
+            enabled = old.get("enabled", True) if isinstance(old, dict) else True
+            files = home / "files"
+            # Overwrite in place: on Windows an open file can't be removed, so
+            # a full delete-then-copy could leave the old skills behind.
+            shutil.rmtree(files, ignore_errors=True)
+            shutil.copytree(source, files, dirs_exist_ok=True)
+            skills: list[Skill] = []
+            for path in sorted(files.glob("*/SKILL.md")):
+                meta, _ = front_matter(path.read_text(encoding="utf-8"))
+                skills.append(
+                    Skill(
+                        name=meta.get("name") or path.parent.name,
+                        description=meta.get("description", ""),
+                        path=_relative(path, home),
+                    )
+                )
+            extension = Extension(
+                id=BUILTIN_ID,
+                name="FCC skills",
+                source="",
+                description=BUILTIN_ABOUT,
+                skills=skills,
+                origin="builtin",
+                enabled=enabled is not False,
+            )
+            self._write(extension)
+            return extension
+
+        return await anyio.to_thread.run_sync(work)
+
     def _write(self, extension: Extension) -> None:
         home = self._folder / extension.id
         home.mkdir(parents=True, exist_ok=True)
@@ -648,6 +696,10 @@ class ExtensionLibrary:
         raise ExtensionError(f"There is no extension {ext_id}.")
 
     async def remove(self, ext_id: str) -> None:
+        if ext_id == BUILTIN_ID:
+            raise ExtensionError(
+                "FCC's own skills come with the app: turn them off instead."
+            )
         await self.get(ext_id)
         await anyio.to_thread.run_sync(
             lambda: shutil.rmtree(self._folder / ext_id, ignore_errors=True)

@@ -3025,3 +3025,19 @@ h3.subhead {
   flex: 1 1 180px;
   min-width: 0;
 }
+
+/* Active plug-ins: long skill names and commands wrap on a phone. */
+.active-plugin {
+  min-width: 0;
+}
+
+.active-plugin ul {
+  margin: 6px 0 0;
+  padding-left: 1.1rem;
+}
+
+.active-plugin li,
+.active-plugin p,
+.active-plugin code {
+  overflow-wrap: anywhere;
+}

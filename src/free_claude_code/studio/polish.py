@@ -1,8 +1,12 @@
 """A designer's once-over for a web project: what would make it look finished."""
 
+import itertools
 import re
 from collections.abc import Mapping, Sequence
 
+_HIDDEN = re.compile(
+    r"<!--.*?-->|<template\b.*?</template>|<script\b.*?</script>", re.S | re.I
+)
 _HEX = re.compile(r"#(?:[0-9a-fA-F]{3}){1,2}\b")
 _RULE = re.compile(r"([^{}]+)\{([^{}]*)\}")
 _FONT_PX = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)px", re.I)
@@ -167,6 +171,12 @@ def polish_notes(files: Mapping[str, str], pictures: Sequence[str] = ()) -> list
         notes.append(
             "Add short transitions (150-250ms) to hovers and toggles so changes feel smooth."
         )
+    moving = re.search(r"\b(transition|animation)\s*:", styles, re.I)
+    if moving and "prefers-reduced-motion" not in styles:
+        notes.append(
+            "Add @media (prefers-reduced-motion: reduce) that turns off "
+            "animations and transitions, for people who get motion-sick."
+        )
     background_picture = re.search(r"background(-image)?\s*:[^;]*url\(", styles, re.I)
     styled = set(_CSS_CLASS.findall(re.sub(r"url\([^)]*\)", "", styles)))
     for path, text in pages.items():
@@ -176,6 +186,42 @@ def polish_notes(files: Mapping[str, str], pictures: Sequence[str] = ()) -> list
             )
         if not re.search(r"<h1\b", text, re.I):
             notes.append(f"{path}: has no <h1> headline.")
+        # What the page shows: not comments, templates or scripts.
+        shown = _HIDDEN.sub("", text)
+        headlines = len(re.findall(r"<h1\b", shown, re.I))
+        if headlines > 1:
+            notes.append(
+                f"{path}: has {headlines} <h1> headlines; keep exactly one (the "
+                "page's main message) and use h2 for sections."
+            )
+        levels = [int(level) for level in re.findall(r"<h([1-6])\b", shown, re.I)]
+        jumps = [(a, b) for a, b in itertools.pairwise(levels) if b > a + 1]
+        if jumps:
+            a, b = jumps[0]
+            notes.append(
+                f"{path}: a heading jumps from h{a} to h{b}; keep headings in "
+                "order so screen readers can follow the page."
+            )
+        if re.search(r"<html\b", shown, re.I) and not re.search(
+            r"<html\b[^>]*\blang=", shown, re.I
+        ):
+            notes.append(f'{path}: add lang to <html> (e.g. <html lang="en">).')
+        unsafe = [
+            tag
+            for tag in re.findall(
+                r"<a\b[^>]*target=[\"']_blank[\"'][^>]*>", shown, re.I
+            )
+            if not re.search(r"rel=[\"'][^\"']*noopener", tag, re.I)
+        ]
+        if unsafe:
+            notes.append(
+                f'{path}: {len(unsafe)} link(s) open a new tab without rel="noopener"; add it.'
+            )
+        if re.search(r">\s*(click here|here)\s*</a>", shown, re.I):
+            notes.append(
+                f"{path}: a link just says 'click here'; say where it goes "
+                "(e.g. 'See our prices')."
+            )
         if re.search(r"<img\b(?![^>]*\b(?:width|height|loading)=)", text, re.I):
             notes.append(
                 f'{path}: give images width and height (or loading="lazy") so the page does not jump while loading.'
@@ -224,4 +270,4 @@ def polish_notes(files: Mapping[str, str], pictures: Sequence[str] = ()) -> list
                 f"plain: {', '.join(unstyled[:8])}. Style them, or use the "
                 f"classes the CSS has ({', '.join(sorted(styled)[:8])})."
             )
-    return notes[:24]
+    return notes[:30]

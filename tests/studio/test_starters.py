@@ -73,6 +73,11 @@ API_LIST = {
 }
 
 
+async def repos(studio):
+    """The added repos, leaving out FCC's own built-in skills."""
+    return [e for e in await studio.extensions() if e.origin != "builtin"]
+
+
 def bundle(folder: Path, repos: dict[str, dict[str, str]], *, github_only=()):
     """A starter bundle like vendor/repos, with zips, checksums, and a manifest."""
     folder.mkdir(parents=True, exist_ok=True)
@@ -228,7 +233,7 @@ async def test_a_damaged_copy_is_never_installed(tmp_path, make_studio):
     zip_path.write_bytes(zip_path.read_bytes() + b"tampered")
     studio._starter_folder = folder
     assert await studio.ensure_starters() == []
-    assert await studio.extensions() == []
+    assert await repos(studio) == []
 
 
 @pytest.mark.asyncio
@@ -323,7 +328,7 @@ async def test_agents_search_every_repo_and_read_the_part_they_need(
     # switched off, so nothing of them reaches the agents until turned on.
     off = await skill(action="search", query="kubernetes rbac")
     assert "auditing-kubernetes-rbac" not in off and "k8s-rbac" not in off
-    for extension in await studio.extensions():
+    for extension in await repos(studio):
         assert not extension.enabled
         await studio.switch_extension(extension.id, on=True)
     found = await skill(action="search", query="kubernetes rbac")
@@ -338,7 +343,7 @@ async def test_agents_search_every_repo_and_read_the_part_they_need(
     assert "Open-Meteo" in part and "Filler 70" in part and "Filler 150" not in part
 
     listed = await skill(action="list")
-    assert "92 skills in 3 repos" in listed and "- owner/many: 90 skills" in listed
+    assert "94 skills in 4 repos" in listed and "- owner/many: 90 skills" in listed
     one_repo = await skill(action="list", repo="security")
     assert one_repo.startswith("Skills:") and "auditing-kubernetes-rbac" in one_repo
     with pytest.raises(ValueError, match="no file"):
@@ -361,7 +366,7 @@ async def test_a_starter_added_by_hand_is_never_added_twice(make_studio, tmp_pat
     studio._extensions._transport = github_with(API_LIST, {})
     by_hand = await studio.add_extension("https://github.com/public-apis/public-apis")
     assert await studio.ensure_starters() == []
-    assert [e.id for e in await studio.extensions()] == [by_hand.id]
+    assert [e.id for e in await repos(studio)] == [by_hand.id]
 
 
 # ------------------------------------------------------------ repo agents
@@ -441,7 +446,7 @@ async def test_repos_added_before_are_read_again_with_the_agent_rule(
 
     await studio.ensure_starters()
 
-    [again] = await studio.extensions()
+    [again] = await repos(studio)
     assert [a.name for a in again.agents] == ["real"]
 
 
