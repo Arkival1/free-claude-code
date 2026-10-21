@@ -412,7 +412,20 @@ def test_old_lines_dont_count(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "name", ["notes.md", "keys.txt", "config.yml", "config.yaml", "app.env", "a.ini"]
+    "name",
+    [
+        "notes.md",
+        "keys.txt",
+        "config.yml",
+        "config.yaml",
+        "app.env",
+        "a.ini",
+        ".ENV",
+        "notes.rst",
+        "secrets.key",
+        ".npmrc",
+        "Dockerfile",
+    ],
 )
 def test_keys_are_caught_in_any_text_file(tmp_path, name):
     (tmp_path / name).write_text("token: ghp_" + "a" * 30 + "\n")
@@ -425,10 +438,24 @@ def test_text_files_only_get_the_key_check(tmp_path):
     assert scan(tmp_path, ["notes.md"]) == []
 
 
-def test_binary_and_missing_files_are_skipped(tmp_path):
+def test_binary_and_missing_files_get_no_false_alarms(tmp_path):
     (tmp_path / "a.png").write_bytes(b"\x89PNG eval(")
     (tmp_path / "b.py").write_bytes(b"\xff\xfe\x00bad")
     assert scan(tmp_path, ["a.png", "b.py", "gone.py"]) == []
+
+
+@pytest.mark.parametrize("name", ["a.py", "a.js", "a.html", "a.png", "a.bin"])
+@pytest.mark.parametrize("noise", [b"\x00", b"\xff\xfe", b"\x89PNG\r\n"])
+def test_odd_bytes_cant_hide_a_key(tmp_path, name, noise):
+    key = b"KEY = 'ghp_" + b"a" * 30 + b"'\n"
+    (tmp_path / name).write_bytes(noise + b"\n" + key)
+    hits = scan(tmp_path, [name])
+    assert any("key or token" in hit for hit in hits), hits
+
+
+def test_odd_bytes_dont_switch_off_the_code_checks(tmp_path):
+    (tmp_path / "a.py").write_bytes(b"\x00\nos.system(cmd)\n")
+    assert any("shell command" in hit for hit in scan(tmp_path, ["a.py"]))
 
 
 def test_the_scan_is_capped(tmp_path):
@@ -529,8 +556,9 @@ def test_restore_twice_changes_nothing_the_second_time(tmp_path):
     assert points.restore(target, str(first["id"])) == 0
 
 
-def test_checkpoints_made_together_get_their_own_ids(tmp_path):
+def test_checkpoints_made_together_get_their_own_ids(tmp_path, monkeypatch):
     changer, _, target, points = make_points(tmp_path)
+    monkeypatch.setattr("time.time", lambda: 1_000.0)  # every save in one instant
     ids = {
         str(points.save(target, changer.baseline(), str(n))["id"]) for n in range(20)
     }
@@ -1450,3 +1478,51 @@ async def test_the_app_checks_what_it_is_sent(make_studio, tmp_path, path, body,
 
 def test_the_fake_app_matches_the_test_versions():
     assert '"6.75.0"' in PYPROJECT and make_app is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("files", [["."], ["../x.py"], ["/etc/passwd"], ["src/"]])
+async def test_helper_files_follow_the_plan_path_rules(make_studio, tmp_path, files):
+    studio, copy = await tool_studio(
+        make_studio, tmp_path, [{"run_id": "r", "chat_id": "c", "kind": "build"}]
+    )
+    outcome = await studio._changer_tool(
+        call({"action": "subagent", "task": "do part", "files": files}),
+        ToolContext(agent_id="a", chat_id="c", site_id=copy.id),
+    )
+    assert outcome.failed and "isn't a file path" in outcome.text
+
+
+@pytest.mark.asyncio
+async def test_resuming_a_choice_shows_the_hint(make_studio, tmp_path, monkeypatch):
+    studio, _ = make_studio([])
+    wire(studio, tmp_path)
+    keep_driving(studio, monkeypatch)
+    project = ChangeProject(
+        request="x", status="paused", plan={"suggestions": [{"title": "Dark mode"}]}
+    )
+    await studio._store.put(project)
+    await studio.changer_act("resume")
+    after = await studio._store.require(ChangeProject, project.id)
+    assert after.status == "choose" and "Pick one" in after.note
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("files", "refused"), [(None, False), ("src/a.py", False), ("../a.py", True)]
+)
+async def test_helper_files_given_oddly(make_studio, tmp_path, files, refused):
+    studio, copy = await tool_studio(
+        make_studio, tmp_path, [{"run_id": "r", "chat_id": "c", "kind": "build"}]
+    )
+    outcome = await studio._changer_tool(
+        call({"action": "subagent", "task": "do part", "files": files}),
+        ToolContext(agent_id="a", chat_id="c", site_id=copy.id),
+    )
+    assert ("isn't a file path" in outcome.text) is refused
+    if not refused:
+        project = await studio._change_project()
+        assert project is not None
+        helper = project.tasks[-1]
+        assert helper["kind"] == "helper"
+        assert helper["files"] == ([] if files is None else [files])

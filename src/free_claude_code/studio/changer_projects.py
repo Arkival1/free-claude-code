@@ -60,7 +60,8 @@ def _strings(raw: object, limit: int = 40) -> list[str]:
     return [str(item).strip() for item in raw if str(item).strip()][:limit]
 
 
-def _paths(raw: object) -> list[str]:
+def clean_paths(raw: object) -> list[str]:
+    """File paths inside the copy, tidied; anything else is refused."""
     paths = []
     for item in _strings(raw, 60):
         path = item.replace("\\", "/")
@@ -109,7 +110,7 @@ def read_plan(raw: Mapping[str, object]) -> JsonObject:
                 {
                     "title": title,
                     "goal": goal,
-                    "files": _paths(item.get("files")),
+                    "files": clean_paths(item.get("files")),
                     "tests": _strings(item.get("tests")),
                     "status": "waiting",
                     "review": "",
@@ -133,7 +134,7 @@ def read_plan(raw: Mapping[str, object]) -> JsonObject:
         "summary": str(raw.get("summary", "")).strip()[:1500],
         "spec": str(raw.get("spec", "")).strip()[:6000],
         "risks": _strings(raw.get("risks")),
-        "files": _paths(raw.get("files")),
+        "files": clean_paths(raw.get("files")),
         "tests": _strings(raw.get("tests")),
         "milestones": milestones,
         "suggestions": suggestions if not milestones else [],
@@ -271,11 +272,8 @@ _URL = re.compile(r"https?://([A-Za-z0-9.-]+)")
 _CODE = frozenset(
     {".py", ".js", ".ts", ".html", ".ps1", ".sh", ".cmd", ".bat", ".json", ".toml"}
 )
-_TEXT = frozenset(
-    {".md", ".txt", ".yml", ".yaml", ".env", ".ini", ".cfg", ".css", ".csv", ".xml"}
-)
-"""Code gets every check; other text files only the key check (a key in a
-note or a settings file would still ship in the zip)."""
+"""Code gets every check; any other file only the key check (a key in a
+note, a settings file or a picture would still ship in the zip)."""
 
 
 def scan(
@@ -292,15 +290,15 @@ def scan(
         path = target / name
         if not path.is_file():
             continue
-        code = path.suffix.lower() in _CODE
-        if not code and not (
-            path.suffix.lower() in _TEXT or path.name.startswith(".env")
-        ):
-            continue
         try:
-            new_lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError, UnicodeDecodeError:
+            data = path.read_bytes()
+        except OSError:
             continue
+        # Code gets every check, whatever bytes it holds; any other file
+        # (text or binary) still gets the key check, so no file can carry a
+        # key into the zip unseen.
+        code = path.suffix.lower() in _CODE
+        new_lines = data.decode("utf-8", errors="replace").splitlines()
         old: set[str] = set()
         if source is not None and (source / name).is_file():
             try:

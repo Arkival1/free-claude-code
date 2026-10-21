@@ -42,6 +42,7 @@ from .changer_projects import (
     QUICK_BUDGET,
     Checkpoints,
     build_goal,
+    clean_paths,
     estimate_tokens,
     fix_goal,
     known_hosts,
@@ -2788,7 +2789,12 @@ class StudioService:
             else:
                 resumed = "awaiting_plan"
             project = await self._save_project(
-                project, owner=True, status=resumed, note=""
+                project,
+                owner=True,
+                status=resumed,
+                note="Pick one of the suggestions to build."
+                if resumed == "choose"
+                else "",
             )
             if resumed in {"awaiting_plan", "choose"}:
                 return await self.changer_view()
@@ -3500,9 +3506,9 @@ class StudioService:
                     context,
                     str(arguments.get("task", "")),
                     agent_name=str(arguments.get("agent", "") or ""),
-                    files=[str(f) for f in raw_files]
-                    if isinstance(raw_files, list)
-                    else [],
+                    files=clean_paths(
+                        [raw_files] if isinstance(raw_files, str) else raw_files
+                    ),
                 )
             if action == "package":
                 return ToolOutcome(
