@@ -25,5 +25,11 @@ def test_the_changer_copies_fcc_and_checks_it(page: Page, admin_base_url: str) -
     expect(page.locator(".changer-check")).to_contain_text(
         "Checks passed", timeout=60_000
     )
+    page.get_by_label("What should the Changer change?").fill("Add a dark mode")
+    page.get_by_role("button", name="Start the change").click()
+    expect(page.locator(".changer h2", has_text="Update project")).to_be_visible(
+        timeout=30_000
+    )
+    expect(page.locator(".changer-goal")).to_contain_text("Add a dark mode")
     if SHOTS:
         page.screenshot(path=f"{SHOTS}/changer.png", full_page=True)

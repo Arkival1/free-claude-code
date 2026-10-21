@@ -3,7 +3,7 @@ name: previewer
 description: One low-cost read-only reviewer for FCC bugs, test gaps, data consistency, requirements, and system behavior.
 model: haiku
 effort: medium
-maxTurns: 4
+maxTurns: 10
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, Write
 ---

@@ -1364,14 +1364,33 @@ its model on its agent page) that works in a copy of FCC's own files, the
 - **Screenshots** run the changed copy on a spare port with no keys and an
   empty data folder, and take pictures of the Studio pages you name (needs
   Playwright's browser: `uv run playwright install chromium`).
-- For a big job it hands separate parts to **helper Changers** (subagents) that
-  work in the same copy and report back; helpers can't hand work on again.
-- When the checks pass it makes an **update zip** (only the changed files, the
-  version raised by one, and a note) plus a **backup zip** of the files it
-  replaces. Both download from the page.
+- **Small fixes** go straight through. **Bigger jobs become an update
+  project**: the **Changer Planner** reads the code and plans it in
+  milestones (with a spec for a new area) for you to **Approve**; anything
+  touching the Trading Bank, Content Farm, keys or settings always waits for
+  you. Vague requests get up to three suggestions first; press **Build this**.
+- Each milestone is saved as a checkpoint, built by the Changer, checked,
+  reviewed by a **different agent** (the **Changer Reviewer**, plus the
+  **Changer Security** reviewer when protected files change), fixed (up to two
+  rounds), screenshotted if a page changed, and saved again. **Pause**,
+  **Resume**, **Change the plan**, **Cancel**, and **Roll back to here** on any
+  checkpoint. If FCC restarts mid-job, the project waits for Resume.
+- The Changer hands separate parts to **helpers** (a helper Changer or any
+  team member by name): at most two at a time, each owning its own files, and
+  helpers can't hand work on again.
+- Before work starts it checks each agent's model answers; the Changer team
+  never switches to another model on its own. A token **budget** (normal, big
+  or very big) pauses the project with what's done and what's left.
+- **Make update zip** first scans the new lines for keys, `eval`/shell
+  commands, turned-off certificate checks, unsafe loading, new web addresses
+  and switched-off checks; anything flagged waits for **Pack anyway**. The
+  update (`FCC-Studio-update-<version>.zip`) unzips over your fcc folder and
+  carries `_update/<version>/` with CHANGELOG, UPDATE_INSTRUCTIONS, MANIFEST,
+  SHA256SUMS and TEST-REPORT (including what was **not** tested); a
+  `-rollback.zip` undoes it. An update project raises the minor version.
 
 To install an update: close FCC, unzip it into the folder that holds your
-`fcc` folder (choose Replace), and start FCC. To undo it, unzip the backup the
+`fcc` folder (choose Replace), and start FCC. To undo it, unzip the rollback the
 same way. **Start over from a fresh copy** drops changes not yet in a zip.
 
 </details>

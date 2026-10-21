@@ -43,7 +43,7 @@ Operating Rules). Where it differs from the owner's notes further down
 **Roles.** The main session is the implementer: it owns requirements,
 planning, code, edits, tests, browser checks and fixes. There is exactly one
 review subagent, `previewer` (`.claude/agents/previewer.md`, Haiku, medium
-effort, 4 turns, read-only). It is the bug previewer, test-gap checker,
+effort, 10 turns, read-only). It is the bug previewer, test-gap checker,
 data-consistency checker and requirements checker in one report. It never
 edits, writes, installs, commits, pushes, changes settings, exposes secrets
 or starts another subagent. Don't create separate reviewer subagents.
@@ -139,7 +139,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.77.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.78.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
