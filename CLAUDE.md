@@ -33,6 +33,10 @@ Before changing, explaining or shipping anything, read
 `.claude/skills/fcc-studio/SKILL.md` (also the `fcc-studio` skill): what FCC
 and Studio do, every page, where each part of the code lives, how a request
 flows, and the change → test → version → release-zip workflow.
+Then `.claude/skills/fcc-engineer/SKILL.md` (the `fcc-engineer` skill): how
+to work lean (the loop, which tests a change needs via its
+`scripts/related_tests.py`, FCC's traps, the owner's report) and how to
+score the Changer with a real model.
 
 ## Claude Code operating rules (implementer + one previewer)
 
