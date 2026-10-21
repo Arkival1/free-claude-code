@@ -353,7 +353,9 @@ def plan_goal(request: str, feedback: str = "") -> str:
         "a working, testable slice: title, goal, files it owns, tests). A quick "
         "change has one milestone. If the request is vague, give up to three "
         "suggestions instead (title, why, value, effort, risk) and no "
-        "milestones. Then finish."
+        "milestones. Then finish. Be quick: search for the exact words or "
+        "symbols, read only those lines, and hand in the plan within about 15 "
+        "steps. Tests are in tests/ (tests/studio/test_<area>.py)."
     )
     return "\n".join(lines)
 
@@ -374,7 +376,9 @@ def build_goal(project: Mapping[str, object], number: int) -> str:
             *([f"Spec: {plan['spec']}"] if plan.get("spec") else []),
             f"This milestone: {milestone.get('title', '')}: {milestone.get('goal', '')}",
             f"Files it owns: {', '.join(str(f) for f in files) if isinstance(files, list) and files else 'as needed'}",
-            f"Tests: {', '.join(str(t) for t in milestone.get('tests') or []) or 'add tests for the changed behaviour'}",
+            f"Tests: {', '.join(str(t) for t in milestone.get('tests') or []) or 'add tests for the changed behaviour'} "
+            "(add or change a test under tests/; fcc_changer check runs the tests "
+            "related to your change).",
             "Build only this milestone, in small steps, matching the code around "
             "it. Run fcc_changer check and fix every problem. For a separate "
             "part, use fcc_changer subagent with the task and the files it owns "

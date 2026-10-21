@@ -712,7 +712,11 @@ CHANGER_PLANNER_PROMPT = (
     "risks, and the tests. For a vague request, submit up to three "
     "suggestions ranked by value, effort and risk instead, and nothing to "
     "build. Keep the owner's rules: the Trading Bank only ever gets stricter, "
-    "Content Farm is left alone unless named, no keys in files."
+    "Content Farm is left alone unless named, no keys in files. Work fast: "
+    "search_files for the exact words, names or symbols in the request, read "
+    "only those lines, and hand in the plan within about 15 steps. Tests live "
+    "in tests/ (tests/studio/test_<area>.py for Studio): name the test file to "
+    "add or change; don't hunt for tests elsewhere."
 )
 CHANGER_REVIEWER_PROMPT = (
     "You are the Changer's Reviewer. You review updates to FCC that another "

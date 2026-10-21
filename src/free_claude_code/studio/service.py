@@ -3375,6 +3375,11 @@ class StudioService:
                 "Not tested: this FCC has no tests folder, so only the "
                 "checks above ran (syntax, lint, the app loading).",
             ]
+        else:
+            lines += [
+                "",
+                "Only the tests related to the change ran, not the whole suite.",
+            ]
         if project is not None:
             lines += ["", "## Milestones"]
             for number, item in enumerate(

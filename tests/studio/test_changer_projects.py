@@ -216,7 +216,7 @@ async def test_a_quick_change_goes_from_request_to_a_reviewed_zip(
     assert done is not None and done.status == "done"
     with zipfile.ZipFile(studio._changer.update_file(str(made["name"]))) as archive:
         report = archive.read("fcc/_update/6.75.1/TEST-REPORT.md").decode()
-    assert "Bubbles: done" in report and "Not tested" in report
+    assert "Bubbles: done" in report and "not the whole suite" in report
 
 
 @pytest.mark.asyncio

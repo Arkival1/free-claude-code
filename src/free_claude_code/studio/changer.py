@@ -7,6 +7,7 @@ what it changed into an update zip that unzips over the fcc folder, plus a
 backup zip of the files the update replaces.
 """
 
+import ast
 import asyncio
 import difflib
 import hashlib
@@ -31,13 +32,23 @@ from free_claude_code.core.json_types import JsonObject
 COPY_ITEMS: tuple[str, ...] = (
     "src",
     "scripts",
+    "tests",
     "pyproject.toml",
     "uv.lock",
     "README.md",
     "CLAUDE.md",
     ".claude/skills/fcc-studio/SKILL.md",
 )
-"""What the copy holds: the code, the launch scripts, and the map of the app."""
+"""What the copy holds: the code, the launch scripts, the tests, and the map
+of the app."""
+TEST_SECONDS = 420.0
+MAX_TEST_FILES = 12
+SHARED_FILES = frozenset(
+    {"service.py", "store.py", "models.py", "studio_routes.py", "tools.py"}
+)
+"""Files nearly every test touches: tests are picked by the functions changed."""
+LEFT_OUT_TESTS = re.compile(r"content_farm|cartoon_paint")
+"""Content Farm stays untouched and untested unless the owner names it."""
 SKIP_DIRS = frozenset(
     {
         "__pycache__",
@@ -85,6 +96,63 @@ def sha256(path: Path) -> str:
 
 def _wanted(path: Path) -> bool:
     return path.suffix not in SKIP_SUFFIXES and not (SKIP_DIRS & set(path.parts))
+
+
+def _changed_functions(old: str, new: str) -> set[str]:
+    """Names of the functions and classes in ``new`` whose lines changed."""
+    lines = {
+        number
+        for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(
+            None, old.splitlines(), new.splitlines(), autojunk=False
+        ).get_opcodes()
+        if tag != "equal"
+        for number in range(j1 + 1, max(j2, j1 + 1) + 1)
+    }
+    try:
+        parsed = ast.parse(new)
+    except SyntaxError:
+        return set()
+    return {
+        node.name
+        for node in ast.walk(parsed)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        and any(node.lineno <= n <= (node.end_lineno or node.lineno) for n in lines)
+        and len(node.name) > 4
+    }
+
+
+def related_tests(
+    target: Path, touched: Sequence[str], source: Path | None
+) -> list[str]:
+    """The test files that cover a change (so a check runs in a minute, not
+    the whole suite): changed tests, tests naming a changed module, and for
+    big shared files, tests naming a changed function. Content Farm's are
+    left out."""
+    folder = target / "tests"
+    if not folder.is_dir():
+        return []
+    tests = {
+        path.relative_to(target).as_posix(): path
+        for path in folder.rglob("test_*.py")
+        if not LEFT_OUT_TESTS.search(path.name)
+    }
+    picked = {name for name in touched if name in tests}
+    words: set[str] = set()
+    for name in touched:
+        path = Path(name)
+        if not name.startswith("src/") or path.suffix != ".py":
+            continue
+        if path.name in SHARED_FILES:
+            old = _read_text(source / name) if source else ""
+            words |= _changed_functions(old, _read_text(target / name))
+        else:
+            words.add(".".join(path.with_suffix("").parts[2:]))
+    words.discard("")
+    if words:
+        for name, path in tests.items():
+            if name not in picked and any(word in _read_text(path) for word in words):
+                picked.add(name)
+    return sorted(picked)[:MAX_TEST_FILES]
 
 
 def tree(root: Path) -> dict[str, Path]:
@@ -332,17 +400,36 @@ class Changer:
             report.fail(
                 "The app doesn't load from the copy:\n" + output.strip()[-2500:]
             )
-        tests = target / "tests"
-        if tests.is_dir():
+        picked = related_tests(target, touched, self._source)
+        if picked:
             code, output = await self._run(
-                [self._python, "-m", "pytest", "-q", "-x", str(tests)],
+                [
+                    self._python,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "-p",
+                    "no:cacheprovider",
+                    *picked,
+                ],
                 target,
                 env=self._copy_env(target),
+                timeout=TEST_SECONDS,
             )
+            last = output.strip().splitlines()[-1:] or [""]
             if code == 0:
-                report.lines.append("Tests passed.")
+                report.lines.append(
+                    f"Tests passed ({len(picked)} related test files): {last[0][:120]}"
+                )
             else:
-                report.fail("Tests failed:\n" + output.strip()[-2500:])
+                report.fail(
+                    f"Tests failed ({', '.join(picked)}):\n" + output.strip()[-2500:]
+                )
+        elif touched and (target / "tests").is_dir():
+            report.lines.append(
+                "No test covers the changed files yet: add one under tests/ "
+                "(tests/studio/test_<area>.py)."
+            )
         return report
 
     async def _run(

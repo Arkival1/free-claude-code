@@ -47,7 +47,7 @@ def make_app(root: Path) -> Path:
     (root / "uv.lock").write_text(LOCK)
     (root / "CLAUDE.md").write_text("Rules.\n")
     (root / "tests").mkdir()
-    (root / "tests" / "test_x.py").write_text("left out of the copy\n")
+    (root / "tests" / "test_x.py").write_text("def test_x():\n    assert True\n")
     return root
 
 
@@ -61,12 +61,13 @@ def changer_for(tmp_path: Path, **options) -> tuple[Changer, Path, Path]:
     return changer, source, target
 
 
-def test_the_copy_holds_the_code_but_not_caches_tests_or_data(tmp_path):
+def test_the_copy_holds_the_code_and_tests_but_not_caches_or_data(tmp_path):
     changer, _, target = changer_for(tmp_path)
     copied = set(tree(target))
     assert "src/free_claude_code/studio/lab.py" in copied
     assert "scripts/start.ps1" in copied and "pyproject.toml" in copied
-    assert not any("__pycache__" in name or name.startswith("tests") for name in copied)
+    assert "tests/test_x.py" in copied
+    assert not any("__pycache__" in name for name in copied)
     assert changer.changes(target) == {"changed": [], "added": [], "deleted": []}
 
 
@@ -238,3 +239,62 @@ async def test_the_changer_through_the_app(make_studio, tmp_path):
         assert missing.status_code == 404
         empty = await client.post("/studio/api/changer/start", json={"request": " "})
         assert empty.status_code == 400
+
+
+def test_the_check_runs_only_the_tests_for_the_change(tmp_path):
+    from free_claude_code.studio.changer import related_tests
+
+    _, source, target = changer_for(tmp_path)
+    tests = target / "tests" / "studio"
+    tests.mkdir(parents=True)
+    (tests / "test_lab.py").write_text(
+        "from free_claude_code.studio.lab import mix\n\ndef test_mix():\n"
+        "    assert mix() == 'fizz'\n"
+    )
+    (tests / "test_other.py").write_text("def test_other():\n    assert True\n")
+    (tests / "test_content_farm.py").write_text("import free_claude_code.studio.lab\n")
+    assert related_tests(target, ["src/free_claude_code/studio/lab.py"], source) == [
+        "tests/studio/test_lab.py"
+    ]
+    assert related_tests(target, ["tests/studio/test_other.py"], source) == [
+        "tests/studio/test_other.py"
+    ]
+    assert related_tests(target, ["README.md"], source) == []
+
+
+def test_shared_files_pick_tests_by_the_changed_function(tmp_path):
+    from free_claude_code.studio.changer import related_tests
+
+    _, source, target = changer_for(tmp_path)
+    service = "src/free_claude_code/studio/service.py"
+    body = "def changer_view():\n    return 1\n\n\ndef lab_say():\n    return 2\n"
+    (source / service).write_text(body)
+    (target / service).write_text(body.replace("return 1", "return 3"))
+    tests = target / "tests"
+    (tests / "test_view.py").write_text("def test_v():\n    'changer_view'\n")
+    (tests / "test_lab_say.py").write_text("def test_l():\n    'lab_say'\n")
+    assert related_tests(target, [service], source) == ["tests/test_view.py"]
+
+
+@pytest.mark.asyncio
+async def test_the_check_runs_the_related_tests(tmp_path):
+    changer, _, target = changer_for(tmp_path)
+    tests = target / "tests" / "studio"
+    tests.mkdir(parents=True)
+    (tests / "test_lab.py").write_text(
+        "from free_claude_code.studio.lab import mix\n\ndef test_mix():\n"
+        "    assert mix() == 'bubbles'\n"
+    )
+    (target / "pyproject.toml").write_text(
+        PYPROJECT + '\n[tool.pytest.ini_options]\npythonpath = ["src"]\n'
+    )
+    (target / "src/free_claude_code/studio/lab.py").write_text(
+        "def mix():\n    return 'fizz'\n\n"
+    )
+    failed = await changer.check(target)
+    assert not failed.passed and "Tests failed" in failed.text()
+    (target / "src/free_claude_code/studio/lab.py").write_text(
+        "def mix():\n    return 'bubbles'\n"
+    )
+    passed = await changer.check(target)
+    assert passed.passed and "Tests passed (1 related" in passed.text()
