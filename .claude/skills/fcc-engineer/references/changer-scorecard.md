@@ -16,6 +16,21 @@ so tell the owner the plan and the rough cost first.
   model under test. Check the model answers before starting (the Changer
   pings it too).
 
+## Model allowance (check before running)
+
+One Changer case needs about 30-80 model requests. Free Gemini keys allow
+only 20 requests a day per model (found 2026-10-21), so they can't run a
+full case. Probe first with one tiny request per model and read the 429's
+`quotaId`/`quotaValue`. Use a key with real allowance (NVIDIA NIM's free
+tier, or a paid Gemini key) for the scorecard.
+
+A working harness from the first run is described in the commit that added
+`limit_note`; rebuild it in the scratchpad (never in the repo): copy
+`COPY_ITEMS` to a base folder, plant each bug in a per-case source, set
+`studio._changer = Changer(home, source=planted)`, drive with
+`changer_start`/`changer_act("approve")`, then run hidden checks with
+`PYTHONPATH=<copy>/src` and pytest `-o pythonpath=<copy>/src`.
+
 ## The cases (small, each with a hidden check)
 
 Plant each bug in the Changer copy only (never the repo), one at a time,

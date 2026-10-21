@@ -426,6 +426,23 @@ def review_goal(
     )
 
 
+_LIMIT = re.compile(r"\b429\b|quota|rate.?limit|resource.?exhausted", re.IGNORECASE)
+
+
+def limit_note(text: str, model: str) -> str:
+    """A plain note when a provider's limit stopped the work ('' when the
+    text isn't about a limit): what happened and what the owner can do."""
+    if not _LIMIT.search(text):
+        return ""
+    return (
+        f"The model {model or 'in use'} hit its provider's limit (a free Gemini key allows "
+        "about 20 requests a day per model, and one Changer job needs roughly "
+        "30-80). The work so far is saved. Wait for the limit to reset, pick "
+        "another model for the Changer team on the Agents page, or use a key "
+        "with more allowance, then press Resume."
+    )
+
+
 def estimate_tokens(texts: Sequence[str]) -> int:
     """A rough token count of what an agent read and wrote (about 4
     characters a token); shown as an estimate, never as a bill."""

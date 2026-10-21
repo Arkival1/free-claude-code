@@ -1526,3 +1526,51 @@ async def test_helper_files_given_oddly(make_studio, tmp_path, files, refused):
         helper = project.tasks[-1]
         assert helper["kind"] == "helper"
         assert helper["files"] == ([] if files is None else [files])
+
+
+# ------------------------------------------------------------ provider limits
+
+
+@pytest.mark.parametrize(
+    ("text", "limited"),
+    [
+        ("Model endpoint returned 429: rate_limit_error", True),
+        ("You exceeded your current quota", True),
+        ("RESOURCE_EXHAUSTED", True),
+        ("Provider rate limit reached", True),
+        ("Connection refused", False),
+        ("no such model", False),
+        ("", False),
+    ],
+)
+def test_limit_notes(text, limited):
+    from free_claude_code.studio.changer_projects import limit_note
+
+    note = limit_note(text, "gemini/x")
+    assert bool(note) is limited
+    if limited:
+        assert "gemini/x" in note and "Resume" in note and "{" not in note
+
+
+def limited_team(*, at_ping: bool):
+    def respond(system: str, prompt: str) -> object:
+        if prompt == "Reply with the word OK." and at_ping:
+            raise RuntimeError('Model endpoint returned 429: {"error": "quota"}')
+        if prompt == "Reply with the word OK.":
+            from free_claude_code.studio.llm import LLMReply
+
+            return LLMReply(text="OK")
+        raise RuntimeError('Model endpoint returned 429: {"error": "quota"}')
+
+    return respond
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("at_ping", [True, False])
+async def test_a_used_up_limit_pauses_with_a_plain_note(make_studio, tmp_path, at_ping):
+    studio, _ = make_studio(limited_team(at_ping=at_ping))
+    wire(studio, tmp_path)
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "paused", project.note
+    assert "hit its provider's limit" in project.note and "{" not in project.note

@@ -46,6 +46,7 @@ from .changer_projects import (
     estimate_tokens,
     fix_goal,
     known_hosts,
+    limit_note,
     needs_approval,
     overlapping,
     plan_goal,
@@ -2874,6 +2875,9 @@ class StudioService:
                 temperature=0.0,
             )
         except Exception as error:  # any provider failure means: not usable
+            limited = limit_note(str(error), model)
+            if limited:
+                return f"{agent.name}: {limited}"
             others = [m for m in self.server_model_list() if m != model][:5]
             return (
                 f"{agent.name}'s model {model} didn't answer "
@@ -2948,7 +2952,8 @@ class StudioService:
                 await self._save_project(
                     project,
                     status="paused",
-                    note=f"Stopped by an error ({type(error).__name__}: "
+                    note=limit_note(str(error), "")
+                    or f"Stopped by an error ({type(error).__name__}: "
                     f"{str(error)[:300]}). Press Resume to try again.",
                 )
 
@@ -2961,6 +2966,12 @@ class StudioService:
             project, planner, plan_goal(project.request, project.note), kind="plan"
         )
         raw = task.get("plan")
+        limited = limit_note(f"{run.error} {run.result}", planner.model)
+        if not isinstance(raw, dict) and limited:
+            # A used-up limit isn't a bad request: keep it resumable.
+            return await self._save_project(
+                project, status="paused", note=f"{planner.name}: {limited}"
+            )
         if not isinstance(raw, dict):
             return await self._save_project(
                 project,
