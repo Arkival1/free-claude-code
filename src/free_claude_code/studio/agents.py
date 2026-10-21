@@ -302,11 +302,11 @@ HISTORY_BUDGET = 36_000
 KEEP_RECENT = 6
 REPLY_TOKENS = 2048
 BUILD_REPLY_TOKENS = 4096
+"""Builders write whole files in one reply, so they get more room."""
 SERVER_REPLY_TOKENS = 4096
 SERVER_BUILD_REPLY_TOKENS = 16384
 """Server models think before they answer and write whole pages in one reply,
 so they get more room than a model on this PC (whose context is small)."""
-"""Builders write whole files in one reply, so they get more room."""
 
 
 def model_missing_hint(error: str, model: str, agent: str) -> str:
