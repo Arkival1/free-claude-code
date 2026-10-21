@@ -39,7 +39,7 @@ from free_claude_code.studio.changer_projects import (
     scan,
 )
 from free_claude_code.studio.llm import ToolCall
-from free_claude_code.studio.models import AgentRun, ChangeProject
+from free_claude_code.studio.models import AgentRun, ChangeProject, Message
 from free_claude_code.studio.service import StudioError
 from free_claude_code.studio.tools import ToolContext
 from tests.api.support import create_test_app
@@ -1596,64 +1596,202 @@ async def test_a_used_up_limit_pauses_with_a_plain_note(make_studio, tmp_path, a
     ],
 )
 def test_which_stops_carry_on(reason, again):
-    from free_claude_code.studio.changer_projects import worth_another_go
+    from free_claude_code.studio.agents import worth_another_go
 
     assert worth_another_go(reason) is again
 
 
 def test_the_carry_on_goal_says_where_it_stopped():
-    from free_claude_code.studio.changer_projects import carry_on_goal
+    from free_claude_code.studio.agents import carry_on_goal
 
     goal = carry_on_goal("BUILD milestone 1", "step_limit", 1)
     assert goal.startswith("CARRY ON (try 2)") and "ran out of steps" in goal
-    assert "fcc_changer changes" in goal and goal.endswith("BUILD milestone 1")
+    assert "already done" in goal and goal.endswith("BUILD milestone 1")
 
 
-def flaky_planner(fails: int, error: str):
-    """A Planner whose first tries fail with ``error``; then it plans."""
+def flaky_planner(fails: int, error: str) -> tuple[object, dict[str, int]]:
+    """A Planner whose first calls fail with ``error``; then it plans."""
     from free_claude_code.studio.llm import StudioLLMError
 
     inner = team(quick_plan())
-    left = {"fails": fails}
+    seen = {"fails": fails, "failed": 0}
 
     def respond(system: str, prompt: str) -> object:
-        if "Changer's Planner" in system and left["fails"] > 0:
-            left["fails"] -= 1
+        if "Changer's Planner" in system and seen["fails"] > 0:
+            seen["fails"] -= 1
+            seen["failed"] += 1
             raise StudioLLMError(error)
         return inner(system, prompt)
 
-    return respond
+    return respond, seen
+
+
+async def planner_run(studio):
+    await studio.changer_start("Make the Lab say bubbles")
+    return await settle(studio)
 
 
 @pytest.mark.asyncio
-async def test_a_step_that_stops_early_carries_on(make_studio, tmp_path):
-    studio, _ = make_studio(flaky_planner(1, "Request timed out"))
+async def test_a_task_that_stops_early_carries_on(make_studio, tmp_path):
+    respond, seen = flaky_planner(1, "Request timed out")
+    studio, _ = make_studio(respond)
     wire(studio, tmp_path)
-    studio._changer_retry_wait = 0
-    await studio.changer_start("Make the Lab say bubbles")
-    project = await settle(studio)
+    studio._carry_on_wait = 0
+    project = await planner_run(studio)
     assert project.status == "awaiting_release", project.note
-    plans = [t for t in project.tasks if t["kind"] == "plan"]
-    assert len(plans) == 2 and plans[1]["try"] == 2
+    assert seen["failed"] == 1
+    planner_chat = project.tasks[0]["chat_id"]
+    events = await studio._store.find(Message, where={"chat_id": planner_chat})
+    assert any(m.data.get("kind") == "carry_on" for m in events)
 
 
 @pytest.mark.asyncio
 async def test_carrying_on_has_a_limit(make_studio, tmp_path):
-    studio, _ = make_studio(flaky_planner(9, "Request timed out"))
+    respond, seen = flaky_planner(9, "Request timed out")
+    studio, _ = make_studio(respond)
     wire(studio, tmp_path)
-    studio._changer_retry_wait = 0
-    await studio.changer_start("Make the Lab say bubbles")
-    project = await settle(studio)
+    studio._carry_on_wait = 0
+    project = await planner_run(studio)
     assert project.status == "failed"
-    assert len([t for t in project.tasks if t["kind"] == "plan"]) == 3
+    assert seen["failed"] == 3  # the first try and two more
 
 
 @pytest.mark.asyncio
 async def test_a_used_up_day_doesnt_hammer_the_provider(make_studio, tmp_path):
-    studio, _ = make_studio(flaky_planner(9, "429: You exceeded your current quota"))
+    respond, seen = flaky_planner(9, "429: You exceeded your current quota")
+    studio, _ = make_studio(respond)
     wire(studio, tmp_path)
-    studio._changer_retry_wait = 0
-    await studio.changer_start("Make the Lab say bubbles")
-    project = await settle(studio)
+    studio._carry_on_wait = 0
+    project = await planner_run(studio)
     assert project.status == "paused" and "limit" in project.note
-    assert len([t for t in project.tasks if t["kind"] == "plan"]) == 1
+    assert seen["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_every_agent_carries_on_not_just_the_changer(make_studio, tmp_path):
+    from free_claude_code.studio.llm import LLMReply, StudioLLMError
+
+    calls = {"n": 0}
+
+    def respond(system: str, prompt: str) -> object:
+        if prompt == "Reply with the word OK.":
+            return LLMReply(text="OK")
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise StudioLLMError("Model endpoint returned 503: overloaded")
+        return LLMReply(text="All done.")
+
+    studio, _ = make_studio(respond)
+    studio._carry_on_wait = 0
+    agent = await studio.create_agent(
+        name="Researcher", role="agent", model="nvidia_nim/test-model"
+    )
+    run = await studio.start_task(agent_id=agent.id, goal="Find three facts")
+    job = studio._run_jobs.get(run.id)
+    if job is not None:
+        await job
+    finished = await studio._store.require(AgentRun, run.id)
+    assert finished.status == "succeeded" and calls["n"] == 2
+
+
+async def agent_task(studio, respond_tools: tuple[str, ...] = ()):
+    agent = await studio.create_agent(
+        name="Researcher",
+        role="agent",
+        model="nvidia_nim/test-model",
+        tools=respond_tools,
+        all_tools=False,
+    )
+    return await studio.start_task(agent_id=agent.id, goal="Find three facts")
+
+
+async def finish(studio, run) -> AgentRun:
+    job = studio._run_jobs.get(run.id)
+    if job is not None:
+        await job
+    return await studio._store.require(AgentRun, run.id)
+
+
+@pytest.mark.asyncio
+async def test_any_agent_stops_at_a_used_up_day(make_studio):
+    from free_claude_code.studio.llm import StudioLLMError
+
+    calls = {"n": 0}
+
+    def respond(system: str, prompt: str) -> object:
+        calls["n"] += 1
+        raise StudioLLMError("429: You exceeded your current quota")
+
+    studio, _ = make_studio(respond)
+    studio._carry_on_wait = 0
+    finished = await finish(studio, await agent_task(studio))
+    assert finished.status == "failed" and calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_steps_add_up_across_tries(make_studio):
+    from .conftest import tool_reply
+
+    def respond(system: str, prompt: str) -> object:
+        return tool_reply("web_search", {"query": "facts"})
+
+    studio, _ = make_studio(
+        respond, STUDIO_AGENT_MAX_STEPS=2, STUDIO_BUILDER_MAX_STEPS=2
+    )
+    studio._carry_on_wait = 0
+    run = await agent_task(studio, ("web_search",))
+    finished = await finish(studio, run)
+    assert finished.status == "failed" and finished.step == 6
+    events = await studio._store.find(Message, where={"chat_id": run.chat_id})
+    kinds = [m.data.get("kind") for m in events]
+    assert kinds.count("carry_on") == 2 and kinds.count("step_limit") == 3
+
+
+@pytest.mark.asyncio
+async def test_a_stop_during_the_wait_ends_it(make_studio):
+    from free_claude_code.studio.llm import StudioLLMError
+
+    calls = {"n": 0}
+
+    def respond(system: str, prompt: str) -> object:
+        calls["n"] += 1
+        raise StudioLLMError("Model endpoint returned 429: rate_limit_error")
+
+    studio, _ = make_studio(respond)
+    studio._carry_on_wait = 30
+    run = await agent_task(studio)
+    for _ in range(200):
+        events = await studio._store.find(Message, where={"chat_id": run.chat_id})
+        if any(m.data.get("kind") == "carry_on" for m in events):
+            break
+        await asyncio.sleep(0.02)
+    await studio.stop_agent_work(run.agent_id)
+    stopped = await studio._store.require(AgentRun, run.id)
+    assert stopped.status == "cancelled" and calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_planner_that_handed_in_doesnt_plan_again(make_studio, tmp_path):
+    from .conftest import tool_reply
+
+    calls = {"n": 0}
+    inner = team(quick_plan())
+
+    def respond(system: str, prompt: str) -> object:
+        if "Changer's Planner" in system and prompt != "Reply with the word OK.":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return tool_reply("fcc_changer", quick_plan())
+            return tool_reply(
+                "search_files", {"query": "more"}, call_id=f"s{calls['n']}"
+            )
+        return inner(system, prompt)
+
+    studio, _ = make_studio(
+        respond, STUDIO_AGENT_MAX_STEPS=3, STUDIO_BUILDER_MAX_STEPS=3
+    )
+    wire(studio, tmp_path)
+    studio._carry_on_wait = 0
+    project = await planner_run(studio)
+    assert calls["n"] == 3  # one try only: the plan was already in
+    assert project.plan.get("milestones")

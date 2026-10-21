@@ -238,6 +238,51 @@ IDLE_NOTE = (
     "page, rewrite index.html completely with write_file, with real content "
     "for this job."
 )
+CARRY_ON_TRIES = 2
+"""How many more times a task that stopped early carries on by itself."""
+_DAILY = re.compile(r"quota|per ?day|resource.?exhausted", re.IGNORECASE)
+_TRANSIENT = re.compile(
+    r"step_limit|\bstuck\b|time ?out|timed out|\b429\b|rate.?limit|\b5\d\d\b|"
+    r"overloaded|unavailable|high demand|connection|reset by peer|temporar",
+    re.IGNORECASE,
+)
+
+
+def worth_another_go(reason: str) -> bool:
+    """A task that stopped early for a passing reason (out of steps, stuck,
+    a timeout, a brief rate limit, a busy server) carries on; a used-up daily
+    allowance or a real refusal doesn't."""
+    return bool(_TRANSIENT.search(reason)) and not _DAILY.search(reason)
+
+
+async def _wants_more(keep_going: Callable[[], Awaitable[bool]] | None) -> bool:
+    """Ask the job whether it still wants another go; a check that fails
+    means no (the task ends and records its outcome)."""
+    if keep_going is None:
+        return True
+    try:
+        return await keep_going()
+    except Exception:  # a broken check must never leave a task hanging
+        logger.exception("Couldn't tell whether a task should carry on")
+        return False
+
+
+def carry_on_goal(goal: str, reason: str, attempt: int) -> str:
+    """The same task again, told where the last try stopped."""
+    why = (
+        "it ran out of steps"
+        if "step_limit" in reason
+        else f"it stopped early ({reason.strip()[:200]})"
+    )
+    return (
+        f"CARRY ON (try {attempt + 1}): the last try at this task stopped because "
+        f"{why}. Its work so far is kept: first look at what is already done "
+        "(the files, or fcc_changer changes in the Changer's copy), don't redo "
+        "it, finish the rest, then hand in your result. If you already handed "
+        f"it in, just finish with a short summary.\n\n{goal}"
+    )
+
+
 FINAL_STEPS = 2
 FINAL_NOTE = (
     "(Studio) Only {steps} steps left. Finish now with what you have: hand in "
@@ -780,10 +825,12 @@ class AgentRunner:
         main_own_memory: bool = False,
         learned: Callable[[str, ToolCall], Awaitable[None]] | None = None,
         built: Callable[[Chat, frozenset[str]], Awaitable[None]] | None = None,
+        carry_on_wait: float = 20.0,
     ) -> None:
         self._store = store
         # Hands the user a download of each app a turn built or changed.
         self._built = built
+        self._carry_on_wait = carry_on_wait
         # The main AI's calls that worked, so its playbook keeps the example.
         self._learned = learned
         # Agents on this PC direct the agents on server AIs.
@@ -1177,8 +1224,13 @@ class AgentRunner:
         *,
         note: str = "",
         fallback_model: str | None = None,
+        keep_going: Callable[[], Awaitable[bool]] | None = None,
     ) -> AgentRun:
         """Run one autonomous goal to completion and persist its outcome.
+
+        A try that stops early for a passing reason carries on (up to
+        CARRY_ON_TRIES more), unless ``keep_going`` says the job no longer
+        wants it (handed in already, or paused by the owner).
 
         ``note`` rides along with the goal (what the team shared in the room)
         without becoming part of it.
@@ -1200,23 +1252,49 @@ class AgentRunner:
             sealed=sealed,
             directs=directs,
         )
-        history = [ChatMessage.user(run.goal)]
-        result = await self._loop(
-            agent,
-            chat,
-            history=history,
-            context=context,
-            query=run.goal,
-            max_steps=run.max_steps or self._max_steps,
-            sealed=sealed,
-            alone=True,
-            turn_note=note,
-            fallback_model=fallback_model,
-        )
+        asked = run.goal
+        steps = 0
+        for attempt in range(CARRY_ON_TRIES + 1):
+            result = await self._loop(
+                agent,
+                chat,
+                history=[ChatMessage.user(asked)],
+                context=context,
+                query=asked,
+                max_steps=run.max_steps or self._max_steps,
+                sealed=sealed,
+                alone=True,
+                turn_note=note,
+                fallback_model=fallback_model,
+            )
+            steps += result.steps
+            reason = (result.error or "").strip()
+            if "step_limit" in reason:
+                reason = f"step_limit {result.text}".strip()
+            if (
+                not result.failed
+                or attempt == CARRY_ON_TRIES
+                or not worth_another_go(reason)
+                or not await _wants_more(keep_going)
+            ):
+                break
+            # It stopped part way for a passing reason: it carries on by
+            # itself instead of leaving the task half done.
+            await self._store.append_message(
+                chat_id=chat.id,
+                role="event",
+                text=f"Carrying on (try {attempt + 2} of {CARRY_ON_TRIES + 1}): "
+                f"the last try stopped early ({reason[:160]}).",
+                author=agent.name,
+                data={"kind": "carry_on", "try": attempt + 2},
+            )
+            if re.search(r"\b429\b|rate.?limit", reason, re.IGNORECASE):
+                await asyncio.sleep(self._carry_on_wait * (attempt + 1))
+            asked = carry_on_goal(run.goal, reason, attempt + 1)
         finished = started.model_copy(
             update={
                 "status": "failed" if result.failed else "succeeded",
-                "step": result.steps,
+                "step": steps,
                 "result": result.text,
                 "error": result.error,
                 "updated_at": now_ms(),
