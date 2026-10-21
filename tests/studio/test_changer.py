@@ -298,3 +298,95 @@ async def test_the_check_runs_the_related_tests(tmp_path):
     )
     passed = await changer.check(target)
     assert passed.passed and "Tests passed (1 related" in passed.text()
+
+
+def test_changed_tests_run_first_and_a_cut_is_counted(tmp_path):
+    from free_claude_code.studio.changer import pick_tests
+
+    _, source, target = changer_for(tmp_path)
+    tests = target / "tests"
+    for number in range(15):
+        (tests / f"test_a{number:02}.py").write_text(
+            "import free_claude_code.studio.lab\n"
+        )
+    (tests / "test_zz.py").write_text("def test_z():\n    assert True\n")
+    pick = pick_tests(
+        target, ["src/free_claude_code/studio/lab.py", "tests/test_zz.py"], source
+    )
+    assert pick.files[0] == "tests/test_zz.py"
+    assert len(pick.files) == 12 and pick.found == 16
+
+
+def test_shared_file_changes_outside_a_function_are_named(tmp_path):
+    from free_claude_code.studio.changer import pick_tests
+
+    _, source, target = changer_for(tmp_path)
+    service = "src/free_claude_code/studio/service.py"
+    (source / service).write_text("LIMIT = 1\n\n\ndef save():\n    return 1\n")
+    (target / service).write_text("LIMIT = 2\n\n\ndef save():\n    return 2\n")
+    (target / "tests" / "test_save.py").write_text("def test_s():\n    'save'\n")
+    pick = pick_tests(target, [service], source)
+    assert pick.files == ["tests/test_save.py"]  # short names count too
+    assert pick.uncovered == [f"{service} (changes outside a function)"]
+
+
+@pytest.mark.parametrize(
+    ("text", "picked"),
+    [
+        ("from free_claude_code.studio import lab\n", True),
+        ("from free_claude_code.studio import ideas, lab as l\n", True),
+        ("import free_claude_code.studio.lab\n", True),
+        ("x = 'studio.label'\n", False),
+        ("from free_claude_code.studio import labs\n", False),
+        ("from free_claude_code.studio import (\n    ideas,\n    lab,\n)\n", True),
+        ("from free_claude_code.studio import (\n    ideas,\n)\nlab = 1\n", False),
+    ],
+)
+def test_tests_are_matched_by_how_they_import(tmp_path, text, picked):
+    from free_claude_code.studio.changer import pick_tests
+
+    _, source, target = changer_for(tmp_path)
+    (target / "tests" / "test_one.py").write_text(text)
+    pick = pick_tests(target, ["src/free_claude_code/studio/lab.py"], source)
+    assert (pick.files == ["tests/test_one.py"]) is picked
+
+
+@pytest.mark.asyncio
+async def test_doc_changes_need_no_test(tmp_path):
+    changer, _, target = changer_for(tmp_path)
+    (target / "CLAUDE.md").write_text("New rules.\n")
+    report = await changer.check(target)
+    assert "No test covers" not in report.text()
+
+
+@pytest.mark.asyncio
+async def test_the_check_says_what_it_ran_and_what_it_missed(tmp_path, monkeypatch):
+    import importlib.util
+
+    changer, source, target = changer_for(tmp_path)
+    tests = target / "tests"
+    for number in range(14):
+        (tests / f"test_a{number:02}.py").write_text(
+            "import free_claude_code.studio.lab\n\ndef test_a():\n    assert True\n"
+        )
+    (target / "src/free_claude_code/studio/lab.py").write_text(
+        "def mix():\n    return 'b'\n"
+    )
+    service = "src/free_claude_code/studio/service.py"
+    (source / service).write_text("LIMIT = 1\n")
+    (target / service).write_text("LIMIT = 2\n")
+    (target / "pyproject.toml").write_text(
+        PYPROJECT + '\n[tool.pytest.ini_options]\npythonpath = ["src"]\n'
+    )
+    report = await changer.check(target)
+    text = report.text()
+    assert "Tests passed (12 of 14 related test files)" in text, text
+    assert "Not matched to a test" in text and service in text
+    real = importlib.util.find_spec
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name, *a: None if name == "pytest" else real(name, *a),
+    )
+    missing = await changer.check(target)
+    assert "pytest isn't installed here" in missing.text()

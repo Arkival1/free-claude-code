@@ -11,6 +11,7 @@ import ast
 import asyncio
 import difflib
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -98,8 +99,9 @@ def _wanted(path: Path) -> bool:
     return path.suffix not in SKIP_SUFFIXES and not (SKIP_DIRS & set(path.parts))
 
 
-def _changed_functions(old: str, new: str) -> set[str]:
-    """Names of the functions and classes in ``new`` whose lines changed."""
+def _changed_functions(old: str, new: str) -> tuple[set[str], bool]:
+    """Names of the functions and classes in ``new`` whose lines changed, and
+    whether some changed lines sit outside any of them (imports, settings)."""
     lines = {
         number
         for tag, _i1, _i2, j1, j2 in difflib.SequenceMatcher(
@@ -111,48 +113,100 @@ def _changed_functions(old: str, new: str) -> set[str]:
     try:
         parsed = ast.parse(new)
     except SyntaxError:
-        return set()
-    return {
-        node.name
+        return set(), bool(lines)
+    spans = [
+        (node.name, node.lineno, node.end_lineno or node.lineno)
         for node in ast.walk(parsed)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-        and any(node.lineno <= n <= (node.end_lineno or node.lineno) for n in lines)
-        and len(node.name) > 4
+    ]
+    names = {
+        name for name, start, end in spans if any(start <= n <= end for n in lines)
     }
+    loose = any(not any(start <= n <= end for _, start, end in spans) for n in lines)
+    return names, loose
 
 
-def related_tests(
+@dataclass
+class PickedTests:
+    """The tests a check runs for a change, and what they don't cover."""
+
+    files: list[str] = field(default_factory=list)
+    found: int = 0
+    uncovered: list[str] = field(default_factory=list)
+
+
+def _names_module(text: str, dotted: str) -> bool:
+    """Whether a test's text uses a module, however it imports it (dotted,
+    "from pkg import mod", or a bracketed import over several lines)."""
+    if re.search(rf"\b{re.escape(dotted)}\b", text):
+        return True
+    package, _, module = dotted.rpartition(".")
+    if not package:
+        return False
+    for found in re.finditer(
+        rf"from\s+free_claude_code\.{re.escape(package)}\s+import\s+"
+        r"(\([^)]*\)|[^\n]*)",
+        text,
+    ):
+        if re.search(rf"\b{re.escape(module)}\b", found.group(1)):
+            return True
+    return False
+
+
+def pick_tests(
     target: Path, touched: Sequence[str], source: Path | None
-) -> list[str]:
+) -> PickedTests:
     """The test files that cover a change (so a check runs in a minute, not
-    the whole suite): changed tests, tests naming a changed module, and for
-    big shared files, tests naming a changed function. Content Farm's are
-    left out."""
+    the whole suite): changed tests first, then tests using a changed module,
+    and for big shared files, tests naming a changed function. Content Farm's
+    are left out. Changes nothing can be matched to are named, never hidden."""
+    pick = PickedTests()
     folder = target / "tests"
     if not folder.is_dir():
-        return []
+        return pick
     tests = {
-        path.relative_to(target).as_posix(): path
-        for path in folder.rglob("test_*.py")
-        if not LEFT_OUT_TESTS.search(path.name)
+        relative: path
+        for path in sorted(folder.rglob("test_*.py"))
+        if not LEFT_OUT_TESTS.search(relative := path.relative_to(target).as_posix())
     }
-    picked = {name for name in touched if name in tests}
-    words: set[str] = set()
+    changed = [name for name in touched if name in tests]
+    modules: set[str] = set()
+    functions: set[str] = set()
     for name in touched:
         path = Path(name)
         if not name.startswith("src/") or path.suffix != ".py":
             continue
         if path.name in SHARED_FILES:
             old = _read_text(source / name) if source else ""
-            words |= _changed_functions(old, _read_text(target / name))
+            names, loose = _changed_functions(old, _read_text(target / name))
+            functions |= names
+            if loose:
+                pick.uncovered.append(f"{name} (changes outside a function)")
+            if not names and not loose:
+                pick.uncovered.append(name)
         else:
-            words.add(".".join(path.with_suffix("").parts[2:]))
-    words.discard("")
-    if words:
-        for name, path in tests.items():
-            if name not in picked and any(word in _read_text(path) for word in words):
-                picked.add(name)
-    return sorted(picked)[:MAX_TEST_FILES]
+            modules.add(".".join(path.with_suffix("").parts[2:]))
+    modules.discard("")
+    others: list[str] = []
+    for name, path in tests.items():
+        if name in changed or not (modules or functions):
+            continue
+        text = _read_text(path)
+        if any(_names_module(text, m) for m in modules) or any(
+            re.search(rf"\b{re.escape(f)}\b", text) for f in functions
+        ):
+            others.append(name)
+    every = [*changed, *others]
+    pick.found = len(every)
+    pick.files = every[:MAX_TEST_FILES]
+    return pick
+
+
+def related_tests(
+    target: Path, touched: Sequence[str], source: Path | None
+) -> list[str]:
+    """The test files a check runs for a change (see pick_tests)."""
+    return pick_tests(target, touched, source).files
 
 
 def tree(root: Path) -> dict[str, Path]:
@@ -400,8 +454,15 @@ class Changer:
             report.fail(
                 "The app doesn't load from the copy:\n" + output.strip()[-2500:]
             )
-        picked = related_tests(target, touched, self._source)
-        if picked:
+        pick = pick_tests(target, touched, self._source)
+        picked = pick.files
+        if picked and not importlib.util.find_spec("pytest"):
+            report.lines.append(
+                "pytest isn't installed here, so the related tests didn't run."
+            )
+        elif picked:
+            # One process (no xdist workers), so a timeout leaves nothing behind.
+            serial = ["-n", "0"] if importlib.util.find_spec("xdist") else []
             code, output = await self._run(
                 [
                     self._python,
@@ -410,6 +471,7 @@ class Changer:
                     "-q",
                     "-p",
                     "no:cacheprovider",
+                    *serial,
                     *picked,
                 ],
                 target,
@@ -417,18 +479,29 @@ class Changer:
                 timeout=TEST_SECONDS,
             )
             last = output.strip().splitlines()[-1:] or [""]
+            count = (
+                f"{len(picked)} of {pick.found} related test files"
+                if pick.found > len(picked)
+                else f"{len(picked)} related test files"
+            )
             if code == 0:
-                report.lines.append(
-                    f"Tests passed ({len(picked)} related test files): {last[0][:120]}"
-                )
+                report.lines.append(f"Tests passed ({count}): {last[0][:120]}")
             else:
                 report.fail(
-                    f"Tests failed ({', '.join(picked)}):\n" + output.strip()[-2500:]
+                    f"Tests failed ({count}: {', '.join(picked)}):\n"
+                    + output.strip()[-2500:]
                 )
-        elif touched and (target / "tests").is_dir():
+        elif (
+            any(n.startswith("src/") and n.endswith(".py") for n in touched)
+            and (target / "tests").is_dir()
+        ):
             report.lines.append(
-                "No test covers the changed files yet: add one under tests/ "
+                "No test covers the changed code yet: add one under tests/ "
                 "(tests/studio/test_<area>.py)."
+            )
+        if pick.uncovered:
+            report.lines.append(
+                "Not matched to a test: " + ", ".join(pick.uncovered[:6]) + "."
             )
         return report
 
