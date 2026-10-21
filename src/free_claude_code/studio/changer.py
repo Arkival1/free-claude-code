@@ -52,7 +52,6 @@ SKIP_DIRS = frozenset(
 SKIP_SUFFIXES = frozenset({".pyc", ".pyo"})
 UPDATE_PREFIX = "fcc/"
 """Release zips unpack into fcc/, so updates do too."""
-NOTE_NAME = "FCC-UPDATE.txt"
 MAX_UPDATES = 30
 MAX_DIFF_LINES = 600
 SERVER_WAIT_SECONDS = 120.0
@@ -103,14 +102,19 @@ def tree(root: Path) -> dict[str, Path]:
     return files
 
 
-def bump_version(text: str) -> tuple[str, str, str]:
-    """pyproject text with the patch number raised: (text, old, new)."""
+def bump_version(text: str, *, minor: bool = False) -> tuple[str, str, str]:
+    """pyproject text with the patch number (or, for an update project, the
+    minor number) raised: (text, old, new)."""
     found = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"', text, re.MULTILINE)
     if not found:
         raise ChangerError("pyproject.toml has no version line.")
-    major, minor, patch = found.groups()
-    old = f"{major}.{minor}.{patch}"
-    new = f"{major}.{minor}.{int(patch) + 1}"
+    major, middle, patch = found.groups()
+    old = f"{major}.{middle}.{patch}"
+    new = (
+        f"{major}.{int(middle) + 1}.0"
+        if minor
+        else f"{major}.{middle}.{int(patch) + 1}"
+    )
     return text[: found.start()] + f'version = "{new}"' + text[found.end() :], old, new
 
 
@@ -169,6 +173,10 @@ class Changer:
     @property
     def source(self) -> Path | None:
         return self._source
+
+    @property
+    def home(self) -> Path:
+        return self._home
 
     @property
     def updates_dir(self) -> Path:
@@ -461,10 +469,21 @@ class Changer:
 
     # ------------------------------------------------------------ update zips
 
-    def package(self, target: Path, note: str) -> JsonObject:
-        """Pack the changes into an update zip (and a backup of what it
-        replaces). The copy's version goes up one so the PC and phone load
-        the new pages instead of cached ones."""
+    def package(
+        self,
+        target: Path,
+        note: str,
+        *,
+        minor: bool = False,
+        report: str = "",
+        manifest: JsonObject | None = None,
+    ) -> JsonObject:
+        """Pack the changes into an update zip and a rollback zip.
+
+        The update unzips straight over the fcc folder; its paperwork
+        (changelog, instructions, manifest, checksums, test report) sits in
+        fcc/_update/<version>/. The copy's version goes up (patch, or minor
+        for an update project) so the PC and phone load the new pages."""
         changes = self.changes(target)
         if not changes["changed"] and not changes["added"] and not changes["deleted"]:
             raise ChangerError(
@@ -472,80 +491,109 @@ class Changer:
             )
         pyproject = target / "pyproject.toml"
         lock = target / "uv.lock"
-        text, old, new = bump_version(_read_text(pyproject))
+        text, old, new = bump_version(_read_text(pyproject), minor=minor)
         pyproject.write_text(text, encoding="utf-8")
         if lock.is_file():
             lock.write_text(bump_lock(_read_text(lock), old, new), encoding="utf-8")
         changes = self.changes(target)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        name = f"FCC-Update-{new}-{stamp}"
+        name = f"FCC-Studio-update-{new}-{stamp}"
         self.updates_dir.mkdir(parents=True, exist_ok=True)
         update = self.updates_dir / f"{name}.zip"
-        backup = self.updates_dir / f"{name}-backup.zip"
+        rollback = self.updates_dir / f"{name}-rollback.zip"
         carried = [*changes["changed"], *changes["added"]]
-        summary = _note(name, old, new, note, changes)
+        papers = f"{UPDATE_PREFIX}_update/{new}/"
+        sums = "".join(
+            f"{sha256(target / relative)}  {relative}\n" for relative in carried
+        )
+        record: JsonObject = {
+            "name": name,
+            "from": old,
+            "to": new,
+            "kind": "project" if minor else "quick",
+            "made_by": "the Changer",
+            "made_at": stamp,
+            "changed": list(changes["changed"]),
+            "added": list(changes["added"]),
+            "deleted": list(changes["deleted"]),
+            **(manifest or {}),
+        }
         with zipfile.ZipFile(update, "w", zipfile.ZIP_DEFLATED) as archive:
             for relative in carried:
                 archive.write(target / relative, UPDATE_PREFIX + relative)
-            archive.writestr(UPDATE_PREFIX + NOTE_NAME, summary)
-        with zipfile.ZipFile(backup, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                papers + "CHANGELOG.md", _changelog(old, new, note, changes)
+            )
+            archive.writestr(
+                papers + "UPDATE_INSTRUCTIONS.md", _instructions(name, changes)
+            )
+            archive.writestr(papers + "MANIFEST.json", json.dumps(record, indent=2))
+            archive.writestr(papers + "SHA256SUMS.txt", sums)
+            archive.writestr(
+                papers + "TEST-REPORT.md",
+                report.strip() or "# Test report\n\nNo checks were recorded.\n",
+            )
+        with zipfile.ZipFile(rollback, "w", zipfile.ZIP_DEFLATED) as archive:
             for relative in [*changes["changed"], *changes["deleted"]]:
                 original = self._source / relative if self._source else None
                 if original is not None and original.is_file():
                     archive.write(original, UPDATE_PREFIX + relative)
             archive.writestr(
                 UPDATE_PREFIX + "FCC-UNDO.txt",
-                f"Backup for {name}. To undo the update, unzip this over the "
-                "same folder (choose Replace), then delete these files the "
-                "update added:\n" + "\n".join(changes["added"] or ["(none)"]),
+                f"Rollback for {name}. To undo the update, close FCC, unzip this "
+                "over the same folder (choose Replace), then delete these files "
+                "the update added:\n" + "\n".join(changes["added"] or ["(none)"]),
             )
         self._prune()
         return {
             "name": update.name,
-            "backup": backup.name,
+            "backup": rollback.name,
             "version": new,
             "changes": {key: list(value) for key, value in changes.items()},
-            "note": summary,
+            "note": _changelog(old, new, note, changes),
         }
 
-    def _prune(self) -> None:
-        zips = sorted(
+    def _zips(self) -> list[Path]:
+        if not self.updates_dir.is_dir():
+            return []
+        return sorted(
             (
                 path
-                for path in self.updates_dir.glob("FCC-Update-*.zip")
-                if not path.name.endswith("-backup.zip")
+                for path in self.updates_dir.glob("FCC-*.zip")
+                if not path.stem.endswith(("-backup", "-rollback"))
             ),
             key=lambda path: path.stat().st_mtime,
         )
-        for old in zips[:-MAX_UPDATES]:
+
+    def _undo_of(self, path: Path) -> Path:
+        rollback = path.with_name(path.stem + "-rollback.zip")
+        return (
+            rollback if rollback.exists() else path.with_name(path.stem + "-backup.zip")
+        )
+
+    def _prune(self) -> None:
+        for old in self._zips()[:-MAX_UPDATES]:
+            self._undo_of(old).unlink(missing_ok=True)
             old.unlink(missing_ok=True)
-            old.with_name(old.stem + "-backup.zip").unlink(missing_ok=True)
 
     def updates(self) -> list[JsonObject]:
-        if not self.updates_dir.is_dir():
-            return []
-        rows: list[JsonObject] = []
-        for path in sorted(
-            self.updates_dir.glob("FCC-Update-*.zip"),
-            key=lambda item: item.stat().st_mtime,
-            reverse=True,
-        ):
-            if path.name.endswith("-backup.zip"):
-                continue
-            rows.append(
-                {
-                    "name": path.name,
-                    "backup": path.stem + "-backup.zip",
-                    "size": path.stat().st_size,
-                    "at": int(path.stat().st_mtime * 1000),
-                }
-            )
-        return rows
+        return [
+            {
+                "name": path.name,
+                "backup": self._undo_of(path).name,
+                "size": path.stat().st_size,
+                "at": int(path.stat().st_mtime * 1000),
+            }
+            for path in reversed(self._zips())
+        ]
 
     def update_file(self, name: str) -> Path:
         path = self.updates_dir / name
         if (
-            not re.fullmatch(r"FCC-Update-[0-9.]+-[0-9-]+(?:-backup)?\.zip", name)
+            not re.fullmatch(
+                r"FCC-(?:Update|Studio-update)-[0-9.]+-[0-9-]+(?:-backup|-rollback)?\.zip",
+                name,
+            )
             or not path.is_file()
         ):
             raise ChangerError("No such update zip.")
@@ -561,23 +609,39 @@ def _read_text(path: Path) -> str:
         return ""
 
 
-def _note(
-    name: str, old: str, new: str, note: str, changes: dict[str, list[str]]
-) -> str:
-    def block(title: str, items: list[str]) -> str:
-        return f"{title}:\n" + ("\n".join(f"  {item}" for item in items) or "  (none)")
+def _block(title: str, items: list[str]) -> str:
+    return f"## {title}\n\n" + ("\n".join(f"- {item}" for item in items) or "- (none)")
 
-    return "\n\n".join(
-        [
-            f"{name}: FCC {old} -> {new}, made by the Changer.",
-            note.strip() or "(no note)",
-            "How to install: close FCC, unzip this into the folder that holds "
-            "your fcc folder (the same place you unzipped FCC), choose Replace, "
-            "then start FCC again. The backup zip next to this one undoes it.",
-            block("Changed", changes["changed"]),
-            block("Added", changes["added"]),
-            block("Delete these by hand (the update removed them)", changes["deleted"]),
-        ]
+
+def _changelog(old: str, new: str, note: str, changes: dict[str, list[str]]) -> str:
+    return (
+        "\n\n".join(
+            [
+                f"# FCC {old} -> {new}",
+                note.strip() or "(no note)",
+                _block("Changed", changes["changed"]),
+                _block("Added", changes["added"]),
+                _block("Removed", changes["deleted"]),
+            ]
+        )
+        + "\n"
+    )
+
+
+def _instructions(name: str, changes: dict[str, list[str]]) -> str:
+    return (
+        "\n\n".join(
+            [
+                f"# Installing {name}",
+                "1. Close FCC.\n2. Unzip this into the folder that holds your fcc "
+                "folder (the same place you unzipped FCC) and choose Replace.\n3. "
+                "Delete the files listed under Remove by hand, if any.\n4. Start FCC.",
+                _block("Remove by hand (unzipping can't delete)", changes["deleted"]),
+                "## Undo\n\nClose FCC, unzip the matching -rollback.zip the same way "
+                "(Replace), delete the files it lists, and start FCC.",
+            ]
+        )
+        + "\n"
     )
 
 

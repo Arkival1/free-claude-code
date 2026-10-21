@@ -582,6 +582,35 @@ class LabPart(Record):
     created_at: int = Field(default_factory=now_ms)
 
 
+class ChangeProject(Record):
+    """One Changer job, quick or big: the plan, milestones, approvals,
+    checkpoints, tasks, and where it stopped, so it survives a restart."""
+
+    id: str = Field(default_factory=lambda: new_id("chp"))
+    request: str
+    status: str = "planning"
+    """planning, choose, awaiting_plan, building, paused, awaiting_release,
+    done, cancelled, failed."""
+    size: str = ""
+    """quick or project, chosen by the planner after looking."""
+    kind: str = ""
+    plan: JsonObject = Field(default_factory=dict)
+    """summary, spec, risks, files, tests, milestones (title, goal, files,
+    tests, status, review, checkpoint), suggestions."""
+    milestone: int = 0
+    tasks: list[JsonObject] = Field(default_factory=list)
+    """run_id, chat_id, agent, kind (plan, build, fix, review, security,
+    helper), milestone, files."""
+    checkpoints: list[JsonObject] = Field(default_factory=list)
+    budget: int = 2_000_000
+    """Estimated tokens the whole job may use before it pauses."""
+    note: str = ""
+    """What the owner should know now (why it paused, what failed)."""
+    release: JsonObject = Field(default_factory=dict)
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
 class TutorAttempt(Record):
     """One answer to a maths tutor question, marked in code."""
 

@@ -66,9 +66,10 @@ or starts another subagent. Don't create separate reviewer subagents.
    requirements, the diff, the directly related files and short failure
    output (no huge logs, no whole repo). The owner's setup prompt for a
    fresh session is `.claude/previewer-prompt.md`.
-5. Read its report, fix confirmed issues in the main session, rerun the
-   failed checks. Run the previewer again only if it found important issues
-   or the change is high risk.
+5. Run the previewer twice per milestone (two passes, medium effort): the
+   second pass reviews after the first pass's confirmed issues are fixed.
+   Fix confirmed issues in the main session and rerun the failed checks
+   after each pass.
 
 **Skills: load only what the task needs** (installed in `.claude/skills`,
 recorded in `vendor/agent-skills`):

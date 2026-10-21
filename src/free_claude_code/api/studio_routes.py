@@ -3270,6 +3270,13 @@ class SubagentSwitchPayload(BaseModel):
 
 class ChangerStartPayload(BaseModel):
     request: str = Field(min_length=1, max_length=8000)
+    budget: int = Field(default=0, ge=0, le=50_000_000)
+
+
+class ChangerActPayload(BaseModel):
+    feedback: str = Field(default="", max_length=4000)
+    index: int | None = None
+    checkpoint: str = Field(default="", max_length=40)
 
 
 class ChangerShotsPayload(BaseModel):
@@ -3279,6 +3286,7 @@ class ChangerShotsPayload(BaseModel):
 
 class ChangerPackPayload(BaseModel):
     note: str = Field(default="", max_length=4000)
+    confirm: bool = False
 
 
 class TutorCheckPayload(BaseModel):
@@ -4703,7 +4711,25 @@ async def changer_start(
     _: None = Access,
 ) -> JsonObject:
     """Hand the Changer a change to make (it works in its copy, not the app)."""
-    return await studio.changer_start(payload.request)
+    return await studio.changer_start(payload.request, budget=payload.budget)
+
+
+@router.post("/studio/api/changer/project/{action}")
+async def changer_project_action(
+    action: Literal[
+        "approve", "replan", "choose", "pause", "resume", "cancel", "rollback"
+    ],
+    payload: ChangerActPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The owner's buttons on an update project."""
+    return await studio.changer_act(
+        action,
+        feedback=payload.feedback,
+        index=payload.index,
+        checkpoint=payload.checkpoint,
+    )
 
 
 @router.post("/studio/api/changer/fresh")
@@ -4739,7 +4765,7 @@ async def changer_package(
     _: None = Access,
 ) -> JsonObject:
     """Pack the changes into an update zip, with a backup zip to undo it."""
-    return await studio.changer_package(payload.note)
+    return await studio.changer_package(payload.note, confirm=payload.confirm)
 
 
 @router.get("/studio/api/changer/diff")

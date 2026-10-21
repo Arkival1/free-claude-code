@@ -34,6 +34,27 @@ from . import system_monitor
 from .agents import SEALED_TOOLS, AgentRunner, TurnResult, step_budget
 from .assistant_tools import describe_time, now_line, parse_when
 from .changer import Changer, ChangerError, app_root
+from .changer_projects import (
+    ACTIVE,
+    FINISHED,
+    MAX_FIX_ROUNDS,
+    PROJECT_BUDGET,
+    QUICK_BUDGET,
+    Checkpoints,
+    build_goal,
+    estimate_tokens,
+    fix_goal,
+    known_hosts,
+    needs_approval,
+    overlapping,
+    plan_goal,
+    protected_files,
+    read_plan,
+    review_goal,
+    scan,
+)
+from .changer_projects import MAX_HELPERS as HELPER_CAP
+from .changer_projects import PlanError as ChangePlanError
 from .claw import ClawCode, ClawError
 from .code_loop import code_and_test, project_name
 from .commands import CommandBroker, CommandError
@@ -149,6 +170,7 @@ from .models import (
     AGENT_ROLES,
     Agent,
     AgentRun,
+    ChangeProject,
     Chat,
     ChatNotes,
     CommandRequest,
@@ -230,7 +252,11 @@ from .playbook import (
 )
 from .presets import (
     BUILDER_PROMPT,
+    CHANGER_PLANNER_PROMPT,
     CHANGER_PROMPT,
+    CHANGER_READER_TOOLS,
+    CHANGER_REVIEWER_PROMPT,
+    CHANGER_SECURITY_PROMPT,
     CHANGER_TOOLS,
     CODER_PROMPT,
     CODER_TOOLS,
@@ -334,6 +360,12 @@ LAB_AGENT_NAME = "Lab"
 FARM_AGENT_NAME = "Farm"
 CHANGER_AGENT_NAME = "Changer"
 CHANGER_COPY_NAME = "FCC (Changer copy)"
+CHANGER_PLANNER_NAME = "Changer Planner"
+CHANGER_REVIEWER_NAME = "Changer Reviewer"
+CHANGER_SECURITY_NAME = "Changer Security"
+CHANGER_TEAM = frozenset(
+    {"Changer", CHANGER_PLANNER_NAME, CHANGER_REVIEWER_NAME, CHANGER_SECURITY_NAME}
+)
 CHANGER_HELPER_SECONDS = 1800.0
 _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     BUILDER_AGENT_NAME: (
@@ -707,6 +739,11 @@ def _default_tools() -> tuple[str, ...]:
     return DEFAULT_TOOL_NAMES
 
 
+def _items(value: object) -> list[JsonValue]:
+    """A JSON list field as a list (anything else as an empty one)."""
+    return list(value) if isinstance(value, list) else []
+
+
 def _shared_memory_owner() -> Agent:
     """Stand in for the team when its memory is written to Obsidian."""
     return Agent.model_validate(
@@ -849,6 +886,8 @@ class StudioService:
         )
         self._changer_helpers: set[str] = set()
         self._changer_last: JsonObject = {}
+        self._changer_driver: asyncio.Task[object] | None = None
+        self._changer_models_ok: set[str] = set()
         self._lab_busy = 0
         self._lab_error: str | None = None
         self._farm = ContentFarm(
@@ -2566,24 +2605,512 @@ class StudioService:
         return copy
 
     async def _changer_busy(self) -> bool:
+        project = await self._change_project()
+        if project is not None and project.status in ACTIVE:
+            return True
         agent = await self._changer_agent()
         return any(
             run.status in {"queued", "running"}
             for run in await self.runs(agent_id=agent.id)
         )
 
-    async def changer_start(self, request: str) -> JsonObject:
-        """Hand the Changer a change to make; it works in the background."""
+    # ------------------------------------------------------------ update projects
+
+    async def _changer_member(
+        self, name: str, prompt: str, tools: Sequence[str]
+    ) -> Agent:
+        """One of the Changer's specialists (created on first use; the owner
+        sees it on the Agents page and can give it its own model)."""
+        for agent in await self._store.find(
+            Agent, where={"name": name}, order_by="created_at ASC"
+        ):
+            if not agent.archived:
+                return agent
+        return await self.create_agent(
+            name=name,
+            role="agent",
+            model=self.server_model,
+            system_prompt=prompt,
+            tools=tools,
+            description=f"The Changer's {name.removeprefix('Changer ').lower()}.",
+            all_tools=False,
+        )
+
+    async def _changer_planner(self) -> Agent:
+        return await self._changer_member(
+            CHANGER_PLANNER_NAME, CHANGER_PLANNER_PROMPT, CHANGER_READER_TOOLS
+        )
+
+    async def _changer_reviewer(self, *, security: bool) -> Agent:
+        if security:
+            return await self._changer_member(
+                CHANGER_SECURITY_NAME, CHANGER_SECURITY_PROMPT, CHANGER_READER_TOOLS
+            )
+        return await self._changer_member(
+            CHANGER_REVIEWER_NAME, CHANGER_REVIEWER_PROMPT, CHANGER_READER_TOOLS
+        )
+
+    @property
+    def _changer_checkpoints(self) -> Checkpoints:
+        return Checkpoints(
+            self._changer.home / "checkpoints", source=self._changer.source
+        )
+
+    async def _change_project(self) -> ChangeProject | None:
+        found = await self._store.find(
+            ChangeProject, order_by="created_at DESC", limit=1
+        )
+        return found[0] if found else None
+
+    async def _save_project(
+        self, project: ChangeProject, **changes: object
+    ) -> ChangeProject:
+        updated = project.model_copy(update={**changes, "updated_at": now_ms()})
+        await self._store.put(updated)
+        return updated
+
+    async def _project_of_chat(self, chat_id: str) -> ChangeProject | None:
+        project = await self._change_project()
+        if project is None:
+            return None
+        if any(task.get("chat_id") == chat_id for task in project.tasks):
+            return project
+        return None
+
+    def _drive(self, project_id: str) -> None:
+        if self._changer_driver is not None and not self._changer_driver.done():
+            return
+        self._changer_driver = self.spawn(self._changer_drive(project_id))
+
+    async def changer_start(self, request: str, *, budget: int = 0) -> JsonObject:
+        """Start a change, quick or big: the Planner looks and plans first."""
         if not request.strip():
             raise StudioError("Say what the Changer should change.")
         if await self._changer_busy():
             raise StudioError("The Changer is already working on a change.")
-        agent = await self._changer_agent()
-        copy = await self._changer_copy() or await self.changer_fresh_copy()
+        if await self._changer_copy() is None:
+            await self.changer_fresh_copy()
+        project = ChangeProject(request=request.strip()[:8000])
+        if budget > 0:
+            project = project.model_copy(update={"budget": budget})
+        await self._store.put(project)
+        self._drive(project.id)
+        return {"project_id": project.id}
+
+    async def changer_act(self, action: str, **options: object) -> JsonObject:
+        """The owner's buttons on a project: approve, replan, choose, pause,
+        resume, cancel, rollback."""
+        project = await self._change_project()
+        if project is None:
+            raise StudioError("There is no update project yet.")
+        if action == "approve":
+            if project.status != "awaiting_plan":
+                raise StudioError("There's no plan waiting for approval.")
+            project = await self._save_project(project, status="building", note="")
+            self._drive(project.id)
+        elif action == "replan":
+            if project.status in ACTIVE:
+                raise StudioError("Pause the project before changing its plan.")
+            feedback = str(options.get("feedback", "")).strip()
+            project = await self._save_project(
+                project, status="planning", plan={}, milestone=0, note=feedback[:2000]
+            )
+            self._drive(project.id)
+        elif action == "choose":
+            suggestions = project.plan.get("suggestions")
+            index = options.get("index")
+            if (
+                project.status != "choose"
+                or not isinstance(suggestions, list)
+                or not isinstance(index, int)
+                or not 0 <= index < len(suggestions)
+            ):
+                raise StudioError("Pick one of the suggestions.")
+            chosen = suggestions[index]
+            assert isinstance(chosen, dict)
+            request = f"{chosen.get('title', '')}: {chosen.get('why', '')}"
+            project = await self._save_project(
+                project, request=request, status="planning", plan={}, note=""
+            )
+            self._drive(project.id)
+        elif action == "pause":
+            if project.status not in ACTIVE:
+                raise StudioError("The project isn't running.")
+            project = await self._save_project(
+                project,
+                status="paused",
+                note="Paused by you; it stops after the step it's on. Press Resume.",
+            )
+        elif action == "resume":
+            if project.status != "paused":
+                raise StudioError("The project isn't paused.")
+            project = await self._save_project(
+                project,
+                status="building" if project.plan.get("milestones") else "planning",
+                note="",
+            )
+            self._drive(project.id)
+        elif action == "cancel":
+            if project.status in FINISHED:
+                raise StudioError("The project has already finished.")
+            for name in (
+                CHANGER_AGENT_NAME,
+                CHANGER_PLANNER_NAME,
+                CHANGER_REVIEWER_NAME,
+                CHANGER_SECURITY_NAME,
+            ):
+                for agent in await self._store.find(Agent, where={"name": name}):
+                    await self.stop_agent_work(agent.id)
+            project = await self._save_project(
+                project, status="cancelled", note="Cancelled by you."
+            )
+        elif action == "rollback":
+            if project.status in ACTIVE:
+                raise StudioError("Pause the project before rolling back.")
+            point = str(options.get("checkpoint", ""))
+            saved = next((c for c in project.checkpoints if c.get("id") == point), None)
+            if saved is None:
+                raise StudioError("Pick a checkpoint from the list.")
+            target = await self._changer_target()
+            try:
+                touched = await asyncio.to_thread(
+                    self._changer_checkpoints.restore, target, point
+                )
+            except ChangerError as error:
+                raise StudioError(str(error)) from error
+            raw_back = saved.get("milestone", 0)
+            back_to = raw_back if isinstance(raw_back, int) else 0
+            milestones = [
+                {**m, "status": "waiting", "review": "", "fixes": 0}
+                if isinstance(m, dict) and number >= back_to
+                else m
+                for number, m in enumerate(_items(project.plan.get("milestones")))
+            ]
+            project = await self._save_project(
+                project,
+                plan={**project.plan, "milestones": milestones},
+                milestone=back_to,
+                status="paused" if milestones else project.status,
+                note=f"Rolled back to '{saved.get('label', point)}' ({touched} files). "
+                "Press Resume to build from there.",
+            )
+        else:
+            raise StudioError("Unknown project action.")
+        return await self.changer_view()
+
+    async def _changer_model_problem(self, agent: Agent) -> str:
+        """Why an agent's model can't work right now ('' when it can): a tiny
+        call checks it is set up and answers before a long job starts."""
+        model = agent.model or self.default_model
+        if model in self._changer_models_ok:
+            return ""
+        try:
+            await self._router.complete(
+                [ChatMessage.user("Reply with the word OK.")],
+                model=model,
+                max_tokens=8,
+                temperature=0.0,
+            )
+        except Exception as error:  # any provider failure means: not usable
+            others = [m for m in self.server_model_list() if m != model][:5]
+            return (
+                f"{agent.name}'s model {model} didn't answer "
+                f"({type(error).__name__}: {str(error)[:160]}). Pick a model that "
+                "works on its agent page"
+                + (f", for example: {', '.join(others)}." if others else ".")
+            )
+        self._changer_models_ok.add(model)
+        return ""
+
+    async def _changer_step(
+        self,
+        project: ChangeProject,
+        agent: Agent,
+        goal: str,
+        *,
+        kind: str,
+        milestone: int = 0,
+        files: Sequence[str] = (),
+    ) -> tuple[ChangeProject, AgentRun, JsonObject]:
+        """Run one agent task for the project and wait for it; returns the
+        project as saved after, the finished run, and its task record."""
+        copy = await self._changer_copy()
         run = await self.start_task(
-            agent_id=agent.id, goal=request.strip(), site_id=copy.id
+            agent_id=agent.id, goal=goal, site_id=copy.id if copy else None
         )
-        return {"run_id": run.id, "chat_id": run.chat_id}
+        task: JsonObject = {
+            "run_id": run.id,
+            "chat_id": run.chat_id,
+            "agent": agent.name,
+            "model": agent.model,
+            "kind": kind,
+            "milestone": milestone,
+            "files": list(files),
+        }
+        project = await self._save_project(project, tasks=[*project.tasks, task])
+        job = self._run_jobs.get(run.id)
+        if job is not None:
+            await asyncio.shield(job)
+        finished = await self._store.require(AgentRun, run.id)
+        project = await self._store.require(ChangeProject, project.id)
+        record = next((t for t in project.tasks if t.get("run_id") == run.id), task)
+        return project, finished, record
+
+    async def _changer_tokens(self, project: ChangeProject) -> int:
+        texts: list[str] = []
+        for task in project.tasks:
+            chat_id = str(task.get("chat_id", ""))
+            if chat_id:
+                texts.extend(
+                    message.text
+                    for message in await self._store.find(
+                        Message, where={"chat_id": chat_id}
+                    )
+                )
+        return estimate_tokens(texts)
+
+    async def _changer_drive(self, project_id: str) -> None:
+        """Take a project from where it is to the next point that needs the
+        owner (plan approval, a pause, the release)."""
+        try:
+            project = await self._store.require(ChangeProject, project_id)
+            if project.status == "planning":
+                project = await self._changer_plan(project)
+            while project.status == "building":
+                project = await self._changer_milestone(project)
+        except Exception as error:  # a crash must leave the project explained
+            logger.exception("Changer project {} failed", project_id)
+            with contextlib.suppress(Exception):
+                project = await self._store.require(ChangeProject, project_id)
+                await self._save_project(
+                    project,
+                    status="paused",
+                    note=f"Stopped by an error ({type(error).__name__}: "
+                    f"{str(error)[:300]}). Press Resume to try again.",
+                )
+
+    async def _changer_plan(self, project: ChangeProject) -> ChangeProject:
+        planner = await self._changer_planner()
+        problem = await self._changer_model_problem(planner)
+        if problem:
+            return await self._save_project(project, status="paused", note=problem)
+        project, run, task = await self._changer_step(
+            project, planner, plan_goal(project.request, project.note), kind="plan"
+        )
+        raw = task.get("plan")
+        if not isinstance(raw, dict):
+            return await self._save_project(
+                project,
+                status="failed",
+                note="The Planner finished without a plan"
+                + (
+                    f": {run.result or run.error}"[:600]
+                    if run.result or run.error
+                    else "."
+                ),
+            )
+        plan: JsonObject = raw
+        size = str(plan.get("size", "project"))
+        budget = project.budget
+        if size == "quick" and budget == PROJECT_BUDGET:
+            budget = QUICK_BUDGET
+        if plan.get("suggestions") and not plan.get("milestones"):
+            return await self._save_project(
+                project,
+                plan=plan,
+                size=size,
+                kind=str(plan.get("kind", "")),
+                status="choose",
+                note="Pick one of the suggestions to build.",
+            )
+        waiting = needs_approval(plan)
+        protected = protected_files(plan)
+        return await self._save_project(
+            project,
+            plan=plan,
+            size=size,
+            kind=str(plan.get("kind", "")),
+            budget=budget,
+            milestone=0,
+            status="awaiting_plan" if waiting else "building",
+            note=(
+                "Check the plan and press Approve."
+                + (
+                    f" It touches protected files: {', '.join(protected)}."
+                    if protected
+                    else ""
+                )
+                if waiting
+                else ""
+            ),
+        )
+
+    async def _changer_milestone(self, project: ChangeProject) -> ChangeProject:
+        """Build, check, review, fix and screenshot one milestone."""
+        milestones = list(_items(project.plan.get("milestones")))
+        number = project.milestone
+        if number >= len(milestones):
+            return await self._save_project(
+                project,
+                status="awaiting_release",
+                note="All milestones are built, checked and reviewed. Press Make update zip.",
+            )
+        used = await self._changer_tokens(project)
+        if used > project.budget:
+            return await self._save_project(
+                project,
+                status="paused",
+                note=f"Ran out of budget: about {used:,} tokens used of {project.budget:,}. "
+                f"Milestones done: {number} of {len(milestones)}. Raise the budget or press Resume.",
+            )
+        builder = await self._changer_agent()
+        problem = await self._changer_model_problem(builder)
+        if problem:
+            return await self._save_project(project, status="paused", note=problem)
+        target = await self._changer_target()
+        current = milestones[number]
+        milestone: JsonObject = dict(current) if isinstance(current, dict) else {}
+        point = await asyncio.to_thread(
+            self._changer_checkpoints.save,
+            target,
+            self._changer.baseline(),
+            f"Before milestone {number + 1}: {milestone.get('title', '')}",
+        )
+        point["milestone"] = number
+        milestone["status"] = "building"
+        milestones[number] = milestone
+        project = await self._save_project(
+            project,
+            checkpoints=[*project.checkpoints, point],
+            plan={**project.plan, "milestones": milestones},
+        )
+        files = [str(f) for f in _items(milestone.get("files"))]
+        project, _run, _ = await self._changer_step(
+            project,
+            builder,
+            build_goal(project.model_dump(), number),
+            kind="build",
+            milestone=number,
+            files=files,
+        )
+        if (await self._store.require(ChangeProject, project.id)).status != "building":
+            return await self._store.require(ChangeProject, project.id)
+        verdicts: list[str] = []
+        while True:
+            report = await self._changer.check(target)
+            self._changer_last["check"] = report.view()
+            problems = "" if report.passed else "\n".join(report.problems)
+            if not problems:
+                problems, verdicts = await self._changer_reviews(
+                    project, number, target
+                )
+                project = await self._store.require(ChangeProject, project.id)
+            if not problems:
+                break
+            raw_fixes = milestone.get("fixes", 0)
+            fixes = raw_fixes if isinstance(raw_fixes, int) else 0
+            if fixes >= MAX_FIX_ROUNDS:
+                milestone["status"] = "needs you"
+                milestone["review"] = problems[:3000]
+                milestones[number] = milestone
+                return await self._save_project(
+                    project,
+                    plan={**project.plan, "milestones": milestones},
+                    status="paused",
+                    note=f"Milestone {number + 1} still has problems after "
+                    f"{fixes} fixes. Read them, then Resume, change the plan, or roll back.",
+                )
+            milestone["fixes"] = fixes + 1
+            milestones[number] = milestone
+            project = await self._save_project(
+                project, plan={**project.plan, "milestones": milestones}
+            )
+            project, _run, _ = await self._changer_step(
+                project,
+                builder,
+                fix_goal(project.model_dump(), number, problems),
+                kind="fix",
+                milestone=number,
+                files=files,
+            )
+            if project.status != "building":
+                return project
+        shots_note = ""
+        changed = await asyncio.to_thread(self._changer.changes, target)
+        if any(
+            "studio_static/" in name
+            for name in [*changed["changed"], *changed["added"]]
+        ):
+            try:
+                await self.changer_screenshots()
+            except StudioError as error:
+                shots_note = f" Screenshots couldn't be taken: {str(error)[:200]}"
+        point = await asyncio.to_thread(
+            self._changer_checkpoints.save,
+            target,
+            self._changer.baseline(),
+            f"After milestone {number + 1}: {milestone.get('title', '')}",
+        )
+        point["milestone"] = number + 1
+        milestone["status"] = "done"
+        milestone["review"] = "; ".join(verdicts) + shots_note
+        milestone["checkpoint"] = point["id"]
+        milestones[number] = milestone
+        project = await self._store.require(ChangeProject, project.id)
+        return await self._save_project(
+            project,
+            plan={**project.plan, "milestones": milestones},
+            checkpoints=[*project.checkpoints, point],
+            milestone=number + 1,
+        )
+
+    async def _changer_reviews(
+        self, project: ChangeProject, number: int, target: Path
+    ) -> tuple[str, list[str]]:
+        """A different agent reviews the milestone (and the security reviewer
+        when protected files changed). Returns the problems ('' when it
+        passes) and a line per verdict."""
+        changes = await asyncio.to_thread(self._changer.changes, target)
+        touched = [*changes["changed"], *changes["added"]]
+        diff = "\n".join(
+            [
+                await asyncio.to_thread(self._changer.diff, target, name)
+                for name in touched[:30]
+            ]
+        )
+        security = bool(protected_files({"files": touched}))
+        problems: list[str] = []
+        verdicts: list[str] = []
+        builder = await self._changer_agent()
+        for secure in (False, True) if security else (False,):
+            reviewer = await self._changer_reviewer(security=secure)
+            if reviewer.id == builder.id:  # never review your own work
+                raise StudioError("The reviewer can't be the agent that built it.")
+            problem = await self._changer_model_problem(reviewer)
+            if problem:
+                problems.append(problem)
+                continue
+            project, _run, task = await self._changer_step(
+                project,
+                reviewer,
+                review_goal(project.model_dump(), number, diff, security=secure),
+                kind="security" if secure else "review",
+                milestone=number,
+            )
+            review = task.get("review")
+            if not isinstance(review, dict):
+                problems.append(f"{reviewer.name} finished without a verdict.")
+                verdicts.append(f"{reviewer.name}: no verdict")
+                continue
+            verdict = str(review.get("verdict", ""))
+            verdicts.append(f"{reviewer.name}: {verdict}")
+            if verdict != "pass":
+                findings = review.get("findings")
+                problems.append(
+                    f"{reviewer.name} found: "
+                    + json.dumps(findings, ensure_ascii=False)[:3000]
+                )
+        return "\n".join(problems), verdicts
 
     async def changer_view(self) -> JsonObject:
         """Everything the Changer page shows."""
@@ -2601,10 +3128,55 @@ class StudioService:
                 re.MULTILINE,
             )
             version = found.group(1) if found else ""
+        project = await self._change_project()
+        driving = self._changer_driver is not None and not self._changer_driver.done()
+        if project is not None and project.status in ACTIVE and not driving:
+            # FCC stopped while it worked (a restart): it waits to be resumed.
+            project = await self._save_project(
+                project,
+                status="paused",
+                note="FCC stopped while the Changer was working. Press Resume to carry on.",
+            )
+        project_view: JsonObject | None = None
+        if project is not None:
+            team: dict[str, str] = {}
+            for name in (
+                CHANGER_AGENT_NAME,
+                CHANGER_PLANNER_NAME,
+                CHANGER_REVIEWER_NAME,
+                CHANGER_SECURITY_NAME,
+            ):
+                for member in await self._store.find(Agent, where={"name": name}):
+                    team[name] = member.model
+            runs = {
+                run.id: run
+                for run in await self._store.find(
+                    AgentRun, order_by="created_at DESC", limit=200
+                )
+            }
+            project_view = {
+                **project.model_dump(),
+                "tokens": await self._changer_tokens(project),
+                "team": team,
+                "protected": protected_files(project.plan),
+                "tasks": [
+                    {
+                        **task,
+                        "status": runs[str(task["run_id"])].status
+                        if str(task.get("run_id")) in runs
+                        else "gone",
+                        "step": runs[str(task["run_id"])].step
+                        if str(task.get("run_id")) in runs
+                        else 0,
+                    }
+                    for task in project.tasks
+                ][-40:],
+            }
         runs = (await self.runs(agent_id=agent.id))[:10]
         return {
             "ready": self._changer.source is not None,
             "agent": {"id": agent.id, "name": agent.name, "model": agent.model},
+            "project": project_view,
             "copy": (
                 {
                     "id": copy.id,
@@ -2669,12 +3241,102 @@ class StudioService:
         )
         return result
 
-    async def changer_package(self, note: str) -> JsonObject:
+    def _changer_report(self, project: ChangeProject | None, target: Path) -> str:
+        """TEST-REPORT.md: what was checked and what wasn't."""
+        check = self._changer_last.get("check")
+        lines = ["# Test report", ""]
+        if isinstance(check, dict):
+            lines.append(f"Last check: {'passed' if check.get('passed') else 'FAILED'}")
+            for key in ("problems", "lines"):
+                items = check.get(key)
+                if isinstance(items, list):
+                    lines.extend(f"- {line}" for line in items)
+        else:
+            lines.append("No check was recorded.")
+        if not (target / "tests").is_dir():
+            lines += [
+                "",
+                "Not tested: this FCC has no tests folder, so only the "
+                "checks above ran (syntax, lint, the app loading).",
+            ]
+        if project is not None:
+            lines += ["", "## Milestones"]
+            for number, item in enumerate(
+                _items(project.plan.get("milestones")), start=1
+            ):
+                if isinstance(item, dict):
+                    lines.append(
+                        f"{number}. {item.get('title', '')}: {item.get('status', '')}"
+                        f" ({item.get('review', '') or 'no review recorded'})"
+                    )
+        shots = self._changer.shots()
+        lines += [
+            "",
+            "## Screenshots",
+            *(f"- {name}" for name in shots or ["none taken"]),
+        ]
+        return "\n".join(lines) + "\n"
+
+    async def changer_package(self, note: str, *, confirm: bool = False) -> JsonObject:
+        """Pack the update after the security scan; anything it flags blocks
+        the zip until the owner confirms."""
         target = await self._changer_target()
+        changes = await asyncio.to_thread(self._changer.changes, target)
+        hosts = await asyncio.to_thread(known_hosts, self._changer.source)
+        hits = await asyncio.to_thread(
+            lambda: scan(
+                target,
+                [*changes["changed"], *changes["added"]],
+                known_hosts=hosts,
+                source=self._changer.source,
+            )
+        )
+        if hits and not confirm:
+            return {"blocked": True, "hits": hits}
+        project = await self._change_project()
+        if project is not None and project.status in ACTIVE:
+            raise StudioError(
+                "The Changer is still working; pause it or wait for the release step."
+            )
+        report = self._changer_report(project, target)
+        if hits:
+            report += (
+                "\n## Security scan (confirmed by you)\n"
+                + "\n".join(f"- {h}" for h in hits)
+                + "\n"
+            )
+        manifest: JsonObject = {}
+        if project is not None and project.status not in FINISHED:
+            manifest = {
+                "request": project.request,
+                "milestones": [
+                    str(m.get("title", ""))
+                    for m in _items(project.plan.get("milestones"))
+                    if isinstance(m, dict)
+                ],
+                "agents": sorted(
+                    {f"{t.get('agent')} ({t.get('model')})" for t in project.tasks}
+                ),
+            }
         try:
-            return await asyncio.to_thread(self._changer.package, target, note)
+            made = await asyncio.to_thread(
+                lambda: self._changer.package(
+                    target,
+                    note or (str(project.plan.get("summary", "")) if project else ""),
+                    minor=project is not None
+                    and project.size == "project"
+                    and project.status not in FINISHED,
+                    report=report,
+                    manifest=manifest,
+                )
+            )
         except ChangerError as error:
             raise StudioError(str(error)) from error
+        if project is not None and project.status == "awaiting_release":
+            await self._save_project(
+                project, status="done", release=made, note=f"Packed {made['name']}."
+            )
+        return made
 
     async def changer_diff(self, path: str) -> str:
         target = await self._changer_target()
@@ -2692,7 +3354,8 @@ class StudioService:
             raise StudioNotFoundError(str(error)) from error
 
     async def _changer_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
-        """The Changer's own tool: checks, screenshots, helpers, update zips."""
+        """The Changer team's own tool: plans, reviews, checks, screenshots,
+        helpers."""
         copy = await self._changer_copy()
         if copy is None or context.site_id != copy.id:
             return ToolOutcome(
@@ -2706,6 +3369,8 @@ class StudioService:
         action = str(arguments.get("action", ""))
         data: JsonObject = {"tool": CHANGER_TOOL, "action": action}
         try:
+            if action in {"plan", "review"}:
+                return await self._changer_submit(context, action, arguments)
             if action == "changes":
                 changes = await asyncio.to_thread(self._changer.changes, target)
                 lines = [
@@ -2745,60 +3410,192 @@ class StudioService:
                     failed=not taken,
                 )
             if action == "subagent":
+                raw_files = arguments.get("files")
                 return await self._changer_helper(
-                    context, str(arguments.get("task", ""))
+                    context,
+                    str(arguments.get("task", "")),
+                    agent_name=str(arguments.get("agent", "") or ""),
+                    files=[str(f) for f in raw_files]
+                    if isinstance(raw_files, list)
+                    else [],
                 )
             if action == "package":
-                result = await self.changer_package(str(arguments.get("note", "")))
                 return ToolOutcome(
-                    text=f"Packed {result['name']} (version {result['version']}), with "
-                    f"the backup {result['backup']}. The owner downloads it from "
-                    "the Changer page.",
-                    data={**data, **result},
+                    text="The release step packs the update once the owner "
+                    "approves it; finish with your summary instead.",
+                    data=data,
+                    failed=True,
                 )
-        except (StudioError, ChangerError) as error:
+        except (StudioError, ChangerError, ChangePlanError) as error:
             return ToolOutcome(text=str(error), data=data, failed=True)
         return ToolOutcome(
-            text="Pick an action: changes, check, screenshots, subagent, or package.",
+            text="Pick an action: plan, review, changes, check, screenshots, or subagent.",
             data=data,
             failed=True,
         )
 
-    async def _changer_helper(self, context: ToolContext, task: str) -> ToolOutcome:
-        """A helper Changer on part of the job, in the same copy; one level
-        deep, so helpers don't hand work on again."""
-        data: JsonObject = {"tool": CHANGER_TOOL, "action": "subagent"}
-        if not task.strip():
-            return ToolOutcome(text="Give the helper a task.", data=data, failed=True)
-        if context.chat_id in self._changer_helpers:
+    async def _changer_submit(
+        self, context: ToolContext, action: str, arguments: Mapping[str, object]
+    ) -> ToolOutcome:
+        """A plan from the Planner or a verdict from a reviewer, kept on the
+        task it belongs to."""
+        data: JsonObject = {"tool": CHANGER_TOOL, "action": action}
+        project = await self._project_of_chat(context.chat_id)
+        task = (
+            next(
+                (t for t in project.tasks if t.get("chat_id") == context.chat_id), None
+            )
+            if project
+            else None
+        )
+        expected = {"plan": {"plan"}, "review": {"review", "security"}}[action]
+        if project is None or task is None or task.get("kind") not in expected:
             return ToolOutcome(
-                text="Helpers do their part themselves; they can't hand it on.",
+                text=f"Only the {'Planner' if action == 'plan' else 'reviewers'} "
+                f"{'submit plans' if action == 'plan' else 'submit verdicts'}, on their own step.",
                 data=data,
                 failed=True,
             )
-        agent = await self._changer_agent()
-        run = await self.start_task(
-            agent_id=agent.id, goal=f"Helper: {task.strip()}", site_id=context.site_id
+        if action == "plan":
+            plan = read_plan(arguments)
+            stored: JsonObject = {"plan": plan}
+            milestones = plan.get("milestones")
+            suggestions = plan.get("suggestions")
+            summary = (
+                f"Plan saved: {plan['size']} {plan['kind']}, "
+                f"{len(milestones) if isinstance(milestones, list) else 0} milestone(s), "
+                f"{len(suggestions) if isinstance(suggestions, list) else 0} "
+                "suggestion(s). Now finish."
+            )
+        else:
+            verdict = str(arguments.get("verdict", "")).casefold()
+            if verdict not in {"pass", "fail"}:
+                raise ChangePlanError("The verdict is pass or fail.")
+            findings = arguments.get("findings")
+            stored = {
+                "review": {
+                    "verdict": verdict,
+                    "findings": findings if isinstance(findings, list) else [],
+                    "notes": str(arguments.get("notes", ""))[:2000],
+                }
+            }
+            summary = f"Verdict saved: {verdict}. Now finish."
+        tasks = [
+            {**t, **stored} if t.get("chat_id") == context.chat_id else t
+            for t in project.tasks
+        ]
+        await self._save_project(project, tasks=tasks)
+        return ToolOutcome(text=summary, data={**data, **stored})
+
+    async def _changer_helper(
+        self,
+        context: ToolContext,
+        task: str,
+        *,
+        agent_name: str = "",
+        files: Sequence[str] = (),
+    ) -> ToolOutcome:
+        """A helper on part of the job, in the same copy: a helper Changer or
+        a named team member. One level deep, at most two at a time, and no two
+        helpers own the same file."""
+        data: JsonObject = {"tool": CHANGER_TOOL, "action": "subagent"}
+        if not task.strip():
+            return ToolOutcome(text="Give the helper a task.", data=data, failed=True)
+        project = await self._project_of_chat(context.chat_id)
+        mine = (
+            next(
+                (t for t in project.tasks if t.get("chat_id") == context.chat_id), None
+            )
+            if project
+            else None
         )
-        self._changer_helpers.add(run.chat_id)
-        job = self._run_jobs.get(run.id)
-        if job is not None:
-            try:
-                await asyncio.wait_for(asyncio.shield(job), CHANGER_HELPER_SECONDS)
-            except TimeoutError:
+        if context.chat_id in self._changer_helpers or (
+            mine is not None
+            and mine.get("kind") in {"helper", "plan", "review", "security"}
+        ):
+            return ToolOutcome(
+                text="Only the builder hands parts on; helpers and reviewers do "
+                "their own part.",
+                data=data,
+                failed=True,
+            )
+        if project is not None:
+            running = {
+                run.id
+                for run in await self._store.find(
+                    AgentRun, order_by="created_at DESC", limit=200
+                )
+                if run.status in {"queued", "running"}
+            }
+            busy = [
+                [str(f) for f in _items(t.get("files"))]
+                for t in project.tasks
+                if t.get("kind") == "helper" and t.get("run_id") in running
+            ]
+            if len(busy) >= HELPER_CAP:
                 return ToolOutcome(
-                    text="The helper is still working after 30 minutes; check its "
-                    "changes with action changes before going on.",
-                    data={**data, "run_id": run.id},
+                    text=f"{HELPER_CAP} helpers are already working; wait for one to finish.",
+                    data=data,
                     failed=True,
                 )
-        finished = await self._store.require(AgentRun, run.id)
+            shared = overlapping(busy, files)
+            if shared:
+                return ToolOutcome(
+                    text=f"Another helper owns {', '.join(shared)}; give this one other files.",
+                    data=data,
+                    failed=True,
+                )
+        agent = await self._changer_agent()
+        if agent_name.strip():
+            named = next(
+                (
+                    a
+                    for a in await self.agents()
+                    if a.name.casefold() == agent_name.strip().casefold()
+                    and not a.archived
+                ),
+                None,
+            )
+            if named is None or named.role in {MAIN_ROLE, "guide"}:
+                return ToolOutcome(
+                    text=f"No team member called {agent_name}.", data=data, failed=True
+                )
+            agent = named
+        goal = f"Helper: {task.strip()}" + (
+            f"\nFiles you own: {', '.join(files)}" if files else ""
+        )
+        if project is not None:
+            project, finished, _ = await self._changer_step(
+                project,
+                agent,
+                goal,
+                kind="helper",
+                milestone=project.milestone,
+                files=files,
+            )
+        else:
+            run = await self.start_task(
+                agent_id=agent.id, goal=goal, site_id=context.site_id
+            )
+            self._changer_helpers.add(run.chat_id)
+            job = self._run_jobs.get(run.id)
+            if job is not None:
+                try:
+                    await asyncio.wait_for(asyncio.shield(job), CHANGER_HELPER_SECONDS)
+                except TimeoutError:
+                    return ToolOutcome(
+                        text="The helper is still working after 30 minutes; check its "
+                        "changes with action changes before going on.",
+                        data={**data, "run_id": run.id},
+                        failed=True,
+                    )
+            finished = await self._store.require(AgentRun, run.id)
         report = (
             finished.result or finished.error or "The helper finished without a report."
         )
         return ToolOutcome(
-            text=f"Helper ({finished.status}): {report}",
-            data={**data, "run_id": run.id, "status": finished.status},
+            text=f"Helper {agent.name} ({finished.status}): {report}",
+            data={**data, "run_id": finished.id, "status": finished.status},
             failed=finished.status != "succeeded",
         )
 
@@ -4197,7 +4994,11 @@ class StudioService:
                     chat,
                     run,
                     note=note,
-                    fallback_model=await self._fallback_model(agent),
+                    # The Changer's team never switches models on its own
+                    # (it could land on a paid one).
+                    fallback_model=None
+                    if agent.name in CHANGER_TEAM
+                    else await self._fallback_model(agent),
                 )
             for helper in helpers:
                 if when(helper.role) == "after" and finished.status == "succeeded":

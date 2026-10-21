@@ -140,3 +140,58 @@ body[data-page="changer"] .view {
   color: var(--muted);
   cursor: pointer;
 }
+
+.changer-note {
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: 0 10px 10px 0;
+}
+
+.changer-milestones,
+.changer-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 22px;
+}
+
+.changer-milestones p,
+.changer-suggestions p {
+  margin: 2px 0;
+}
+
+.changer .pill.done { color: var(--good); }
+.changer .pill.building,
+.changer .pill.running,
+.changer .pill.queued { color: var(--accent); }
+.changer .pill.waiting { color: var(--muted); }
+.changer .pill.failed,
+.changer .pill.needs { color: var(--bad); }
+
+.changer-replan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.changer-spec {
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+
+.changer-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.changer-tasks li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}

@@ -21,6 +21,22 @@
   };
   const when = (ms) => (ms ? new Date(ms).toLocaleString() : "");
   const working = () => (data.runs || []).find((run) => ["queued", "running"].includes(run.status));
+  const ACTIVE = ["planning", "building"];
+  const projectBusy = () => data.project && ACTIVE.includes(data.project.status);
+  const projectOpen = () =>
+    data.project && !["done", "cancelled", "failed"].includes(data.project.status);
+  const STATUS_TEXT = {
+    planning: "Planning: the Planner is reading the code",
+    choose: "Pick a suggestion",
+    awaiting_plan: "Waiting for you to approve the plan",
+    building: "Building",
+    paused: "Paused",
+    awaiting_release: "Ready to release",
+    done: "Done",
+    cancelled: "Cancelled",
+    failed: "Stopped",
+  };
+  let blockedHits = null;
 
   async function render(context) {
     ctx = context;
@@ -35,7 +51,7 @@
     data = await ctx.api("/studio/api/changer");
     if (!ctx.alive()) return;
     paint();
-    if (working()) {
+    if (working() || projectBusy()) {
       timer = setTimeout(() => {
         if (ctx.alive()) refresh().catch(() => {});
       }, POLL_MS);
@@ -85,7 +101,15 @@
       return;
     }
     root.replaceChildren(
-      ...[introCard(), askCard(), changesCard(), shotsCard(), updatesCard(), runsCard()].filter(
+      ...[
+        introCard(),
+        projectOpen() ? projectCard() : askCard(),
+        data.project && !projectOpen() ? projectCard() : null,
+        changesCard(),
+        shotsCard(),
+        updatesCard(),
+        runsCard(),
+      ].filter(
         Boolean
       )
     );
@@ -113,6 +137,143 @@
     ]);
   }
 
+  // The update project: plan, milestones, approvals, tasks, checkpoints.
+  function projectCard() {
+    const project = data.project;
+    const plan = project.plan || {};
+    const milestones = plan.milestones || [];
+    const act = (name, body = {}) => ctx.post(`/studio/api/changer/project/${name}`, body);
+    const feedback = el("textarea", {
+      rows: "2",
+      maxlength: "4000",
+      placeholder: "What to change in the plan",
+      "aria-label": "Notes for a new plan",
+    });
+    const buttons = [];
+    if (project.status === "awaiting_plan") {
+      buttons.push(action("Approve the plan", () => act("approve"), { primary: true, busy: "Starting…" }));
+    }
+    if (ACTIVE.includes(project.status)) {
+      buttons.push(action("Pause", () => act("pause"), { busy: "Pausing…" }));
+      const current = [...(project.tasks || [])].reverse().find((task) => ["queued", "running"].includes(task.status));
+      if (current) {
+        buttons.push(
+          el("button", { class: "primary", text: `Watch ${current.agent} work`, onclick: () => ctx.go(`task/${current.run_id}`) })
+        );
+      }
+    }
+    if (project.status === "paused") {
+      buttons.push(action("Resume", () => act("resume"), { primary: true, busy: "Resuming…" }));
+    }
+    if (projectOpen() && !ACTIVE.includes(project.status)) {
+      buttons.push(action("Cancel the project", () => act("cancel"), { confirm: "Cancel this project? The copy keeps its changes; roll back to undo them." }));
+    }
+    const replan = ["awaiting_plan", "paused", "choose"].includes(project.status)
+      ? el("div", { class: "changer-replan" }, [
+          feedback,
+          action("Change the plan", () => act("replan", { feedback: feedback.value }), { busy: "Replanning…" }),
+        ])
+      : null;
+    const used = project.tokens || 0;
+    return card(`Update project: ${STATUS_TEXT[project.status] || project.status}`, [
+      el("p", { class: "changer-goal", text: project.request }),
+      project.note ? el("p", { class: "changer-note", text: project.note }) : null,
+      el("p", { class: "muted" }, [
+        `${project.size || "size not decided yet"}${project.kind ? ` · ${project.kind}` : ""} · about ${used.toLocaleString()} of ${Number(project.budget).toLocaleString()} tokens (estimated)`,
+      ]),
+      el(
+        "p",
+        { class: "muted" },
+        Object.entries(project.team || {}).map(([name, model]) => `${name}: ${model}`).join(" · ")
+      ),
+      plan.summary ? el("p", { text: plan.summary }) : null,
+      plan.spec
+        ? el("details", {}, [el("summary", { text: "Spec" }), el("pre", { class: "changer-spec", text: plan.spec })])
+        : null,
+      (plan.risks || []).length
+        ? el("details", {}, [el("summary", { text: "Risks" }), el("ul", {}, plan.risks.map((risk) => el("li", { text: risk })))])
+        : null,
+      (project.protected || []).length
+        ? el("p", { class: "warn", text: `Touches protected files: ${project.protected.join(", ")}` })
+        : null,
+      (plan.suggestions || []).length && project.status === "choose"
+        ? el(
+            "ol",
+            { class: "changer-suggestions" },
+            plan.suggestions.map((item, index) =>
+              el("li", {}, [
+                el("strong", { text: item.title }),
+                el("p", { class: "muted", text: `${item.why} · value ${item.value} · effort ${item.effort} · risk ${item.risk}` }),
+                action("Build this", () => act("choose", { index }), { busy: "Planning…" }),
+              ])
+            )
+          )
+        : null,
+      milestones.length
+        ? el(
+            "ol",
+            { class: "changer-milestones" },
+            milestones.map((item) =>
+              el("li", { class: `milestone ${item.status}` }, [
+                el("span", { class: `pill ${item.status}`, text: item.status }),
+                el("strong", { text: ` ${item.title}` }),
+                el("p", { class: "muted", text: item.goal }),
+                item.review ? el("p", { class: "muted", text: item.review }) : null,
+              ])
+            )
+          )
+        : null,
+      el("div", { class: "row wrap" }, buttons),
+      replan,
+      tasksBlock(project),
+      checkpointsBlock(project),
+    ]);
+  }
+
+  function tasksBlock(project) {
+    const tasks = project.tasks || [];
+    if (!tasks.length) return null;
+    return el("details", { open: ACTIVE.includes(project.status) }, [
+      el("summary", { text: `Tasks (${tasks.length})` }),
+      el(
+        "ul",
+        { class: "changer-tasks" },
+        tasks.map((task) =>
+          el("li", {}, [
+            el("button", {
+              class: "link",
+              text: `${task.agent} · ${task.kind}${task.kind === "plan" ? "" : ` · milestone ${Number(task.milestone) + 1}`}`,
+              onclick: () => ctx.go(`task/${task.run_id}`),
+            }),
+            el("span", { class: `pill ${task.status}`, text: task.status }),
+            task.review ? el("span", { class: "muted", text: ` ${task.review.verdict}` }) : null,
+          ])
+        )
+      ),
+    ]);
+  }
+
+  function checkpointsBlock(project) {
+    const points = project.checkpoints || [];
+    if (!points.length || ACTIVE.includes(project.status)) return null;
+    return el("details", {}, [
+      el("summary", { text: `Checkpoints (${points.length})` }),
+      el(
+        "ul",
+        { class: "changer-tasks" },
+        points.map((point) =>
+          el("li", {}, [
+            el("span", { text: `${point.label} · ${when(point.at)}` }),
+            action("Roll back to here", () => ctx.post("/studio/api/changer/project/rollback", { checkpoint: point.id }), {
+              confirm: `Put the copy back to "${point.label}"?`,
+              busy: "Rolling back…",
+            }),
+          ])
+        )
+      ),
+    ]);
+  }
+
   function askCard() {
     const run = working();
     if (run) {
@@ -135,14 +296,24 @@
       placeholder: "e.g. Add a dark/light switch to Settings, or: the Lab's Mix button does nothing on the phone, fix it",
       "aria-label": "What should the Changer change?",
     });
+    const budget = el("select", { "aria-label": "Token budget" }, [
+      el("option", { value: "0", text: "Budget: normal (decided by size)" }),
+      el("option", { value: "5000000", text: "Budget: big project (about 5M tokens)" }),
+      el("option", { value: "15000000", text: "Budget: very big project (about 15M tokens)" }),
+    ]);
     return card("What should it change?", [
+      el("p", {
+        class: "muted",
+        text: "Small fixes go straight through. Bigger jobs become an update project: the Planner reads the code and makes a plan in milestones for you to approve; then each milestone is built, checked, reviewed by a different agent, screenshotted and saved before the next. Vague requests get up to three suggestions first.",
+      }),
       box,
+      budget,
       action(
         "Start the change",
         async () => {
           if (!box.value.trim()) throw new Error("Say what to change first.");
-          await ctx.post("/studio/api/changer/start", { request: box.value });
-          ctx.notify("The Changer is on it.");
+          await ctx.post("/studio/api/changer/start", { request: box.value, budget: Number(budget.value) });
+          ctx.notify("The Planner is reading the code.");
         },
         { primary: true, busy: "Starting…" }
       ),
@@ -209,8 +380,27 @@
             note,
             action(
               "Make update zip",
-              () => ctx.post("/studio/api/changer/package", { note: note.value }),
-              { primary: true, busy: "Packing…" }
+              async () => {
+                const made = await ctx.post("/studio/api/changer/package", { note: note.value });
+                blockedHits = made.blocked ? made.hits : null;
+                if (!made.blocked) ctx.notify(`Packed ${made.name}.`);
+              },
+              { primary: true, busy: "Scanning and packing…" }
+            ),
+          ])
+        : null,
+      blockedHits
+        ? el("div", { class: "changer-check bad" }, [
+            el("strong", { text: "The security scan flagged these new lines. Read them before packing:" }),
+            el("ul", {}, blockedHits.map((hit) => el("li", { text: hit }))),
+            action(
+              "Pack anyway",
+              async () => {
+                const made = await ctx.post("/studio/api/changer/package", { note: note.value, confirm: true });
+                blockedHits = null;
+                ctx.notify(`Packed ${made.name}.`);
+              },
+              { confirm: "Pack the update with these flagged lines?", busy: "Packing…" }
             ),
           ])
         : null,

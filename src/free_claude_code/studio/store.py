@@ -12,6 +12,7 @@ import anyio.to_thread
 from .models import (
     Agent,
     AgentRun,
+    ChangeProject,
     Chat,
     ChatNotes,
     CommandRequest,
@@ -86,6 +87,9 @@ _JSON_FIELDS = frozenset(
         "loaded",
         "weights",
         "evidence",
+        "tasks",
+        "checkpoints",
+        "release",
     }
 )
 
@@ -118,6 +122,7 @@ TABLES: Mapping[type[Record], str] = {
     LabPart: "studio_lab_parts",
     LabChemical: "studio_lab_chemicals",
     TutorAttempt: "studio_tutor_attempts",
+    ChangeProject: "studio_change_projects",
     FarmChannel: "studio_farm_channels",
     FarmPost: "studio_farm_posts",
     FarmAsset: "studio_farm_assets",

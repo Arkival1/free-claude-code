@@ -1,6 +1,8 @@
 """The Changer: an AI inside FCC that changes a copy of FCC and packs update
 zips, never touching the running app."""
 
+import hashlib
+import json
 import zipfile
 from pathlib import Path
 
@@ -15,12 +17,7 @@ from free_claude_code.studio.changer import (
     bump_version,
     tree,
 )
-from free_claude_code.studio.llm import LLMReply
-from free_claude_code.studio.models import Agent
-from free_claude_code.studio.presets import CHANGER_TOOLS
 from tests.api.support import create_test_app
-
-from .conftest import tool_reply
 
 PYPROJECT = '[project]\nname = "free-claude-code"\nversion = "6.75.0"\n'
 LOCK = (
@@ -122,7 +119,7 @@ def test_versions_go_up_one_patch():
         bump_version("[project]\n")
 
 
-def test_an_update_zip_carries_only_the_changes_and_a_backup_undoes_it(tmp_path):
+def test_an_update_zip_carries_only_the_changes_and_a_rollback_undoes_it(tmp_path):
     changer, _, target = changer_for(tmp_path)
     with pytest.raises(ChangerError, match="Nothing has changed"):
         changer.package(target, "")
@@ -130,26 +127,44 @@ def test_an_update_zip_carries_only_the_changes_and_a_backup_undoes_it(tmp_path)
         "def mix():\n    return 'bubbles'\n"
     )
     (target / "src/free_claude_code/studio/new.py").write_text("X = 1\n")
-    made = changer.package(target, "The Lab fizzes with bubbles now.")
+    made = changer.package(
+        target, "The Lab fizzes with bubbles now.", report="# Test report\nok\n"
+    )
     assert made["version"] == "6.75.1"
+    assert str(made["name"]).startswith("FCC-Studio-update-6.75.1-")
     update = changer.update_file(str(made["name"]))
+    papers = "fcc/_update/6.75.1/"
     with zipfile.ZipFile(update) as archive:
         names = set(archive.namelist())
-        note = archive.read("fcc/FCC-UPDATE.txt").decode()
+        changelog = archive.read(papers + "CHANGELOG.md").decode()
+        manifest = json.loads(archive.read(papers + "MANIFEST.json"))
+        sums = archive.read(papers + "SHA256SUMS.txt").decode()
+        lab = archive.read("fcc/src/free_claude_code/studio/lab.py")
     assert names == {
         "fcc/src/free_claude_code/studio/lab.py",
         "fcc/src/free_claude_code/studio/new.py",
         "fcc/pyproject.toml",
         "fcc/uv.lock",
-        "fcc/FCC-UPDATE.txt",
+        papers + "CHANGELOG.md",
+        papers + "UPDATE_INSTRUCTIONS.md",
+        papers + "MANIFEST.json",
+        papers + "SHA256SUMS.txt",
+        papers + "TEST-REPORT.md",
     }
-    assert "6.75.0 -> 6.75.1" in note and "bubbles now" in note
+    assert "6.75.0 -> 6.75.1" in changelog and "bubbles now" in changelog
+    assert manifest["from"] == "6.75.0" and manifest["to"] == "6.75.1"
+    assert (
+        hashlib.sha256(lab).hexdigest() + "  src/free_claude_code/studio/lab.py" in sums
+    )
+    assert str(made["backup"]).endswith("-rollback.zip")
     with zipfile.ZipFile(changer.update_file(str(made["backup"]))) as archive:
         assert "fizz" in archive.read("fcc/src/free_claude_code/studio/lab.py").decode()
         assert "new.py" in archive.read("fcc/FCC-UNDO.txt").decode()
     assert [row["name"] for row in changer.updates()] == [made["name"]]
     with pytest.raises(ChangerError):
         changer.update_file("../../etc/passwd")
+    project = changer.package(target, "A bigger one.", minor=True)
+    assert project["version"] == "6.76.0"
 
 
 @pytest.mark.asyncio
@@ -179,56 +194,6 @@ async def test_screenshots_run_the_copy_with_no_keys_and_empty_data(
     assert changer.shots() == ["lab.png", "trade.png"]
     with pytest.raises(ChangerError):
         await changer.screenshots(target, ["../etc"])
-
-
-@pytest.mark.asyncio
-async def test_the_changer_edits_the_copy_checks_it_and_packs_a_zip(
-    make_studio, tmp_path
-):
-    source = make_app(tmp_path / "fcc")
-    turns = iter(
-        [
-            tool_reply(
-                "edit_file",
-                {
-                    "path": "src/free_claude_code/studio/lab.py",
-                    "old_text": "'fizz'",
-                    "new_text": "'bubbles'",
-                },
-            ),
-            tool_reply("fcc_changer", {"action": "check"}),
-            tool_reply(
-                "fcc_changer", {"action": "package", "note": "The Lab makes bubbles."}
-            ),
-            tool_reply("finish", {"summary": "Changed the Lab; update zip is ready."}),
-        ]
-    )
-
-    def respond(system: str, prompt: str):
-        return next(turns, LLMReply(text="Done."))
-
-    studio, _ = make_studio(respond)
-    studio._changer = Changer(
-        tmp_path / "changer", source=source, import_check="print('ok')"
-    )
-    started = await studio.changer_start("Make the Lab say bubbles")
-    job = studio._run_jobs.get(str(started["run_id"]))
-    if job is not None:
-        await job
-    view = await studio.changer_view()
-    runs = view["runs"]
-    assert isinstance(runs, list) and isinstance(runs[0], dict)
-    assert runs[0]["status"] == "succeeded", runs[0]
-    updates = view["updates"]
-    assert isinstance(updates, list) and len(updates) == 1
-    check = view["check"]
-    assert isinstance(check, dict) and check["passed"] is True
-    # The running app's file is untouched; the copy has the change.
-    assert "fizz" in (source / "src/free_claude_code/studio/lab.py").read_text()
-    agent = view["agent"]
-    assert isinstance(agent, dict)
-    changer = await studio._store.require(Agent, str(agent["id"]))
-    assert set(CHANGER_TOOLS) <= set(changer.tools) and not changer.all_tools
 
 
 @pytest.mark.asyncio

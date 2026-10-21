@@ -1378,30 +1378,52 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name=CHANGER_TOOL,
         description=(
-            "The Changer's own tool, for changing FCC itself in the Changer "
-            "copy. action changes: list the files changed so far. check: "
+            "The Changer team's own tool, for changing FCC itself in the "
+            "Changer copy. action plan (Planner): submit the plan: size (quick "
+            "or project), kind, summary, spec, risks, files, tests, milestones "
+            "[{title, goal, files, tests}], or suggestions [{title, why, value, "
+            "effort, risk}] for a vague request. action review (reviewers): "
+            "verdict pass or fail, findings [{problem, where, evidence, fix}], "
+            "notes. action changes: the files changed so far. check: "
             "syntax-check every changed file and load the app from the copy; "
-            "fix every problem it reports. screenshots: run the changed copy on "
-            "a spare port (no keys, empty data) and screenshot Studio pages "
-            "(pages: home, lab, trade, learn, tutor, agents, settings...; "
-            "phone true for phone size). subagent: hand a separate, "
-            "self-contained part of the job to a helper Changer that works in "
-            "the same copy and reports back (task: everything it needs, "
-            "including which files are its own). package: when the checks "
-            "pass, pack the changes into an update zip for the owner (note: "
-            "what changed, in plain words)."
+            "fix every problem it reports. screenshots: run the changed copy "
+            "on a spare port (no keys, empty data) and screenshot Studio pages "
+            "(pages: home, lab, trade, learn, tutor, agents, settings...; phone "
+            "true for phone size). subagent: hand a separate part to a helper "
+            "that works in the same copy and reports back (task: everything it "
+            "needs; files: the files it owns; agent: optional team member's "
+            "name, else a helper Changer)."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["changes", "check", "screenshots", "subagent", "package"],
+                    "enum": [
+                        "plan",
+                        "review",
+                        "changes",
+                        "check",
+                        "screenshots",
+                        "subagent",
+                    ],
                 },
+                "size": {"type": "string", "enum": ["quick", "project"]},
+                "kind": {"type": "string"},
+                "summary": {"type": "string"},
+                "spec": {"type": "string"},
+                "risks": {"type": "array", "items": {"type": "string"}},
+                "files": {"type": "array", "items": {"type": "string"}},
+                "tests": {"type": "array", "items": {"type": "string"}},
+                "milestones": {"type": "array", "items": {"type": "object"}},
+                "suggestions": {"type": "array", "items": {"type": "object"}},
+                "verdict": {"type": "string", "enum": ["pass", "fail"]},
+                "findings": {"type": "array", "items": {"type": "object"}},
+                "notes": {"type": "string"},
                 "pages": {"type": "array", "items": {"type": "string"}},
                 "phone": {"type": "boolean"},
                 "task": {"type": "string"},
-                "note": {"type": "string"},
+                "agent": {"type": "string"},
             },
             "required": ["action"],
         },
