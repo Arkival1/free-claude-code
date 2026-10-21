@@ -16,6 +16,7 @@ installed from there when GitHub no longer has it.
 
 | Folder | Upstream | Licence | Used for |
 | --- | --- | --- | --- |
+| [`agent-skills/`](agent-skills/README.md) | https://github.com/addyosmani/agent-skills, https://github.com/anthropics/skills, https://github.com/vercel-labs/agent-skills, https://github.com/vercel-labs/skills | MIT / Apache 2.0 | Claude Code skills in `.claude/skills/` for the implementer + previewer setup in `CLAUDE.md` |
 | [`claw-code/`](claw-code/README.md) | https://github.com/ultraworkers/claw-code | MIT | Claw Code built on this PC and run through FCC (Knowledge & Memory → Claw Code, `fcc-claw`) |
 | [`cua/`](cua/README.md) | https://github.com/trycua/cua | MIT | Kept for a planned PC-control feature (not used yet) |
 | [`stable-diffusion-cpp/`](stable-diffusion-cpp/README.md) | https://github.com/leejet/stable-diffusion.cpp | MIT | The Image engine: painted cartoon places and characters (Settings → Image engine) |
