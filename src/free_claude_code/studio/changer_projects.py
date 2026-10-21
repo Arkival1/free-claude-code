@@ -66,7 +66,13 @@ def _paths(raw: object) -> list[str]:
         path = item.replace("\\", "/")
         while path.startswith("./"):
             path = path[2:]
-        if not _PATH.match(path) or path.startswith("/") or ".." in path.split("/"):
+        parts = path.split("/")
+        if (
+            not _PATH.match(path)
+            or path.startswith("/")
+            or ".." in parts
+            or parts[-1] in {"", "."}
+        ):
             raise PlanError(f"{item!r} isn't a file path inside the copy.")
         paths.append(path)
     return paths
@@ -177,8 +183,12 @@ class Checkpoints:
         self._source = source
 
     def save(self, target: Path, baseline: Mapping[str, str], label: str) -> JsonObject:
-        point = f"cp{int(time.time() * 1000)}"
+        stamp = int(time.time() * 1000)
+        while (self._home / f"cp{stamp}").exists():
+            stamp += 1  # two saves in the same millisecond get their own ids
+        point = f"cp{stamp}"
         folder = self._home / point
+        folder.mkdir(parents=True)
         files = tree(target)
         changed = {
             name: path
@@ -258,6 +268,14 @@ _SCANS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 _URL = re.compile(r"https?://([A-Za-z0-9.-]+)")
+_CODE = frozenset(
+    {".py", ".js", ".ts", ".html", ".ps1", ".sh", ".cmd", ".bat", ".json", ".toml"}
+)
+_TEXT = frozenset(
+    {".md", ".txt", ".yml", ".yaml", ".env", ".ini", ".cfg", ".css", ".csv", ".xml"}
+)
+"""Code gets every check; other text files only the key check (a key in a
+note or a settings file would still ship in the zip)."""
 
 
 def scan(
@@ -272,17 +290,12 @@ def scan(
     hits: list[str] = []
     for name in files:
         path = target / name
-        if not path.is_file() or path.suffix.lower() not in {
-            ".py",
-            ".js",
-            ".ts",
-            ".html",
-            ".ps1",
-            ".sh",
-            ".cmd",
-            ".json",
-            ".toml",
-        }:
+        if not path.is_file():
+            continue
+        code = path.suffix.lower() in _CODE
+        if not code and not (
+            path.suffix.lower() in _TEXT or path.name.startswith(".env")
+        ):
             continue
         try:
             new_lines = path.read_text(encoding="utf-8").splitlines()
@@ -297,10 +310,10 @@ def scan(
         for number, line in enumerate(new_lines, start=1):
             if line in old:
                 continue
-            for label, pattern in _SCANS:
+            for label, pattern in _SCANS if code else _SCANS[:1]:
                 if pattern.search(line):
                     hits.append(f"{name} line {number}: {label}")
-            for host in _URL.findall(line):
+            for host in _URL.findall(line) if code else ():
                 base = ".".join(host.casefold().split(".")[-2:])
                 if base not in known_hosts and host.casefold() not in known_hosts:
                     hits.append(f"{name} line {number}: a new web address ({host})")

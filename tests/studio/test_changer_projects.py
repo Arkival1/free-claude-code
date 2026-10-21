@@ -48,6 +48,7 @@ def team(
     *,
     verdicts: list[str] | None = None,
     ping_fails: bool = False,
+    new_text: str = "'bubbles'",
 ) -> Callable[[str, str], object]:
     """A scripted team: Planner, builder (the Changer) and reviewers."""
     steps: dict[str, list[object]] = {
@@ -94,7 +95,7 @@ def team(
             if builds % 2 == 1:
                 return tool_reply(
                     "edit_file",
-                    {"path": LAB, "old_text": "'fizz'", "new_text": "'bubbles'"},
+                    {"path": LAB, "old_text": "'fizz'", "new_text": new_text},
                     call_id=f"edit{builds}",
                 )
             return LLMReply(text="Built and checked.")

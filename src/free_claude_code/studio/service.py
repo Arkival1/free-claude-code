@@ -2778,7 +2778,9 @@ class StudioService:
         elif action == "resume":
             if project.status != "paused":
                 raise StudioError("The project isn't paused.")
-            if not project.plan.get("milestones"):
+            if project.plan.get("suggestions") and not project.plan.get("milestones"):
+                resumed = "choose"  # the suggestions are still there to pick
+            elif not project.plan.get("milestones"):
                 resumed = "planning"
             elif project.plan.get("approved", True):
                 # Plans saved before the "approved" key existed were approved.
@@ -2788,7 +2790,7 @@ class StudioService:
             project = await self._save_project(
                 project, owner=True, status=resumed, note=""
             )
-            if resumed == "awaiting_plan":
+            if resumed in {"awaiting_plan", "choose"}:
                 return await self.changer_view()
             self._drive(project.id)
         elif action == "cancel":
@@ -3153,7 +3155,15 @@ class StudioService:
                 for name in touched[:30]
             ]
         )
-        security = bool(protected_files({"files": touched}))
+        hosts = await asyncio.to_thread(known_hosts, self._changer.source)
+        risky = await asyncio.to_thread(
+            lambda: scan(
+                target, touched, known_hosts=hosts, source=self._changer.source
+            )
+        )
+        # Protected files, or keys, commands, code run from text, new web
+        # addresses and the like, bring in the Security Reviewer too.
+        security = bool(protected_files({"files": touched}) or risky)
         problems: list[str] = []
         verdicts: list[str] = []
         builder = await self._changer_agent()
@@ -3356,6 +3366,11 @@ class StudioService:
         """Pack the update after the security scan; anything it flags blocks
         the zip until the owner confirms."""
         target = await self._changer_target()
+        project = await self._change_project()
+        if project is not None and project.status in ACTIVE:
+            raise StudioError(
+                "The Changer is still working; pause it or wait for the release step."
+            )
         changes = await asyncio.to_thread(self._changer.changes, target)
         hosts = await asyncio.to_thread(known_hosts, self._changer.source)
         hits = await asyncio.to_thread(
@@ -3368,11 +3383,6 @@ class StudioService:
         )
         if hits and not confirm:
             return {"blocked": True, "hits": hits}
-        project = await self._change_project()
-        if project is not None and project.status in ACTIVE:
-            raise StudioError(
-                "The Changer is still working; pause it or wait for the release step."
-            )
         report = self._changer_report(project, target)
         if hits:
             report += (
@@ -3634,6 +3644,16 @@ class StudioService:
             if named is None or named.role in {MAIN_ROLE, "guide"}:
                 return ToolOutcome(
                     text=f"No team member called {agent_name}.", data=data, failed=True
+                )
+            if named.name in {
+                CHANGER_PLANNER_NAME,
+                CHANGER_REVIEWER_NAME,
+                CHANGER_SECURITY_NAME,
+            }:
+                return ToolOutcome(
+                    text=f"{named.name} checks the work, so it can't help build it.",
+                    data=data,
+                    failed=True,
                 )
             agent = named
         goal = f"Helper: {task.strip()}" + (
