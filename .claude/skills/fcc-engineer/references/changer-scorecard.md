@@ -31,6 +31,12 @@ A working harness from the first run is described in the commit that added
 `changer_start`/`changer_act("approve")`, then run hidden checks with
 `PYTHONPATH=<copy>/src` and pytest `-o pythonpath=<copy>/src`.
 
+Models tried (2026-10-21, owner's NVIDIA key): Nemotron 3 Ultra 550B
+(`nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b`) did the work well at about
+15 s a reply; GLM-5.3 was good but hit "Too Many Requests" with 3-4 cases at
+once; Kimi K2.6 and Nemotron 3 Super weren't on the key. Run at most 3 cases
+at once, and use `pgrep -f "run_eval.py B"` (not `\|`) to wait for groups.
+
 ## The cases (small, each with a hidden check)
 
 Plant each bug in the Changer copy only (never the repo), one at a time,

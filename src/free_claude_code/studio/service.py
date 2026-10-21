@@ -57,6 +57,7 @@ from .changer_projects import (
     limit_note,
     needs_approval,
     overlapping,
+    plan_from_findings,
     plan_goal,
     protected_files,
     read_plan,
@@ -3039,6 +3040,27 @@ class StudioService:
                 note=f"{planner.name} couldn't finish: its model kept stopping "
                 f"({(run.error or '')[:160]}). Press Resume to try again, or pick "
                 "another model for it on the Agents page.",
+            )
+        made = (
+            plan_from_findings(
+                project.request, run.result, await self._changer_target()
+            )
+            if not isinstance(raw, dict) and run.status == "succeeded"
+            else None
+        )
+        if made is not None:
+            # It found things but never handed in a plan: its findings become
+            # a one-step plan, which waits for the owner.
+            return await self._save_project(
+                project,
+                plan=made,
+                size="project",
+                kind=str(made.get("kind", "")),
+                milestone=0,
+                status="awaiting_plan",
+                note="The Planner wrote its findings but didn't hand in a plan, "
+                "so FCC made a one-step plan from them. Check it, then Approve "
+                "or change the plan.",
             )
         if not isinstance(raw, dict):
             return await self._save_project(

@@ -446,6 +446,52 @@ def limit_note(text: str, model: str) -> str:
     )
 
 
+_FOUND_PATH = re.compile(r"\b((?:src|tests|scripts)/[A-Za-z0-9_./-]+\.\w+)")
+
+
+def plan_from_findings(request: str, findings: str, target: Path) -> JsonObject | None:
+    """A one-milestone plan made from findings a Planner wrote as text but
+    never handed in (None when there is nothing to build on). It always
+    waits for the owner's approval."""
+    text = findings.strip()
+    if len(text) < 80:
+        return None
+    files: list[str] = []
+    for found in _FOUND_PATH.findall(text):
+        try:
+            path = clean_paths([found])[0]
+        except PlanError:
+            continue  # "..", absolute or odd paths never reach the plan
+        if path not in files and (target / path).is_file():
+            files.append(path)
+    files = sorted(files)[:8]
+    try:
+        plan = read_plan(
+            {
+                "size": "project",
+                "kind": "bug fix"
+                if re.search(r"\bbug|fix|broken|error", request, re.I)
+                else "feature",
+                "summary": f"Made from the Planner's findings (it didn't hand in a plan): {request}"[
+                    :1500
+                ],
+                "files": files,
+                "milestones": [
+                    {
+                        "title": "Act on the Planner's findings",
+                        "goal": f"The owner's request: {request}\n\nThe Planner found:\n{text}"[
+                            :3000
+                        ],
+                        "files": files,
+                    }
+                ],
+            }
+        )
+    except PlanError:
+        return None
+    return {**plan, "approved": False, "from_findings": True}
+
+
 def hand_in_goal(goal: str, wanted: str, notes: str) -> str:
     """A follow-up for a Planner or reviewer that wrote its findings as text
     instead of handing them in."""

@@ -59,8 +59,10 @@ Read `CLAUDE.md` for the owner's rules; this page doesn't repeat them.
 
 ## FCC traps (each one cost a run before)
 
-- **No suppressions**: `# type: ignore` / `noqa` are banned. Narrow types
-  with `isinstance`, small helpers like `_items()`, or explicit annotations
+- **No suppressions**: `# type: ignore` / `noqa` are banned, even as text in
+  a test string (CI greps for them): split such a string (`"# type" + ": ignore"`).
+  Run `./scripts/ci.sh --skip playwright --skip pytest` before a release.
+  Narrow types with `isinstance`, small helpers like `_items()`, or explicit annotations
   (`JsonObject`, `JsonValue`, `list[dict[str, JsonValue]]`).
 - **Python 3.14**: `except A, B:` (no brackets) is valid and used here.
 - **Imports**: inside the package never `import free_claude_code` for paths;

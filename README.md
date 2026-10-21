@@ -1381,6 +1381,18 @@ its model on its agent page) that works in a copy of FCC's own files, the
 - Before work starts it checks each agent's model answers; the Changer team
   never switches to another model on its own. A token **budget** (normal, big
   or very big) pauses the project with what's done and what's left.
+- Its copy holds FCC's tests too, and each check runs only the tests related to
+  the change (changed tests first; anything it can't match is named). Changed
+  Python files are tidied the way FCC's checks expect.
+- It doesn't stop half way: a busy provider (a rate limit) is waited out, and a
+  step that runs out of steps, times out or answers empty carries on (up to two
+  more tries). A used-up daily allowance pauses the project with a plain note,
+  ready for **Resume**. If the Planner writes its findings but never hands in a
+  plan, FCC turns them into a one-step plan that waits for your **Approve**.
+
+Every agent's background task carries on the same way (the Builder, Coder,
+Researcher, relays and subagents too), and every model call waits out a brief
+rate limit instead of losing its work.
 - **Make update zip** first scans the new lines for keys, `eval`/shell
   commands, turned-off certificate checks, unsafe loading, new web addresses
   and switched-off checks; anything flagged waits for **Pack anyway**. The

