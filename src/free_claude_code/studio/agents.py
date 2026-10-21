@@ -240,6 +240,9 @@ IDLE_NOTE = (
     "page, rewrite index.html completely with write_file, with real content "
     "for this job."
 )
+RATE_WAITS = (15.0, 30.0, 60.0, 90.0)
+"""Seconds to wait before asking again after a brief rate limit (about three
+minutes in all, then the call fails and the task carries on)."""
 CARRY_ON_TRIES = 2
 """How many more times a task that stopped early carries on by itself."""
 _TRANSIENT = re.compile(
@@ -1494,16 +1497,21 @@ class AgentRunner:
                     else:
                         history.append(ChatMessage.user(note))
             try:
-                reply = await self._router.complete(
-                    history,
-                    model=model,
-                    system=system,
-                    tools=step_specs if names else (),
-                    max_tokens=BUILD_REPLY_TOKENS
-                    if WRITE_TOOLS & set(names)
-                    else REPLY_TOKENS,
-                    temperature=self._temperature,
-                    on_text=self._show_live(chat.id),
+                reply = await self._patiently(
+                    chat.id,
+                    agent.name,
+                    functools.partial(
+                        self._router.complete,
+                        history,
+                        model=model,
+                        system=system,
+                        tools=step_specs if names else (),
+                        max_tokens=BUILD_REPLY_TOKENS
+                        if WRITE_TOOLS & set(names)
+                        else REPLY_TOKENS,
+                        temperature=self._temperature,
+                        on_text=self._show_live(chat.id),
+                    ),
                 )
             except StudioLLMError as error:
                 self._clear_live(chat.id)
@@ -1943,6 +1951,30 @@ class AgentRunner:
             failed=True,
             error="step_limit",
         )
+
+    async def _patiently(
+        self, chat_id: str, name: str, call: Callable[[], Awaitable[LLMReply]]
+    ) -> LLMReply:
+        """Make a model call, waiting out a brief rate limit (the provider is
+        busy for a minute) instead of losing the work so far."""
+        for attempt, wait in enumerate(RATE_WAITS):
+            try:
+                return await call()
+            except StudioLLMError as error:
+                if not brief_limit(str(error)):
+                    raise
+                self._clear_live(chat_id)
+                if attempt == 0:
+                    await self._store.append_message(
+                        chat_id=chat_id,
+                        role="event",
+                        text=f"{name} is waiting: the model's provider is busy "
+                        "(a rate limit). It carries on by itself.",
+                        author=name,
+                        data={"kind": "rate_wait"},
+                    )
+                await asyncio.sleep(wait * self._carry_on_wait / 20.0)
+        return await call()
 
     def _toolshed(
         self, agent: Agent, names: Sequence[str], *, sealed: bool

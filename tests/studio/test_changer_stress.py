@@ -1655,7 +1655,7 @@ async def test_carrying_on_has_a_limit(make_studio, tmp_path):
     wire(studio, tmp_path)
     studio._carry_on_wait = 0
     project = await planner_run(studio)
-    assert project.status == "failed"
+    assert project.status == "paused" and "Press Resume" in project.note
     assert seen["failed"] == 3  # the first try and two more
 
 
@@ -1765,7 +1765,7 @@ async def test_a_stop_during_the_wait_ends_it(make_studio):
     run = await agent_task(studio)
     for _ in range(200):
         events = await studio._store.find(Message, where={"chat_id": run.chat_id})
-        if any(m.data.get("kind") == "carry_on" for m in events):
+        if any(m.data.get("kind") == "rate_wait" for m in events):
             break
         await asyncio.sleep(0.02)
     await studio.stop_agent_work(run.agent_id)
@@ -1897,6 +1897,11 @@ LIMIT_TEXTS = [
     ("quota per day used", "day"),
     ("GenerateRequestsPerDay exceeded", "day"),
     ("RESOURCE_EXHAUSTED", "day"),
+    ("daily quota used up (limit 50 per minute)", "day"),
+    (
+        "RESOURCE_EXHAUSTED: GenerateRequestsPerMinutePerProjectPerModel exceeded",
+        "minute",
+    ),
 ]
 
 
@@ -1910,3 +1915,77 @@ def test_every_part_of_fcc_reads_limits_the_same_way(text, kind):
     assert brief_limit(text) is (kind == "minute")
     assert bool(limit_note(text, "m")) is (kind == "day")
     assert worth_another_go(text) is (kind == "minute")
+
+
+@pytest.mark.asyncio
+async def test_a_brief_rate_limit_is_waited_out_mid_task(make_studio):
+    from free_claude_code.studio.llm import LLMReply, StudioLLMError
+
+    calls = {"n": 0}
+
+    def respond(system: str, prompt: str) -> object:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise StudioLLMError("Model endpoint returned 429: rate_limit_error")
+        return LLMReply(text="All done.")
+
+    studio, _ = make_studio(respond)
+    studio._carry_on_wait = 0
+    run = await agent_task(studio)
+    finished = await finish(studio, run)
+    assert finished.status == "succeeded" and calls["n"] == 3
+    events = await studio._store.find(Message, where={"chat_id": run.chat_id})
+    kinds = [m.data.get("kind") for m in events]
+    assert kinds.count("rate_wait") == 1 and "carry_on" not in kinds
+
+
+@pytest.mark.asyncio
+async def test_a_planner_kept_busy_pauses_instead_of_failing(make_studio, tmp_path):
+    respond, _ = flaky_planner(999, "Model endpoint returned 429: rate_limit_error")
+    studio, _ = make_studio(respond)
+    wire(studio, tmp_path)
+    studio._carry_on_wait = 0
+    project = await planner_run(studio)
+    assert project.status == "paused" and "couldn't finish" in project.note
+
+
+@pytest.mark.asyncio
+async def test_a_busy_reviewer_pauses_instead_of_starting_fixes(make_studio, tmp_path):
+    from free_claude_code.studio.llm import StudioLLMError
+
+    inner = team(quick_plan())
+
+    def respond(system: str, prompt: str) -> object:
+        if "Reviewer" in system and prompt != "Reply with the word OK.":
+            raise StudioLLMError("Model endpoint returned 503: overloaded")
+        return inner(system, prompt)
+
+    studio, _ = make_studio(respond)
+    wire(studio, tmp_path)
+    studio._carry_on_wait = 0
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "paused" and "review couldn't run" in project.note
+    assert "fix" not in [t["kind"] for t in project.tasks]
+
+
+@pytest.mark.asyncio
+async def test_a_reviewer_out_of_allowance_pauses_with_the_plain_note(
+    make_studio, tmp_path
+):
+    from free_claude_code.studio.llm import StudioLLMError
+
+    inner = team(quick_plan())
+
+    def respond(system: str, prompt: str) -> object:
+        if "Reviewer" in system and prompt != "Reply with the word OK.":
+            raise StudioLLMError("429: You exceeded your current quota per day")
+        return inner(system, prompt)
+
+    studio, _ = make_studio(respond)
+    wire(studio, tmp_path)
+    studio._carry_on_wait = 0
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "paused" and "allowance" in project.note
+    assert "fix" not in [t["kind"] for t in project.tasks]

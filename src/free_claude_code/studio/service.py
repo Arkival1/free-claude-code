@@ -32,7 +32,13 @@ from free_claude_code.core.json_types import JsonObject, JsonValue
 from free_claude_code.core.version import package_version
 
 from . import system_monitor
-from .agents import SEALED_TOOLS, AgentRunner, TurnResult, step_budget
+from .agents import (
+    SEALED_TOOLS,
+    AgentRunner,
+    TurnResult,
+    step_budget,
+    worth_another_go,
+)
 from .assistant_tools import describe_time, now_line, parse_when
 from .changer import Changer, ChangerError, app_root
 from .changer_projects import (
@@ -3021,6 +3027,19 @@ class StudioService:
             return await self._save_project(
                 project, status="paused", note=f"{planner.name}: {limited}"
             )
+        if (
+            not isinstance(raw, dict)
+            and run.status == "failed"
+            and worth_another_go(run.error or "")
+        ):
+            # Still busy or slow after waiting and carrying on: resumable too.
+            return await self._save_project(
+                project,
+                status="paused",
+                note=f"{planner.name} couldn't finish: its model kept stopping "
+                f"({(run.error or '')[:160]}). Press Resume to try again, or pick "
+                "another model for it on the Agents page.",
+            )
         if not isinstance(raw, dict):
             return await self._save_project(
                 project,
@@ -3248,6 +3267,21 @@ class StudioService:
                 milestone=number,
             )
             review = task.get("review")
+            limited = limit_note(f"{_run.error or ''} {_run.result}", reviewer.model)
+            if not isinstance(review, dict) and limited:
+                return "", verdicts, f"{reviewer.name}: {limited}"
+            if (
+                not isinstance(review, dict)
+                and _run.status == "failed"
+                and worth_another_go(_run.error or "")
+            ):
+                # The reviewer's model was busy, not the code at fault.
+                return (
+                    "",
+                    verdicts,
+                    f"{reviewer.name}'s model kept stopping "
+                    f"({(_run.error or '')[:160]}).",
+                )
             if not isinstance(review, dict):
                 problems.append(f"{reviewer.name} finished without a verdict.")
                 verdicts.append(f"{reviewer.name}: no verdict")
