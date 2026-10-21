@@ -445,6 +445,13 @@ class Changer:
                 report.fail(
                     "Lint (undefined names, unused imports):\n" + output.strip()[-2000:]
                 )
+            # Tidy the changed Python files the way FCC's own checks expect
+            # (the copy only; a file that won't parse is reported above).
+            code, output = await self._run(
+                [self._python, "-m", "ruff", "format", *python_files], target
+            )
+            if code == 0 and "reformatted" in output:
+                report.lines.append(f"Formatted: {output.strip()[:160]}")
         code, output = await self._run(
             [self._python, "-c", self._import_check], target, env=self._copy_env(target)
         )

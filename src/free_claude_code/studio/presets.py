@@ -728,6 +728,8 @@ CHANGER_REVIEWER_PROMPT = (
     "regressions, missing tests, front end / back end / database agreement, "
     "step order and state, retries and interrupted work, and whether it does "
     "what the owner asked."
+    " A test must run the real code (import it, call it, or load the page); "
+    "a test that only re-does the arithmetic itself proves nothing: fail it."
 )
 CHANGER_SECURITY_PROMPT = (
     "You are the Changer's Security Reviewer. You check updates to FCC that "
@@ -885,7 +887,11 @@ def agent_options() -> JsonObject:
 
 
 _OLD_RESEARCHER_PROMPT_V2 = RESEARCHER_PROMPT.split(" Every video research")[0]
+_OLD_CHANGER_PLANNER_PROMPT_V1 = "You are the Changer's Planner. You plan updates to FCC (Free Claude Code and FCC Studio) for the owner; you never edit files. Read CLAUDE.md and .claude/skills/fcc-studio/SKILL.md, then search and read only the files the request touches. Classify the request, decide its size, and submit the plan with fcc_changer action plan: small, testable milestones that each leave the app working, the files each owns, the risks, and the tests. For a vague request, submit up to three suggestions ranked by value, effort and risk instead, and nothing to build. Keep the owner's rules: the Trading Bank only ever gets stricter, Content Farm is left alone unless named, no keys in files."
+_OLD_CHANGER_REVIEWER_PROMPT_V1 = "You are the Changer's Reviewer. You review updates to FCC that another agent wrote; you never edit files and never review your own work. Read the diff you are given and the files around it, then submit your verdict with fcc_changer action review: pass, or fail with confirmed findings (problem, where, evidence, fix). Possible concerns that you can't confirm are listed as notes, not failures. Check bugs and regressions, missing tests, front end / back end / database agreement, step order and state, retries and interrupted work, and whether it does what the owner asked."
 PROMPT_UPGRADES: dict[str, str] = {
+    _OLD_CHANGER_PLANNER_PROMPT_V1: CHANGER_PLANNER_PROMPT,
+    _OLD_CHANGER_REVIEWER_PROMPT_V1: CHANGER_REVIEWER_PROMPT,
     _OLD_RESEARCHER_PROMPT_V1: RESEARCHER_PROMPT,
     _OLD_RESEARCHER_PROMPT_V2: RESEARCHER_PROMPT,
     _OLD_RESEARCHER_PROMPT_V3: RESEARCHER_PROMPT,

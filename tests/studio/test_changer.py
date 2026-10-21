@@ -390,3 +390,29 @@ async def test_the_check_says_what_it_ran_and_what_it_missed(tmp_path, monkeypat
     )
     missing = await changer.check(target)
     assert "pytest isn't installed here" in missing.text()
+
+
+@pytest.mark.asyncio
+async def test_the_check_tidies_python_formatting(tmp_path):
+    changer, _, target = changer_for(tmp_path)
+    lab = target / "src/free_claude_code/studio/lab.py"
+    lab.write_text("def mix():\n   return  'bubbles'\n")
+    report = await changer.check(target)
+    assert report.passed, report.text()
+    assert lab.read_text() == 'def mix():\n    return "bubbles"\n'
+    assert "Formatted" in report.text()
+
+
+def test_older_changer_team_instructions_are_upgraded():
+    from free_claude_code.studio import presets
+
+    assert (
+        presets.PROMPT_UPGRADES[presets._OLD_CHANGER_PLANNER_PROMPT_V1]
+        == presets.CHANGER_PLANNER_PROMPT
+    )
+    assert (
+        presets.PROMPT_UPGRADES[presets._OLD_CHANGER_REVIEWER_PROMPT_V1]
+        == presets.CHANGER_REVIEWER_PROMPT
+    )
+    assert "15 steps" in presets.CHANGER_PLANNER_PROMPT
+    assert "run the real code" in presets.CHANGER_REVIEWER_PROMPT
