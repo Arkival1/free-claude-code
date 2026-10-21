@@ -369,8 +369,11 @@ async def test_the_driver_never_undoes_the_owners_pause_or_cancel(
     await studio._store.put(project)
     stale = project  # the driver's old copy
     await studio._save_project(project, owner=True, status="paused")
+    await studio._save_project(project, owner=True, note="Paused by you.")
     kept = await studio._save_project(stale, status="building", note="driver")
-    assert kept.status == "paused" and kept.note == "driver"
+    assert kept.status == "paused" and kept.note == "Paused by you."
+    noted = await studio._save_project(stale, note="All milestones are built")
+    assert noted.note == "Paused by you."
     await studio._save_project(kept, owner=True, status="cancelled")
     still = await studio._save_project(stale, status="awaiting_release")
     assert still.status == "cancelled"
@@ -431,3 +434,39 @@ async def test_resume_after_needs_you_gets_a_fresh_fix_budget(make_studio, tmp_p
     await studio.changer_act("resume")
     project = await settle(studio)
     assert project.status == "awaiting_release", project.note
+
+
+@pytest.mark.asyncio
+async def test_resume_of_an_old_plan_without_the_approved_key_builds(
+    make_studio, tmp_path, monkeypatch
+):
+    studio, _ = make_studio([])
+    wire(studio, tmp_path)
+    plan = read_plan(quick_plan(size="project"))
+    plan.pop("approved", None)
+    await studio._store.put(ChangeProject(request="x", status="paused", plan=plan))
+    driven: list[str] = []
+    monkeypatch.setattr(studio, "_drive", driven.append)
+    await studio.changer_act("resume")
+    assert driven  # resumed straight to building, no second approval
+
+
+@pytest.mark.asyncio
+async def test_rolling_back_a_finished_project_keeps_it_finished(make_studio, tmp_path):
+    studio, _ = make_studio(team(quick_plan()))
+    wire(studio, tmp_path)
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    before = next(
+        p for p in project.checkpoints if str(p["label"]).startswith("Before")
+    )
+    project = await studio._save_project(project, owner=True, status="done")
+    plan = project.plan
+    await studio.changer_act("rollback", checkpoint=before["id"])
+    project = await studio._change_project()
+    assert project is not None and project.status == "done"
+    assert project.plan == plan and "Resume" not in project.note
+    target = await studio._changer_target()
+    assert "fizz" in (target / LAB).read_text()
+    with pytest.raises(Exception, match="isn't paused"):
+        await studio.changer_act("resume")

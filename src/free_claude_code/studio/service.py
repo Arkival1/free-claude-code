@@ -2671,12 +2671,13 @@ class StudioService:
         copy). The driver never undoes the owner's pause or cancel: only the
         owner's own buttons (owner=True) change a held project's status."""
         latest = await self._store.get(ChangeProject, project.id) or project
-        if (
-            not owner
-            and latest.status in OWNER_HOLDS
-            and changes.get("status", latest.status) != latest.status
-        ):
-            changes = {key: value for key, value in changes.items() if key != "status"}
+        if not owner and latest.status in OWNER_HOLDS:
+            # Keep the owner's note too, so it never contradicts the status.
+            changes = {
+                key: value
+                for key, value in changes.items()
+                if key not in ("status", "note")
+            }
         updated = latest.model_copy(update={**changes, "updated_at": now_ms()})
         await self._store.put(updated)
         return updated
@@ -2779,7 +2780,8 @@ class StudioService:
                 raise StudioError("The project isn't paused.")
             if not project.plan.get("milestones"):
                 resumed = "planning"
-            elif project.plan.get("approved"):
+            elif project.plan.get("approved", True):
+                # Plans saved before the "approved" key existed were approved.
                 resumed = "building"
             else:
                 resumed = "awaiting_plan"
@@ -2825,17 +2827,27 @@ class StudioService:
                 else m
                 for number, m in enumerate(_items(project.plan.get("milestones")))
             ]
-            project = await self._save_project(
-                project,
-                owner=True,
-                plan={**project.plan, "milestones": milestones},
-                milestone=back_to,
-                status="paused"
-                if milestones and project.status not in FINISHED
-                else project.status,
-                note=f"Rolled back to '{saved.get('label', point)}' ({touched} files). "
-                "Press Resume to build from there.",
-            )
+            rolled = f"Rolled back to '{saved.get('label', point)}' ({touched} files)."
+            if project.status in FINISHED:
+                # A finished project keeps its plan as it was; only the files
+                # go back, and nothing offers a Resume the project can't do.
+                project = await self._save_project(
+                    project,
+                    owner=True,
+                    note=f"{rolled} The project stays {project.status}; "
+                    "start a new change to build again.",
+                )
+            else:
+                project = await self._save_project(
+                    project,
+                    owner=True,
+                    plan={**project.plan, "milestones": milestones},
+                    milestone=back_to,
+                    status="paused" if milestones else project.status,
+                    note=f"{rolled} Press Resume to build from there."
+                    if milestones
+                    else rolled,
+                )
         else:
             raise StudioError("Unknown project action.")
         return await self.changer_view()
