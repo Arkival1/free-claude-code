@@ -46,6 +46,7 @@ from .changer_projects import (
     clean_paths,
     estimate_tokens,
     fix_goal,
+    hand_in_goal,
     known_hosts,
     limit_note,
     needs_approval,
@@ -132,6 +133,7 @@ from .learning import (
     parse_learn_request,
     wants_to_stop_learning,
 )
+from .limits import brief_limit
 from .llm import (
     LOCAL_MODEL_PREFIX,
     ChatMessage,
@@ -368,6 +370,9 @@ CHANGER_REVIEWER_NAME = "Changer Reviewer"
 CHANGER_SECURITY_NAME = "Changer Security"
 OWNER_HOLDS = frozenset({"paused", "cancelled"})
 """Statuses only the owner's buttons change."""
+CHANGER_PING_TRIES = 3
+"""Checks of a model before a job, waiting between them after a brief rate
+limit."""
 CHANGER_TEAM = frozenset(
     {"Changer", CHANGER_PLANNER_NAME, CHANGER_REVIEWER_NAME, CHANGER_SECURITY_NAME}
 )
@@ -726,7 +731,7 @@ def _todo_lines(items: Sequence[TodoItem], *, now: datetime) -> str:
 LOCAL_MODEL_SECONDS = 1800.0
 """How long an agent waits for a model on this PC through the proxy (llama.cpp,
 LM Studio, Ollama): a big agent prompt on a CPU takes minutes to read."""
-SERVER_MODEL_SECONDS = 180.0
+SERVER_MODEL_SECONDS = 420.0
 
 
 def _proxy_timeout(model: str) -> float:
@@ -2880,22 +2885,32 @@ class StudioService:
         model = agent.model or self.default_model
         if model in self._changer_models_ok:
             return ""
-        try:
-            await self._router.complete(
-                [ChatMessage.user("Reply with the word OK.")],
-                model=model,
-                max_tokens=8,
-                temperature=0.0,
-            )
-        except Exception as error:  # any provider failure means: not usable
-            limited = limit_note(str(error), model)
+        failure: Exception | None = None
+        for attempt in range(CHANGER_PING_TRIES):
+            try:
+                await self._router.complete(
+                    [ChatMessage.user("Reply with the word OK.")],
+                    model=model,
+                    max_tokens=8,
+                    temperature=0.0,
+                )
+                failure = None
+                break
+            except Exception as error:  # any provider failure: maybe not usable
+                failure = error
+                if not brief_limit(str(error)) or attempt == CHANGER_PING_TRIES - 1:
+                    break
+                # A brief rate limit: wait a little and ask again.
+                await asyncio.sleep(self._carry_on_wait * (attempt + 1))
+        if failure is not None:
+            limited = limit_note(str(failure), model)
             if limited:
                 return f"{agent.name}: {limited}"
             others = [m for m in self.server_model_list() if m != model][:5]
             return (
                 f"{agent.name}'s model {model} didn't answer "
-                f"({type(error).__name__}: {str(error)[:160]}). Pick a model that "
-                "works on its agent page"
+                f"({type(failure).__name__}: {str(failure)[:160]}). Pick a model "
+                "that works on its agent page"
                 + (f", for example: {', '.join(others)}." if others else ".")
             )
         self._changer_models_ok.add(model)
@@ -2910,6 +2925,7 @@ class StudioService:
         kind: str,
         milestone: int = 0,
         files: Sequence[str] = (),
+        hand_in: bool = False,
     ) -> tuple[ChangeProject, AgentRun, JsonObject]:
         """Run one agent task for the project and wait for it; returns the
         project as saved after, the finished run, and its task record. (A
@@ -2935,6 +2951,25 @@ class StudioService:
         finished = await self._store.require(AgentRun, run.id)
         project = await self._store.require(ChangeProject, project.id)
         record = next((t for t in project.tasks if t.get("run_id") == run.id), task)
+        wanted = {"plan": "plan", "review": "review", "security": "review"}.get(kind)
+        if (
+            wanted
+            and wanted not in record
+            and finished.status == "succeeded"
+            and project.status in ACTIVE
+            and not hand_in
+        ):
+            # It wrote its findings as text instead of handing them in: one
+            # short follow-up asks it to hand them in.
+            return await self._changer_step(
+                project,
+                agent,
+                hand_in_goal(goal, wanted, finished.result),
+                kind=kind,
+                milestone=milestone,
+                files=files,
+                hand_in=True,
+            )
         return project, finished, record
 
     async def _changer_tokens(self, project: ChangeProject) -> int:

@@ -16,6 +16,7 @@ from pathlib import Path
 from free_claude_code.core.json_types import JsonObject, JsonValue
 
 from .changer import ChangerError, sha256, tree
+from .limits import daily_limit
 
 SIZES = ("quick", "project")
 KINDS = (
@@ -430,20 +431,30 @@ def review_goal(
     )
 
 
-_LIMIT = re.compile(r"\b429\b|quota|rate.?limit|resource.?exhausted", re.IGNORECASE)
-
-
 def limit_note(text: str, model: str) -> str:
-    """A plain note when a provider's limit stopped the work ('' when the
-    text isn't about a limit): what happened and what the owner can do."""
-    if not _LIMIT.search(text):
+    """A plain note when a used-up daily allowance stopped the work ('' when
+    the text isn't about one): what happened and what the owner can do."""
+    if not daily_limit(text):
         return ""
     return (
-        f"The model {model or 'in use'} hit its provider's limit (a free Gemini key allows "
-        "about 20 requests a day per model, and one Changer job needs roughly "
-        "30-80). The work so far is saved. Wait for the limit to reset, pick "
-        "another model for the Changer team on the Agents page, or use a key "
-        "with more allowance, then press Resume."
+        f"The model {model or 'in use'} has used up its provider's allowance "
+        "for now (free keys can allow as little as 20 requests a day per "
+        "model, and one Changer job needs roughly 30-80). The work so far is "
+        "saved. Wait for the allowance to reset, pick another model for the "
+        "Changer team on the Agents page, or use a key with more allowance, "
+        "then press Resume."
+    )
+
+
+def hand_in_goal(goal: str, wanted: str, notes: str) -> str:
+    """A follow-up for a Planner or reviewer that wrote its findings as text
+    instead of handing them in."""
+    what = "plan" if wanted == "plan" else "review (verdict pass or fail, findings)"
+    return (
+        f"HAND IN: you finished without calling fcc_changer with action "
+        f"{wanted}. Call it now with your {what}, using what you already found "
+        "(don't start over), then finish.\n\nWhat you found:\n"
+        f"{notes.strip()[:3000]}\n\nThe job was:\n{goal}"
     )
 
 

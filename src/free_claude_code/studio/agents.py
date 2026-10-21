@@ -18,6 +18,7 @@ from .farm.requests import farm_job
 from .ideas import ROLE_CATEGORIES
 from .lab.bench import LAB_PROMPT
 from .lab.requests import lab_job
+from .limits import brief_limit, daily_limit
 from .llm import (
     THINKING_ONLY,
     ChatMessage,
@@ -150,8 +151,9 @@ def empty_reply_note(agent: str, model: str, stop_reason: str) -> str:
         )
     elif stop_reason in {"length", "max_tokens"}:
         why = (
-            "it ran out of room before answering. In LM Studio, load the model "
-            "with a bigger Context Length (8192 or more)"
+            "it ran out of room before answering (a model on this PC needs a "
+            "bigger Context Length in LM Studio, 8192 or more; a server model "
+            "spent its reply thinking)"
         )
     else:
         why = (
@@ -240,9 +242,9 @@ IDLE_NOTE = (
 )
 CARRY_ON_TRIES = 2
 """How many more times a task that stopped early carries on by itself."""
-_DAILY = re.compile(r"quota|per ?day|resource.?exhausted", re.IGNORECASE)
 _TRANSIENT = re.compile(
-    r"step_limit|\bstuck\b|time ?out|timed out|\b429\b|rate.?limit|\b5\d\d\b|"
+    r"step_limit|\bstuck\b|empty_reply|time ?out|timed out|took longer|\b429\b|"
+    r"rate.?limit|\b5\d\d\b|"
     r"overloaded|unavailable|high demand|connection|reset by peer|temporar",
     re.IGNORECASE,
 )
@@ -252,7 +254,9 @@ def worth_another_go(reason: str) -> bool:
     """A task that stopped early for a passing reason (out of steps, stuck,
     a timeout, a brief rate limit, a busy server) carries on; a used-up daily
     allowance or a real refusal doesn't."""
-    return bool(_TRANSIENT.search(reason)) and not _DAILY.search(reason)
+    return (bool(_TRANSIENT.search(reason)) or brief_limit(reason)) and not daily_limit(
+        reason
+    )
 
 
 async def _wants_more(keep_going: Callable[[], Awaitable[bool]] | None) -> bool:
@@ -1288,7 +1292,7 @@ class AgentRunner:
                 author=agent.name,
                 data={"kind": "carry_on", "try": attempt + 2},
             )
-            if re.search(r"\b429\b|rate.?limit", reason, re.IGNORECASE):
+            if brief_limit(reason):
                 await asyncio.sleep(self._carry_on_wait * (attempt + 1))
             asked = carry_on_goal(run.goal, reason, attempt + 1)
         finished = started.model_copy(
@@ -1745,6 +1749,15 @@ class AgentRunner:
                     # likely can't call tools at all.
                     text = f"{text}\n\n{NO_SEARCH_NOTE.format(name=agent.name)}"
                 await self._record_assistant(chat, agent, text, reply)
+                if not reply.text.strip() and alone:
+                    # No answer at all is not a finished task: it carries on.
+                    return TurnResult(
+                        text=text,
+                        steps=step,
+                        tool_calls=tuple(used),
+                        failed=True,
+                        error="empty_reply",
+                    )
                 return TurnResult(text=text, steps=step, tool_calls=tuple(used))
             if said:
                 reply = replace(

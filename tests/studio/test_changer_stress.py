@@ -1109,7 +1109,7 @@ async def test_a_plan_with_a_bad_path_isnt_used(make_studio, tmp_path):
     await studio.changer_start("x")
     project = await settle(studio)
     assert project.status == "failed"
-    assert [t["kind"] for t in project.tasks] == ["plan"]
+    assert [t["kind"] for t in project.tasks] == ["plan", "plan"]  # one hand-in ask
 
 
 @pytest.mark.asyncio
@@ -1534,10 +1534,12 @@ async def test_helper_files_given_oddly(make_studio, tmp_path, files, refused):
 @pytest.mark.parametrize(
     ("text", "limited"),
     [
-        ("Model endpoint returned 429: rate_limit_error", True),
+        ("Model endpoint returned 429: rate_limit_error", False),
         ("You exceeded your current quota", True),
         ("RESOURCE_EXHAUSTED", True),
-        ("Provider rate limit reached", True),
+        ("429 quota exceeded: GenerateRequestsPerMinutePerProjectPerModel", False),
+        ("Provider rate limit reached", False),
+        ("GenerateRequestsPerDayPerProjectPerModel-FreeTier", True),
         ("Connection refused", False),
         ("no such model", False),
         ("", False),
@@ -1573,7 +1575,8 @@ async def test_a_used_up_limit_pauses_with_a_plain_note(make_studio, tmp_path, a
     await studio.changer_start("Make the Lab say bubbles")
     project = await settle(studio)
     assert project.status == "paused", project.note
-    assert "hit its provider's limit" in project.note and "{" not in project.note
+    assert "used up its provider's allowance" in project.note
+    assert "{" not in project.note
 
 
 # ------------------------------------------------------------ carrying on
@@ -1663,7 +1666,7 @@ async def test_a_used_up_day_doesnt_hammer_the_provider(make_studio, tmp_path):
     wire(studio, tmp_path)
     studio._carry_on_wait = 0
     project = await planner_run(studio)
-    assert project.status == "paused" and "limit" in project.note
+    assert project.status == "paused" and "allowance" in project.note
     assert seen["failed"] == 1
 
 
@@ -1795,3 +1798,115 @@ async def test_a_planner_that_handed_in_doesnt_plan_again(make_studio, tmp_path)
     project = await planner_run(studio)
     assert calls["n"] == 3  # one try only: the plan was already in
     assert project.plan.get("milestones")
+
+
+# ------------------------------------------------------------ real-model lessons
+
+
+@pytest.mark.parametrize(
+    ("text", "brief"),
+    [
+        ("Model endpoint returned 429: rate_limit_error", True),
+        ("Too Many Requests", True),
+        ("429: You exceeded your current quota", False),
+        ("Connection refused", False),
+        ("429 quota exceeded: GenerateRequestsPerMinutePerProjectPerModel", True),
+        ("429 quota exceeded: GenerateRequestsPerDayPerProjectPerModel", False),
+    ],
+)
+def test_brief_limits(text, brief):
+    from free_claude_code.studio.limits import brief_limit
+
+    assert brief_limit(text) is brief
+
+
+@pytest.mark.asyncio
+async def test_a_brief_rate_limit_waits_instead_of_pausing(make_studio, tmp_path):
+    from free_claude_code.studio.llm import StudioLLMError
+
+    inner = team(quick_plan())
+    pings = {"n": 0}
+
+    def respond(system: str, prompt: str) -> object:
+        if prompt == "Reply with the word OK.":
+            pings["n"] += 1
+            if pings["n"] == 1:
+                raise StudioLLMError("Model endpoint returned 429: rate_limit_error")
+        return inner(system, prompt)
+
+    studio, _ = make_studio(respond)
+    wire(studio, tmp_path)
+    studio._carry_on_wait = 0
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "awaiting_release", project.note
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("who", ["planner", "reviewer"])
+async def test_findings_written_as_text_are_handed_in(make_studio, tmp_path, who):
+    from free_claude_code.studio.llm import LLMReply
+
+    inner = team(quick_plan())
+    asked = {"n": 0}
+    marker = "Changer's Planner" if who == "planner" else "Reviewer"
+
+    def respond(system: str, prompt: str) -> object:
+        if marker in system and prompt != "Reply with the word OK.":
+            asked["n"] += 1
+            if asked["n"] == 1:
+                return LLMReply(text="I found it: lab.py returns fizz.")
+        return inner(system, prompt)
+
+    studio, _ = make_studio(respond)
+    wire(studio, tmp_path)
+    studio._carry_on_wait = 0
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "awaiting_release", project.note
+    kinds = [t["kind"] for t in project.tasks]
+    assert kinds.count("plan" if who == "planner" else "review") == 2
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_carries_on(make_studio):
+    from free_claude_code.studio.llm import LLMReply
+
+    calls = {"n": 0}
+
+    def respond(system: str, prompt: str) -> object:
+        calls["n"] += 1
+        return LLMReply(text="" if calls["n"] <= 2 else "All done.")
+
+    studio, _ = make_studio(respond)
+    studio._carry_on_wait = 0
+    finished = await finish(studio, await agent_task(studio))
+    assert finished.status == "succeeded" and calls["n"] == 3
+
+
+LIMIT_TEXTS = [
+    ("Quota exceeded: GenerateRequestsPerMinute ... quota", "minute"),
+    (
+        "GenerateRequestsPerMinutePerProjectPerModel exceeded, your current quota is 15",
+        "minute",
+    ),
+    ("You exceeded your current quota\nlimit: GenerateRequestsPerMinute", "minute"),
+    ("You exceeded your current quota, GenerateRequestsPerMinute", "minute"),
+    ("429 Too Many Requests", "minute"),
+    ("You exceeded your current quota", "day"),
+    ("quota per day used", "day"),
+    ("GenerateRequestsPerDay exceeded", "day"),
+    ("RESOURCE_EXHAUSTED", "day"),
+]
+
+
+@pytest.mark.parametrize(("text", "kind"), LIMIT_TEXTS)
+def test_every_part_of_fcc_reads_limits_the_same_way(text, kind):
+    from free_claude_code.studio.agents import worth_another_go
+    from free_claude_code.studio.changer_projects import limit_note
+    from free_claude_code.studio.limits import brief_limit, daily_limit
+
+    assert daily_limit(text) is (kind == "day")
+    assert brief_limit(text) is (kind == "minute")
+    assert bool(limit_note(text, "m")) is (kind == "day")
+    assert worth_another_go(text) is (kind == "minute")
