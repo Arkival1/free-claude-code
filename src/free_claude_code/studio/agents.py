@@ -238,6 +238,13 @@ IDLE_NOTE = (
     "page, rewrite index.html completely with write_file, with real content "
     "for this job."
 )
+FINAL_STEPS = 2
+FINAL_NOTE = (
+    "(Studio) Only {steps} steps left. Finish now with what you have: hand in "
+    "your result (a plan or a verdict if that is your job, else a short "
+    "summary of what you did and what is left)."
+)
+"""Said once, so an agent hands in its work instead of being cut off."""
 HISTORY_BUDGET = 36_000
 """Characters of earlier tool output kept in full before older ones shrink."""
 KEEP_RECENT = 6
@@ -743,6 +750,10 @@ def step_budget(
     if agent.role in {"coder", "developer"}:
         return max(coder_steps, agent_steps)
     if agent.role == "builder" or writes_like_builder(agent):
+        return max(builder_steps, agent_steps)
+    if "fcc_changer" in agent.tools:
+        # The Changer's Planner and reviewers read a big codebase before
+        # they can hand in a plan or a verdict.
         return max(builder_steps, agent_steps)
     return agent_steps
 
@@ -1804,7 +1815,18 @@ class AgentRunner:
                     failed=True,
                     error="stuck",
                 )
-            if idle >= IDLE_STEPS and history and history[-1].role == "tool":
+            if (
+                step == max_steps - FINAL_STEPS
+                and history
+                and history[-1].role == "tool"
+            ):
+                last = history[-1]
+                history[-1] = ChatMessage(
+                    role="tool",
+                    content=f"{last.content}\n\n{FINAL_NOTE.format(steps=FINAL_STEPS)}",
+                    tool_call_id=last.tool_call_id,
+                )
+            elif idle >= IDLE_STEPS and history and history[-1].role == "tool":
                 idle = 0
                 last = history[-1]
                 history[-1] = ChatMessage(

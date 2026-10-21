@@ -471,3 +471,19 @@ async def test_rolling_back_a_finished_project_keeps_it_finished(make_studio, tm
     assert "fizz" in (target / LAB).read_text()
     with pytest.raises(Exception, match="isn't paused"):
         await studio.changer_act("resume")
+
+
+def test_the_changer_team_gets_room_to_read():
+    from free_claude_code.studio.agents import step_budget
+    from free_claude_code.studio.models import Agent
+
+    planner = Agent(
+        name="Changer Planner",
+        role="agent",
+        model="m",
+        tools=("read_file", "search_files", "fcc_changer"),
+    )
+    reader = Agent(name="Reader", role="agent", model="m", tools=("read_file",))
+    budget = {"agent_steps": 12, "builder_steps": 40, "coder_steps": 80}
+    assert step_budget(planner, **budget) == 40
+    assert step_budget(reader, **budget) == 12
