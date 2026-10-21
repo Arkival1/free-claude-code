@@ -302,6 +302,10 @@ HISTORY_BUDGET = 36_000
 KEEP_RECENT = 6
 REPLY_TOKENS = 2048
 BUILD_REPLY_TOKENS = 4096
+SERVER_REPLY_TOKENS = 4096
+SERVER_BUILD_REPLY_TOKENS = 16384
+"""Server models think before they answer and write whole pages in one reply,
+so they get more room than a model on this PC (whose context is small)."""
 """Builders write whole files in one reply, so they get more room."""
 
 
@@ -833,11 +837,13 @@ class AgentRunner:
         learned: Callable[[str, ToolCall], Awaitable[None]] | None = None,
         built: Callable[[Chat, frozenset[str]], Awaitable[None]] | None = None,
         carry_on_wait: float = 20.0,
+        local_model: Callable[[str], bool] = lambda _model: True,
     ) -> None:
         self._store = store
         # Hands the user a download of each app a turn built or changed.
         self._built = built
         self._carry_on_wait = carry_on_wait
+        self._local_model = local_model
         # The main AI's calls that worked, so its playbook keeps the example.
         self._learned = learned
         # Agents on this PC direct the agents on server AIs.
@@ -1506,9 +1512,7 @@ class AgentRunner:
                         model=model,
                         system=system,
                         tools=step_specs if names else (),
-                        max_tokens=BUILD_REPLY_TOKENS
-                        if WRITE_TOOLS & set(names)
-                        else REPLY_TOKENS,
+                        max_tokens=self._reply_tokens(model, names),
                         temperature=self._temperature,
                         on_text=self._show_live(chat.id),
                     ),
@@ -1951,6 +1955,13 @@ class AgentRunner:
             failed=True,
             error="step_limit",
         )
+
+    def _reply_tokens(self, model: str, names: Sequence[str]) -> int:
+        """Room for one reply: more for writing files, and more on a server."""
+        writes = bool(WRITE_TOOLS & set(names))
+        if self._local_model(model):
+            return BUILD_REPLY_TOKENS if writes else REPLY_TOKENS
+        return SERVER_BUILD_REPLY_TOKENS if writes else SERVER_REPLY_TOKENS
 
     async def _patiently(
         self, chat_id: str, name: str, call: Callable[[], Awaitable[LLMReply]]

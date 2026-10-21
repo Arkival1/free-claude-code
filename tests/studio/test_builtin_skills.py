@@ -180,3 +180,34 @@ async def test_a_failed_install_is_tried_again_on_next_use(make_studio, monkeypa
     assert await studio._builtin_skills() is None or not studio._builtin_checked
     again = await studio._builtin_skills()
     assert again is not None and len(again.skills) == 2 and studio._builtin_checked
+
+
+@pytest.mark.asyncio
+async def test_server_models_get_room_to_write_a_whole_page(make_studio):
+    from free_claude_code.studio import agents
+
+    studio, _ = make_studio([])
+    runner = studio._runner()
+    server = "nvidia_nim/some/model"
+    local = "local/qwen"
+    assert (
+        runner._reply_tokens(server, ("write_file",))
+        == agents.SERVER_BUILD_REPLY_TOKENS
+    )
+    assert runner._reply_tokens(server, ("read_file",)) == agents.SERVER_REPLY_TOKENS
+    assert runner._reply_tokens(local, ("write_file",)) == agents.BUILD_REPLY_TOKENS
+    assert runner._reply_tokens(local, ("read_file",)) == agents.REPLY_TOKENS
+
+
+@pytest.mark.asyncio
+async def test_a_broken_image_search_says_to_draw_instead(make_studio):
+    from free_claude_code.studio.llm import ToolCall
+    from free_claude_code.studio.tools import IMAGES_DOWN_NOTE, ToolContext
+
+    studio, _ = make_studio([])
+    site = await studio.create_site(name="Shop")
+    outcome = await studio._toolbox().run(
+        ToolCall(id="1", name="find_images", arguments={"query": "bread"}),
+        ToolContext(agent_id="a", chat_id="c", site_id=site.id),
+    )
+    assert outcome.failed and IMAGES_DOWN_NOTE in outcome.text

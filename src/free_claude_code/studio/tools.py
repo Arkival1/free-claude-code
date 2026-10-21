@@ -157,6 +157,11 @@ TEST_LANGUAGES = {
     "css": "css",
 }
 MAIN_ROLE = "main"
+IMAGES_DOWN_NOTE = (
+    "Image search isn't working right now: don't search again on this job. "
+    "Draw the pictures instead (inline SVG illustrations, icons, or CSS "
+    "gradients and shapes) and carry on building."
+)
 OFFLINE_NOTE = (
     "The internet looks unreachable from this computer, so web tools are paused "
     "until it is back. Carry on with recall, the project files, and what you know."
@@ -2002,6 +2007,8 @@ class AgentToolbox:
             ValueError,
         ) as error:
             text = _blocked_page(call, error) or f"{call.name} failed: {error}"
+            if call.name == "find_images":
+                text += f" {IMAGES_DOWN_NOTE}"
             if call.name in NETWORK_TOOLS and _connection_lost(error):
                 if self._connectivity is not None:
                     self._connectivity.mark_offline(str(error))

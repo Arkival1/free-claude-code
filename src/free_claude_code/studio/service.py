@@ -1703,6 +1703,7 @@ class StudioService:
             learned=self._learn_call if self.settings.studio_jarvis_playbook else None,
             built=self._offer_app_download,
             carry_on_wait=self._carry_on_wait,
+            local_model=self._is_local,
         )
 
     async def _offer_app_download(self, chat: Chat, site_ids: frozenset[str]) -> None:
