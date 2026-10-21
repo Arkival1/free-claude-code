@@ -429,6 +429,37 @@ def review_goal(
 _LIMIT = re.compile(r"\b429\b|quota|rate.?limit|resource.?exhausted", re.IGNORECASE)
 
 
+MAX_STEP_RETRIES = 2
+_DAILY = re.compile(r"quota|per ?day|resource.?exhausted", re.IGNORECASE)
+_TRANSIENT = re.compile(
+    r"step_limit|stuck|time ?out|timed out|\b429\b|rate.?limit|\b5\d\d\b|"
+    r"overloaded|unavailable|high demand|connection|reset by peer|temporar",
+    re.IGNORECASE,
+)
+
+
+def worth_another_go(reason: str) -> bool:
+    """A step that stopped early for a passing reason (out of steps, a
+    timeout, a brief rate limit, a busy server) carries on; a used-up daily
+    allowance or a real refusal doesn't."""
+    return bool(_TRANSIENT.search(reason)) and not _DAILY.search(reason)
+
+
+def carry_on_goal(goal: str, reason: str, attempt: int) -> str:
+    """The same job again, told where the last try stopped."""
+    why = (
+        "it ran out of steps"
+        if "step_limit" in reason
+        else f"it stopped early ({reason.strip()[:200]})"
+    )
+    return (
+        f"CARRY ON (try {attempt + 1}): the last try at this job stopped because "
+        f"{why}. Its work is still in the copy: first run fcc_changer changes "
+        "to see what is done, don't redo it, finish the rest, then hand in your "
+        f"result.\n\n{goal}"
+    )
+
+
 def limit_note(text: str, model: str) -> str:
     """A plain note when a provider's limit stopped the work ('' when the
     text isn't about a limit): what happened and what the owner can do."""

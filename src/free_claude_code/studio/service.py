@@ -38,10 +38,12 @@ from .changer_projects import (
     ACTIVE,
     FINISHED,
     MAX_FIX_ROUNDS,
+    MAX_STEP_RETRIES,
     PROJECT_BUDGET,
     QUICK_BUDGET,
     Checkpoints,
     build_goal,
+    carry_on_goal,
     clean_paths,
     estimate_tokens,
     fix_goal,
@@ -54,6 +56,7 @@ from .changer_projects import (
     read_plan,
     review_goal,
     scan,
+    worth_another_go,
 )
 from .changer_projects import MAX_HELPERS as HELPER_CAP
 from .changer_projects import PlanError as ChangePlanError
@@ -892,6 +895,8 @@ class StudioService:
         self._changer_last: JsonObject = {}
         self._changer_driver: asyncio.Task[object] | None = None
         self._changer_models_ok: set[str] = set()
+        self._changer_retry_wait = 20.0
+        """Seconds before a step that hit a brief rate limit carries on."""
         self._lab_busy = 0
         self._lab_error: str | None = None
         self._farm = ContentFarm(
@@ -2899,28 +2904,47 @@ class StudioService:
         files: Sequence[str] = (),
     ) -> tuple[ChangeProject, AgentRun, JsonObject]:
         """Run one agent task for the project and wait for it; returns the
-        project as saved after, the finished run, and its task record."""
+        project as saved after, the finished run, and its task record. A try
+        that stops early for a passing reason (out of steps, a timeout, a
+        brief rate limit) carries on, up to MAX_STEP_RETRIES more times, so a
+        stage isn't left half done."""
         copy = await self._changer_copy()
-        run = await self.start_task(
-            agent_id=agent.id, goal=goal, site_id=copy.id if copy else None
-        )
-        task: JsonObject = {
-            "run_id": run.id,
-            "chat_id": run.chat_id,
-            "agent": agent.name,
-            "model": agent.model,
-            "kind": kind,
-            "milestone": milestone,
-            "files": list(files),
-        }
-        latest = await self._store.require(ChangeProject, project.id)
-        project = await self._save_project(latest, tasks=[*latest.tasks, task])
-        job = self._run_jobs.get(run.id)
-        if job is not None:
-            await asyncio.shield(job)
-        finished = await self._store.require(AgentRun, run.id)
-        project = await self._store.require(ChangeProject, project.id)
-        record = next((t for t in project.tasks if t.get("run_id") == run.id), task)
+        asked = goal
+        for attempt in range(MAX_STEP_RETRIES + 1):
+            run = await self.start_task(
+                agent_id=agent.id, goal=asked, site_id=copy.id if copy else None
+            )
+            task: JsonObject = {
+                "run_id": run.id,
+                "chat_id": run.chat_id,
+                "agent": agent.name,
+                "model": agent.model,
+                "kind": kind,
+                "milestone": milestone,
+                "files": list(files),
+                **({"try": attempt + 1} if attempt else {}),
+            }
+            latest = await self._store.require(ChangeProject, project.id)
+            project = await self._save_project(latest, tasks=[*latest.tasks, task])
+            job = self._run_jobs.get(run.id)
+            if job is not None:
+                await asyncio.shield(job)
+            finished = await self._store.require(AgentRun, run.id)
+            project = await self._store.require(ChangeProject, project.id)
+            record = next((t for t in project.tasks if t.get("run_id") == run.id), task)
+            reason = f"{finished.error or ''} {finished.result}".strip()
+            handed_in = "plan" in record or "review" in record
+            if (
+                finished.status == "succeeded"
+                or handed_in
+                or attempt == MAX_STEP_RETRIES
+                or project.status not in ACTIVE
+                or not worth_another_go(reason)
+            ):
+                break
+            if re.search(r"\b429\b|rate.?limit", reason, re.IGNORECASE):
+                await asyncio.sleep(self._changer_retry_wait * (attempt + 1))
+            asked = carry_on_goal(goal, reason, attempt + 1)
         return project, finished, record
 
     async def _changer_tokens(self, project: ChangeProject) -> int:

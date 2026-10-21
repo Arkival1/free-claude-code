@@ -1574,3 +1574,86 @@ async def test_a_used_up_limit_pauses_with_a_plain_note(make_studio, tmp_path, a
     project = await settle(studio)
     assert project.status == "paused", project.note
     assert "hit its provider's limit" in project.note and "{" not in project.note
+
+
+# ------------------------------------------------------------ carrying on
+
+
+@pytest.mark.parametrize(
+    ("reason", "again"),
+    [
+        ("step_limit Stopped after 40 steps without finishing.", True),
+        ("stuck", True),
+        ("Request timed out", True),
+        ("Model endpoint returned 429: rate_limit_error", True),
+        ("Model endpoint returned 503: overloaded", True),
+        ("This model is currently experiencing high demand", True),
+        ("Connection reset by peer", True),
+        ("You exceeded your current quota", False),
+        ("GenerateRequestsPerDayPerProjectPerModel 429", False),
+        ("The model refused", False),
+        ("", False),
+    ],
+)
+def test_which_stops_carry_on(reason, again):
+    from free_claude_code.studio.changer_projects import worth_another_go
+
+    assert worth_another_go(reason) is again
+
+
+def test_the_carry_on_goal_says_where_it_stopped():
+    from free_claude_code.studio.changer_projects import carry_on_goal
+
+    goal = carry_on_goal("BUILD milestone 1", "step_limit", 1)
+    assert goal.startswith("CARRY ON (try 2)") and "ran out of steps" in goal
+    assert "fcc_changer changes" in goal and goal.endswith("BUILD milestone 1")
+
+
+def flaky_planner(fails: int, error: str):
+    """A Planner whose first tries fail with ``error``; then it plans."""
+    from free_claude_code.studio.llm import StudioLLMError
+
+    inner = team(quick_plan())
+    left = {"fails": fails}
+
+    def respond(system: str, prompt: str) -> object:
+        if "Changer's Planner" in system and left["fails"] > 0:
+            left["fails"] -= 1
+            raise StudioLLMError(error)
+        return inner(system, prompt)
+
+    return respond
+
+
+@pytest.mark.asyncio
+async def test_a_step_that_stops_early_carries_on(make_studio, tmp_path):
+    studio, _ = make_studio(flaky_planner(1, "Request timed out"))
+    wire(studio, tmp_path)
+    studio._changer_retry_wait = 0
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "awaiting_release", project.note
+    plans = [t for t in project.tasks if t["kind"] == "plan"]
+    assert len(plans) == 2 and plans[1]["try"] == 2
+
+
+@pytest.mark.asyncio
+async def test_carrying_on_has_a_limit(make_studio, tmp_path):
+    studio, _ = make_studio(flaky_planner(9, "Request timed out"))
+    wire(studio, tmp_path)
+    studio._changer_retry_wait = 0
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "failed"
+    assert len([t for t in project.tasks if t["kind"] == "plan"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_used_up_day_doesnt_hammer_the_provider(make_studio, tmp_path):
+    studio, _ = make_studio(flaky_planner(9, "429: You exceeded your current quota"))
+    wire(studio, tmp_path)
+    studio._changer_retry_wait = 0
+    await studio.changer_start("Make the Lab say bubbles")
+    project = await settle(studio)
+    assert project.status == "paused" and "limit" in project.note
+    assert len([t for t in project.tasks if t["kind"] == "plan"]) == 1
