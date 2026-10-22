@@ -143,6 +143,9 @@ Notes carried over from the long session that built FCC Studio (LCC).
   rest. Spend the depth where mistakes cost, and keep the rest short. When
   delegating, pass the same level as the subagent's effort (the previewer
   stays at medium, as set above, unless the owner says otherwise).
+- Only low, medium and high effort (owner's call): never xhigh, max or
+  ultra, and never start a multi-agent workflow (ultracode) unless the owner
+  asks for it in their own words. When delegating, pass low, medium or high.
 - Low-effort mode (chat, questions, writing): answer in a few plain lines
   from what's already known; no tools, searches, file reads, task lists or
   subagents unless the answer truly needs one; one tool call at most when it
