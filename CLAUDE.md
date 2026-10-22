@@ -137,6 +137,12 @@ Notes carried over from the long session that built FCC Studio (LCC).
   out of full runs (`--ignore` `tests/studio/test_content_farm*.py`,
   `tests/studio/test_cartoon_paint.py` and `e2e/test_content_farm.py`).
 - Don't power their app with this session's own credentials or keys.
+- Effort to match the job (owner's call): low for plain writing (answers,
+  docs, notes, reports); high for coding, planning, bug hunting and fixing,
+  reviews of risky code (keys, the Trading Bank, the Changer); medium for the
+  rest. Spend the depth where mistakes cost, and keep the rest short. When
+  delegating, pass the same level as the subagent's effort (the previewer
+  stays at medium, as set above, unless the owner says otherwise).
 - Work on `claude/multi-agent-local-models-app-s6uxxh` and push finished,
   checked work there (the owner's standing instruction; this is the "asked"
   in "don't commit or push unless asked"). Never push to `main`. Use one
