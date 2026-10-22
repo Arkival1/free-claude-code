@@ -143,6 +143,12 @@ Notes carried over from the long session that built FCC Studio (LCC).
   rest. Spend the depth where mistakes cost, and keep the rest short. When
   delegating, pass the same level as the subagent's effort (the previewer
   stays at medium, as set above, unless the owner says otherwise).
+- Low-effort mode (chat, questions, writing): answer in a few plain lines
+  from what's already known; no tools, searches, file reads, task lists or
+  subagents unless the answer truly needs one; one tool call at most when it
+  does. No recap of earlier work, no lists of options (give one
+  recommendation), no re-checking what was just shown. If it turns out to be
+  a code or bug job, say so and move up to high.
 - Work on `claude/multi-agent-local-models-app-s6uxxh` and push finished,
   checked work there (the owner's standing instruction; this is the "asked"
   in "don't commit or push unless asked"). Never push to `main`. Use one
