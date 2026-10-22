@@ -3284,6 +3284,15 @@ class ChangerShotsPayload(BaseModel):
     phone: bool = False
 
 
+class ChangerNotePayload(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+    lesson: bool = False
+
+
+class ChangerModelPayload(BaseModel):
+    model: str = Field(min_length=1, max_length=200)
+
+
 class ChangerPackPayload(BaseModel):
     note: str = Field(default="", max_length=4000)
     confirm: bool = False
@@ -4756,6 +4765,47 @@ async def changer_screenshots(
 ) -> JsonObject:
     """Run the changed copy on a spare port and screenshot Studio pages."""
     return await studio.changer_screenshots(payload.pages, phone=payload.phone)
+
+
+@router.post("/studio/api/changer/notes")
+async def changer_note(
+    payload: ChangerNotePayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """A note from the owner to the whole Changer team (or a lesson kept
+    for every later update)."""
+    return await studio.owner_change_note(payload.text, lesson=payload.lesson)
+
+
+@router.post("/studio/api/changer/team-model")
+async def changer_team_model(
+    payload: ChangerModelPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Move the whole Changer team to one model (its notebook stays)."""
+    return await studio.changer_team_model(payload.model)
+
+
+@router.post("/studio/api/changer/helpers")
+async def changer_helpers(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Add the Changer's helper team from wshobson/agents."""
+    return await studio.add_changer_helpers()
+
+
+@router.delete("/studio/api/changer/lessons/{note_id}")
+async def changer_forget_lesson(
+    note_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Forget one lesson the Changer team kept."""
+    await studio.forget_change_lesson(note_id)
+    return {"deleted": True}
 
 
 @router.post("/studio/api/changer/package")

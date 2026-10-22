@@ -87,6 +87,9 @@ class AgentDef:
     description: str
     prompt: str
     tools: list[str] = field(default_factory=list)
+    tier: str = ""
+    """light, strong, or '' (everyday): from the model a Claude Code agent
+    asks for (haiku, opus; sonnet or inherit are everyday)."""
 
 
 @dataclass(slots=True)
@@ -154,6 +157,7 @@ class Extension:
                     description=_text(item, "description"),
                     prompt=_text(item, "prompt"),
                     tools=_texts(item, "tools"),
+                    tier=_text(item, "tier"),
                 )
                 for item in _dicts(data, "agents")
             ],
@@ -344,6 +348,17 @@ def listed_agents(listed: object, plugin_dir: Path, root: Path) -> list[Path]:
     return found[:MAX_AGENTS]
 
 
+def agent_tier(model: str) -> str:
+    """The tier of model a Claude Code agent asks for: light (haiku),
+    strong (opus, or the newest top model), or '' for everyday work."""
+    name = model.strip().casefold()
+    if "haiku" in name:
+        return "light"
+    if "opus" in name or "fable" in name:
+        return "strong"
+    return ""
+
+
 def _read_json(path: Path) -> object:
     try:
         return json.loads(path.read_text(encoding="utf-8", errors="replace"))
@@ -432,6 +447,7 @@ def scan(root: Path, *, base: Path, name: str) -> Extension:
                     description=values.get("description", "")[:400],
                     prompt=body.strip()[:MAX_SKILL_CHARS],
                     tools=[t.strip() for t in tools.split(",") if t.strip()],
+                    tier=agent_tier(values.get("model", "")),
                 )
             )
         elif f"/{path.stem}".casefold() not in named:

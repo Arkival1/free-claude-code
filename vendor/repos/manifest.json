@@ -346,6 +346,16 @@
       "file": "OpenHands__software-agent-sdk.zip",
       "sha256": "90e540401dfe078b204c8612515dbef32d4559da2bc8fd05c24e71247215ffd5",
       "size": 37332
+    },
+    {
+      "owner": "wshobson",
+      "repo": "agents",
+      "commit": "0874a27b17a22e2b7c2e2bcd725768e0803cad06",
+      "licence": "MIT",
+      "about": "202 coding agents with model tiers (light, everyday, strong) and 185 skills: debugging, review, tests, security, Python, JavaScript, UI.",
+      "file": "wshobson__agents.zip",
+      "sha256": "982ddbc7412ddb4022f2693e013934c590bb9e89a4fed31deacdb4e74ca02bcf",
+      "size": 2511147
     }
   ]
 }

@@ -611,6 +611,23 @@ class ChangeProject(Record):
     updated_at: int = Field(default_factory=now_ms)
 
 
+class ChangeNote(Record):
+    """One note in the Changer's shared notebook: what an agent or Aider
+    found, decided, did, or left for the next one. FCC keeps it, not the
+    model, so it outlives a switch of model or API; a lesson (no project)
+    carries on to later updates."""
+
+    id: str = Field(default_factory=lambda: new_id("chn"))
+    project_id: str = ""
+    """The update it belongs to; empty for a lesson every update reads."""
+    author: str
+    kind: str = "finding"
+    """finding, decision, done, next, or lesson."""
+    text: str
+    milestone: int = 0
+    created_at: int = Field(default_factory=now_ms)
+
+
 class TutorAttempt(Record):
     """One answer to a maths tutor question, marked in code."""
 

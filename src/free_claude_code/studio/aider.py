@@ -15,6 +15,7 @@ aider-chat``) and then agents can hand it a job. FCC runs it:
 """
 
 import asyncio
+import json
 import os
 import re
 import shutil
@@ -62,6 +63,25 @@ class AiderJob:
     base_url: str
     api_key: str
     edit_format: str = "diff"
+    reading: tuple[tuple[str, str], ...] = ()
+    """Read-only texts it follows but never edits, as (file name, text): the
+    skills for the job and the Changer's notebook."""
+    read_paths: tuple[str, ...] = ()
+    """Project files it reads but doesn't edit (the tests it must pass)."""
+    pictures: tuple[Path, ...] = ()
+    """Screenshots it looks at (read-only); the model must be able to see."""
+    test_command: str = ""
+    """Run after its edits; failures go back to it to fix (Aider stops after
+    three tries). FCC picks the command, never the model."""
+    lint: bool = True
+    """Aider's own syntax and lint check after each edit, fixed the same way."""
+    editor_model: str = ""
+    """Set: architect mode, where ``model`` plans and this one writes the
+    edits (a cheaper or local model); both at ``base_url``."""
+    map_tokens: int = 0
+    """Room for its map of the whole project (0: off; costs tokens)."""
+    env: tuple[tuple[str, str], ...] = ()
+    """Extra variables for the test command (PYTHONPATH for the Changer copy)."""
 
 
 @dataclass(slots=True)
@@ -127,14 +147,45 @@ def job_files(folder: Path, raw: Sequence[str]) -> tuple[str, ...]:
 
 
 def aider_command(aider: str, job: AiderJob, scratch: Path) -> list[str]:
-    """The command: one message, no git, no shell, no extras, history kept
-    in ``scratch`` (outside the project)."""
+    """The command: one message, no git, no shell, no link reading; the
+    skills, notebook and pictures as read-only files and the history in
+    ``scratch`` (outside the project); tests and lint fixed in a loop."""
+    if job.editor_model:
+        mode = [
+            "--architect",
+            "--editor-model",
+            f"openai/{job.editor_model}",
+            "--editor-edit-format",
+            job.edit_format,
+        ]
+    else:
+        mode = ["--edit-format", job.edit_format]
+    reading: list[str] = []
+    for name, _text in job.reading:
+        reading += ["--read", str(scratch / "read" / name)]
+    for number, picture in enumerate(job.pictures, start=1):
+        reading += ["--read", str(scratch / "read" / f"{number}-{picture.name}")]
+    if job.pictures:
+        # Aider only sends pictures to a model it knows can see; FCC's models
+        # are new to it, so it is told.
+        reading += ["--model-metadata-file", str(scratch / "model-metadata.json")]
+    for path in job.read_paths:
+        reading += ["--read", path]
+    testing = (
+        ["--test-cmd", job.test_command, "--auto-test"]
+        if job.test_command
+        else ["--no-auto-test"]
+    )
     return [
         aider,
         "--model",
         f"openai/{job.model}",
-        "--edit-format",
-        job.edit_format,
+        "--weak-model",
+        f"openai/{job.editor_model or job.model}",
+        *mode,
+        *reading,
+        *testing,
+        "--auto-lint" if job.lint else "--no-auto-lint",
         "--message-file",
         str(scratch / "job.txt"),
         "--yes-always",
@@ -145,15 +196,13 @@ def aider_command(aider: str, job: AiderJob, scratch: Path) -> list[str]:
         "--no-check-update",
         "--no-suggest-shell-commands",
         "--no-detect-urls",
-        "--no-auto-lint",
-        "--no-auto-test",
         "--no-pretty",
         "--no-stream",
         "--no-fancy-input",
         "--no-show-model-warnings",
         "--no-restore-chat-history",
         "--map-tokens",
-        "0",
+        str(job.map_tokens),
         "--timeout",
         "300",
         "--env-file",
@@ -183,6 +232,7 @@ def aider_env(job: AiderJob, scratch: Path) -> dict[str, str]:
             "OPENAI_API_KEY": job.api_key,
             "NO_COLOR": "1",
             "PYTHONIOENCODING": "utf-8",
+            **dict(job.env),
         }
     )
     return env
@@ -190,9 +240,17 @@ def aider_env(job: AiderJob, scratch: Path) -> dict[str, str]:
 
 def shown_command(job: AiderJob) -> str:
     """What the owner is asked to approve."""
+    extras = [
+        f"architect, edits by {job.editor_model}" if job.editor_model else "",
+        f"then runs: {job.test_command}" if job.test_command else "",
+        f"project map {job.map_tokens} tokens" if job.map_tokens else "",
+        f"{len(job.pictures)} screenshot(s)" if job.pictures else "",
+    ]
+    told = "; ".join(part for part in extras if part)
     return (
         f"aider --model openai/{job.model} --message-file job.txt "
-        f"{' '.join(job.files)}  (no git, no shell commands, no keys)"
+        f"{' '.join(job.files)}  (no git, no shell commands, no keys"
+        f"{f'; {told}' if told else ''})"
     )
 
 
@@ -223,6 +281,25 @@ async def run_aider(
             encoding="utf-8",
         )
         (scratch / "none.env").write_text("", encoding="utf-8")
+        read = scratch / "read"
+        read.mkdir()
+        for name, text in job.reading:
+            (read / name).write_text(text, encoding="utf-8")
+        for number, picture in enumerate(job.pictures, start=1):
+            shutil.copyfile(picture, read / f"{number}-{picture.name}")
+        if job.pictures:
+            (scratch / "model-metadata.json").write_text(
+                json.dumps(
+                    {
+                        f"openai/{job.model}": {
+                            "supports_vision": True,
+                            "litellm_provider": "openai",
+                            "mode": "chat",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
         before = await asyncio.to_thread(snapshot, job.folder)
         own = {path.name for path in job.folder.iterdir()}
         windows = os.name == "nt"

@@ -12,6 +12,7 @@ import anyio.to_thread
 from .models import (
     Agent,
     AgentRun,
+    ChangeNote,
     ChangeProject,
     Chat,
     ChatNotes,
@@ -123,6 +124,7 @@ TABLES: Mapping[type[Record], str] = {
     LabChemical: "studio_lab_chemicals",
     TutorAttempt: "studio_tutor_attempts",
     ChangeProject: "studio_change_projects",
+    ChangeNote: "studio_change_notes",
     FarmChannel: "studio_farm_channels",
     FarmPost: "studio_farm_posts",
     FarmAsset: "studio_farm_assets",

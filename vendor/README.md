@@ -21,7 +21,7 @@ installed from there when GitHub no longer has it.
 | [`cua/`](cua/README.md) | https://github.com/trycua/cua | MIT | Kept for a planned PC-control feature (not used yet) |
 | [`stable-diffusion-cpp/`](stable-diffusion-cpp/README.md) | https://github.com/leejet/stable-diffusion.cpp | MIT | The Image engine: painted cartoon places and characters (Settings → Image engine) |
 | [`three/`](three/README.md) | https://github.com/mrdoob/three.js | MIT | The 3D views: the Trading Bank's debate arena, the Ops page, and the 3D site templates |
-| [`repos/`](repos/README.md) | 35 repos (OpenHands, MetaGPT, crewAI, FinRobot, awesome-claude-code-subagents, hindsight, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, switched off until the owner turns them on |
+| [`repos/`](repos/README.md) | 36 repos (OpenHands, MetaGPT, crewAI, FinRobot, awesome-claude-code-subagents, wshobson/agents, hindsight, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, switched off until the owner turns them on |
 | [`ruflo-core/`](ruflo-core/README.md) | https://github.com/ruvnet/ruflo | MIT | Ruflo's agents, skills and MCP server for Claude Code sessions on this repo (`.claude/`, `.mcp.json`) |
 | [`hyperliquid-python-sdk/`](hyperliquid-python-sdk/README.md) | https://github.com/hyperliquid-dex/hyperliquid-python-sdk | MIT | The reference signing code and test values FCC's own Hyperliquid (Invo) signing is checked against |
 
@@ -29,3 +29,8 @@ Not vendored: **Aider** (https://github.com/Aider-AI/aider, Apache 2.0). FCC
 neither bundles nor downloads it; the owner installs it (`uv tool install
 aider-chat`) and FCC only runs the installed `aider` program for the **aider**
 tool. Nothing in FCC depends on Aider's repo or releases staying online.
+
+Not vendored: **FreeLLMAPI** (https://github.com/tashfeenahmed/freellmapi,
+MIT). It is a separate Node.js app the owner may run on their PC; FCC only
+talks to its OpenAI-style address as the **freellmapi** provider. FCC ships
+none of its code and works without it.

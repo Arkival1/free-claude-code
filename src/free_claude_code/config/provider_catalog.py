@@ -82,6 +82,7 @@ NARAROUTE_DEFAULT_BASE = "https://router.bynara.id/v1"
 POOLSIDE_DEFAULT_BASE = "https://inference.poolside.ai/v1"
 # LLM7.io OpenAI-compatible Chat Completions API.
 LLM7_DEFAULT_BASE = "https://api.llm7.io/v1"
+FREELLMAPI_DEFAULT_BASE = "http://localhost:3001/v1"
 # Lightning AI Model APIs OpenAI-compatible Chat Completions gateway.
 LIGHTNING_DEFAULT_BASE = "https://lightning.ai/api/v1"
 # Experiential Labs OpenAI-compatible Chat Completions gateway.
@@ -690,6 +691,18 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="ollama_api_key",
         default_base_url=OLLAMA_CLOUD_DEFAULT_BASE,
         proxy_attr="ollama_cloud_proxy",
+    ),
+    "freellmapi": ProviderDescriptor(
+        provider_id="freellmapi",
+        display_name="FreeLLMAPI (on this PC)",
+        website_url="https://github.com/tashfeenahmed/freellmapi",
+        logo_filename="freellmapi.svg",
+        credential_env="FREELLMAPI_API_KEY",
+        credential_url="http://localhost:3001",
+        credential_attr="freellmapi_api_key",
+        default_base_url=FREELLMAPI_DEFAULT_BASE,
+        base_url_attr="freellmapi_base_url",
+        proxy_attr="freellmapi_proxy",
     ),
     "lmstudio": ProviderDescriptor(
         provider_id="lmstudio",

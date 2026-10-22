@@ -5,12 +5,14 @@ import base64
 import contextlib
 import functools
 import imaplib
+import importlib.util
 import json
 import re
 import secrets
 import shutil
 import smtplib
 import socket
+import sys
 import tempfile
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -56,7 +58,7 @@ from .aider import (
 )
 from .aider import report as aider_report
 from .assistant_tools import describe_time, now_line, parse_when
-from .changer import Changer, ChangerError, app_root
+from .changer import Changer, ChangerError, app_root, pick_tests
 from .changer_projects import (
     ACTIVE,
     FINISHED,
@@ -199,6 +201,7 @@ from .models import (
     AGENT_ROLES,
     Agent,
     AgentRun,
+    ChangeNote,
     ChangeProject,
     Chat,
     ChatNotes,
@@ -427,6 +430,23 @@ CHANGER_TEAM = frozenset(
 )
 CHANGER_HELPER_SECONDS = 1800.0
 VISION_SECONDS = 300.0
+NOTE_KINDS = frozenset({"finding", "decision", "done", "next", "lesson"})
+MAX_NOTE_CHARS = 600
+NOTEBOOK_SHOWN = 16
+LESSONS_SHOWN = 8
+MAX_LESSONS = 60
+NOTEBOOK_CHARS = 6000
+"""The Changer's notebook in each step's note: the goal, the plan, the
+newest 16 notes and 8 lessons, at most about 1,500 tokens."""
+NOTEBOOK_HEAD = (
+    "CHANGER NOTEBOOK: shared by everyone on this update (the Changer, its "
+    "Planner and reviewers, helpers, team agents and Aider). FCC keeps it, so "
+    "it holds when a model or API changes. Read it before re-reading files. "
+    "Add to it with fcc_changer action note (kind: finding, decision, done, "
+    "next or lesson; one or two lines): where things are, what you decided "
+    "and why, what you finished, what the next one should do. A lesson is "
+    "kept for later updates too."
+)
 VISION_REPLY_TOKENS = 8192
 """Room for the Vision Model's answer: models that think first (Nemotron VL)
 use most of it before they write."""
@@ -540,6 +560,30 @@ OWN_MEMORY_TOOLS = ("remember", "recall")
 """A repo agent's own memory (its own area while it thinks on a server)."""
 TOOLSHED_FLAG = "extension_agent_toolshed_v1"
 CHANGER_AIDER_FLAG = "changer_aider_v1"
+HELPER_REPO = "https://github.com/wshobson/agents"
+CHANGER_HELPERS: tuple[tuple[str, str], ...] = (
+    ("debugging-toolkit-debugger", "debugger"),
+    ("distributed-debugging-error-detective", "error-detective"),
+    ("backend-development-test-automator", "test-automator"),
+    ("backend-development-security-auditor", "security-auditor"),
+    ("python-pro", "python-pro"),
+    ("javascript-pro", "javascript-pro"),
+    ("ui-designer", "ui-designer"),
+    ("search-specialist", "search-specialist"),
+)
+"""The Changer's helper team from wshobson/agents (its agent's name there,
+the name on the team): short instructions (about 120 to 900 words each), so
+a hand-off costs little."""
+CHANGER_HELPER_TEAM = tuple(name for _, name in CHANGER_HELPERS)
+SAFE_TEST_NAME = re.compile(r"[A-Za-z0-9_./-]+")
+MAX_AIDER_TEST_READS = 4
+MAX_AIDER_TEST_BYTES = 60_000
+"""The tests Aider reads to see what passing means: four files, small ones."""
+AIDER_MAP_TOKENS = 1024
+"""Aider's map of the project when asked for (repo_map): enough to find its
+way around FCC for about a thousand tokens a request."""
+MAX_AIDER_PICTURES = 4
+PICTURE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 """The Changer made before Aider gets the aider tool once (the owner can
 take it away again)."""
 """Repo agents already on the team were given the toolshed."""
@@ -2710,13 +2754,173 @@ class StudioService:
         project = await self._change_project()
         if project is not None and project.status in ACTIVE:
             return True
-        agent = await self._changer_agent()
-        return any(
-            run.status in {"queued", "running"}
-            for run in await self.runs(agent_id=agent.id)
-        )
+        team = {
+            agent.id
+            for agent in await self.agents()
+            if agent.name in CHANGER_TEAM and not agent.archived
+        }
+        team.add((await self._changer_agent()).id)
+        for member in team:
+            if any(
+                run.status in {"queued", "running"}
+                for run in await self.runs(agent_id=member)
+            ):
+                return True
+        return False
 
     # ------------------------------------------------------------ update projects
+
+    async def add_change_note(
+        self,
+        author: str,
+        text: str,
+        *,
+        kind: str = "finding",
+        project: ChangeProject | None = None,
+    ) -> ChangeNote | None:
+        """Write one note in the Changer's notebook (a lesson is kept for
+        every later update). An exact repeat of a recent note is skipped."""
+        cleaned = " ".join(text.split())[:MAX_NOTE_CHARS]
+        if not cleaned:
+            return None
+        if kind == "lesson":
+            project_id, milestone = "", 0
+        else:
+            project = project or await self._change_project()
+            if project is None or project.status in FINISHED:
+                # A finished update takes no more notes; a lesson outlives it.
+                return None
+            project_id, milestone = project.id, project.milestone
+        recent = await self._store.find(
+            ChangeNote,
+            where={"project_id": project_id},
+            order_by="created_at DESC",
+            limit=20,
+        )
+        same = next((n for n in recent if n.text == cleaned and n.kind == kind), None)
+        if same is not None:
+            return same
+        note = ChangeNote(
+            project_id=project_id,
+            author=author.strip()[:60] or "Agent",
+            kind=kind,
+            text=cleaned,
+            milestone=milestone,
+        )
+        await self._store.put(note)
+        if kind == "lesson":
+            lessons = await self._store.find(
+                ChangeNote, where={"project_id": ""}, order_by="created_at DESC"
+            )
+            for old in lessons[MAX_LESSONS:]:
+                await self._store.delete(ChangeNote, old.id)
+        return note
+
+    async def owner_change_note(self, text: str, *, lesson: bool = False) -> JsonObject:
+        """A note from the owner to the whole Changer team; the next step
+        of every agent reads it."""
+        note = await self.add_change_note(
+            "Owner", text, kind="lesson" if lesson else "next"
+        )
+        if note is None:
+            raise StudioError(
+                "Write the note, and have a change open (a lesson needs no change)."
+            )
+        return note.model_dump()
+
+    async def forget_change_lesson(self, note_id: str) -> None:
+        note = await self._store.get(ChangeNote, note_id)
+        if note is None or note.project_id:
+            raise StudioNotFoundError("No such lesson.")
+        await self._store.delete(ChangeNote, note_id)
+
+    async def change_notes(
+        self, project_id: str, *, limit: int = NOTEBOOK_SHOWN
+    ) -> list[ChangeNote]:
+        """The newest notes of an update (or the lessons, for ""), oldest
+        first."""
+        found = await self._store.find(
+            ChangeNote,
+            where={"project_id": project_id},
+            order_by="created_at DESC",
+            limit=limit,
+        )
+        return list(reversed(found))
+
+    async def _notebook_note(self, agent: Agent, run: AgentRun) -> str:
+        """The notebook for an agent working in the Changer's copy (or one of
+        the Changer team): the goal pinned on top, the plan and where it is,
+        the newest notes, and the lessons from earlier updates."""
+        copy = await self._changer_copy()
+        if agent.name not in CHANGER_TEAM and (copy is None or run.site_id != copy.id):
+            return ""
+        return await self._notebook_text()
+
+    async def _notebook_text(self) -> str:
+        """The notebook as everyone on the update reads it (Aider gets it as
+        a read-only file)."""
+        project = await self._change_project()
+        lines = [NOTEBOOK_HEAD]
+        if project is not None and project.status not in FINISHED:
+            lines.append(
+                f"GOAL (the owner's words; keep to it): {project.request[:800]}"
+            )
+            summary = str(project.plan.get("summary") or "")
+            if summary:
+                lines.append(f"Plan: {summary[:400]}")
+            for number, item in enumerate(_items(project.plan.get("milestones"))):
+                if not isinstance(item, dict):
+                    continue
+                if item.get("status") == "done":
+                    mark = "done"
+                elif number == project.milestone:
+                    mark = "NOW"
+                else:
+                    mark = "to do"
+                lines.append(
+                    f"- Milestone {number + 1} [{mark}]: "
+                    f"{str(item.get('title', ''))[:120]}"
+                )
+            notes = await self.change_notes(project.id)
+            if notes:
+                lines.append("Notes (oldest first):")
+                lines += [f"- [{n.author}, {n.kind}] {n.text}" for n in notes]
+        helpers = [
+            agent
+            for agent in await self.agents()
+            if not agent.archived and agent.name in CHANGER_HELPER_TEAM
+        ]
+        if helpers:
+            lines.append(
+                "Team helpers (hand one a separate part with fcc_changer subagent, "
+                "agent: its name, and the files it owns): "
+                + "; ".join(f"{a.name}: {a.description[:70]}" for a in helpers)
+            )
+        lessons = await self.change_notes("", limit=LESSONS_SHOWN)
+        if lessons:
+            lines.append("Lessons from earlier updates:")
+            lines += [f"- {n.text}" for n in lessons]
+        lesson_start = next(
+            (i for i, line in enumerate(lines) if line.startswith("Lessons from")),
+            len(lines),
+        )
+        while len("\n".join(lines)) > NOTEBOOK_CHARS:
+            # Whole lines go, oldest note first, then the oldest lessons; the
+            # goal and the plan always stay.
+            cut = next(
+                (i for i, line in enumerate(lines) if line.startswith("- [")), None
+            )
+            if cut is None and lesson_start + 1 < len(lines):
+                cut = lesson_start + 1
+            if cut is None:
+                break
+            lines.pop(cut)
+            if cut < lesson_start:
+                lesson_start -= 1
+        text = "\n".join(lines)
+        if len(text) > NOTEBOOK_CHARS:
+            text = text[: max(text.rfind("\n", 0, NOTEBOOK_CHARS), 0) or NOTEBOOK_CHARS]
+        return text
 
     async def _upgraded_prompt(self, agent: Agent) -> Agent:
         """An agent still on an old built-in prompt moves to the new one (a
@@ -2754,6 +2958,29 @@ class StudioService:
         return await self._changer_member(
             CHANGER_PLANNER_NAME, CHANGER_PLANNER_PROMPT, CHANGER_READER_TOOLS
         )
+
+    async def changer_team_model(self, model: str) -> JsonObject:
+        """Move the whole Changer team (Changer, Planner, Reviewer, Security)
+        to one model, e.g. from NVIDIA to FreeLLMAPI. Their notebook stays:
+        FCC keeps it, not the model."""
+        chosen = model.strip()
+        if not chosen or len(chosen) > 200:
+            raise StudioError("Give the model, like freellmapi/auto:coding.")
+        if await self._changer_busy():
+            raise StudioError(
+                "The Changer is working; pause it before switching models."
+            )
+        team = [
+            await self._changer_agent(),
+            await self._changer_planner(),
+            await self._changer_reviewer(security=False),
+            await self._changer_reviewer(security=True),
+        ]
+        for member in team:
+            await self.update_agent(member.id, {"model": chosen})
+        # The next job checks the new model answers before it starts.
+        self._changer_models_ok.discard(chosen)
+        return {"model": chosen, "team": [member.name for member in team]}
 
     async def _changer_reviewer(self, *, security: bool) -> Agent:
         if security:
@@ -3051,6 +3278,20 @@ class StudioService:
             await asyncio.shield(job)
         finished = await self._store.require(AgentRun, run.id)
         project = await self._store.require(ChangeProject, project.id)
+        # FCC writes what each step did into the notebook itself, so the
+        # next agent (on any model) knows without asking the model to.
+        outcome = (
+            (finished.result or "").strip()
+            if finished.status == "succeeded"
+            else f"stopped ({finished.status}): {finished.error or 'no reason given'}"
+        )
+        await self.add_change_note(
+            agent.name,
+            f"{kind} step{f' (milestone {milestone + 1})' if kind != 'plan' else ''}: "
+            f"{outcome}",
+            kind="done",
+            project=project,
+        )
         record = next((t for t in project.tasks if t.get("run_id") == run.id), task)
         wanted = {"plan": "plan", "review": "review", "security": "review"}.get(kind)
         if (
@@ -3262,6 +3503,13 @@ class StudioService:
             report = await self._changer.check(target)
             self._changer_last["check"] = report.view()
             problems = "" if report.passed else "\n".join(report.problems)
+            if problems:
+                await self.add_change_note(
+                    "FCC",
+                    f"The check failed: {problems}",
+                    kind="finding",
+                    project=project,
+                )
             if not problems:
                 problems, verdicts, blocked = await self._changer_reviews(
                     project, number, target
@@ -3332,6 +3580,13 @@ class StudioService:
         milestone["status"] = "done"
         milestone["review"] = "; ".join(verdicts) + shots_note
         milestone["checkpoint"] = point["id"]
+        await self.add_change_note(
+            "FCC",
+            f"Milestone {number + 1} ({milestone.get('title', '')}) is done: "
+            f"checked and reviewed ({'; '.join(verdicts) or 'passed'}).",
+            kind="done",
+            project=project,
+        )
         milestones[number] = milestone
         project = await self._store.require(ChangeProject, project.id)
         return await self._save_project(
@@ -3472,6 +3727,10 @@ class StudioService:
                     }
                     for task in project.tasks
                 ][-40:],
+                "notebook": [
+                    note.model_dump()
+                    for note in await self.change_notes(project.id, limit=40)
+                ],
             }
         runs = (await self.runs(agent_id=agent.id))[:10]
         return {
@@ -3506,6 +3765,10 @@ class StudioService:
                 for run in runs
             ],
             "check": self._changer_last.get("check"),
+            "lessons": [
+                note.model_dump()
+                for note in await self.change_notes("", limit=MAX_LESSONS)
+            ],
             "shots": self._changer.shots(),
             "shots_note": self._changer_last.get("shots_note", ""),
             "screenshots_ready": page_try_ready(),
@@ -3715,6 +3978,24 @@ class StudioService:
                     data={**data, **result},
                     failed=not taken,
                 )
+            if action == "note":
+                kind = str(arguments.get("kind") or "finding").casefold()
+                written = await self.add_change_note(
+                    context.agent_name,
+                    str(arguments.get("text") or arguments.get("notes") or ""),
+                    kind=kind if kind in NOTE_KINDS else "finding",
+                )
+                if written is None:
+                    return ToolOutcome(
+                        text="Write the note in text (one or two lines). With no "
+                        "update open, only a lesson (kind lesson) is kept.",
+                        data=data,
+                        failed=True,
+                    )
+                return ToolOutcome(
+                    text=f"Noted in the notebook ({written.kind}).",
+                    data={**data, "note": written.id},
+                )
             if action in {"try", "look"}:
                 return await self._changer_pages(
                     target, arguments, look=action == "look"
@@ -3753,7 +4034,7 @@ class StudioService:
             return ToolOutcome(text=str(error), data=data, failed=True)
         return ToolOutcome(
             text="Pick an action: plan, review, changes, check, tests, try, look, "
-            "screenshots, or subagent.",
+            "note, screenshots, or subagent.",
             data=data,
             failed=True,
         )
@@ -3923,7 +4204,17 @@ class StudioService:
         except AiderError as error:
             return refuse(str(error))
         agent = await self._store.get(Agent, context.agent_id)
-        job = self._aider_job(folder, task, files, agent.model if agent else "")
+        copy = await self._changer_copy()
+        in_copy = copy is not None and copy.id == context.site_id
+        try:
+            job = await self._aider_extras(
+                self._aider_job(folder, task, files, agent.model if agent else ""),
+                agent,
+                call.arguments,
+                in_copy=in_copy,
+            )
+        except AiderError as error:
+            return refuse(str(error))
         done: list[AiderResult] = []
 
         async def run() -> tuple[int, str, bool]:
@@ -3948,6 +4239,13 @@ class StudioService:
         if not done:
             return refuse(outcome.text)
         result = done[0]
+        if in_copy and result.touched:
+            await self.add_change_note(
+                "Aider",
+                f"changed {', '.join(result.touched[:8])} for {context.agent_name}: "
+                f"{task[:240]}",
+                kind="done",
+            )
         data.update(
             {
                 "exit_code": result.code,
@@ -3961,6 +4259,145 @@ class StudioService:
             data=data,
             failed=result.code != 0 or not result.touched,
         )
+
+    async def _aider_extras(
+        self,
+        job: AiderJob,
+        agent: Agent | None,
+        arguments: Mapping[str, object],
+        *,
+        in_copy: bool,
+    ) -> AiderJob:
+        """What Aider gets beyond the job: the skills and (in the Changer
+        copy) the notebook to follow, the tests to run and fix, architect
+        mode, a project map, and screenshots for a model that can see."""
+        reading: list[tuple[str, str]] = []
+        if agent is not None:
+            skills = await self._skill_brief(agent, job.message)
+            if not skills:
+                skills = await self._skill_texts(
+                    (VIBE_SKILL, DEBUG_SKILL) if in_copy else (APP_SKILL, DEBUG_SKILL)
+                )
+            if skills:
+                reading.append(("fcc-skills.md", skills))
+            if in_copy:
+                notebook = await self._notebook_text()
+                reading.append(("changer-notebook.md", notebook))
+        pictures = self._aider_pictures(job.folder, arguments, in_copy=in_copy)
+        model, editor = job.model, ""
+        settings = self.settings
+        local = job.edit_format == "whole"
+        if arguments.get("architect") is True:
+            wanted = settings.studio_aider_editor_model or ""
+            # The editor talks to the same address as the planner: a model
+            # on the same side (this PC or FCC's address), else the same one.
+            same_side = bool(wanted) and wanted.startswith(LOCAL_MODEL_PREFIX) == local
+            editor = (
+                wanted[len(LOCAL_MODEL_PREFIX) :]
+                if same_side and local
+                else wanted
+                if same_side
+                else model
+            )
+        if pictures:
+            vision = settings.studio_vision_model or ""
+            if not vision or vision.startswith(LOCAL_MODEL_PREFIX) or local:
+                raise AiderError(
+                    "Screenshots need a Vision Model on a server (Settings, "
+                    "Studio) and a server model for the job."
+                )
+            # The model that can see plans; the agent's own model edits.
+            model, editor = vision, editor or job.model
+        test_command, test_files, skipped = self._aider_tests(
+            job.folder, job.files, in_copy=in_copy
+        )
+        if skipped and in_copy:
+            await self.add_change_note(
+                "FCC",
+                "Aider's test run leaves out these test files (their names have "
+                f"spaces or shell characters; rename them): {', '.join(skipped)}",
+                kind="finding",
+            )
+        return replace(
+            job,
+            model=model,
+            editor_model=editor,
+            reading=tuple(reading),
+            read_paths=tuple(name for name in test_files if name not in job.files),
+            pictures=pictures,
+            test_command=test_command,
+            map_tokens=AIDER_MAP_TOKENS if arguments.get("repo_map") is True else 0,
+            env=(("PYTHONPATH", str(job.folder / "src")),) if in_copy else (),
+        )
+
+    def _aider_pictures(
+        self, folder: Path, arguments: Mapping[str, object], *, in_copy: bool
+    ) -> tuple[Path, ...]:
+        """In the Changer copy, screenshots: true gives the newest Changer
+        screenshots; in a project, images names picture files in it."""
+        if in_copy and arguments.get("screenshots") is True:
+            return tuple(
+                self._changer.shot(name)
+                for name in self._changer.shots()[:MAX_AIDER_PICTURES]
+            )
+        raw = arguments.get("images")
+        names = [raw] if isinstance(raw, str) else [str(item) for item in _items(raw)]
+        if not names:
+            return ()
+        root = folder.resolve()
+        chosen: list[Path] = []
+        for name in names[:MAX_AIDER_PICTURES]:
+            path = (root / name.strip()).resolve()
+            if (
+                not path.is_relative_to(root)
+                or path.suffix.lower() not in PICTURE_SUFFIXES
+                or not path.is_file()
+            ):
+                raise AiderError(f"{name}: give a picture file in the project.")
+            chosen.append(path)
+        return tuple(chosen)
+
+    def _aider_tests(
+        self, folder: Path, files: Sequence[str], *, in_copy: bool
+    ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+        """The test command Aider runs and fixes until it passes, chosen by
+        FCC (never the model), the test files it reads to see what passing
+        means, and test files left out because of their names: the tests
+        related to the files in the Changer copy, pytest when the project
+        has test_*.py files, npm test when its package.json has a test
+        script; nothing when there are none."""
+        python = f'"{sys.executable}"'
+        serial = " -n 0" if importlib.util.find_spec("xdist") else ""
+        pytest = f"{python} -m pytest -q -x -p no:cacheprovider{serial}"
+        if in_copy:
+            found = pick_tests(folder, list(files), self._changer.source).files
+        else:
+            found = sorted(
+                {
+                    path.relative_to(folder).as_posix()
+                    for path in (
+                        *folder.glob("test_*.py"),
+                        *folder.glob("tests/test_*.py"),
+                    )
+                    if path.stat().st_size <= MAX_AIDER_TEST_BYTES
+                }
+            )
+        # Aider runs this through a shell: only plain file names go in, so a
+        # test file named with ; or $() can't add a command.
+        picked = [name for name in found if SAFE_TEST_NAME.fullmatch(name)]
+        skipped = tuple(name for name in found if name not in picked)
+        if picked:
+            command = f"{pytest} " + " ".join(picked) if in_copy else pytest
+            return command, tuple(picked[:MAX_AIDER_TEST_READS]), skipped
+        package = folder / "package.json"
+        if not in_copy and package.is_file():
+            try:
+                scripts = json.loads(package.read_text(encoding="utf-8")).get("scripts")
+            except ValueError, OSError, AttributeError:
+                scripts = None
+            if isinstance(scripts, dict) and scripts.get("test"):
+                return "npm test --silent", (), skipped
+        return "", (), skipped
 
     def _aider_job(
         self, folder: Path, task: str, files: tuple[str, ...], model: str
@@ -5549,8 +5986,9 @@ class StudioService:
             chat = await self._store.require(Chat, chat_id)
             run = await self._store.require(AgentRun, run_id)
             note = await self._room_note(run) if chat.parent_chat_id else ""
+            notebook = await self._notebook_note(agent, run)
             brief = await self._skill_brief(agent, run.goal)
-            note = "\n\n".join(part for part in (note, brief) if part)
+            note = "\n\n".join(part for part in (note, notebook, brief) if part)
             helpers = await self._helpers_for(agent, run)
             for helper in helpers:
                 if when(helper.role) == "during":
@@ -7305,6 +7743,11 @@ class StudioService:
                 wanted.append(DEBUG_SKILL)
         if not wanted:
             return ""
+        return await self._skill_texts(wanted)
+
+    async def _skill_texts(self, wanted: Sequence[str]) -> str:
+        """FCC's built-in skills by name, in full, under one heading ("" when
+        they're off or none is found)."""
         builtin = await self._builtin_skills()
         if builtin is None or not builtin.enabled:
             return ""
@@ -7586,12 +8029,54 @@ class StudioService:
         return await self.create_agent(
             name=as_name or found.name,
             role="agent",
-            model=self.server_model,
+            model=self._tier_model(found.tier),
             system_prompt=found.prompt,
             description=found.description or f"From {extension.name}.",
             tools=tools,
             all_tools=False,
         )
+
+    def _tier_model(self, tier: str) -> str:
+        """The model for a repo agent's tier: the Light or Strong Model when
+        set, else the server model everyone else uses."""
+        settings = self.settings
+        if tier == "light" and settings.studio_light_model:
+            return settings.studio_light_model
+        if tier == "strong" and settings.studio_strong_model:
+            return settings.studio_strong_model
+        return self.server_model
+
+    async def add_changer_helpers(self) -> JsonObject:
+        """The Changer's helper team: eight lean agents from wshobson/agents
+        (the starter repo is turned on for it). Agents already on the team
+        are kept as they are."""
+        extension = next(
+            (
+                e
+                for e in await self._extensions.all()
+                if e.source.rstrip("/").casefold() == HELPER_REPO.casefold()
+            ),
+            None,
+        )
+        if extension is None:
+            raise StudioError(
+                "wshobson/agents isn't added yet: on the More page, open Repos "
+                "that come with FCC and add it back."
+            )
+        if not extension.enabled:
+            extension.enabled = True
+            await self._extensions.save(extension)
+        names = {
+            agent.name.casefold() for agent in await self.agents() if not agent.archived
+        }
+        added: list[str] = []
+        for source, name in CHANGER_HELPERS:
+            if name.casefold() in names:
+                continue
+            if any(agent.name == source for agent in extension.agents):
+                await self.add_extension_agent(extension.id, source, as_name=name)
+                added.append(name)
+        return {"added": added, "team": list(CHANGER_HELPER_TEAM)}
 
     async def _enabled_servers(self) -> list[tuple[Extension, McpServer]]:
         added = [
@@ -9548,12 +10033,58 @@ class StudioService:
                 counts[station] = counts.get(station, 0) + 1
         feed.sort(key=lambda item: -int(str(item["at"])))
         return {
+            "changer": await self._hq_changer(people),
             "agents": people,
             "stations": stations_view(counts, notes),
             "pending": [item.model_dump() for item in pending[:5]],
             "drafts": len(drafts),
             "feed": feed[:14],
             "plans": [self.plan_view(plan) for plan in shown_plans],
+        }
+
+    async def _hq_changer(self, people: Sequence[JsonObject]) -> JsonObject | None:
+        """The Changer's update as the HQ shows it: the goal, how far it got,
+        who is working on it right now (Changer team, helpers, team agents in
+        its copy), and the newest notebook notes. None when there's no update
+        or the last one ended over an hour ago."""
+        project = await self._change_project()
+        if project is None or (
+            project.status in {"done", "cancelled", "failed"}
+            and now_ms() - project.updated_at > PLAN_SHOWN_MS
+        ):
+            return None
+        milestones = [
+            m for m in _items(project.plan.get("milestones")) if isinstance(m, dict)
+        ]
+        on_it = {str(task.get("agent", "")) for task in project.tasks}
+        working = [
+            {"name": person["name"], "tool": person["tool"], "model": person["model"]}
+            for person in people
+            if person["busy"]
+            and (person["name"] in CHANGER_TEAM or person["name"] in on_it)
+        ]
+        return {
+            "id": project.id,
+            "request": project.request[:300],
+            "status": project.status,
+            "note": project.note[:300],
+            "milestone": min(project.milestone + 1, len(milestones))
+            if milestones
+            else 0,
+            "milestones": len(milestones),
+            "title": str(milestones[project.milestone].get("title", ""))[:160]
+            if project.milestone < len(milestones)
+            else "",
+            "working": working,
+            "notes": [
+                {
+                    "author": n.author,
+                    "kind": n.kind,
+                    "text": n.text[:240],
+                    "at": n.created_at,
+                }
+                for n in await self.change_notes(project.id, limit=6)
+            ],
         }
 
     async def hq_say(self, agent_id: str, text: str) -> JsonObject:

@@ -132,6 +132,7 @@
   let panel = null;
   let feed = null;
   let plansBox = null;
+  let changerBox = null;
   let relayBox = null;
   let tip = null;
   let frame = 0;
@@ -693,6 +694,7 @@
     panel = h("aside", { class: "hq-panel card", "aria-live": "polite" });
     feed = h("ol", { class: "hq-feed", "aria-label": "Newest steps" });
     plansBox = h("div", { class: "hq-plan-list" });
+    changerBox = h("section", { class: "hq-plans hq-changer", "aria-label": "The Changer's update", hidden: true });
     const planInput = h("input", {
       type: "text",
       name: "goal",
@@ -736,6 +738,7 @@
             h("div", { class: "hq-legend", "aria-hidden": "true" }, [h("span", { class: "dot busy" }), "working", h("span", { class: "dot idle" }), "free"]),
           ]),
           stage,
+          changerBox,
           h("section", { class: "hq-plans", "aria-label": "Team plans" }, [
             h("h3", { class: "hq-feed-title", text: "Team plans" }),
             planForm,
@@ -782,6 +785,7 @@
       sync(data);
       drawFeed();
       drawPlans();
+      drawChanger();
       if (state.selected && state.selected.kind === "agent") {
         state.activity = await ctx.api(`/studio/api/agents/${state.selected.id}/activity`).catch(() => null);
       }
@@ -1001,6 +1005,48 @@
           ? [h("li", { class: "hq-relay-stage always" }, [h("span", { class: "hq-tool", text: "✓" }), h("div", { class: "grow" }, [h("strong", { text: "LCC: final check" }), h("small", { class: "muted", text: "websites, apps, and games" })])])]
           : []),
       ])
+    );
+  }
+
+  // The Changer's update: its goal, the milestone it's on, who is working
+  // on it now (its team, helpers, team agents, Aider), and the newest notes
+  // from the shared notebook.
+  function drawChanger() {
+    const job = state.data && state.data.changer;
+    const h = ctx.el;
+    changerBox.hidden = !job;
+    if (!job) return;
+    const where = job.milestones ? `milestone ${job.milestone} of ${job.milestones}${job.title ? `: ${job.title}` : ""}` : job.status;
+    changerBox.replaceChildren(
+      h("h3", { class: "hq-feed-title", text: "The Changer's update" }),
+      h("article", { class: `hq-plan ${job.status === "building" || job.status === "planning" ? "running" : job.status}` }, [
+        h("div", { class: "hq-plan-head" }, [
+          h("strong", { text: job.request }),
+          h("span", { class: "hq-plan-state", text: `${job.status} · ${where}` }),
+          h("a", { class: "link-button", href: "#changer", text: "Open" }),
+        ]),
+        job.note ? h("p", { class: "muted small", text: job.note }) : null,
+        h("p", { class: "small" }, [
+          h("strong", { text: "Working now: " }),
+          job.working.length ? job.working.map((w) => `${w.name}${w.tool ? ` (${w.tool})` : ""}`).join(", ") : "nobody right now",
+        ]),
+        job.notes.length
+          ? h(
+              "ol",
+              { class: "hq-plan-steps" },
+              job.notes
+                .slice()
+                .reverse()
+                .map((note) =>
+                  h("li", { class: "step done" }, [
+                    h("span", { class: "hq-tool", text: note.kind }),
+                    h("span", { class: "who", text: note.author }),
+                    h("span", { class: "muted", text: note.text }),
+                  ])
+                )
+            )
+          : h("p", { class: "muted small", text: "The team notebook is empty so far." }),
+      ].filter(Boolean))
     );
   }
 

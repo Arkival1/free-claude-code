@@ -1417,8 +1417,15 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "read the changed files and check them (check_project, try_page, "
             "fcc_changer check) like your own work. Good for a focused edit "
             "across a few files or a stubborn bug; describe the job fully: "
-            "what to change, why, and how to know it works. Runs after the "
-            "owner's command approval (Agents Can Run Commands)."
+            "what to change, why, and how to know it works. It follows FCC's "
+            "skills (and the Changer's notebook in its copy), runs the related "
+            "tests and fixes them until they pass, and checks its own syntax. "
+            "architect: true for a bigger change (one model plans, another "
+            "writes). repo_map: true when it must find its way around a big "
+            "codebase like FCC (costs about 1k tokens a request). screenshots: "
+            "true (Changer copy) or images: picture files, so a Vision Model "
+            "sees the page. Runs after the owner's command approval (Agents "
+            "Can Run Commands)."
         ),
         parameters={
             "type": "object",
@@ -1432,6 +1439,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                     "items": {"type": "string"},
                     "description": "The files it may change or create (at most 12).",
                 },
+                "architect": {"type": "boolean"},
+                "repo_map": {"type": "boolean"},
+                "screenshots": {"type": "boolean"},
+                "images": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["task", "files"],
         },
@@ -1455,7 +1466,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "files, pop-ups and sideways scrolling; phone false for PC size. "
             "look: screenshot pages at PC and phone size and have the Vision "
             "Model say what looks wrong (question: what to check); fix it and "
-            "look again. screenshots: just pictures of pages for the owner "
+            "look again. note: write in the shared notebook everyone on the "
+            "update reads (text; kind finding, decision, done, next, or lesson "
+            "to keep for later updates). screenshots: just pictures of pages for the owner "
             "(pages; phone true for phone size). subagent: hand a separate part to a helper "
             "that works in the same copy and reports back (task: everything it "
             "needs; files: the files it owns; agent: optional team member's "
@@ -1474,6 +1487,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "tests",
                         "try",
                         "look",
+                        "note",
                         "screenshots",
                         "subagent",
                     ],
@@ -1494,6 +1508,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "page": {"type": "string"},
                 "steps": {"type": "array", "items": {"type": "object"}},
                 "question": {"type": "string"},
+                "text": {"type": "string"},
                 "phone": {"type": "boolean"},
                 "task": {"type": "string"},
                 "agent": {"type": "string"},

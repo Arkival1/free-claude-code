@@ -929,6 +929,7 @@ async def test_create_provider_instantiates_each_builtin():
         provider_rate_window=11,
         provider_max_concurrency=3,
         sambanova_api_key="test_sambanova_key",
+        freellmapi_api_key="test_freellmapi_key",
     )
     cases = {
         "nvidia_nim": NvidiaNimProvider,
@@ -943,6 +944,7 @@ async def test_create_provider_instantiates_each_builtin():
         "siliconflow": OpenAIChatProvider,
         "nebius": OpenAIChatProvider,
         "scaleway": OpenAIChatProvider,
+        "freellmapi": OpenAIChatProvider,
         "chutes": OpenAIChatProvider,
         "featherless": OpenAIChatProvider,
         "azure_openai": OpenAIChatProvider,
@@ -1376,3 +1378,20 @@ async def test_provider_runtime_cleanup_exceptiongroup_on_multiple_failures() ->
 
     assert not runtime.is_cached("x")
     assert not runtime.is_cached("y")
+
+
+@pytest.mark.asyncio
+async def test_freellmapi_is_a_router_on_this_pc_not_a_local_model():
+    descriptor = PROVIDER_CATALOG["freellmapi"]
+    # It sends prompts to outside free tiers, so FCC never treats it as a
+    # model on this PC (local models get the owner's private memory).
+    assert descriptor.local is False
+    assert descriptor.credential_env == "FREELLMAPI_API_KEY"
+    settings = _make_settings(
+        freellmapi_api_key="freellmapi-unified",
+        freellmapi_base_url="http://127.0.0.1:31415/v1",
+    )
+    provider = await create_provider("freellmapi", settings)
+    assert isinstance(provider, OpenAIChatProvider)
+    assert str(provider._client.base_url).startswith("http://127.0.0.1:31415/v1")
+    assert provider._client.api_key == "freellmapi-unified"

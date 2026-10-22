@@ -195,3 +195,30 @@ body[data-page="changer"] .view {
   align-items: center;
   gap: 8px;
 }
+
+.changer-notebook {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.changer-note .pill {
+  margin-right: 4px;
+}
+
+.changer-note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.changer-note-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+}

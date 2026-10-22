@@ -47,6 +47,11 @@ print(json.dumps({{
     "cwd": os.getcwd(),
     "args": args,
     "first": message.splitlines()[0],
+    "read": {{
+        pathlib.Path(args[i + 1]).name: pathlib.Path(args[i + 1]).read_bytes()[:40].decode("utf-8", "replace")
+        for i, a in enumerate(args) if a == "--read"
+    }},
+    "pythonpath": os.environ.get("PYTHONPATH", ""),
 }}))
 """
 
@@ -254,3 +259,277 @@ def test_a_local_model_talks_to_the_model_server_on_this_pc(make_studio, tmp_pat
     assert job.edit_format == "whole"
     server = studio._aider_job(tmp_path, "Fix it", ("a.py",), "nvidia_nim/x")
     assert server.edit_format == "diff" and server.base_url.endswith("/v1")
+
+
+def test_the_command_carries_skills_tests_lint_architect_and_map(tmp_path):
+    from dataclasses import replace
+
+    job = replace(
+        job_for(tmp_path / "project", ("a.py",)),
+        reading=(("fcc-skills.md", "# Debugging"),),
+        pictures=(tmp_path / "shot.png",),
+        test_command="python -m pytest -q -x",
+        editor_model="lmstudio/qwen3-4b",
+        map_tokens=1024,
+    )
+    command = aider_command("aider", job, tmp_path / "scratch")
+    reads = [command[i + 1] for i, part in enumerate(command) if part == "--read"]
+    assert reads == [
+        str(tmp_path / "scratch" / "read" / "fcc-skills.md"),
+        str(tmp_path / "scratch" / "read" / "1-shot.png"),
+    ]
+    assert command[command.index("--test-cmd") + 1] == "python -m pytest -q -x"
+    assert "--auto-test" in command and "--auto-lint" in command
+    assert "--architect" in command and "--edit-format" not in command
+    assert command[command.index("--editor-model") + 1] == "openai/lmstudio/qwen3-4b"
+    assert command[command.index("--weak-model") + 1] == "openai/lmstudio/qwen3-4b"
+    assert command[command.index("--map-tokens") + 1] == "1024"
+    plain = aider_command("aider", job_for(tmp_path, ("a.py",)), tmp_path / "s")
+    assert "--no-auto-test" in plain and "--test-cmd" not in plain
+    assert "--architect" not in plain and plain[plain.index("--map-tokens") + 1] == "0"
+
+
+@pytest.mark.asyncio
+async def test_aider_reads_its_skills_and_pictures_without_touching_the_project(
+    tmp_path,
+):
+    from dataclasses import replace
+
+    project = tmp_path / "project"
+    project.mkdir()
+    picture = tmp_path / "home-pc.png"
+    picture.write_bytes(b"\x89PNG fake")
+    job = replace(
+        job_for(project, ("app.py",)),
+        reading=(
+            ("fcc-skills.md", "# Vibe coding"),
+            ("changer-notebook.md", "GOAL: x"),
+        ),
+        pictures=(picture,),
+        env=(("PYTHONPATH", "/copy/src"),),
+    )
+    result = await run_aider(job, aider=fake_aider(tmp_path / "bin"), timeout=60)
+    facts = seen(result.output)
+    read = facts["read"]
+    assert isinstance(read, dict)
+    assert read["fcc-skills.md"] == "# Vibe coding"
+    assert read["changer-notebook.md"] == "GOAL: x"
+    assert read["1-home-pc.png"].startswith("\ufffdPNG")
+    assert facts["pythonpath"] == "/copy/src"
+    assert sorted(p.name for p in project.iterdir()) == ["app.py"]
+
+
+async def copy_studio(make_studio, tmp_path, **settings):
+    from free_claude_code.studio.changer import Changer
+    from tests.studio.test_changer import make_app
+
+    studio, _ = make_studio([], STUDIO_AGENT_COMMANDS="auto", **settings)
+    studio._changer = Changer(
+        tmp_path / "changer",
+        source=make_app(tmp_path / "fcc"),
+        import_check="print('ok')",
+    )
+    copy = await studio.changer_fresh_copy()
+    changer = await studio._changer_agent()
+    return studio, copy, changer
+
+
+@pytest.mark.asyncio
+async def test_in_the_changer_copy_aider_gets_the_notebook_and_related_tests(
+    make_studio, tmp_path
+):
+    from free_claude_code.studio.models import ChangeProject
+
+    studio, copy, changer = await copy_studio(make_studio, tmp_path)
+    await studio._store.put(
+        ChangeProject(request="Make lab fizz louder", status="building")
+    )
+    folder = studio.workspace.directory(copy.id)
+    (folder / "tests" / "test_lab.py").write_text(
+        "from free_claude_code.studio.lab import mix\n\n"
+        "def test_mix():\n    assert mix() == 'fizz'\n"
+    )
+    job = await studio._aider_extras(
+        studio._aider_job(
+            folder, "Fix mix()", ("src/free_claude_code/studio/lab.py",), changer.model
+        ),
+        changer,
+        {"repo_map": True},
+        in_copy=True,
+    )
+    names = [name for name, _ in job.reading]
+    assert names == ["fcc-skills.md", "changer-notebook.md"]
+    notebook = dict(job.reading)["changer-notebook.md"]
+    assert "GOAL (the owner's words; keep to it): Make lab fizz louder" in notebook
+    assert "-m pytest -q -x" in job.test_command
+    assert job.test_command.endswith("tests/test_lab.py")
+    assert job.read_paths == ("tests/test_lab.py",)
+    assert job.map_tokens == 1024
+    assert dict(job.env)["PYTHONPATH"] == str(folder / "src")
+
+
+@pytest.mark.asyncio
+async def test_aider_in_the_copy_writes_what_it_changed_in_the_notebook(
+    make_studio, tmp_path, monkeypatch
+):
+    from free_claude_code.studio.models import ChangeProject
+
+    studio, copy, changer = await copy_studio(make_studio, tmp_path)
+    project = ChangeProject(request="Louder fizz", status="building")
+    await studio._store.put(project)
+    aider = fake_aider(tmp_path / "bin")
+    monkeypatch.setattr("free_claude_code.studio.service.find_aider", lambda: aider)
+    outcome = await studio._aider_tool(
+        ToolCall(
+            id="1",
+            name="aider",
+            arguments={
+                "task": "Make it louder",
+                "files": ["src/free_claude_code/studio/lab.py"],
+            },
+        ),
+        ToolContext(
+            agent_id=changer.id, chat_id="c", site_id=copy.id, agent_name="Changer"
+        ),
+    )
+    assert not outcome.failed, outcome.text
+    notes = await studio.change_notes(project.id)
+    assert notes[-1].author == "Aider"
+    assert "src/free_claude_code/studio/lab.py" in notes[-1].text
+
+
+@pytest.mark.asyncio
+async def test_architect_mode_keeps_both_models_on_one_address(make_studio, tmp_path):
+    studio, _ = make_studio([], STUDIO_AIDER_EDITOR_MODEL="local/qwen3-4b")
+    agent = await studio.create_agent(
+        name="Coder", role="coder", model="nvidia_nim/big"
+    )
+
+    async def extras(model: str):
+        return await studio._aider_extras(
+            studio._aider_job(tmp_path, "x", ("a.py",), model),
+            agent,
+            {"architect": True},
+            in_copy=False,
+        )
+
+    server = await extras("nvidia_nim/big")
+    # A local editor can't sit behind FCC's address with a server planner.
+    assert server.editor_model == "nvidia_nim/big"
+    local = await extras("local/qwen3-8b")
+    assert (local.model, local.editor_model) == ("qwen3-8b", "qwen3-4b")
+
+
+@pytest.mark.asyncio
+async def test_screenshots_need_a_vision_model_and_it_plans(make_studio, tmp_path):
+    from free_claude_code.studio.aider import AiderError
+
+    (tmp_path / "shot.png").write_bytes(b"png")
+    blind, _ = make_studio([])
+    agent = await blind.create_agent(name="Coder", role="coder", model="nvidia_nim/big")
+    base = blind._aider_job(tmp_path, "x", ("a.py",), "nvidia_nim/big")
+    with pytest.raises(AiderError, match="Vision Model"):
+        await blind._aider_extras(base, agent, {"images": ["shot.png"]}, in_copy=False)
+    seeing, _ = make_studio([], STUDIO_VISION_MODEL="nvidia_nim/vl")
+    job = await seeing._aider_extras(
+        base, agent, {"images": ["shot.png"]}, in_copy=False
+    )
+    assert (job.model, job.editor_model) == ("nvidia_nim/vl", "nvidia_nim/big")
+    assert job.pictures == ((tmp_path / "shot.png").resolve(),)
+    with pytest.raises(AiderError, match="picture file"):
+        await seeing._aider_extras(base, agent, {"images": ["../x.png"]}, in_copy=False)
+
+
+@pytest.mark.parametrize(
+    ("files", "wanted"),
+    [
+        ({"tests/test_a.py": "def test_a(): pass\n"}, "-m pytest -q -x"),
+        ({"tests/conftest.py": "import pytest\n"}, ""),
+        ({"test_b.py": "def test_b(): pass\n"}, "-m pytest -q -x"),
+        (
+            {"package.json": '{"scripts": {"test": "node test.js"}}'},
+            "npm test --silent",
+        ),
+        ({"package.json": '{"scripts": {}}'}, ""),
+        ({"index.html": "<h1>x</h1>"}, ""),
+    ],
+)
+def test_fcc_picks_the_projects_test_command(make_studio, tmp_path, files, wanted):
+    studio, _ = make_studio([])
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    command, reads, _ = studio._aider_tests(tmp_path, ["a.py"], in_copy=False)
+    assert (wanted in command) if wanted else command == ""
+    if "pytest" in command:
+        assert reads and all(name.endswith(".py") for name in reads)
+
+
+@pytest.mark.asyncio
+async def test_a_test_file_with_shell_characters_never_reaches_the_command(
+    make_studio, tmp_path
+):
+    studio, copy, _ = await copy_studio(make_studio, tmp_path)
+    folder = studio.workspace.directory(copy.id)
+    plain = folder / "tests" / "test_lab.py"
+    hostile = folder / "tests" / "test_a;touch pwned $(id).py"
+    for path in (plain, hostile):
+        path.write_text(
+            "from free_claude_code.studio.lab import mix\n\n"
+            "def test_mix():\n    assert mix()\n"
+        )
+    command, reads, skipped = studio._aider_tests(
+        folder,
+        ["src/free_claude_code/studio/lab.py", hostile.relative_to(folder).as_posix()],
+        in_copy=True,
+    )
+    assert "tests/test_lab.py" in command
+    assert ";" not in command and "$(" not in command and "pwned" not in command
+    assert reads == ("tests/test_lab.py",)
+    assert skipped == ("tests/test_a;touch pwned $(id).py",)
+
+
+@pytest.mark.asyncio
+async def test_skipped_test_files_are_named_in_the_notebook(make_studio, tmp_path):
+    from free_claude_code.studio.models import ChangeProject
+
+    studio, copy, changer = await copy_studio(make_studio, tmp_path)
+    project = ChangeProject(request="Louder fizz", status="building")
+    await studio._store.put(project)
+    folder = studio.workspace.directory(copy.id)
+    odd = folder / "tests" / "test_my$lab.py"
+    odd.write_text("from free_claude_code.studio.lab import mix\n")
+    await studio._aider_extras(
+        studio._aider_job(
+            folder,
+            "x",
+            ("src/free_claude_code/studio/lab.py", "tests/test_my$lab.py"),
+            changer.model,
+        ),
+        changer,
+        {},
+        in_copy=True,
+    )
+    notes = await studio.change_notes(project.id)
+    assert any("tests/test_my$lab.py" in n.text and n.author == "FCC" for n in notes)
+
+
+@pytest.mark.asyncio
+async def test_two_pictures_with_one_name_both_reach_aider(tmp_path):
+    from dataclasses import replace
+
+    project = tmp_path / "project"
+    (project / "a").mkdir(parents=True)
+    (project / "b").mkdir()
+    (project / "a" / "shot.png").write_bytes(b"first")
+    (project / "b" / "shot.png").write_bytes(b"second")
+    job = replace(
+        job_for(project, ("app.py",)),
+        pictures=(project / "a" / "shot.png", project / "b" / "shot.png"),
+    )
+    command = aider_command("aider", job, tmp_path / "scratch")
+    assert "--model-metadata-file" in command
+    result = await run_aider(job, aider=fake_aider(tmp_path / "bin"), timeout=60)
+    read = seen(result.output)["read"]
+    assert isinstance(read, dict)
+    assert read["1-shot.png"] == "first" and read["2-shot.png"] == "second"

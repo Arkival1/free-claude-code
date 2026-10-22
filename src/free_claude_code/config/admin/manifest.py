@@ -928,6 +928,41 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_AIDER_EDITOR_MODEL",
+        "Aider Editor Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_aider_editor_model",
+        description=(
+            "For Aider's architect mode: a cheaper model that writes the edits "
+            "while the agent's own model plans them (a local model when the "
+            "agent is on a local model; a server model otherwise). Empty: the "
+            "agent's model does both."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LIGHT_MODEL",
+        "Light Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_light_model",
+        description=(
+            "For agents added from a repo that ask for a light model (simple, "
+            "high-volume work): a cheap or local model. Empty: the Studio default."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_STRONG_MODEL",
+        "Strong Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_strong_model",
+        description=(
+            "For agents added from a repo that ask for a strong model (security, "
+            "architecture, hard reviews). Empty: the Studio default."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_CLASS_PASS_MARK",
         "Class Pass Mark",
         "studio",

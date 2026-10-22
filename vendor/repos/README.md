@@ -66,6 +66,7 @@ adds it back.
 | [AI4Finance-Foundation/FinRobot](https://github.com/AI4Finance-Foundation/FinRobot) | `2717499b8e` | Apache-2.0 | `AI4Finance-Foundation__FinRobot.zip` (0.28 MB) | FinRobot: finance agents (analysts, investment committee, reports) and 60 finance skills. |
 | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | `6b93fa0e25` | MIT | `crewAIInc__crewAI.zip` (0.69 MB) | crewAI: role-playing agent crews (researcher, analyst, planner, writer, editor) and its docs. |
 | [OpenHands/software-agent-sdk](https://github.com/OpenHands/software-agent-sdk) | `1cfba2117e` | MIT | `OpenHands__software-agent-sdk.zip` (0.04 MB) | OpenHands agent: the SDK where the OpenHands engineer's own prompt lives now. |
+| [wshobson/agents](https://github.com/wshobson/agents) | `0874a27b17` | MIT | `wshobson__agents.zip` (2.51 MB) | 202 coding agents with model tiers and 185 skills: debugging, review, tests, security, Python, JavaScript, UI. The Changer's helper team comes from here. |
 
 ## Left out, and why
 
@@ -93,6 +94,19 @@ Clone the repo into its own folder (don't run anything in it), keep the
 same parts, zip them under one top folder named `<repo>-<commit7>/`, and
 update `manifest.json` (commit, sha256, size) and `SHA256SUMS`.
 `tests/studio/test_starters.py` checks every row.
+
+## wshobson/agents: model tiers
+
+Each wshobson agent names the model it needs in its header (`model: haiku`,
+`sonnet` or `opus`). FCC reads that as a tier: light jobs get the **Light
+Model**, hard ones the **Strong Model** (Settings, Studio), and the rest the
+Studio default, so simple work doesn't spend a strong model's tokens. Its
+plugin hooks, tool folders and evals are left out (only the agents, skills,
+commands, plugin manifests, docs and licence are kept), and nothing in it
+runs. **Add the helper team** on the Changer page adds eight lean agents from
+it (debugger, error detective, test automator, security auditor, Python and
+JavaScript experts, UI designer, search specialist) for the Changer to hand
+parts to.
 
 ## Agent cards FCC wrote
 

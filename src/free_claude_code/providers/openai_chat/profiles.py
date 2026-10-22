@@ -674,6 +674,21 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
         ),
         ChatTemplateReasoning(field="enable_thinking"),
     ),
+    "freellmapi": OpenAIChatProfile(
+        _policy(
+            "FreeLLMAPI",
+            ReasoningReplayMode.REASONING_CONTENT,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+        NO_REASONING,
+        model_listing=OpenAIModelListing(
+            path="/models",
+            query_params=(("available", "true"),),
+            # Its router picks a free model for these: any, for code, the
+            # strongest, or the quickest one that has quota left.
+            additional_model_ids=("auto", "auto:coding", "auto:smartest", "auto:fast"),
+        ),
+    ),
     "llm7": OpenAIChatProfile(
         _policy(
             "LLM7",

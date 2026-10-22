@@ -1415,6 +1415,25 @@ its model on its agent page) that works in a copy of FCC's own files, the
   review** when it builds, **debugging** when it fixes; its reviewers follow
   **code review** and can run tests and try pages to confirm a finding.
 
+**Team notebook.** Everyone working on an update (the Changer, its Planner and
+reviewers, helpers, team agents and Aider) shares one notebook that FCC keeps,
+not the model: the goal in your words pinned on top, the plan and which
+milestone is on now, and short notes of what each one found, decided and
+finished (FCC also writes one after every step and every check). Every agent
+reads it before each step, so nothing is looked up twice and a switch of model
+or API (NVIDIA to FreeLLMAPI, say) loses nothing. Lessons can be kept for later
+updates. Add your own note from the Changer page; **Use for the whole team**
+moves all four Changer agents to one model at once. The HQ shows the update:
+its goal, the milestone, who is working on it now, and the newest notes.
+
+**Helper team.** wshobson/agents (202 coding agents, MIT) comes with FCC,
+switched off. **Add the helper team** on the Changer page turns it on and adds
+eight lean agents (debugger, error detective, test automator, security auditor,
+Python and JavaScript experts, UI designer, search specialist) the Changer can
+hand parts to. Each agent asks for a light, everyday or strong model; FCC gives
+it the **Light Model** or **Strong Model** (Settings, Studio) or the default, so
+simple jobs don't spend a strong model's tokens.
+
 **Aider helper.** If you install [Aider](https://aider.chat) (once:
 `uv tool install aider-chat`), the Changer, Builder, Coder and Developer can
 hand it a focused coding job with the **aider** tool. FCC doesn't bundle
@@ -1423,7 +1442,23 @@ itself, after the same Ask/Auto approval as any command (Agents Can Run
 Commands). It talks to the agent's own model through FCC's own address (a
 local model at your model server), so it never sees a provider key. Git,
 commits, shell commands, link reading, analytics and update checks are off,
-and its history files stay outside the project.
+and its history files stay outside the project. Each job also gets FCC's skills
+(and, in the Changer's copy, the team notebook) as read-only guides; the tests
+FCC picks for the files (related tests in the copy, pytest or npm test in a
+project) run after its edits and it fixes failures (three tries at most); its
+own syntax check runs too. Agents can ask for **architect** mode (one model
+plans, the **Aider Editor Model** writes), a **project map** for big codebases
+(about 1,000 tokens a request), and **screenshots** a Vision Model looks at.
+
+**FreeLLMAPI.** If you run [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi)
+on your PC (it spreads requests over free tiers of many providers), add its
+unified key as **FreeLLMAPI** in Admin, Providers (`FREELLMAPI_API_KEY`; its
+address is `http://localhost:3001/v1` unless you change `FREELLMAPI_BASE_URL`).
+Then use models like `freellmapi/auto`, `freellmapi/auto:coding` or
+`freellmapi/auto:smartest` for any agent or the whole Changer team. FCC doesn't
+bundle it. It sends your prompts to outside providers, so FCC treats it as a
+server model (your private memory stays away from it), and its answers vary
+with which free model it picks.
 
 **Seeing pages.** The Builder, Designer, Coder, Developer and Tester also get
 **look_page**: PC and phone screenshots of a project page go to the Vision

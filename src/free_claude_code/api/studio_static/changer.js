@@ -105,6 +105,7 @@
         introCard(),
         projectOpen() ? projectCard() : askCard(),
         data.project && !projectOpen() ? projectCard() : null,
+        notebookCard(),
         changesCard(),
         shotsCard(),
         updatesCard(),
@@ -121,6 +122,7 @@
       el("p", {
         text: "Tell it what to change or fix in FCC. It works on a copy of FCC's own files, never the app you're using; it checks its work, takes screenshots, and makes an update zip you install when you want (close FCC, unzip over your fcc folder, start FCC). Every update comes with a backup zip to undo it.",
       }),
+      teamModelForm(),
       el("p", { class: "muted" }, [
         `Model: ${data.agent.model} · `,
         el("a", { href: `#agent/${data.agent.id}`, text: "change the Changer's model" }),
@@ -133,6 +135,87 @@
             confirm: "Start over? Changes in the copy that aren't in an update zip are lost.",
             busy: "Copying…",
           })
+        : null,
+    ]);
+  }
+
+  // One model for the whole Changer team, e.g. switching from NVIDIA to a
+  // FreeLLMAPI router on this PC; the team notebook keeps its memory.
+  function teamModelForm() {
+    const input = el("input", {
+      type: "text",
+      value: data.agent.model,
+      maxlength: 200,
+      "aria-label": "Model for the whole Changer team",
+      placeholder: "e.g. freellmapi/auto:coding or nvidia_nim/…",
+    });
+    return el("div", { class: "changer-note-form" }, [
+      el("label", { class: "muted", text: "Model for the whole Changer team (Changer, Planner, Reviewer, Security). Its notebook stays when you switch." }),
+      input,
+      action("Use for the whole team", async () => {
+        const done = await ctx.post("/studio/api/changer/team-model", { model: input.value.trim() });
+        ctx.notify(`The Changer team now uses ${done.model}.`);
+      }),
+    ]);
+  }
+
+  // The notebook everyone on the update shares (the Changer, its reviewers,
+  // helpers, team agents and Aider): FCC keeps it, so it holds when the
+  // model or API changes. The owner can add a note for the whole team.
+  function notebookCard() {
+    const notes = (data.project && data.project.notebook) || [];
+    const lessons = data.lessons || [];
+    const input = el("textarea", {
+      rows: 2,
+      maxlength: 600,
+      placeholder: "A note for the whole team, e.g. keep the old button colours",
+      "aria-label": "Note for the Changer team",
+    });
+    const keep = el("input", { type: "checkbox" });
+    const noteLine = (note) =>
+      el("li", { class: `changer-note ${note.kind}` }, [
+        el("span", { class: "pill", text: note.kind }),
+        el("strong", { text: ` ${note.author}: ` }),
+        el("span", { text: note.text }),
+      ]);
+    return card("Team notebook", [
+      el("p", {
+        class: "muted",
+        text: "Everyone working on the update reads this before each step and writes what they found, decided and finished, so nothing is done twice and a model switch loses nothing.",
+      }),
+      notes.length
+        ? el("ol", { class: "changer-notebook" }, notes.slice().reverse().map(noteLine))
+        : el("p", { class: "muted", text: "No notes yet: they appear as the team works." }),
+      el("div", { class: "changer-note-form" }, [
+        input,
+        el("label", { class: "muted" }, [keep, " Keep as a lesson for later updates"]),
+        action("Add note", async () => {
+          const text = input.value.trim();
+          if (!text) throw new Error("Write the note first.");
+          await ctx.post("/studio/api/changer/notes", { text, lesson: keep.checked });
+        }),
+      ]),
+      el("p", { class: "muted" }, [
+        "Helper team: eight lean agents from wshobson/agents (debugger, error detective, test automator, security auditor, Python and JavaScript experts, UI designer, search specialist) the Changer can hand parts to. Each gets the Light, Strong or default model its job needs. ",
+        action("Add the helper team", async () => {
+          const done = await ctx.post("/studio/api/changer/helpers");
+          ctx.notify(done.added.length ? `Added: ${done.added.join(", ")}` : "The helper team is already on the team.");
+        }, { busy: "Adding…" }),
+      ]),
+      lessons.length
+        ? el("details", {}, [
+            el("summary", { text: `Lessons kept for later updates (${lessons.length})` }),
+            el(
+              "ul",
+              { class: "changer-notebook" },
+              lessons.map((note) =>
+                el("li", { class: "changer-note lesson" }, [
+                  el("span", { text: `${note.author}: ${note.text} ` }),
+                  action("Forget", () => ctx.api(`/studio/api/changer/lessons/${note.id}`, { method: "DELETE" })),
+                ])
+              )
+            ),
+          ])
         : null,
     ]);
   }

@@ -354,6 +354,17 @@ class Settings(BaseModel):
         validation_alias="LM_STUDIO_BASE_URL",
     )
 
+    # ==================== FreeLLMAPI Config ====================
+    # A router the owner runs on this PC that spreads requests over free
+    # tiers; it calls outside providers, so it is not a local model.
+    freellmapi_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="FREELLMAPI_API_KEY"
+    )
+    freellmapi_base_url: NonEmptyString = Field(
+        default="http://localhost:3001/v1",
+        validation_alias="FREELLMAPI_BASE_URL",
+    )
+
     # ==================== Llama.cpp Config ====================
     llamacpp_base_url: NonEmptyString = Field(
         default="http://localhost:8080/v1",
@@ -507,6 +518,9 @@ class Settings(BaseModel):
     )
     llm7_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="LLM7_PROXY"
+    )
+    freellmapi_proxy: OptionalNonEmptyString = Field(
+        default=None, validation_alias="FREELLMAPI_PROXY"
     )
     lightning_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="LIGHTNING_PROXY"
@@ -760,6 +774,15 @@ class Settings(BaseModel):
     )
     studio_vision_model: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_VISION_MODEL"
+    )
+    studio_aider_editor_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_AIDER_EDITOR_MODEL"
+    )
+    studio_light_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_LIGHT_MODEL"
+    )
+    studio_strong_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_STRONG_MODEL"
     )
     studio_class_pass_mark: float = Field(
         default=0.7, ge=0.0, le=1.0, validation_alias="STUDIO_CLASS_PASS_MARK"
