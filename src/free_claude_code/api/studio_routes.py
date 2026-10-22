@@ -46,6 +46,7 @@ from free_claude_code.studio.farm.library import (
     kind_of,
 )
 from free_claude_code.studio.file_text import MAX_UPLOAD, read_file_text
+from free_claude_code.studio.free_models import free_services
 from free_claude_code.studio.ideas import MAX_IDEA_VIDEO_BYTES, IdeaError
 from free_claude_code.studio.lab.sim import LabError
 from free_claude_code.studio.llm import ChatMessage
@@ -1433,6 +1434,16 @@ async def _server_models(services: ApiServices) -> list[str]:
     if settings.studio_default_model:
         configured.add(settings.studio_default_model)
     return sorted({info.model_id for info in infos} | configured)
+
+
+@router.get("/studio/api/models/free")
+async def free_models(
+    services: ApiServices = Depends(get_services),
+    _: None = Access,
+) -> JsonObject:
+    """The free AI services, ready to pick as a brain or how to set them up."""
+    settings = services.requests.current_settings()
+    return {"services": free_services(settings, await _server_models(services))}
 
 
 @router.get("/studio/api/hq")

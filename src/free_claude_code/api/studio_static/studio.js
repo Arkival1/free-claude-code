@@ -1308,6 +1308,53 @@
     ]);
   }
 
+  // The free AI services (FreeLLMAPI on this PC, OpenRouter's free models,
+  // NVIDIA, Groq, Gemini, Mistral, Cerebras): what's ready to pick, and for
+  // the rest where to get a free key and where to paste it.
+  function freeServicesBox(onUse) {
+    const box = el("div", { class: "stack free-services" }, [
+      el("p", { class: "muted", text: "Looking for free AI services…" }),
+    ]);
+    api("/studio/api/models/free")
+      .then(({ services }) => {
+        box.replaceChildren(
+          ...services.map((service) =>
+            el("div", { class: `list-item free-service ${service.ready ? "ready" : "unset"}` }, [
+              el("div", { class: "grow" }, [
+                el("strong", { text: service.name }),
+                el("span", { class: `pill ${service.ready ? "good" : "muted"}`, text: service.ready ? "Ready" : "Needs a key" }),
+                el("p", { class: "muted small", text: service.about }),
+                service.ready
+                  ? el(
+                      "div",
+                      { class: "row wrap" },
+                      service.models.length
+                        ? service.models.map((model) =>
+                            el("button", {
+                              class: "secondary small",
+                              type: "button",
+                              text: model.id.slice(service.id.length + 1),
+                              title: model.note || model.id,
+                              "aria-label": `Use ${model.id}`,
+                              onclick: () => onUse(model.id),
+                            })
+                          )
+                        : [el("span", { class: "muted small", text: "Its models show here once FCC has listed them (Admin, Models, Refresh)." })]
+                    )
+                  : el("p", { class: "muted small" }, [
+                      el("a", { href: service.key_url, target: "_blank", rel: "noopener", text: "Get a free key" }),
+                      ` · then ${service.setup} `,
+                      el("a", { href: "/admin", text: "Open Admin" }),
+                    ]),
+              ]),
+            ])
+          )
+        );
+      })
+      .catch((error) => box.replaceChildren(el("p", { class: "muted", text: error.message })));
+    return box;
+  }
+
   // Pick the model the main AI (or every agent) thinks with, from the models
   // on this PC, or from a .gguf file chosen in a normal file window.
   function openBrainPicker(mainName, onDone) {
@@ -1396,6 +1443,9 @@
         text: "Pick a model on this PC. It runs in LM Studio, so nothing leaves your computer.",
       }),
       list,
+      el("h3", { text: "Or a free AI service" }),
+      el("p", { class: "muted small", text: "These think on outside servers, so your private memory stays on this PC." }),
+      freeServicesBox((model) => use(model)),
       el("label", { class: "check" }, [everyone, "Use it for every agent too"]),
       el("div", { class: "row" }, [
         find,
@@ -1422,12 +1472,14 @@
       return;
     }
     const localModels = (data.local.models || []).filter((model) => !/embed/i.test(model));
-    const serverModels = data.server || [];
+    const routerModels = ["freellmapi/auto", "freellmapi/auto:coding", "freellmapi/auto:smartest", "freellmapi/auto:fast"];
+    const serverModels = (data.server || []).filter((model) => !routerModels.includes(model));
     const label = (model) => model.replace(/^local\//, "");
     const pickers = new Map();
+    let lastPicked = null;
     const status = el("p", { class: "muted", role: "status" });
     const picker = (row) => {
-      const known = new Set([...localModels, ...serverModels]);
+      const known = new Set([...localModels, ...serverModels, ...routerModels]);
       // Server models grouped by provider (NVIDIA NIM, OpenRouter, …), so a
       // list of 80 models from one key is easy to scan.
       const byProvider = new Map();
@@ -1438,6 +1490,7 @@
       }
       const groups = [
         el("optgroup", { label: "On this PC (LM Studio)" }, localModels.map((model) => el("option", { value: model, text: label(model) }))),
+        el("optgroup", { label: "Free: FreeLLMAPI on this PC" }, routerModels.map((model) => el("option", { value: model, text: model.slice(11) }))),
         ...[...byProvider.entries()].map(([provider, models]) =>
           el("optgroup", { label: `Server: ${provider} (${models.length})` }, models.map((model) => el("option", { value: model, text: model.slice(provider.length + 1) })))
         ),
@@ -1445,6 +1498,10 @@
       if (!known.has(row.model)) groups.unshift(el("option", { value: row.model, text: `${label(row.model)} (not found)` }));
       const select = el("select", { "aria-label": `Model for ${row.name}` }, groups);
       select.value = row.model;
+      // A free service's button below fills in the agent last tapped.
+      select.addEventListener("focus", () => {
+        lastPicked = { select, name: row.name };
+      });
       pickers.set(row.id, select);
       return select;
     };
@@ -1563,6 +1620,22 @@
         : null,
       ...rows,
       advice,
+      el("details", {}, [
+        el("summary", { text: "Free AI services: which are ready, and how to add the rest" }),
+        freeServicesBox((model) => {
+          if (!lastPicked) {
+            status.textContent = "Tap an agent's model list above first, then press the free model again.";
+            return;
+          }
+          const { select, name } = lastPicked;
+          if (![...select.options].some((option) => option.value === model)) {
+            select.prepend(el("option", { value: model, text: model }));
+          }
+          select.value = model;
+          explain();
+          status.textContent = `${name} will use ${model}. Press Save to keep it.`;
+        }),
+      ]),
       el("div", { class: "row" }, [suggest, save]),
       status,
     ]);
@@ -7696,6 +7769,10 @@
     const list = el("datalist", { id: "model-list" }, [
       ...data.local.models.map((model) => el("option", { value: model, label: "local" })),
       ...data.server.map((model) => el("option", { value: model, label: "server" })),
+      ...["auto", "auto:coding", "auto:smartest", "auto:fast"]
+        .map((name) => `freellmapi/${name}`)
+        .filter((model) => !data.server.includes(model))
+        .map((model) => el("option", { value: model, label: "free: FreeLLMAPI on this PC" })),
     ]);
     document.getElementById("model-list")?.remove();
     document.body.append(list);

@@ -1450,6 +1450,12 @@ own syntax check runs too. Agents can ask for **architect** mode (one model
 plans, the **Aider Editor Model** writes), a **project map** for big codebases
 (about 1,000 tokens a request), and **screenshots** a Vision Model looks at.
 
+**Free AI services in the brain pickers.** Choose brain and Team brains list
+the free services: FreeLLMAPI's choices (`auto`, `auto:coding`, `auto:smartest`,
+`auto:fast`) are always there, OpenRouter shows its free models, and NVIDIA,
+Groq, Gemini, Mistral and Cerebras show their models once they have a key.
+A service without a key shows a **Get a free key** link and where to paste it.
+
 **FreeLLMAPI.** If you run [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi)
 on your PC (it spreads requests over free tiers of many providers), add its
 unified key as **FreeLLMAPI** in Admin, Providers (`FREELLMAPI_API_KEY`; its
