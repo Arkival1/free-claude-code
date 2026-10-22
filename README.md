@@ -838,7 +838,12 @@ pictures, motion, accessibility, speed and real content) goes to the Builder
 on every job, and the **app developer engineer** (a short spec, clear
 structure, every error handled, safe input and output, real tests, a README)
 goes to the Coder, Developer and Tester; each gets the other too when the job
-calls for it. The Builder's **polish_check** holds pages to the design skill
+calls for it. FCC skills also carry deeper web design guides the Builder can
+read when a site needs them: **impeccable**, **taste-skill**
+(design-taste-frontend), a redesign guide, four style guides (minimalist,
+high-end, brutalist, GPT taste) and Vercel's **web design guidelines**
+checklist. A guide longer than 16,000 characters says where it was cut and
+which line to read on from. The Builder's **polish_check** holds pages to the design skill
 (one h1, headings in order, page language, safe new-tab links, link text,
 reduced motion, and more). The **Active plug-ins** card at the top of the
 More page lists everything switched on, what each does, and which agents use

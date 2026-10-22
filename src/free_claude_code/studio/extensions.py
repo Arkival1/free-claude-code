@@ -857,7 +857,14 @@ class ExtensionLibrary:
             if around:
                 start = max(0, around - 40)
                 return "\n".join(lines[start : start + 120])
-            return "\n".join(lines)[:MAX_SKILL_CHARS]
+            whole = "\n".join(lines)
+            if len(whole) <= MAX_SKILL_CHARS:
+                return whole
+            line = whole[:MAX_SKILL_CHARS].count("\n") + 1
+            return (
+                f"{whole[:MAX_SKILL_CHARS]}\n\n[Cut here: {MAX_SKILL_CHARS:,} of "
+                f"{len(whole):,} characters shown. Read on with line {line}.]"
+            )
 
         return await anyio.to_thread.run_sync(work)
 
@@ -870,6 +877,20 @@ class ExtensionLibrary:
             text = path.read_text(encoding="utf-8", errors="replace")
             limit = README_SKILL_CHARS if skill.kind == "readme" else MAX_SKILL_CHARS
             _, body = front_matter(text)
-            return body[:limit]
+            if len(body) <= limit:
+                return body
+            # Say it was cut and where the rest is, so a long guide isn't
+            # followed as if its first part were all of it.
+            shown = body[:limit]
+            line = text[: len(text) - len(body) + limit].count("\n") + 1
+            files = home / "files"
+            if files not in path.parents:
+                return f"{shown}\n\n[Cut here: {limit:,} of {len(body):,} characters.]"
+            file = path.relative_to(files).as_posix()
+            return (
+                f"{shown}\n\n[Cut here: {limit:,} of {len(body):,} characters shown. "
+                f'Read on with the skill tool: repo "{extension.name}", file '
+                f'"{file}", line {line}.]'
+            )
 
         return await anyio.to_thread.run_sync(work)

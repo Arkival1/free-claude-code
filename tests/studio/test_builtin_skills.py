@@ -9,7 +9,17 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun
 from free_claude_code.studio.polish import polish_notes
 
-SKILL_COUNT = 6
+SKILL_COUNT = 14
+DESIGN_SKILLS = {
+    "design-taste-frontend",
+    "impeccable",
+    "redesign-existing-projects",
+    "minimalist-ui",
+    "high-end-visual-design",
+    "industrial-brutalist-ui",
+    "gpt-taste",
+    "web-design-guidelines",
+}
 
 
 @pytest.mark.asyncio
@@ -19,14 +29,18 @@ async def test_the_skills_install_refresh_and_keep_the_owners_switch(make_studio
     built = await library.install_builtin()
     assert built is not None and built.origin == "builtin" and built.enabled
     names = {skill.name for skill in built.skills}
-    assert names == {
-        "web-design-engineer",
-        "app-developer-engineer",
-        "vibe-coding",
-        "debugging",
-        "visual-review",
-        "code-review",
-    }
+    assert (
+        names
+        == {
+            "web-design-engineer",
+            "app-developer-engineer",
+            "vibe-coding",
+            "debugging",
+            "visual-review",
+            "code-review",
+        }
+        | DESIGN_SKILLS
+    )
     built.enabled = False
     await library.save(built)
     again = await library.install_builtin()
@@ -293,3 +307,62 @@ async def test_a_broken_image_search_says_to_draw_instead(make_studio):
         ToolContext(agent_id="a", chat_id="c", site_id=site.id),
     )
     assert outcome.failed and IMAGES_DOWN_NOTE in outcome.text
+
+
+@pytest.mark.asyncio
+async def test_the_web_design_skills_come_with_their_licences_and_guides(
+    make_studio,
+):
+    studio, _ = make_studio([])
+    library = studio._extensions
+    built = await library.install_builtin()
+    assert built is not None
+    web = next(skill for skill in built.skills if skill.name == "web-design-engineer")
+    text = await library.skill_text(built, web)
+    for name in DESIGN_SKILLS:
+        assert f"`{name}`" in text, name
+    files = library._folder / BUILTIN_ID / "files"
+    for folder in ("impeccable", "taste-skill", "soft-skill", "web-design-guidelines"):
+        assert any((files / folder).glob("LICENSE*")), folder
+    assert (files / "impeccable" / "NOTICE.md").is_file()
+    guide = await library.read_file(
+        "FCC skills", "impeccable/reference/polish.md", around=0
+    )
+    assert guide.strip()
+    rules = await library.read_file(
+        "FCC skills", "web-design-guidelines/guidelines.md", around=0
+    )
+    assert rules.strip()
+    assert not list(files.rglob("*.sh")) and not list(files.rglob("*.js"))
+
+
+@pytest.mark.asyncio
+async def test_a_long_skill_says_where_it_was_cut_and_the_rest_can_be_read(
+    make_studio,
+):
+    studio, _ = make_studio([])
+    library = studio._extensions
+    built = await library.install_builtin()
+    assert built is not None
+    taste = next(s for s in built.skills if s.name == "design-taste-frontend")
+    text = await library.skill_text(built, taste)
+    assert "[Cut here: 16,000 of " in text
+    assert 'repo "FCC skills", file "taste-skill/SKILL.md", line ' in text
+    line = int(text.rsplit("line ", 1)[1].rstrip(".]"))
+    rest = await library.read_file("FCC skills", "taste-skill/SKILL.md", around=line)
+    after = text.split("\n\n[Cut here", 1)[0][-60:].strip()
+    assert after.splitlines()[-1] in rest
+    whole = await library.read_file("FCC skills", "taste-skill/SKILL.md")
+    assert "characters shown. Read on with line " in whole
+    short = next(s for s in built.skills if s.name == "web-design-engineer")
+    assert "[Cut here" not in await library.skill_text(built, short)
+
+
+def test_impeccable_never_asks_to_run_its_missing_launcher():
+    from free_claude_code.studio.extensions import BUILTIN_SKILLS
+
+    folder = BUILTIN_SKILLS / "impeccable"
+    assert not (folder / "scripts").exists()
+    text = (folder / "SKILL.md").read_text(encoding="utf-8")
+    assert "is skipped too: don't try to run it" in text
+    assert '1. Run `"${CLAUDE_SKILL_DIR}/scripts/impeccable" context`' not in text

@@ -55,3 +55,11 @@ Work in this order. Each step has a rule you can check.
     `look_page` (PC and phone screenshots the Vision Model judges), fix what
     it shows and look again (3 rounds at most); then say what you built and
     how to open it.
+
+**Go deeper when the site needs it** (read one with the `skill` tool, by
+name): `design-taste-frontend` (a design direction that doesn't look
+templated), `impeccable` (shape, audit, polish, typography, colour, motion;
+its guides are in `impeccable/reference/`), `redesign-existing-projects`
+(upgrading a site that already exists), a style to match the mood
+(`minimalist-ui`, `high-end-visual-design`, `industrial-brutalist-ui`,
+`gpt-taste`), and `web-design-guidelines` to check the finished pages.

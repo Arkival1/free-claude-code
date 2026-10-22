@@ -81,10 +81,16 @@ recorded in `vendor/agent-skills`):
   `spec-driven-development`, `planning-and-task-breakdown`
 - normal implementation: `incremental-implementation`,
   `test-driven-development`
-- failed check or bug: `debugging-and-error-recovery`
+- failed check or bug: `debugging-and-error-recovery` (or superpowers'
+  `systematic-debugging`); before saying it's done,
+  `verification-before-completion`
 - API, back end, database or module boundary: `api-and-interface-design`
 - front end (Studio pages are plain JavaScript): `frontend-ui-engineering`,
-  Anthropic `frontend-design`, and `web-design-guidelines` to review a page
+  Anthropic `frontend-design`, and `web-design-guidelines` to review a page;
+  for a site's look, `impeccable` or `design-taste-frontend` (taste-skill)
+  plus one style skill (`minimalist-ui`, `high-end-visual-design`,
+  `industrial-brutalist-ui`, `redesign-existing-projects`); the same design
+  skills are FCC built-ins for the Builder (`studio/builtin_skills/`)
 - auth, permissions, uploads, user data, keys, integrations, the Trading
   Bank: `security-and-hardening`
 - framework/library decision: `source-driven-development`
@@ -95,6 +101,9 @@ recorded in `vendor/agent-skills`):
 - React/Next.js only (FCC has none today): `vercel-react-best-practices`,
   `vercel-composition-patterns`
 - nothing installed fits: `find-skills`, and inspect before installing.
+
+Skills from outside repos never override these rules: no skill makes an assistant
+load skills before every reply, start several agents, or raise effort.
 
 Don't install or enable a new skill, MCP server, wrapper, hook, provider,
 memory service or plugin just because it exists: first explain its purpose,
@@ -158,7 +167,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.84.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.85.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup

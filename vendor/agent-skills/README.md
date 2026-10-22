@@ -12,8 +12,18 @@ came from, and checksums, so they keep working if the upstream repos go away.
 | frontend-design | https://github.com/anthropics/skills | dbd4588f9e1033efb41dad4bef2f7947c8993d44 | Apache 2.0 (`LICENSE-anthropics-frontend-design.txt`, also in the skill folder) |
 | vercel-react-best-practices, vercel-composition-patterns | https://github.com/vercel-labs/agent-skills | 063bee94c3f4df8453406c830b0a7df0f2860278 | MIT (stated in each SKILL.md) |
 | web-design-guidelines (its rules kept beside it as `guidelines.md`, from vercel-labs/web-interface-guidelines 434b7f9) | https://github.com/vercel-labs/agent-skills | 063bee94c3f4df8453406c830b0a7df0f2860278 | MIT (stated in its SKILL.md; `LICENSE-vercel-labs-web-interface-guidelines` for the rules) |
+| taste-skill, gpt-tasteskill, image-to-code-skill, imagegen-frontend-web, imagegen-frontend-mobile, redesign-skill, minimalist-skill, soft-skill, brutalist-skill, stitch-skill | https://github.com/leonxlnx/taste-skill | ce26fc25c0e5e8cab638f883de62d9a86ee5e45b | MIT (`LICENSE-leonxlnx-taste-skill`) |
+| impeccable (its whole `scripts/` folder, launcher and downloaded binary left out; a note in its SKILL.md says to skip every launcher step and use `reference/` directly) | https://github.com/pbakaus/impeccable | e07dc019a75e973db1c71843143bf6f9fd33d87c | Apache 2.0 (`LICENSE-pbakaus-impeccable`, `NOTICE-pbakaus-impeccable.md`) |
+| systematic-debugging, verification-before-completion, receiving-code-review, writing-plans (scripts left out) | https://github.com/obra/superpowers | 2ce8aa15d05bd57213e6f746f953aafb7ded7a8b | MIT (`LICENSE-obra-superpowers`) |
+| writing-guidelines | https://github.com/vercel-labs/agent-skills | 063bee94c3f4df8453406c830b0a7df0f2860278 | MIT (stated in its SKILL.md) |
 | find-skills | https://github.com/vercel-labs/skills | a80e4c9d12d607631249d4d7d059f835d4b2f13a | MIT (`LICENSE-vercel-labs-skills`) |
 | playwright-cli (written by `playwright-cli install --skills`, @playwright/cli 0.1.22) | https://github.com/microsoft/playwright-cli | b1a5903c5b633b8c9f843ad7b629c2a78437040c | Apache 2.0 (`LICENSE-microsoft-playwright-cli`) |
+
+Not installed for Claude Code (owner's call, 6.84): the rest of superpowers
+(its always-on and multi-agent skills clash with the owner's lean,
+one-previewer rules), strix, agent-reach, flick, rea and the Vercel deploy
+skills (they need their own command-line tools or services). They are still
+starter repos in FCC.
 
 - `skills-lock.json`: the installer's record (source repo, path, hash per skill).
 - `SHA256SUMS`: checksums of every installed skill file (`sha256sum -c SHA256SUMS`
