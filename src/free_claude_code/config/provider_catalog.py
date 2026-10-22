@@ -83,6 +83,7 @@ POOLSIDE_DEFAULT_BASE = "https://inference.poolside.ai/v1"
 # LLM7.io OpenAI-compatible Chat Completions API.
 LLM7_DEFAULT_BASE = "https://api.llm7.io/v1"
 FREELLMAPI_DEFAULT_BASE = "http://localhost:3001/v1"
+OMNIROUTE_DEFAULT_BASE = "http://localhost:20128/v1"
 # Lightning AI Model APIs OpenAI-compatible Chat Completions gateway.
 LIGHTNING_DEFAULT_BASE = "https://lightning.ai/api/v1"
 # Experiential Labs OpenAI-compatible Chat Completions gateway.
@@ -703,6 +704,18 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         default_base_url=FREELLMAPI_DEFAULT_BASE,
         base_url_attr="freellmapi_base_url",
         proxy_attr="freellmapi_proxy",
+    ),
+    "omniroute": ProviderDescriptor(
+        provider_id="omniroute",
+        display_name="OmniRoute (on this PC)",
+        website_url="https://github.com/cheaper-inference/OmniRoute",
+        logo_filename="omniroute.svg",
+        credential_env="OMNIROUTE_API_KEY",
+        credential_url="http://localhost:20128",
+        credential_attr="omniroute_api_key",
+        default_base_url=OMNIROUTE_DEFAULT_BASE,
+        base_url_attr="omniroute_base_url",
+        proxy_attr="omniroute_proxy",
     ),
     "lmstudio": ProviderDescriptor(
         provider_id="lmstudio",

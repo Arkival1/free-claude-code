@@ -1450,10 +1450,24 @@ own syntax check runs too. Agents can ask for **architect** mode (one model
 plans, the **Aider Editor Model** writes), a **project map** for big codebases
 (about 1,000 tokens a request), and **screenshots** a Vision Model looks at.
 
+**OmniRoute.** Like FreeLLMAPI, if you run
+[OmniRoute](https://github.com/cheaper-inference/OmniRoute) on your PC, paste its
+key as **OmniRoute** in Admin, Providers (`OMNIROUTE_API_KEY`; address
+`http://localhost:20128/v1`, or set `OMNIROUTE_BASE_URL`) and pick
+`omniroute/auto`. FCC doesn't bundle it and treats it as a server model. Don't
+run Headroom in front of it until their compatibility is checked.
+
+**More starter repos.** FCC now also ships agent-reach, Vercel's agent skills
+(web design guidelines), awesome-design-md, playwright-cli, awesome-free-llm-apis,
+superpowers, impeccable, flick and rea, switched off like the others: turn them
+on from the More page and every agent can search their skills and guides.
+
 **Free AI services in the brain pickers.** Choose brain and Team brains list
 the free services: FreeLLMAPI's choices (`auto`, `auto:coding`, `auto:smartest`,
-`auto:fast`) are always there, OpenRouter shows its free models, and NVIDIA,
-Groq, Gemini, Mistral and Cerebras show their models once they have a key.
+`auto:fast`) and OmniRoute's `auto` are always there, OpenRouter and Kilo show
+their free models, and NVIDIA, Groq, Gemini, Mistral, Cerebras, Cohere, Z.ai,
+Cloudflare, Hugging Face, LLM7 and Ollama Cloud show their models once they have
+a key.
 A service without a key shows a **Get a free key** link and where to paste it.
 
 **FreeLLMAPI.** If you run [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi)

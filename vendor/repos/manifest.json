@@ -356,6 +356,96 @@
       "file": "wshobson__agents.zip",
       "sha256": "982ddbc7412ddb4022f2693e013934c590bb9e89a4fed31deacdb4e74ca02bcf",
       "size": 2511147
+    },
+    {
+      "owner": "Panniantong",
+      "repo": "agent-reach",
+      "commit": "94f06c1969dfc1834001269d79d3ad0972d9dee6",
+      "licence": "MIT",
+      "about": "Agent Reach: give agents the internet (web, social, video sites) with a setup and health-check skill.",
+      "file": "Panniantong__agent-reach.zip",
+      "sha256": "9d7ffb982f83e7a83017882b26ab11599aa251316d6c6a99de0dd6332609609d",
+      "size": 74541
+    },
+    {
+      "owner": "vercel-labs",
+      "repo": "agent-skills",
+      "commit": "063bee94c3f4df8453406c830b0a7df0f2860278",
+      "licence": "MIT (stated in its README and each SKILL.md)",
+      "about": "Vercel's agent skills: web design guidelines, React and Next.js performance, composition patterns.",
+      "file": "vercel-labs__agent-skills.zip",
+      "sha256": "6e09cfcf13ab85e3f38f4b434ccecf8fcd262160679879e24e66bee278e62ca8",
+      "size": 583864
+    },
+    {
+      "owner": "VoltAgent",
+      "repo": "awesome-design-md",
+      "commit": "3b605329240ce735b510037cca322f1831fdd7f8",
+      "licence": "MIT",
+      "about": "DESIGN.md files analysed from real sites: copy one and say 'build a page that looks like this'.",
+      "file": "VoltAgent__awesome-design-md.zip",
+      "sha256": "10a32f4a01a23c0a6cc4d8df9169dc03be17ec1e80b09f261e78809e13ee3373",
+      "size": 787305
+    },
+    {
+      "owner": "microsoft",
+      "repo": "playwright-cli",
+      "commit": "b1a5903c5b633b8c9f843ad7b629c2a78437040c",
+      "licence": "Apache-2.0",
+      "about": "Playwright CLI skills: drive a real browser to test pages, token-efficiently.",
+      "file": "microsoft__playwright-cli.zip",
+      "sha256": "2290a4380948279674d9b86746a2ec94297de5698310ee5149a09a6139be845a",
+      "size": 46073
+    },
+    {
+      "owner": "mnfst",
+      "repo": "awesome-free-llm-apis",
+      "commit": "15bcfde01b825be7d0151999b8ddb1488cdec8a7",
+      "licence": "CC0-1.0",
+      "about": "A list of free LLM APIs with limits; FCC's brain pickers offer the ones it supports.",
+      "file": "mnfst__awesome-free-llm-apis.zip",
+      "sha256": "15faa0c085bd44bebde4ff082f0837d3aab3a4be449d8307db9c6452766e07cc",
+      "size": 16555
+    },
+    {
+      "owner": "obra",
+      "repo": "superpowers",
+      "commit": "2ce8aa15d05bd57213e6f746f953aafb7ded7a8b",
+      "licence": "MIT",
+      "about": "Superpowers: a full coding method (brainstorm, plan, TDD, debugging, review) as skills.",
+      "file": "obra__superpowers.zip",
+      "sha256": "02a40ee5de73cca2f988402972ecd0d6999d7c8ceb7f432cba2e8be44036127d",
+      "size": 421375
+    },
+    {
+      "owner": "pbakaus",
+      "repo": "impeccable",
+      "commit": "e07dc019a75e973db1c71843143bf6f9fd33d87c",
+      "licence": "Apache-2.0",
+      "about": "Impeccable: frontend design guidance, 24 design commands and rules against AI-looking pages.",
+      "file": "pbakaus__impeccable.zip",
+      "sha256": "733ec8b6df461df79497eff976e9c151e5121560d02825f5a15dfa1cc404aeb7",
+      "size": 5662543
+    },
+    {
+      "owner": "Creatorberry",
+      "repo": "flick",
+      "commit": "4442fe355644317aafbe15c55ea3fbcd0217cd8d",
+      "licence": "MIT",
+      "about": "Flick: turn a video, link or transcript into short scene animations (skills and agents).",
+      "file": "Creatorberry__flick.zip",
+      "sha256": "33a9aba8a01eb48e05a311e5e90f3dd20c15c3b581aab76a92ab2273c875b76d",
+      "size": 78624
+    },
+    {
+      "owner": "morluto",
+      "repo": "rea",
+      "commit": "fd5cd1b058dd549b5f5c6d707edeaebcc21c1165",
+      "licence": "MIT",
+      "about": "REA: reverse-engineer apps and binaries; its guides, skills and agents (its MCP server starts off).",
+      "file": "morluto__rea.zip",
+      "sha256": "50bcfda4c9f33e1d895758a025aa25ea51c69636b1c9dea5a1909ce40b55bdd6",
+      "size": 1645527
     }
   ]
 }

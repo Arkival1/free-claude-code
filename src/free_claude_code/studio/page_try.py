@@ -357,8 +357,11 @@ def _listen(
         tab.on("response", on_response)
 
 
-async def _find(tab: Any, target: str) -> Any:
-    """A CSS selector, or else a field's label, a button's name, or text."""
+async def _find(tab: Any, target: str, *, action: str = "") -> Any:
+    """A CSS selector, or else a field's label, a button's name, or text.
+
+    An exact name wins over a partial one, and a click looks for buttons and
+    links first: a section labelled "Add entry" must not catch "Add"."""
     css = bool(_CSS.search(target))
     if css:
         try:
@@ -371,11 +374,19 @@ async def _find(tab: Any, target: str) -> Any:
         found = tab.locator(f'[id="{target}"], [name="{target}"]')
         if await found.count():
             return found.first
-    for found in (
-        tab.get_by_label(target),
+    labels = [tab.get_by_label(target, exact=True), tab.get_by_label(target)]
+    buttons = [
+        tab.get_by_role("button", name=target, exact=True),
+        tab.get_by_role("link", name=target, exact=True),
         tab.get_by_role("button", name=target),
         tab.get_by_role("link", name=target),
+    ]
+    first, then = (buttons, labels) if action == "click" else (labels, buttons)
+    for found in (
+        *first,
+        *then,
         tab.get_by_placeholder(target),
+        tab.get_by_text(target, exact=True),
         tab.get_by_text(target),
     ):
         if await found.count():
@@ -397,7 +408,8 @@ async def _do(tab: Any, number: int, step: Step, report: PageReport) -> bool:
             case "press":
                 key = step.value or "Enter"
                 if step.target:
-                    await (await _find(tab, step.target)).press(key, timeout=timeout)
+                    found = await _find(tab, step.target, action="press")
+                    await found.press(key, timeout=timeout)
                 else:
                     await tab.keyboard.press(key)
                 report.lines.append(f"{number}. pressed {key} {step.target}".rstrip())
@@ -418,7 +430,7 @@ async def _do(tab: Any, number: int, step: Step, report: PageReport) -> bool:
                         )
                 report.lines.append(line)
                 return True
-        found = await _find(tab, step.target)
+        found = await _find(tab, step.target, action=step.do)
         match step.do:
             case "fill":
                 await found.fill(step.value, timeout=timeout)

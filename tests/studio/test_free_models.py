@@ -61,3 +61,37 @@ async def test_the_pickers_get_the_list_from_the_app(make_studio):
     assert response.status_code == 200
     names = [service["id"] for service in response.json()["services"]]
     assert names[0] == "freellmapi" and "groq" in names
+
+
+def test_omniroute_and_the_free_list_providers_are_offered():
+    found = by_id(free_services(Settings.model_construct(), []))
+    assert [m["id"] for m in found["omniroute"]["models"]] == ["omniroute/auto"]
+    for provider in (
+        "kilo",
+        "cohere",
+        "zai_api",
+        "cloudflare",
+        "huggingface",
+        "llm7",
+        "ollama_cloud",
+    ):
+        assert provider in found and found[provider]["key_url"]
+    kilo = by_id(
+        free_services(
+            Settings.model_construct(kilo_api_key="k"),
+            [
+                "kilo/nvidia/nemotron-3-ultra-550b-a55b:free",
+                "kilo/anthropic/claude-opus",
+            ],
+        )
+    )["kilo"]
+    assert [m["id"] for m in kilo["models"]] == [
+        "kilo/nvidia/nemotron-3-ultra-550b-a55b:free"
+    ]
+
+
+def test_cloudflare_is_ready_only_with_its_account_id_too():
+    token_only = Settings.model_construct(cloudflare_api_token="t")
+    assert not by_id(free_services(token_only, []))["cloudflare"]["ready"]
+    both = Settings.model_construct(cloudflare_api_token="t", cloudflare_account_id="a")
+    assert by_id(free_services(both, []))["cloudflare"]["ready"]

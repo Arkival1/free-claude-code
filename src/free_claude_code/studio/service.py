@@ -851,6 +851,13 @@ def _proxy_timeout(model: str) -> float:
     return LOCAL_MODEL_SECONDS if _on_this_pc(model) else SERVER_MODEL_SECONDS
 
 
+def _streams(model: str) -> bool:
+    """Every reply streams, so the time limit is the longest silence, not the
+    whole reply: a server model writing a whole website for eight minutes
+    isn't cut off while words are still coming (a local one neither)."""
+    return bool(model)
+
+
 def _on_this_pc(model: str) -> bool:
     """A model served on this PC (llama.cpp, LM Studio, Ollama): its replies
     stream, so a slow PC writing a long page isn't cut off mid-reply."""
@@ -1120,7 +1127,7 @@ class StudioService:
             token=settings.proxy_auth_token if settings.proxy_auth_enabled else "",
             default_model=self.default_model,
             timeout_for=_proxy_timeout,
-            stream_for=_on_this_pc,
+            stream_for=_streams,
         )
         local = LocalOpenAILLM(
             base_url=self._local_url,

@@ -83,8 +83,8 @@ recorded in `vendor/agent-skills`):
   `test-driven-development`
 - failed check or bug: `debugging-and-error-recovery`
 - API, back end, database or module boundary: `api-and-interface-design`
-- front end (Studio pages are plain JavaScript): `frontend-ui-engineering`
-  and Anthropic `frontend-design`
+- front end (Studio pages are plain JavaScript): `frontend-ui-engineering`,
+  Anthropic `frontend-design`, and `web-design-guidelines` to review a page
 - auth, permissions, uploads, user data, keys, integrations, the Trading
   Bank: `security-and-hardening`
 - framework/library decision: `source-driven-development`
@@ -158,7 +158,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.83.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.84.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup

@@ -142,3 +142,49 @@ def test_a_served_page_is_tried_and_pictured(tmp_path: Path):
     assert report.problems == ["Missing file: /missing.js"]
     assert (tmp_path / "s.png").stat().st_size > 0
     assert report.picture[:3] == b"\xff\xd8\xff", "a JPEG for the Vision Model"
+
+
+LABELLED_PAGE = """<!doctype html><title>Budget</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<section aria-labelledby="form-heading">
+<h2 id="form-heading">Add Entry</h2>
+<label for="amount">Amount</label><input id="amount" type="number">
+<button type="button" onclick="document.getElementById('out').textContent =
+  document.getElementById('amount').value">Add</button>
+</section>
+<p id="out">none</p>"""
+
+
+def test_a_click_finds_the_button_not_a_section_labelled_like_it(tmp_path: Path):
+    (tmp_path / "index.html").write_text(LABELLED_PAGE)
+    report = run(
+        tmp_path,
+        [
+            {"do": "fill", "target": "Amount", "value": "42"},
+            {"do": "click", "target": "Add"},
+            {"do": "read", "target": "#out", "expect": "42"},
+        ],
+    )
+    assert report.passed, report.render()
+
+
+SEARCH_PAGE = """<!doctype html><title>Find</title>
+<label for="q">Search</label>
+<input id="q" onkeydown="if (event.key === 'Enter')
+  document.getElementById('out').textContent = 'entered ' + this.value">
+<button type="button" onclick="document.getElementById('out').textContent =
+  'clicked'">Search</button>
+<p id="out">none</p>"""
+
+
+def test_a_press_goes_to_the_labelled_field_not_a_same_named_button(tmp_path: Path):
+    (tmp_path / "index.html").write_text(SEARCH_PAGE)
+    report = run(
+        tmp_path,
+        [
+            {"do": "fill", "target": "Search", "value": "dogs"},
+            {"do": "press", "target": "Search", "value": "Enter"},
+            {"do": "read", "target": "#out", "expect": "entered dogs"},
+        ],
+    )
+    assert report.passed, report.render()

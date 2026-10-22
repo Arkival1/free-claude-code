@@ -187,3 +187,31 @@ async def test_a_streamed_call_reports_silence_errors_and_plain_answers():
         await client_for(broken).complete(hello)
     assert (await client_for(whole).complete(hello)).text == "All at once."
     assert _on_this_pc("lmstudio/some-model") and not _on_this_pc("nvidia_nim/m")
+
+
+@pytest.mark.asyncio
+async def test_a_server_model_streams_too_so_a_whole_site_is_not_cut_off(make_studio):
+    # A server model writing a whole website takes minutes; the limit is the
+    # longest silence, so it isn't cut off while words are still coming.
+    from free_claude_code.studio.service import _streams
+
+    sent: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(
+            200, content=STREAMED, headers={"content-type": "text/event-stream"}
+        )
+
+    client = ProxyLLM(
+        base_url="http://proxy.test",
+        default_model="nvidia_nim/nvidia/nemotron-3-ultra-550b-a55b",
+        transport=httpx.MockTransport(handler),
+        timeout_for=_proxy_timeout,
+        stream_for=_streams,
+    )
+    await client.complete([ChatMessage(role="user", content="build the site")])
+    assert sent[0]["stream"] is True
+    studio, _ = make_studio([])
+    router = studio._build_router(studio.settings)
+    assert router._proxy._stream_for("nvidia_nim/x") is True

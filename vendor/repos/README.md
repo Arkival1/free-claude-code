@@ -67,8 +67,27 @@ adds it back.
 | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | `6b93fa0e25` | MIT | `crewAIInc__crewAI.zip` (0.69 MB) | crewAI: role-playing agent crews (researcher, analyst, planner, writer, editor) and its docs. |
 | [OpenHands/software-agent-sdk](https://github.com/OpenHands/software-agent-sdk) | `1cfba2117e` | MIT | `OpenHands__software-agent-sdk.zip` (0.04 MB) | OpenHands agent: the SDK where the OpenHands engineer's own prompt lives now. |
 | [wshobson/agents](https://github.com/wshobson/agents) | `0874a27b17` | MIT | `wshobson__agents.zip` (2.51 MB) | 202 coding agents with model tiers and 185 skills: debugging, review, tests, security, Python, JavaScript, UI. The Changer's helper team comes from here. |
+| [Panniantong/agent-reach](https://github.com/Panniantong/agent-reach) | `94f06c1969` | MIT | `Panniantong__agent-reach.zip` (0.07 MB) | Agent Reach: give agents the internet (web, social, video sites) with a setup and health-check skill. |
+| [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) | `063bee94c3` | MIT (stated in its README and each SKILL.md) | `vercel-labs__agent-skills.zip` (0.58 MB) | Vercel's agent skills: web design guidelines, React and Next.js performance, composition patterns. |
+| [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md) | `3b60532924` | MIT | `VoltAgent__awesome-design-md.zip` (0.79 MB) | DESIGN.md files analysed from real sites: copy one and say 'build a page that looks like this'. |
+| [microsoft/playwright-cli](https://github.com/microsoft/playwright-cli) | `b1a5903c5b` | Apache-2.0 | `microsoft__playwright-cli.zip` (0.05 MB) | Playwright CLI skills: drive a real browser to test pages, token-efficiently. |
+| [mnfst/awesome-free-llm-apis](https://github.com/mnfst/awesome-free-llm-apis) | `15bcfde01b` | CC0-1.0 | `mnfst__awesome-free-llm-apis.zip` (0.02 MB) | A list of free LLM APIs with limits; FCC's brain pickers offer the ones it supports. |
+| [obra/superpowers](https://github.com/obra/superpowers) | `2ce8aa15d0` | MIT | `obra__superpowers.zip` (0.42 MB) | Superpowers: a full coding method (brainstorm, plan, TDD, debugging, review) as skills. |
+| [pbakaus/impeccable](https://github.com/pbakaus/impeccable) | `e07dc019a7` | Apache-2.0 | `pbakaus__impeccable.zip` (5.66 MB) | Impeccable: frontend design guidance, 24 design commands and rules against AI-looking pages. |
+| [Creatorberry/flick](https://github.com/Creatorberry/flick) | `4442fe3556` | MIT | `Creatorberry__flick.zip` (0.08 MB) | Flick: turn a video, link or transcript into short scene animations (skills and agents). |
+| [morluto/rea](https://github.com/morluto/rea) | `fd5cd1b058` | MIT | `morluto__rea.zip` (1.65 MB) | REA: reverse-engineer apps and binaries; its guides, skills and agents (its MCP server starts off). Its `third_party/` folder holds only READMEs and the licences of the tools it points to (evmole MIT, pwndbg MIT). |
 
 ## Left out, and why
+
+- **cheaper-inference/OmniRoute** and **headroomlabs-ai/headroom** are
+  programs that sit between FCC and the AI providers (a router and a
+  context compressor), not skills. They aren't shipped: OmniRoute is
+  connected like FreeLLMAPI (the owner runs it, FCC talks to its address),
+  and Headroom waits for the owner's yes after its privacy and
+  compatibility check (CLAUDE.md).
+- **leonxlnx/taste-skill** and **usestrix/strix** stay at the commits above:
+  the newer taste-skill folds its ten skills into one, and the copy here
+  already holds image-to-code and the other nine.
 
 - **nilbuild/developer-roadmap** (roadmap.sh): its licence allows personal
   use only and forbids sharing its content outside the repo, so FCC does

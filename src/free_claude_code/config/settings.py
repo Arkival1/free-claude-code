@@ -365,6 +365,17 @@ class Settings(BaseModel):
         validation_alias="FREELLMAPI_BASE_URL",
     )
 
+    # ==================== OmniRoute Config ====================
+    # Another free-tier router the owner may run on this PC; it calls outside
+    # providers, so it is not a local model.
+    omniroute_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="OMNIROUTE_API_KEY"
+    )
+    omniroute_base_url: NonEmptyString = Field(
+        default="http://localhost:20128/v1",
+        validation_alias="OMNIROUTE_BASE_URL",
+    )
+
     # ==================== Llama.cpp Config ====================
     llamacpp_base_url: NonEmptyString = Field(
         default="http://localhost:8080/v1",
@@ -521,6 +532,9 @@ class Settings(BaseModel):
     )
     freellmapi_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="FREELLMAPI_PROXY"
+    )
+    omniroute_proxy: OptionalNonEmptyString = Field(
+        default=None, validation_alias="OMNIROUTE_PROXY"
     )
     lightning_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="LIGHTNING_PROXY"

@@ -57,6 +57,7 @@ _EXPECTED_PROVIDER_ORDER: tuple[str, ...] = (
     "experiential",
     "ollama_cloud",
     "freellmapi",
+    "omniroute",
     "lmstudio",
     "llamacpp",
     "ollama",

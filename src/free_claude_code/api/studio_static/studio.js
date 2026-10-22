@@ -1473,13 +1473,14 @@
     }
     const localModels = (data.local.models || []).filter((model) => !/embed/i.test(model));
     const routerModels = ["freellmapi/auto", "freellmapi/auto:coding", "freellmapi/auto:smartest", "freellmapi/auto:fast"];
-    const serverModels = (data.server || []).filter((model) => !routerModels.includes(model));
+    const omniModels = ["omniroute/auto"];
+    const serverModels = (data.server || []).filter((model) => !routerModels.includes(model) && !omniModels.includes(model));
     const label = (model) => model.replace(/^local\//, "");
     const pickers = new Map();
     let lastPicked = null;
     const status = el("p", { class: "muted", role: "status" });
     const picker = (row) => {
-      const known = new Set([...localModels, ...serverModels, ...routerModels]);
+      const known = new Set([...localModels, ...serverModels, ...routerModels, ...omniModels]);
       // Server models grouped by provider (NVIDIA NIM, OpenRouter, …), so a
       // list of 80 models from one key is easy to scan.
       const byProvider = new Map();
@@ -1491,6 +1492,7 @@
       const groups = [
         el("optgroup", { label: "On this PC (LM Studio)" }, localModels.map((model) => el("option", { value: model, text: label(model) }))),
         el("optgroup", { label: "Free: FreeLLMAPI on this PC" }, routerModels.map((model) => el("option", { value: model, text: model.slice(11) }))),
+        el("optgroup", { label: "Free: OmniRoute on this PC" }, omniModels.map((model) => el("option", { value: model, text: model.slice(10) }))),
         ...[...byProvider.entries()].map(([provider, models]) =>
           el("optgroup", { label: `Server: ${provider} (${models.length})` }, models.map((model) => el("option", { value: model, text: model.slice(provider.length + 1) })))
         ),
@@ -7773,6 +7775,7 @@
         .map((name) => `freellmapi/${name}`)
         .filter((model) => !data.server.includes(model))
         .map((model) => el("option", { value: model, label: "free: FreeLLMAPI on this PC" })),
+      ...(data.server.includes("omniroute/auto") ? [] : [el("option", { value: "omniroute/auto", label: "free: OmniRoute on this PC" })]),
     ]);
     document.getElementById("model-list")?.remove();
     document.body.append(list);

@@ -930,6 +930,7 @@ async def test_create_provider_instantiates_each_builtin():
         provider_max_concurrency=3,
         sambanova_api_key="test_sambanova_key",
         freellmapi_api_key="test_freellmapi_key",
+        omniroute_api_key="test_omniroute_key",
     )
     cases = {
         "nvidia_nim": NvidiaNimProvider,
@@ -945,6 +946,7 @@ async def test_create_provider_instantiates_each_builtin():
         "nebius": OpenAIChatProvider,
         "scaleway": OpenAIChatProvider,
         "freellmapi": OpenAIChatProvider,
+        "omniroute": OpenAIChatProvider,
         "chutes": OpenAIChatProvider,
         "featherless": OpenAIChatProvider,
         "azure_openai": OpenAIChatProvider,

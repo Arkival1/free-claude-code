@@ -689,6 +689,19 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
             additional_model_ids=("auto", "auto:coding", "auto:smartest", "auto:fast"),
         ),
     ),
+    "omniroute": OpenAIChatProfile(
+        _policy(
+            "OmniRoute",
+            ReasoningReplayMode.REASONING_CONTENT,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+        NO_REASONING,
+        model_listing=OpenAIModelListing(
+            path="/models",
+            # Its router picks a model from the providers the owner connected.
+            additional_model_ids=("auto",),
+        ),
+    ),
     "llm7": OpenAIChatProfile(
         _policy(
             "LLM7",
