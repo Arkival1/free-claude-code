@@ -758,6 +758,9 @@ class Settings(BaseModel):
     studio_student_model: OptionalNonEmptyString = Field(
         default=None, validation_alias="STUDIO_STUDENT_MODEL"
     )
+    studio_vision_model: OptionalNonEmptyString = Field(
+        default=None, validation_alias="STUDIO_VISION_MODEL"
+    )
     studio_class_pass_mark: float = Field(
         default=0.7, ge=0.0, le=1.0, validation_alias="STUDIO_CLASS_PASS_MARK"
     )

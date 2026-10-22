@@ -4,7 +4,7 @@ import asyncio
 import os
 import signal
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,7 +58,7 @@ async def execute(command: str, *, cwd: Path, timeout: float) -> tuple[int, str,
         stdout, _ = await asyncio.wait_for(process.communicate(), timeout)
         timed_out = False
     except TimeoutError:
-        await _kill_tree(process, windows=windows)
+        await kill_tree(process, windows=windows)
         stdout = b""
         if process.stdout is not None:
             try:
@@ -73,7 +73,7 @@ async def execute(command: str, *, cwd: Path, timeout: float) -> tuple[int, str,
     return code, text, timed_out
 
 
-async def _kill_tree(process: asyncio.subprocess.Process, *, windows: bool) -> None:
+async def kill_tree(process: asyncio.subprocess.Process, *, windows: bool) -> None:
     """Stop a command and everything it started (npm, dev servers, ...)."""
     if process.returncode is not None:
         return
@@ -113,8 +113,13 @@ class CommandBroker:
         cwd: Path,
         policy: str,
         timeout: float,
+        run: Callable[[], Awaitable[tuple[int, str, bool]]] | None = None,
     ) -> CommandResult:
-        """Ask for (or skip) approval, run the command, and report the outcome."""
+        """Ask for (or skip) approval, run the command, and report the outcome.
+
+        ``run`` does the work instead of the shell (a tool FCC starts itself,
+        like Aider, with its own environment); ``command`` is then what the
+        user is shown and asked about."""
         cleaned = command.strip()
         if not cleaned:
             raise CommandError("A command is required.")
@@ -166,7 +171,10 @@ class CommandBroker:
         else:
             await self._store.put(request)
         cwd.mkdir(parents=True, exist_ok=True)
-        code, output, timed_out = await execute(cleaned, cwd=cwd, timeout=timeout)
+        if run is None:
+            code, output, timed_out = await execute(cleaned, cwd=cwd, timeout=timeout)
+        else:
+            code, output, timed_out = await run()
         ran = await self._set(
             await self._store.require(CommandRequest, request.id),
             status="ran",

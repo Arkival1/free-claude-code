@@ -112,6 +112,8 @@ SKILL_TOOL = "skill"
 TOOLSHED_TOOL = "toolshed"
 MCP_TOOL = "mcp"
 CHANGER_TOOL = "fcc_changer"
+LOOK_PAGE_TOOL = "look_page"
+AIDER_TOOL = "aider"
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
 MAX_LISTED_PHOTOS = 30
@@ -1381,6 +1383,60 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=LOOK_PAGE_TOOL,
+        description=(
+            "See a page of the project the way a visitor does: screenshots at "
+            "PC and phone size go to the Vision Model, which says what looks "
+            "broken or unfinished (overlaps, cut-off or faint text, broken "
+            "images, crowding, sideways scrolling). Without a Vision Model you "
+            "get each page's text and checks. Use it after building or "
+            "changing a page; fix what it reports and look again (at most 3 "
+            "rounds). steps (as for try_page) run first to reach a state."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "page": {
+                    "type": "string",
+                    "description": "The page file (default index.html).",
+                },
+                "steps": {"type": "array", "items": {"type": "object"}},
+                "question": {
+                    "type": "string",
+                    "description": "What to check, e.g. 'is the menu readable on a phone'.",
+                },
+            },
+        },
+    ),
+    ToolSpec(
+        name=AIDER_TOOL,
+        description=(
+            "Hand a coding job to Aider, a separate coding assistant on this "
+            "PC (if the owner installed it), working on the files you name in "
+            "this project. It writes the change itself with your model; then "
+            "read the changed files and check them (check_project, try_page, "
+            "fcc_changer check) like your own work. Good for a focused edit "
+            "across a few files or a stubborn bug; describe the job fully: "
+            "what to change, why, and how to know it works. Runs after the "
+            "owner's command approval (Agents Can Run Commands)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "The whole job, as you would tell a developer.",
+                },
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "The files it may change or create (at most 12).",
+                },
+            },
+            "required": ["task", "files"],
+        },
+    ),
+    ToolSpec(
         name=CHANGER_TOOL,
         description=(
             "The Changer team's own tool, for changing FCC itself in the "
@@ -1391,10 +1447,16 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "verdict pass or fail, findings [{problem, where, evidence, fix}], "
             "notes. action changes: the files changed so far. check: "
             "syntax-check every changed file and load the app from the copy; "
-            "fix every problem it reports. screenshots: run the changed copy "
-            "on a spare port (no keys, empty data) and screenshot Studio pages "
-            "(pages: home, lab, trade, learn, tutor, agents, settings...; phone "
-            "true for phone size). subagent: hand a separate part to a helper "
+            "fix every problem it reports. tests: run the test files you name "
+            '(tests: ["tests/studio/test_x.py"]) and read the failures. try: run '
+            "the changed copy (no keys, empty data) and use a Studio page like a "
+            "person (page: home, lab, trade, agents...; steps as for try_page: "
+            "fill, click, read with expect); reports script errors, missing "
+            "files, pop-ups and sideways scrolling; phone false for PC size. "
+            "look: screenshot pages at PC and phone size and have the Vision "
+            "Model say what looks wrong (question: what to check); fix it and "
+            "look again. screenshots: just pictures of pages for the owner "
+            "(pages; phone true for phone size). subagent: hand a separate part to a helper "
             "that works in the same copy and reports back (task: everything it "
             "needs; files: the files it owns; agent: optional team member's "
             "name, else a helper Changer)."
@@ -1409,6 +1471,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "review",
                         "changes",
                         "check",
+                        "tests",
+                        "try",
+                        "look",
                         "screenshots",
                         "subagent",
                     ],
@@ -1426,6 +1491,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "findings": {"type": "array", "items": {"type": "object"}},
                 "notes": {"type": "string"},
                 "pages": {"type": "array", "items": {"type": "string"}},
+                "page": {"type": "string"},
+                "steps": {"type": "array", "items": {"type": "object"}},
+                "question": {"type": "string"},
                 "phone": {"type": "boolean"},
                 "task": {"type": "string"},
                 "agent": {"type": "string"},

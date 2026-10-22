@@ -60,7 +60,10 @@ BUILTIN_SKILLS = Path(__file__).resolve().parent / "builtin_skills"
 come with the app, refresh on every start, and are on unless turned off."""
 BUILTIN_ABOUT = (
     "FCC's own skills. The Builder follows the website design engineer on every "
-    "job; the Coder, Developer and Tester follow the app developer engineer."
+    "job; the Coder, Developer and Tester follow the app developer engineer. "
+    "The Changer follows vibe coding and visual review when it builds and "
+    "debugging when it fixes; its reviewers follow code review; bug jobs add "
+    "debugging for everyone."
 )
 
 

@@ -381,7 +381,9 @@ def build_goal(project: Mapping[str, object], number: int) -> str:
             "(add or change a test under tests/; fcc_changer check runs the tests "
             "related to your change).",
             "Build only this milestone, in small steps, matching the code around "
-            "it. Run fcc_changer check and fix every problem. For a separate "
+            "it. Run fcc_changer check and fix every problem. If you changed a "
+            "page (api/studio_static), use it with fcc_changer try and see it "
+            "with fcc_changer look; fix what they show (at most 3 rounds). For a separate "
             "part, use fcc_changer subagent with the task and the files it owns "
             "(optionally agent: a team member's name). Don't package; finish "
             "with what you changed, the checks, and anything left.",
@@ -395,8 +397,10 @@ def fix_goal(project: Mapping[str, object], number: int, problems: str) -> str:
             f"FIX milestone {number + 1} of an update to FCC.",
             f"The owner's request: {project.get('request', '')}",
             f"Problems found: {problems[:4000]}",
-            "Reproduce each problem, find the cause, fix it, add a test that "
-            "would have caught it, and run fcc_changer check until it passes. "
+            "Reproduce each problem first (fcc_changer tests on the failing "
+            "test, or fcc_changer try on the page), find the cause, fix it, add "
+            "a test that would have caught it, and run fcc_changer check until "
+            "it passes. "
             "Finish with what you fixed.",
         ]
     )
@@ -424,9 +428,11 @@ def review_goal(
             focus,
             "The change (diff, cut short if long):",
             diff[:24000],
-            "Read the files you need, then call fcc_changer with action review: "
-            "verdict pass or fail, and findings (each: problem, where, evidence, "
-            "fix). Only confirmed problems fail it. Then finish.",
+            "Read the files you need; to confirm a finding, run its tests "
+            "(fcc_changer tests) or use the page (fcc_changer try). Then call "
+            "fcc_changer with action review: verdict pass or fail, and findings "
+            "(each: problem, where, evidence, fix). Only confirmed problems fail "
+            "it. Then finish.",
         ]
     )
 

@@ -25,6 +25,9 @@ MAX_WAIT_MS = 3000
 PAGE_TEXT_CHARS = 1500
 PHONE_SIZE = (390, 800)
 DESKTOP_SIZE = (1280, 800)
+PICTURE_QUALITY = 55
+"""JPEG quality of the pictures sent to a model: small enough for free
+vision models that take about 180 KB per picture."""
 BROWSER_CHANNELS = ("", "msedge", "chrome")
 """Playwright's own Chromium first, then the Edge or Chrome on the PC."""
 ACTIONS = ("fill", "select", "click", "press", "check", "uncheck", "wait", "read")
@@ -76,6 +79,9 @@ class PageReport:
     problems: list[str] = field(default_factory=list)
     read: dict[str, str] = field(default_factory=dict)
     text: str = ""
+    shot: Path | None = None
+    picture: bytes = b""
+    """With a shot: the same view as a small JPEG, for a model that can see."""
 
     @property
     def passed(self) -> bool:
@@ -174,9 +180,11 @@ async def try_page(
     steps: Sequence[Step],
     *,
     phone: bool = True,
+    shot: Path | None = None,
     launch: Launch = _launch,
 ) -> PageReport:
-    """Open the page, do the steps, and report what a user would see."""
+    """Open the page, do the steps, and report what a user would see; with
+    ``shot``, save a picture of the page at the end there too."""
     path = page_path(folder, page)
     size = PHONE_SIZE if phone else DESKTOP_SIZE
     report = PageReport(page=path.relative_to(folder.resolve()).as_posix(), size=size)
@@ -188,20 +196,80 @@ async def try_page(
         tab = await context.new_page()
         _listen(tab, report, folder)
         await tab.goto(path.as_uri(), wait_until="load", timeout=15_000)
-        await tab.wait_for_timeout(200)
-        for number, step in enumerate(steps, start=1):
-            if not await _do(tab, number, step, report):
-                break
-            await tab.wait_for_timeout(120)
-        await _phone_width(tab, report, phone)
-        text = await tab.evaluate("() => document.body ? document.body.innerText : ''")
-        report.text = " ".join(str(text).split())[:PAGE_TEXT_CHARS]
+        await _play(tab, report, steps, phone=phone, shot=shot)
     finally:
         try:
             await browser.close()
         finally:
             await runner.stop()
     return report
+
+
+async def try_url(
+    url: str,
+    steps: Sequence[Step],
+    *,
+    name: str = "",
+    phone: bool = True,
+    shot: Path | None = None,
+    settle_ms: int = 1500,
+    launch: Launch = _launch,
+) -> PageReport:
+    """The same as ``try_page`` for a page a server serves (FCC's own Studio
+    pages, run from the Changer's copy). Files the page asks for that the
+    server doesn't have count as missing files."""
+    size = PHONE_SIZE if phone else DESKTOP_SIZE
+    report = PageReport(page=name or url, size=size)
+    runner, browser = await launch()
+    try:
+        context = await browser.new_context(
+            viewport={"width": size[0], "height": size[1]}
+        )
+        tab = await context.new_page()
+        _listen(tab, report, None, origin=_origin(url))
+        try:
+            await tab.goto(url, wait_until="load", timeout=30_000)
+        except Exception as error:  # Playwright raises its own Error
+            raise PageTryError(
+                f"Could not open {name or url}: {str(error).splitlines()[0][:200]}"
+            ) from error
+        await tab.wait_for_timeout(settle_ms)
+        await _play(tab, report, steps, phone=phone, shot=shot)
+    finally:
+        try:
+            await browser.close()
+        finally:
+            await runner.stop()
+    return report
+
+
+def _origin(url: str) -> str:
+    match = re.match(r"^(https?://[^/]+)", url)
+    return match.group(1) if match else ""
+
+
+async def _play(
+    tab: Any,
+    report: PageReport,
+    steps: Sequence[Step],
+    *,
+    phone: bool,
+    shot: Path | None,
+) -> None:
+    """Do the steps, check the width, read the page, and take its picture."""
+    await tab.wait_for_timeout(200)
+    for number, step in enumerate(steps, start=1):
+        if not await _do(tab, number, step, report):
+            break
+        await tab.wait_for_timeout(120)
+    await _phone_width(tab, report, phone)
+    text = await tab.evaluate("() => document.body ? document.body.innerText : ''")
+    report.text = " ".join(str(text).split())[:PAGE_TEXT_CHARS]
+    if shot is not None:
+        shot.parent.mkdir(parents=True, exist_ok=True)
+        await tab.screenshot(path=str(shot))
+        report.shot = shot
+        report.picture = await tab.screenshot(type="jpeg", quality=PICTURE_QUALITY)
 
 
 async def screenshot_pages(
@@ -243,7 +311,9 @@ async def screenshot_pages(
     return taken, problems
 
 
-def _listen(tab: Any, report: PageReport, folder: Path) -> None:
+def _listen(
+    tab: Any, report: PageReport, folder: Path | None, *, origin: str = ""
+) -> None:
     def on_dialog(dialog: Any) -> None:
         report.problems.append(
             f"A pop-up {dialog.type} box opened: {dialog.message!r}. Pop-up "
@@ -252,6 +322,10 @@ def _listen(tab: Any, report: PageReport, folder: Path) -> None:
         asyncio.ensure_future(dialog.dismiss())
 
     def on_console(message: Any) -> None:
+        # A served page's failed loads are judged by on_response below: a
+        # missing script is a problem, an API's 404 is an answer.
+        if origin and message.text.startswith("Failed to load resource"):
+            return
         if message.type == "error":
             report.problems.append(f"Console error: {message.text[:300]}")
 
@@ -260,14 +334,27 @@ def _listen(tab: Any, report: PageReport, folder: Path) -> None:
 
     def on_failed(request: Any) -> None:
         url = str(request.url)
-        if url.startswith("file:"):
+        if url.startswith("file:") and folder is not None:
             name = url.removeprefix(folder.resolve().as_uri()).lstrip("/")
             report.problems.append(f"Missing file: {name or url}")
+
+    def on_response(response: Any) -> None:
+        url = str(response.url)
+        # Scripts, styles, pictures and fonts only: an API's 404 is an answer.
+        kind = str(getattr(response.request, "resource_type", ""))
+        if (
+            url.startswith(origin)
+            and int(response.status) == 404
+            and kind in {"script", "stylesheet", "image", "font"}
+        ):
+            report.problems.append(f"Missing file: {url.removeprefix(origin)}")
 
     tab.on("dialog", on_dialog)
     tab.on("console", on_console)
     tab.on("pageerror", on_error)
     tab.on("requestfailed", on_failed)
+    if origin:
+        tab.on("response", on_response)
 
 
 async def _find(tab: Any, target: str) -> Any:

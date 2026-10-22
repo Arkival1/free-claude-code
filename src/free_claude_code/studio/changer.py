@@ -9,6 +9,7 @@ backup zip of the files the update replaces.
 
 import ast
 import asyncio
+import contextlib
 import difflib
 import hashlib
 import importlib.util
@@ -21,7 +22,7 @@ import sys
 import tempfile
 import time
 import zipfile
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +30,8 @@ import httpx
 from loguru import logger
 
 from free_claude_code.core.json_types import JsonObject
+
+from .page_try import PageReport, Step
 
 COPY_ITEMS: tuple[str, ...] = (
     "src",
@@ -78,6 +81,9 @@ IMPORT_CHECK = (
 SERVE_COPY = "from free_claude_code.cli.entrypoints import serve; serve()"
 
 type Shooter = Callable[..., Awaitable[tuple[list[Path], list[str]]]]
+type Tryer = Callable[..., Awaitable[PageReport]]
+"""``page_try.try_url``: use a served page like a person and report."""
+MAX_LOOK_PAGES = 3
 """Screenshot pages: (pages, folder, size=...) → (pictures, problems)."""
 
 
@@ -282,9 +288,11 @@ class Changer:
         source: Path | None,
         python: str = sys.executable,
         shooter: Shooter | None = None,
+        tryer: Tryer | None = None,
         import_check: str = IMPORT_CHECK,
         serve_copy: str = SERVE_COPY,
     ) -> None:
+        self._tryer = tryer
         self._import_check = import_check
         self._serve_copy = serve_copy
         self._home = home
@@ -398,8 +406,15 @@ class Changer:
     # ------------------------------------------------------------ checks
 
     async def check(self, target: Path) -> CheckReport:
-        """Syntax of every changed file, then the app importing from the copy."""
+        """Syntax of every changed file, then the app importing from the copy
+        and its related tests, with an empty home folder (the owner's key
+        files are out of reach of code the agent wrote)."""
+        with _empty_home() as home:
+            return await self._check(target, home)
+
+    async def _check(self, target: Path, home: Path) -> CheckReport:
         report = CheckReport()
+        env = self._copy_env(target, home)
         changes = self.changes(target)
         touched = [*changes["changed"], *changes["added"]]
         if not touched and not changes["deleted"]:
@@ -419,19 +434,26 @@ class Changer:
                 except ValueError as error:
                     report.fail(f"{relative}: not valid JSON ({error})")
             elif suffix in {".js", ".mjs"} and node:
-                code, output = await self._run([node, "--check", str(path)], target)
+                code, output = await self._run(
+                    [node, "--check", str(path)], target, env=env
+                )
                 if code != 0:
                     report.fail(f"{relative}: {output.strip()[:400]}")
         if touched and not node and any(n.endswith((".js", ".mjs")) for n in touched):
             report.lines.append(
                 "Node isn't installed, so script files weren't syntax-checked."
             )
-        ruff = await self._run([self._python, "-m", "ruff", "--version"], target)
+        # -I: the copy's folders aren't on the import path, so a ruff.py the
+        # agent wrote can't stand in for the real one.
+        ruff = await self._run(
+            [self._python, "-I", "-m", "ruff", "--version"], target, env=env
+        )
         python_files = [str(target / n) for n in touched if n.endswith(".py")]
         if ruff[0] == 0 and python_files:
             code, output = await self._run(
                 [
                     self._python,
+                    "-I",
                     "-m",
                     "ruff",
                     "check",
@@ -440,6 +462,7 @@ class Changer:
                     *python_files,
                 ],
                 target,
+                env=env,
             )
             if code != 0:
                 report.fail(
@@ -448,12 +471,16 @@ class Changer:
             # Tidy the changed Python files the way FCC's own checks expect
             # (the copy only; a file that won't parse is reported above).
             code, output = await self._run(
-                [self._python, "-m", "ruff", "format", *python_files], target
+                [self._python, "-I", "-m", "ruff", "format", *python_files],
+                target,
+                env=env,
             )
             if code == 0 and "reformatted" in output:
                 report.lines.append(f"Formatted: {output.strip()[:160]}")
         code, output = await self._run(
-            [self._python, "-c", self._import_check], target, env=self._copy_env(target)
+            [self._python, "-c", self._import_check],
+            target,
+            env=env,
         )
         if code == 0:
             report.lines.append("The app loads from the copy.")
@@ -482,7 +509,7 @@ class Changer:
                     *picked,
                 ],
                 target,
-                env=self._copy_env(target),
+                env=env,
                 timeout=TEST_SECONDS,
             )
             last = output.strip().splitlines()[-1:] or [""]
@@ -555,23 +582,10 @@ class Changer:
 
     # ------------------------------------------------------------ screenshots
 
-    async def screenshots(
-        self, target: Path, pages: Sequence[str] = SCREEN_PAGES, *, phone: bool = False
-    ) -> JsonObject:
-        """Run the copy on a spare port with an empty data folder and
-        screenshot Studio pages; the pictures replace the last set."""
-        if self._shooter is None:
-            raise ChangerError(
-                "Screenshots need Playwright's browser; it isn't installed here."
-            )
-        chosen = [page.strip().lstrip("#") for page in pages if page.strip()][:8]
-        for page in chosen:
-            if not PAGE_NAME.match(page):
-                raise ChangerError(
-                    f"{page!r} isn't a Studio page name (like lab or trade)."
-                )
-        if not chosen:
-            chosen = list(SCREEN_PAGES)
+    @contextlib.asynccontextmanager
+    async def serving(self, target: Path) -> AsyncIterator[str]:
+        """Run the copy on a spare port with an empty data folder (no keys,
+        none of the owner's data) and yield its address; stop it after."""
         port = _free_port()
         home = Path(tempfile.mkdtemp(prefix="fcc-changer-"))
         env = self._copy_env(target, home)
@@ -598,16 +612,9 @@ class Changer:
             if not await _wait_until_up(f"{base}/studio", process):
                 tail = _read_text(log)[-2500:]
                 raise ChangerError(
-                    "The changed copy didn't start, so there's nothing to screenshot:\n"
-                    + tail
+                    "The changed copy didn't start, so there's nothing to see:\n" + tail
                 )
-            if self.shots_dir.exists():
-                shutil.rmtree(self.shots_dir)
-            size = (390, 844) if phone else (1440, 900)
-            named = [
-                (page.replace("/", "-"), f"{base}/studio#{page}") for page in chosen
-            ]
-            taken, problems = await self._shooter(named, self.shots_dir, size=size)
+            yield base
         finally:
             if process.returncode is None:
                 process.terminate()
@@ -617,11 +624,135 @@ class Changer:
                     process.kill()
                     await process.wait()
             shutil.rmtree(home, ignore_errors=True)
+
+    async def screenshots(
+        self, target: Path, pages: Sequence[str] = SCREEN_PAGES, *, phone: bool = False
+    ) -> JsonObject:
+        """Run the copy on a spare port with an empty data folder and
+        screenshot Studio pages; the pictures replace the last set."""
+        if self._shooter is None:
+            raise ChangerError(
+                "Screenshots need Playwright's browser; it isn't installed here."
+            )
+        chosen = _page_names(pages, 8) or list(SCREEN_PAGES)
+        async with self.serving(target) as base:
+            if self.shots_dir.exists():
+                shutil.rmtree(self.shots_dir)
+            size = (390, 844) if phone else (1440, 900)
+            named = [
+                (page.replace("/", "-"), f"{base}/studio#{page}") for page in chosen
+            ]
+            taken, problems = await self._shooter(named, self.shots_dir, size=size)
         return {
             "shots": [path.name for path in taken],
             "problems": problems,
             "phone": phone,
         }
+
+    async def try_pages(
+        self,
+        target: Path,
+        pages: Sequence[str],
+        steps: Sequence[Step] = (),
+        *,
+        sizes: Sequence[str] = ("phone",),
+        pictures: bool = False,
+    ) -> list[PageReport]:
+        """Run the copy once and use each Studio page like a person: do the
+        steps, read the page, report script errors, missing files, pop-ups
+        and sideways scrolling; with ``pictures``, a screenshot of each page
+        at each size goes in the screenshots folder (replacing the last set)
+        for the owner and for a model that can see."""
+        if self._tryer is None:
+            raise ChangerError(
+                "Trying pages needs Playwright's browser; it isn't installed here."
+            )
+        chosen = _page_names(pages, MAX_LOOK_PAGES) or ["home"]
+        reports: list[PageReport] = []
+        async with self.serving(target) as base:
+            if pictures and self.shots_dir.exists():
+                shutil.rmtree(self.shots_dir)
+            for page in chosen:
+                for size in sizes:
+                    phone = size != "pc"
+                    name = f"{page.replace('/', '-')}-{'phone' if phone else 'pc'}"
+                    try:
+                        report = await self._tryer(
+                            f"{base}/studio#{page}",
+                            steps,
+                            name=f"Studio page {page} ({'phone' if phone else 'PC'})",
+                            phone=phone,
+                            shot=self.shots_dir / f"{name}.png" if pictures else None,
+                        )
+                    except Exception as error:  # a browser crash keeps the rest
+                        report = PageReport(
+                            page=f"Studio page {page}",
+                            size=(390, 800) if phone else (1280, 800),
+                            problems=[str(error)],
+                        )
+                    reports.append(report)
+        return reports
+
+    async def run_tests(self, target: Path, files: Sequence[str]) -> CheckReport:
+        """Run the named test files in the copy (tests/..., at most
+        MAX_TEST_FILES; Content Farm's are left out)."""
+        report = CheckReport()
+        chosen: list[str] = []
+        for name in files:
+            relative = name.strip().replace("\\", "/").split("::")[0]
+            path = (target / relative).resolve()
+            if (
+                not relative.startswith("tests/")
+                or not path.is_relative_to(target.resolve())
+                or not path.name.startswith("test_")
+                or path.suffix != ".py"
+                or not path.is_file()
+            ):
+                report.fail(
+                    f"{name}: not a test file in the copy (tests/.../test_*.py)."
+                )
+                continue
+            if LEFT_OUT_TESTS.search(relative):
+                report.lines.append(f"{relative}: Content Farm's tests are left out.")
+                continue
+            test_id = name.strip().replace("\\", "/")
+            if test_id not in chosen:
+                chosen.append(test_id)
+        chosen = chosen[:MAX_TEST_FILES]
+        if not chosen:
+            if report.passed:
+                report.fail(
+                    "Name the test files to run, like tests/studio/test_changer.py."
+                )
+            return report
+        if not importlib.util.find_spec("pytest"):
+            report.fail("pytest isn't installed here, so the tests can't run.")
+            return report
+        serial = ["-n", "0"] if importlib.util.find_spec("xdist") else []
+        with _empty_home() as home:
+            code, output = await self._run(
+                [
+                    self._python,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "-p",
+                    "no:cacheprovider",
+                    *serial,
+                    *chosen,
+                ],
+                target,
+                env=self._copy_env(target, home),
+                timeout=TEST_SECONDS,
+            )
+        if code == 0:
+            last = output.strip().splitlines()[-1:] or [""]
+            report.lines.append(f"Tests passed ({', '.join(chosen)}): {last[0][:160]}")
+        else:
+            report.fail(
+                f"Tests failed ({', '.join(chosen)}):\n" + output.strip()[-3000:]
+            )
+        return report
 
     def shots(self) -> list[str]:
         if not self.shots_dir.is_dir():
@@ -810,6 +941,27 @@ def _instructions(name: str, changes: dict[str, list[str]]) -> str:
         )
         + "\n"
     )
+
+
+@contextlib.contextmanager
+def _empty_home() -> Iterator[Path]:
+    """A new empty home folder for code run from the copy, removed after."""
+    home = Path(tempfile.mkdtemp(prefix="fcc-changer-home-"))
+    try:
+        yield home
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
+def _page_names(pages: Sequence[str], limit: int) -> list[str]:
+    """Studio page names (home, lab, agents/abc...) or a ChangerError."""
+    chosen = [page.strip().lstrip("#") for page in pages if page.strip()][:limit]
+    for page in chosen:
+        if not PAGE_NAME.match(page):
+            raise ChangerError(
+                f"{page!r} isn't a Studio page name (like lab or trade)."
+            )
+    return chosen
 
 
 def _free_port() -> int:

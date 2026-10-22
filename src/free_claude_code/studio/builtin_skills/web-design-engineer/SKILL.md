@@ -51,5 +51,7 @@ Work in this order. Each step has a rule you can check.
     services, prices, hours, places. No lorem ipsum, no "Your text here",
     no template lines left.
 11. **Before finishing.** Run `check_project` and `polish_check` and fix
-    everything they report; look at the page with `try_page` at phone and
-    desktop widths when you can; then say what you built and how to open it.
+    everything they report; use the page with `try_page` and see it with
+    `look_page` (PC and phone screenshots the Vision Model judges), fix what
+    it shows and look again (3 rounds at most); then say what you built and
+    how to open it.

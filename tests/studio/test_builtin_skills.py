@@ -9,6 +9,8 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun
 from free_claude_code.studio.polish import polish_notes
 
+SKILL_COUNT = 6
+
 
 @pytest.mark.asyncio
 async def test_the_skills_install_refresh_and_keep_the_owners_switch(make_studio):
@@ -17,13 +19,21 @@ async def test_the_skills_install_refresh_and_keep_the_owners_switch(make_studio
     built = await library.install_builtin()
     assert built is not None and built.origin == "builtin" and built.enabled
     names = {skill.name for skill in built.skills}
-    assert names == {"web-design-engineer", "app-developer-engineer"}
+    assert names == {
+        "web-design-engineer",
+        "app-developer-engineer",
+        "vibe-coding",
+        "debugging",
+        "visual-review",
+        "code-review",
+    }
     built.enabled = False
     await library.save(built)
     again = await library.install_builtin()
     assert again is not None and again.enabled is False
-    text = await library.skill_text(again, again.skills[0])
-    assert "Before finishing" in text
+    web = next(skill for skill in again.skills if skill.name == "web-design-engineer")
+    text = await library.skill_text(again, web)
+    assert "Before finishing" in text and "look_page" in text
     with pytest.raises(ExtensionError, match="turn them off"):
         await library.remove(BUILTIN_ID)
 
@@ -68,6 +78,74 @@ async def test_each_agent_gets_its_skills_on_every_task(
     prompt = await task_prompt(make_studio, role, goal)
     assert ("# Website design engineer" in prompt) is web
     assert ("# App developer engineer" in prompt) is app
+    assert ("# Debugging" in prompt) is (goal.startswith("Fix"))
+
+
+BUILD_GOAL = (
+    "BUILD milestone 1 of 1 of an update to FCC.\n"
+    "The owner's request: {request}\n"
+    "This milestone: {title}\n"
+    "Files it owns: {files}\n"
+    "Build only this milestone. If you changed a page, fix what look shows."
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "goal", "wanted"),
+    [
+        (
+            "Changer",
+            BUILD_GOAL.format(
+                request="Show the copy's file count",
+                title="Add a count route",
+                files="src/free_claude_code/studio/changer.py",
+            ),
+            {"# Vibe coding"},
+        ),
+        (
+            "Changer",
+            BUILD_GOAL.format(
+                request="Make the Changer page nicer",
+                title="Tidy the card",
+                files="src/free_claude_code/api/studio_static/studio.css",
+            ),
+            {"# Vibe coding", "# Visual review"},
+        ),
+        (
+            "Changer",
+            "FIX milestone 1 of an update to FCC.\nProblems found: a test fails",
+            {"# Debugging"},
+        ),
+        ("Changer Reviewer", "REVIEW milestone 1 of an update.", {"# Code review"}),
+        ("Changer Security", "REVIEW milestone 1 of an update.", {"# Code review"}),
+        ("Changer Planner", "PLAN an update: fix the broken page.", set()),
+    ],
+)
+async def test_the_changer_team_gets_the_skill_for_its_step(
+    make_studio, name, goal, wanted
+):
+    def respond(system: str, prompt: str) -> object:
+        return LLMReply(text="Done.")
+
+    studio, model = make_studio(respond)
+    agent = await studio.create_agent(
+        name=name, role="agent", model="nvidia_nim/test-model", tools=()
+    )
+    run = await studio.start_task(agent_id=agent.id, goal=goal)
+    job = studio._run_jobs.get(run.id)
+    if job is not None:
+        await job
+    prompt = "\n".join(str(call["studio_note"]) for call in model.calls)
+    every = {
+        "# Vibe coding",
+        "# Visual review",
+        "# Debugging",
+        "# Code review",
+        "# Website design engineer",
+        "# App developer engineer",
+    }
+    assert {title for title in every if title in prompt} == wanted
 
 
 @pytest.mark.asyncio
@@ -131,7 +209,7 @@ async def test_a_file_that_cant_be_removed_doesnt_stop_the_refresh(
     await library.install_builtin()
     monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: None)  # a Windows lock
     again = await library.install_builtin()
-    assert again is not None and len(again.skills) == 2
+    assert again is not None and len(again.skills) == SKILL_COUNT
 
 
 @pytest.mark.asyncio
@@ -143,7 +221,7 @@ async def test_two_installs_at_once_both_see_the_skills(make_studio):
         studio._builtin_skills(), studio._builtin_skills()
     )
     assert first is not None and second is not None
-    assert len(first.skills) == len(second.skills) == 2
+    assert len(first.skills) == len(second.skills) == SKILL_COUNT
     agent = await studio.create_agent(name="B", role="builder", model="m/x", tools=())
     brief = await studio._skill_brief(agent, "Build a budget app")
     assert "# Website design engineer" in brief and "# App developer engineer" in brief
@@ -179,7 +257,11 @@ async def test_a_failed_install_is_tried_again_on_next_use(make_studio, monkeypa
     monkeypatch.setattr(shutil, "copytree", flaky)
     assert await studio._builtin_skills() is None or not studio._builtin_checked
     again = await studio._builtin_skills()
-    assert again is not None and len(again.skills) == 2 and studio._builtin_checked
+    assert (
+        again is not None
+        and len(again.skills) == SKILL_COUNT
+        and studio._builtin_checked
+    )
 
 
 @pytest.mark.asyncio

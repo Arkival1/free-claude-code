@@ -916,6 +916,18 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         description="Model the student agent uses. A small local model is the point.",
     ),
     ConfigFieldSpec(
+        "STUDIO_VISION_MODEL",
+        "Vision Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_vision_model",
+        description=(
+            "A model that can see pictures. The Changer and the Builder send it "
+            "screenshots of the pages they made and fix what it points out. "
+            "Empty: they read each page's text and layout checks instead."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_CLASS_PASS_MARK",
         "Class Pass Mark",
         "studio",

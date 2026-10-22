@@ -7,7 +7,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from free_claude_code.studio.page_try import parse_steps, try_page
+from free_claude_code.studio.page_try import PageReport, parse_steps, try_page
 
 TIP_PAGE = """<!doctype html><title>Tips</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -97,3 +97,48 @@ def test_it_reports_pop_ups_errors_missing_files_and_a_too_wide_page(tmp_path: P
     assert 'The page has: button "Save"' in text
     assert "wider than a phone screen" in text
     assert not report.passed
+
+
+SERVED_PAGE = """<!doctype html><title>Served</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/missing.js"></script>
+<button id="go" onclick="document.getElementById('out').textContent='Done'">Go</button>
+<p id="out">Waiting</p>
+<script>fetch('/api/nothing-here').catch(() => {});</script>"""
+
+
+def test_a_served_page_is_tried_and_pictured(tmp_path: Path):
+    import functools
+    import http.server
+    import threading
+
+    from free_claude_code.studio.page_try import try_url
+
+    (tmp_path / "index.html").write_text(SERVED_PAGE)
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=str(tmp_path)
+    )
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
+    steps = parse_steps(
+        [
+            {"do": "click", "target": "Go"},
+            {"do": "read", "target": "#out", "expect": "Done"},
+        ]
+    )
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            coroutine = try_url(
+                url, steps, name="served", phone=False, shot=tmp_path / "s.png"
+            )
+            report: PageReport = pool.submit(lambda: asyncio.run(coroutine)).result()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert report.read == {"#out": "Done"}
+    # The missing script counts; the API's 404 is an answer, not a missing file.
+    assert report.problems == ["Missing file: /missing.js"]
+    assert (tmp_path / "s.png").stat().st_size > 0
+    assert report.picture[:3] == b"\xff\xd8\xff", "a JPEG for the Vision Model"

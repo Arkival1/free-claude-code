@@ -39,5 +39,7 @@ Work in this order. Each step has a rule you can check.
    and its settings. Pinned dependencies (`package.json`, `pyproject.toml`
    or `requirements.txt`). No errors in the console when it runs.
 10. **Before finishing.** Run `check_project`, run the tests and the app
-    itself, fix everything they show, then say what you built, how you
-    checked it, and anything left to do.
+    itself (`try_page` and `look_page` for its pages), fix everything they
+    show, then say what you built, how you checked it, and anything left to
+    do. A focused edit can go to `aider` (task + files) as a draft; check
+    its work like your own.

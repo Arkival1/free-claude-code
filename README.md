@@ -1402,6 +1402,35 @@ its model on its agent page) that works in a copy of FCC's own files, the
   more tries). A used-up daily allowance pauses the project with a plain note,
   ready for **Resume**. If the Planner writes its findings but never hands in a
   plan, FCC turns them into a one-step plan that waits for your **Approve**.
+- It tests like a person: **try** runs the changed copy (empty data, no keys)
+  and uses a Studio page step by step (fill, click, read what it shows),
+  reporting script errors, missing files, pop-ups and sideways scrolling;
+  **tests** runs the test files it names; **look** takes PC and phone
+  screenshots and sends them to the **Vision Model** (Settings, Studio), which
+  says what looks wrong, and the Changer fixes it and looks again (three rounds
+  at most). With no Vision Model it reads each page as text instead. Its checks
+  and tests run with an empty home folder, so code it writes can't reach your
+  keys.
+- It follows FCC's built-in skills for each step: **vibe coding** and **visual
+  review** when it builds, **debugging** when it fixes; its reviewers follow
+  **code review** and can run tests and try pages to confirm a finding.
+
+**Aider helper.** If you install [Aider](https://aider.chat) (once:
+`uv tool install aider-chat`), the Changer, Builder, Coder and Developer can
+hand it a focused coding job with the **aider** tool. FCC doesn't bundle
+Aider. It runs only in a project folder or the Changer's copy, never the app
+itself, after the same Ask/Auto approval as any command (Agents Can Run
+Commands). It talks to the agent's own model through FCC's own address (a
+local model at your model server), so it never sees a provider key. Git,
+commits, shell commands, link reading, analytics and update checks are off,
+and its history files stay outside the project.
+
+**Seeing pages.** The Builder, Designer, Coder, Developer and Tester also get
+**look_page**: PC and phone screenshots of a project page go to the Vision
+Model, which says what looks broken or unfinished. On NVIDIA NIM,
+`nvidia_nim/nvidia/nemotron-3.5-super-vl-120b-a12b` (thorough, about three
+minutes) and `nvidia_nim/meta/llama-3.2-90b-vision-instruct` (quicker) both
+work as the Vision Model.
 
 Every agent's background task carries on the same way (the Builder, Coder,
 Researcher, relays and subagents too), and every model call waits out a brief

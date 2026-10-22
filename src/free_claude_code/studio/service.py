@@ -1,14 +1,17 @@
 """The Studio facade: one object the HTTP layer and tests both drive."""
 
 import asyncio
+import base64
 import contextlib
 import functools
 import imaplib
 import json
 import re
 import secrets
+import shutil
 import smtplib
 import socket
+import tempfile
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -40,6 +43,18 @@ from .agents import (
     worth_another_go,
     writes_like_builder,
 )
+from .aider import (
+    AIDER_INSTALL,
+    AIDER_SECONDS,
+    AiderError,
+    AiderJob,
+    AiderResult,
+    find_aider,
+    job_files,
+    run_aider,
+    shown_command,
+)
+from .aider import report as aider_report
 from .assistant_tools import describe_time, now_line, parse_when
 from .changer import Changer, ChangerError, app_root
 from .changer_projects import (
@@ -231,7 +246,15 @@ from .orders import (
     web_request,
     worth_routing,
 )
-from .page_try import PageReport, page_try_ready, screenshot_pages, try_page
+from .page_try import (
+    PageReport,
+    PageTryError,
+    page_try_ready,
+    parse_steps,
+    screenshot_pages,
+    try_page,
+    try_url,
+)
 from .phone_link import (
     MAX_MEMORY_CHARS,
     MAX_PULL,
@@ -334,10 +357,12 @@ from .teamplan import (
 )
 from .teamplan import summary as plan_summary
 from .tools import (
+    AIDER_TOOL,
     ALL_TOOL_NAMES,
     CHANGER_TOOL,
     DEFAULT_TOOL_NAMES,
     IDEAS_TOOL,
+    LOOK_PAGE_TOOL,
     MAIN_ONLY_TOOLS,
     MAIN_ROLE,
     MAIN_TOOL_NAMES,
@@ -381,6 +406,19 @@ OWNER_HOLDS = frozenset({"paused", "cancelled"})
 """Statuses only the owner's buttons change."""
 WEB_SKILL = "web-design-engineer"
 APP_SKILL = "app-developer-engineer"
+VIBE_SKILL = "vibe-coding"
+DEBUG_SKILL = "debugging"
+LOOK_SKILL = "visual-review"
+REVIEW_SKILL = "code-review"
+CHANGER_GOAL_LINES = ("The owner's request:", "This milestone:", "Files it owns:")
+"""The lines of a Changer step's task that say what the job is about."""
+_BUG_WORDS = re.compile(
+    r"\b(bug|bugs|fix|broken|error|errors|crash\w*|fail\w*|wrong|doesn'?t work)\b",
+    re.I,
+)
+_PAGE_WORDS = re.compile(
+    r"\b(page|pages|studio_static|ui|css|html|screen|button|card|layout|look)\b", re.I
+)
 CHANGER_PING_TRIES = 3
 """Checks of a model before a job, waiting between them after a brief rate
 limit."""
@@ -388,6 +426,21 @@ CHANGER_TEAM = frozenset(
     {"Changer", CHANGER_PLANNER_NAME, CHANGER_REVIEWER_NAME, CHANGER_SECURITY_NAME}
 )
 CHANGER_HELPER_SECONDS = 1800.0
+VISION_SECONDS = 300.0
+VISION_REPLY_TOKENS = 8192
+"""Room for the Vision Model's answer: models that think first (Nemotron VL)
+use most of it before they write."""
+VISION_PROMPT = (
+    "You look at screenshots of web pages for a developer who can't see them. "
+    "For each picture, list what looks broken or unfinished, most important "
+    "first: text that overlaps, is cut off or runs off screen; sideways "
+    "scrolling; text too faint to read; empty areas that should show "
+    "something; broken image icons; crowded or misaligned parts; buttons too "
+    "small to tap on a phone; fonts, colours or spacing that don't match. "
+    "Name the part and where it is, and the fix in HTML or CSS terms. Say "
+    "'Looks fine' for a picture with nothing wrong. Only report what you can "
+    "see; never guess."
+)
 _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     BUILDER_AGENT_NAME: (
         "skill",
@@ -405,6 +458,8 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "restore_file",
         "polish_check",
         "try_page",
+        "look_page",
+        "aider",
         "conversation",
         "knowledge",
         "find_images",
@@ -484,6 +539,9 @@ OWN_MEMORY_FLAG = "extension_agent_memory_v1"
 OWN_MEMORY_TOOLS = ("remember", "recall")
 """A repo agent's own memory (its own area while it thinks on a server)."""
 TOOLSHED_FLAG = "extension_agent_toolshed_v1"
+CHANGER_AIDER_FLAG = "changer_aider_v1"
+"""The Changer made before Aider gets the aider tool once (the owner can
+take it away again)."""
 """Repo agents already on the team were given the toolshed."""
 IDEAS_FLAG = "extension_agent_ideas_v1"
 STARTERS_OFF_FLAG = "starter_repos_off_v1"
@@ -904,6 +962,7 @@ class StudioService:
             self._data_root / "changer",
             source=app_root(),
             shooter=screenshot_pages if page_try_ready() else None,
+            tryer=try_url if page_try_ready() else None,
         )
         self._changer_helpers: set[str] = set()
         self._changer_last: JsonObject = {}
@@ -1658,6 +1717,10 @@ class StudioService:
         once, so a small model uses the service the user asked for."""
         if call.name == CHANGER_TOOL:
             return await self._changer_tool(call, context)
+        if call.name == LOOK_PAGE_TOOL:
+            return await self._look_page(call, context)
+        if call.name == AIDER_TOOL:
+            return await self._aider_tool(call, context)
         said = self._turn_said.get(context.chat_id, "")
         asked = slash_names(said)
         used = slash_names(json.dumps(call.arguments, ensure_ascii=False))
@@ -2589,8 +2652,20 @@ class StudioService:
         for agent in await self._store.find(
             Agent, where={"name": CHANGER_AGENT_NAME}, order_by="created_at ASC"
         ):
-            if not agent.archived:
-                return agent
+            if agent.archived:
+                continue
+            if await self._store.get(StudioFlag, CHANGER_AIDER_FLAG) is None:
+                if AIDER_TOOL not in agent.tools:
+                    agent = agent.model_copy(
+                        update={
+                            "tools": (*agent.tools, AIDER_TOOL),
+                            "updated_at": now_ms(),
+                        }
+                    )
+                    await self._store.put(agent)
+                await self._store.put(StudioFlag(id=CHANGER_AIDER_FLAG, value="1"))
+            return await self._upgraded_prompt(agent)
+        await self._store.put(StudioFlag(id=CHANGER_AIDER_FLAG, value="1"))
         return await self.create_agent(
             name=CHANGER_AGENT_NAME,
             role="agent",
@@ -2643,6 +2718,18 @@ class StudioService:
 
     # ------------------------------------------------------------ update projects
 
+    async def _upgraded_prompt(self, agent: Agent) -> Agent:
+        """An agent still on an old built-in prompt moves to the new one (a
+        prompt the owner wrote is kept)."""
+        prompt = PROMPT_UPGRADES.get(agent.system_prompt)
+        if prompt is None or prompt == agent.system_prompt:
+            return agent
+        agent = agent.model_copy(
+            update={"system_prompt": prompt, "updated_at": now_ms()}
+        )
+        await self._store.put(agent)
+        return agent
+
     async def _changer_member(
         self, name: str, prompt: str, tools: Sequence[str]
     ) -> Agent:
@@ -2652,7 +2739,7 @@ class StudioService:
             Agent, where={"name": name}, order_by="created_at ASC"
         ):
             if not agent.archived:
-                return agent
+                return await self._upgraded_prompt(agent)
         return await self.create_agent(
             name=name,
             role="agent",
@@ -3628,6 +3715,23 @@ class StudioService:
                     data={**data, **result},
                     failed=not taken,
                 )
+            if action in {"try", "look"}:
+                return await self._changer_pages(
+                    target, arguments, look=action == "look"
+                )
+            if action == "tests":
+                raw_tests = arguments.get("tests") or arguments.get("files")
+                report = await self._changer.run_tests(
+                    target,
+                    [raw_tests]
+                    if isinstance(raw_tests, str)
+                    else [str(item) for item in _items(raw_tests)],
+                )
+                return ToolOutcome(
+                    text=report.text(),
+                    data={**data, **report.view()},
+                    failed=not report.passed,
+                )
             if action == "subagent":
                 raw_files = arguments.get("files")
                 return await self._changer_helper(
@@ -3648,9 +3752,241 @@ class StudioService:
         except (StudioError, ChangerError, ChangePlanError) as error:
             return ToolOutcome(text=str(error), data=data, failed=True)
         return ToolOutcome(
-            text="Pick an action: plan, review, changes, check, screenshots, or subagent.",
+            text="Pick an action: plan, review, changes, check, tests, try, look, "
+            "screenshots, or subagent.",
             data=data,
             failed=True,
+        )
+
+    async def _changer_pages(
+        self, target: Path, arguments: Mapping[str, object], *, look: bool
+    ) -> ToolOutcome:
+        """try: use Studio pages of the running copy like a person (steps,
+        then what the page shows and what went wrong). look: the same at PC
+        and phone size with screenshots, judged by the Vision Model."""
+        action = "look" if look else "try"
+        data: JsonObject = {"tool": CHANGER_TOOL, "action": action}
+        raw = arguments.get("pages") or arguments.get("page")
+        pages = [raw] if isinstance(raw, str) else [str(item) for item in _items(raw)]
+        try:
+            steps = parse_steps(arguments.get("steps"))
+        except ValueError as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+        if look:
+            sizes: tuple[str, ...] = ("pc", "phone")
+        else:
+            sizes = ("pc",) if arguments.get("phone") is False else ("phone",)
+        reports = await self._changer.try_pages(
+            target, pages, steps, sizes=sizes, pictures=look
+        )
+        data["passed"] = all(report.passed for report in reports)
+        data["problems"] = [p for report in reports for p in report.problems][:20]
+        if not look:
+            return ToolOutcome(
+                text="\n\n".join(report.render() for report in reports),
+                data=data,
+                failed=not data["passed"],
+            )
+        data["shots"] = [report.shot.name for report in reports if report.shot]
+        text = await self._looked(reports, str(arguments.get("question", "") or ""))
+        return ToolOutcome(text=text, data=data)
+
+    async def _looked(self, reports: Sequence[PageReport], question: str) -> str:
+        """What the Vision Model sees in the pictures, then each page's
+        checks; with no Vision Model (or none answering), each page as text."""
+        seen = await self._see(reports, question)
+        if seen:
+            parts = [seen]
+            parts += [
+                "\n".join(report.render().split("\nPage text at the end:")[:1])
+                for report in reports
+            ]
+        else:
+            parts = [
+                "No Vision Model answered (set one in Settings, Studio), so "
+                "nothing looked at the pictures; here is each page as text, "
+                "with its checks."
+            ]
+            parts += [report.render() for report in reports]
+        return "\n\n".join(parts)
+
+    async def _see(self, reports: Sequence[PageReport], question: str) -> str:
+        """The Vision Model's notes on the pictures, or "" when no model that
+        can see is set or it doesn't answer."""
+        model = self.settings.studio_vision_model
+        pictures = [report for report in reports if report.picture]
+        if not model or not pictures:
+            return ""
+        images = tuple(
+            "data:image/jpeg;base64," + base64.b64encode(report.picture).decode()
+            for report in pictures
+        )
+        names = "\n".join(
+            f"Picture {number}: {report.page}, {report.size[0]}x{report.size[1]}"
+            for number, report in enumerate(pictures, start=1)
+        )
+        prompt = (
+            f"{names}\n\nWhat to check: "
+            f"{question.strip()[:600] or 'how it looks, and anything broken'}"
+        )
+        try:
+            reply = await asyncio.wait_for(
+                self._router.complete(
+                    [ChatMessage.user(prompt, images=images)],
+                    model=model,
+                    system=VISION_PROMPT,
+                    max_tokens=VISION_REPLY_TOKENS,
+                ),
+                VISION_SECONDS,
+            )
+        except Exception as error:  # looking is extra: any failure reads text
+            logger.warning("The Vision Model {} didn't answer: {}", model, error)
+            return ""
+        text = reply.text.strip()
+        return f"What {model} sees in the screenshots:\n{text}" if text else ""
+
+    async def _look_page(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        """A project page at PC and phone size, judged by the Vision Model."""
+        data: JsonObject = {"tool": LOOK_PAGE_TOOL}
+        if not context.site_id:
+            return ToolOutcome(
+                text="look_page works in a project; start one first.",
+                data=data,
+                failed=True,
+            )
+        if not page_try_ready():
+            return ToolOutcome(
+                text="Looking at pages needs the desktop browser part. Run the "
+                "Windows installer again, or: uv sync --extra studio_desk",
+                data=data,
+                failed=True,
+            )
+        folder = self._sites.directory(context.site_id)
+        page = str(call.arguments.get("page") or "index.html")
+        shots = Path(tempfile.mkdtemp(prefix="fcc-look-"))
+        reports: list[PageReport] = []
+        try:
+            steps = parse_steps(call.arguments.get("steps"))
+            reports = [
+                await try_page(
+                    folder,
+                    page,
+                    steps,
+                    phone=phone,
+                    shot=shots / f"{'phone' if phone else 'pc'}.png",
+                )
+                for phone in (False, True)
+            ]
+            text = await self._looked(
+                reports, str(call.arguments.get("question", "") or "")
+            )
+        except (PageTryError, ValueError) as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+        finally:
+            shutil.rmtree(shots, ignore_errors=True)
+        data["page"] = page
+        data["problems"] = [p for report in reports for p in report.problems][:20]
+        return ToolOutcome(text=text, data=data)
+
+    async def _aider_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        """A job for Aider in this project's folder (or the Changer's copy),
+        after the owner's command approval, with none of the owner's keys."""
+        data: JsonObject = {"tool": AIDER_TOOL}
+
+        def refuse(text: str) -> ToolOutcome:
+            return ToolOutcome(text=text, data=data, failed=True)
+
+        if not context.site_id:
+            return refuse(
+                "Aider works in a project folder or the Changer's copy; start a "
+                "project first."
+            )
+        settings = self.settings
+        if settings.studio_agent_commands not in {"ask", "auto"}:
+            return refuse(
+                "Aider runs a program on this PC, so it needs Agents Can Run "
+                "Commands set to Ask or Auto in Studio settings."
+            )
+        aider = find_aider()
+        if aider is None:
+            return refuse(AIDER_INSTALL)
+        task = str(call.arguments.get("task", "") or "").strip()
+        if not task:
+            return refuse("Describe the job for Aider (task).")
+        folder = self._sites.directory(context.site_id)
+        raw = call.arguments.get("files")
+        try:
+            files = job_files(
+                folder,
+                [raw] if isinstance(raw, str) else [str(item) for item in _items(raw)],
+            )
+        except AiderError as error:
+            return refuse(str(error))
+        agent = await self._store.get(Agent, context.agent_id)
+        job = self._aider_job(folder, task, files, agent.model if agent else "")
+        done: list[AiderResult] = []
+
+        async def run() -> tuple[int, str, bool]:
+            result = await run_aider(job, aider=aider)
+            done.append(result)
+            return result.code, aider_report(result), result.timed_out
+
+        try:
+            outcome = await self._commands.request(
+                agent_id=context.agent_id,
+                agent_name=context.agent_name,
+                chat_id=context.chat_id,
+                site_id=context.site_id,
+                command=shown_command(job),
+                cwd=folder,
+                policy=settings.studio_agent_commands,
+                timeout=AIDER_SECONDS,
+                run=run,
+            )
+        except CommandError as error:
+            return refuse(str(error))
+        if not done:
+            return refuse(outcome.text)
+        result = done[0]
+        data.update(
+            {
+                "exit_code": result.code,
+                "changed": list(result.changed),
+                "added": list(result.added),
+                "deleted": list(result.deleted),
+            }
+        )
+        return ToolOutcome(
+            text=aider_report(result),
+            data=data,
+            failed=result.code != 0 or not result.touched,
+        )
+
+    def _aider_job(
+        self, folder: Path, task: str, files: tuple[str, ...], model: str
+    ) -> AiderJob:
+        """Aider asks the agent's own model: a local one at the model server
+        on this PC, a server one through FCC's own OpenAI-style address, so
+        FCC's routing holds the provider keys, not Aider."""
+        settings = self.settings
+        model = model or self.server_model
+        if model.startswith(LOCAL_MODEL_PREFIX):
+            return AiderJob(
+                folder=folder,
+                message=task,
+                files=files,
+                model=model[len(LOCAL_MODEL_PREFIX) :],
+                base_url=self._local_url(),
+                api_key=settings.studio_local_api_key or "local",
+                edit_format="whole",
+            )
+        return AiderJob(
+            folder=folder,
+            message=task,
+            files=files,
+            model=model,
+            base_url=f"http://127.0.0.1:{settings.port}/v1",
+            api_key=settings.proxy_auth_token if settings.proxy_auth_enabled else "fcc",
         )
 
     async def _changer_submit(
@@ -6927,29 +7263,58 @@ class StudioService:
         Builder (and repo agents that write like it) the website design
         engineer, the Coder, Developer and Tester the app developer engineer,
         each also the other when the job calls for it."""
-        if agent.name in CHANGER_TEAM:
-            return ""
-        web = agent.role == "builder" or writes_like_builder(agent)
-        app = agent.role in {"coder", "developer", "tester"}
-        if not (web or app):
-            return ""
         wanted: list[str] = []
-        if web or re.search(r"\b(site|page|landing|ui|design|css|html)\b", goal, re.I):
-            wanted.append(WEB_SKILL)
-        if app or re.search(
-            r"\b(app|tool|game|api|dashboard|calculator|tracker|script)\b", goal, re.I
-        ):
-            wanted.append(APP_SKILL)
+        if agent.name in CHANGER_TEAM:
+            # The Changer's steps: BUILD (vibe coding, visual review for
+            # pages), FIX (debugging); its reviewers review code; the
+            # Planner plans from the map alone.
+            if agent.name in {CHANGER_REVIEWER_NAME, CHANGER_SECURITY_NAME}:
+                wanted.append(REVIEW_SKILL)
+            elif agent.name != CHANGER_PLANNER_NAME:
+                # A step's own instructions mention fixing and pages; judge
+                # by the owner's request and the milestone only.
+                about = "\n".join(
+                    line
+                    for line in goal.splitlines()
+                    if line.startswith(CHANGER_GOAL_LINES)
+                )
+                if goal.lstrip().startswith("FIX") or (
+                    not about and _BUG_WORDS.search(goal)
+                ):
+                    wanted.append(DEBUG_SKILL)
+                else:
+                    wanted.append(VIBE_SKILL)
+                if _PAGE_WORDS.search(about or goal):
+                    wanted.append(LOOK_SKILL)
+        else:
+            web = agent.role == "builder" or writes_like_builder(agent)
+            app = agent.role in {"coder", "developer", "tester"}
+            if not (web or app):
+                return ""
+            if web or re.search(
+                r"\b(site|page|landing|ui|design|css|html)\b", goal, re.I
+            ):
+                wanted.append(WEB_SKILL)
+            if app or re.search(
+                r"\b(app|tool|game|api|dashboard|calculator|tracker|script)\b",
+                goal,
+                re.I,
+            ):
+                wanted.append(APP_SKILL)
+            if _BUG_WORDS.search(goal):
+                wanted.append(DEBUG_SKILL)
+        if not wanted:
+            return ""
         builtin = await self._builtin_skills()
         if builtin is None or not builtin.enabled:
             return ""
         parts: list[str] = []
-        for skill in builtin.skills:
-            if skill.name in wanted:
-                try:
-                    parts.append(await self._extensions.skill_text(builtin, skill))
-                except (OSError, ExtensionError) as error:
-                    logger.warning("Skill {} couldn't be read: {}", skill.name, error)
+        by_name = {skill.name: skill for skill in builtin.skills}
+        for skill in (by_name[name] for name in wanted if name in by_name):
+            try:
+                parts.append(await self._extensions.skill_text(builtin, skill))
+            except (OSError, ExtensionError) as error:
+                logger.warning("Skill {} couldn't be read: {}", skill.name, error)
         if not parts:
             return ""
         return (
