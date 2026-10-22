@@ -173,6 +173,10 @@ Notes carried over from the long session that built FCC Studio (LCC).
   Trading keys live encrypted in `trading-keys.vault` (Windows DPAPI); with
   no such protection FCC stays in practice. Hyperliquid (Invo) trades at 1x,
   isolated, long only, and FCC signs only orders, cancels and leverage.
+- No Freebuff / Codebuff (owner's call): its free tier has no headless
+  mode and its privacy policy allows training on and selling data. Don't
+  add it or suggest it again. Aider (installed by the owner) is the helper
+  coder instead.
 - Ruflo-core is set up for Claude Code here as project files
   (`.claude/agents`, `.claude/skills`, `.mcp.json`); see
   `vendor/ruflo-core/README.md`. Its `.claude-flow/` runtime folder is
