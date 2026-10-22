@@ -96,6 +96,7 @@ _ASSET_FILENAMES = frozenset(
         "tutor.js",
         "fcc3d.js",
         "trade3d.js",
+        "lab3d.js",
         "ops.css",
         "ops.js",
         "ops3d.js",

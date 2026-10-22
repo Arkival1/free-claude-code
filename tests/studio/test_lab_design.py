@@ -50,6 +50,32 @@ def test_each_component_is_drawn_in_its_material_and_weighed():
     assert all(row["how"] for row in result["components"])
 
 
+def test_a_place_in_the_3d_view_is_kept_and_bad_ones_are_dropped():
+    placed = [
+        {**CART[0], "at_mm": [0, 0, 0]},
+        {**CART[2], "at_mm": {"x": 40.5, "y": 3, "z": -20}, "turn_deg": 450},
+        {**CART[3], "at_mm": [1e9, -1e9, 5]},
+        {**CART[4], "at_mm": ["left", 0, 0], "turn_deg": "sideways"},
+        {**CART[5], "at_mm": [1, 2]},
+    ]
+    rows = check(placed)["components"]
+    assert rows[0]["at_mm"] == [0, 0, 0] and rows[0]["turn_deg"] == 0
+    assert rows[1]["at_mm"] == [40.5, 3, -20] and rows[1]["turn_deg"] == 90
+    assert rows[1]["part_kind"] == "brain"
+    assert rows[2]["at_mm"] == [10_000, -10_000, 5]
+    assert rows[3]["at_mm"] is None and rows[3]["turn_deg"] == 0
+    assert rows[4]["at_mm"] is None
+    odd = check([{**CART[0], "at_mm": [True, 0, 0], "turn_deg": 359.96}])
+    assert odd["components"][0]["at_mm"] is None
+    assert odd["components"][0]["turn_deg"] == 0
+    huge = check([{**CART[0], "at_mm": [10**400, 0, 0], "turn_deg": 10**400}])
+    assert huge["components"][0]["at_mm"] is None
+    assert huge["components"][0]["turn_deg"] == 0
+    # Where a part sits doesn't change the physics.
+    plain = [CART[0], CART[2], CART[3], CART[4], CART[5]]
+    assert check(plain)["mass_g"] == check(placed)["mass_g"]
+
+
 def test_the_electronics_run_on_the_circuit_bench():
     result = check(CART)
     assert result["electronics"] is not None

@@ -80,7 +80,14 @@ async def test_scripts_go_compressed_with_their_types(make_studio):
 
             icon = await client.get(f"/studio/assets/{version}/icon-180.png")
             assert "content-encoding" not in icon.headers
-            for name in ("fcc3d.js", "ops3d.js", "three-orbit.js", "ops.js", "ops.css"):
+            for name in (
+                "fcc3d.js",
+                "ops3d.js",
+                "lab3d.js",
+                "three-orbit.js",
+                "ops.js",
+                "ops.css",
+            ):
                 found = await client.get(f"/studio/assets/{version}/{name}")
                 assert found.status_code == 200, name
         finally:

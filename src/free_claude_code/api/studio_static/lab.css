@@ -1111,3 +1111,65 @@ body[data-page="lab"] .view {
 @media (prefers-reduced-motion: reduce) {
   .dtile .dt-icon, .dtile.hot { animation: none; }
 }
+
+/* The 3D build view: a studio render with pointer-line labels. */
+.lab3d-host {
+  position: relative;
+  height: clamp(380px, 62vh, 680px);
+  margin: 0.6rem 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 35%, #b9bcc1 0%, #9a9da3 55%, #7f8288 100%);
+}
+.lab3d-host[hidden] { display: none; }
+.lab3d-host .fcc3d-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.lab3d-overlay { position: absolute; inset: 0; pointer-events: none; }
+.lab3d-overlay[hidden] { display: none; }
+.lab3d-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.lab3d-lines line { stroke: #e04848; stroke-width: 1.2; opacity: 0.9; }
+.lab3d-label {
+  position: absolute;
+  max-width: 34%;
+  padding: 1px 4px;
+  border: 0;
+  background: none;
+  color: #fff;
+  font: italic 500 0.82rem/1.25 system-ui, sans-serif;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.lab3d-label.right { text-align: right; }
+.lab3d-label.on { color: #9fd0ff; }
+.lab3d-label.v-breaks, .lab3d-label.st-burnt { color: #ffb3b3; }
+.lab3d-label:focus-visible { outline: 2px solid #9fd0ff; border-radius: 4px; }
+.lab3d-tools {
+  position: absolute;
+  bottom: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  max-width: 94%;
+}
+.lab3d-tools .chip { background: rgba(20, 22, 26, 0.72); color: #fff; border-color: rgba(255, 255, 255, 0.18); font-size: 0.75rem; }
+.lab3d-ask {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 6px;
+}
+.lab3d-ask input { flex: 1; min-width: 0; background: rgba(20, 22, 26, 0.78); color: #fff; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 10px; padding: 0.45rem 0.7rem; }
+.lab3d-info { margin: 0 0 0.6rem; }
+.lab3d-info[hidden] { display: none; }
+@media (max-width: 560px) {
+  .lab3d-label { font-size: 0.7rem; max-width: 42%; }
+  .lab3d-tools .chip { font-size: 0.68rem; padding: 2px 6px; }
+}

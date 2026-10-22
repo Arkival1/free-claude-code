@@ -112,6 +112,11 @@ class Component:
     carries_kg: float
     wall_mm: float = 0.0
     """A casing's wall thickness (it is hollow); 0 for solid parts."""
+    at_mm: tuple[float, float, float] | None = None
+    """Where it sits in the 3D view (x across, y up, z towards you, from the
+    middle of the floor); None lets the view lay it out."""
+    turn_deg: float = 0.0
+    """How far it is turned about the upright axis in the 3D view."""
 
     def volume_cm3(self) -> float:
         w, h, d = self.size_mm
@@ -194,6 +199,39 @@ def _size(value: object, shape: str) -> tuple[float, float, float]:
     )
 
 
+MAX_REACH_MM = 10_000.0
+"""How far from the middle a component may be placed."""
+
+
+def _number(value: object) -> float | None:
+    """A finite number, or None (bools, text and huge values aren't)."""
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except OverflowError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _place(value: object) -> tuple[float, float, float] | None:
+    """A position [x, y, z] or {x, y, z} in mm, or None when not given."""
+    if isinstance(value, Mapping):
+        value = [value.get(key) for key in ("x", "y", "z")]
+    if not isinstance(value, Sequence) or isinstance(value, str) or len(value) < 3:
+        return None
+    numbers = [_number(item) for item in list(value)[:3]]
+    if len(numbers) < 3 or any(n is None for n in numbers):
+        return None
+    x, y, z = (max(-MAX_REACH_MM, min(MAX_REACH_MM, n or 0.0)) for n in numbers)
+    return (round(x, 1), round(y, 1), round(z, 1))
+
+
+def _turn(value: object) -> float:
+    number = _number(value)
+    return 0.0 if number is None else round(number, 1) % 360
+
+
 def read_component(entry: Mapping[str, object]) -> Component:
     """A component from what was asked; an unknown material or part is
     refused (never guessed)."""
@@ -238,6 +276,8 @@ def read_component(entry: Mapping[str, object]) -> Component:
         wall_mm=(float(wall) if isinstance(wall, int | float) and wall > 0 else WALL_MM)
         if role == "casing" and part is None
         else 0.0,
+        at_mm=_place(entry.get("at_mm")),
+        turn_deg=_turn(entry.get("turn_deg")),
     )
 
 
@@ -350,7 +390,10 @@ def check(
                 "shape": component.shape,
                 "size_mm": list(component.size_mm),
                 "part": component.part.id if component.part else "",
+                "part_kind": component.part.kind if component.part else "",
                 "icon": component.part.icon if component.part else "",
+                "at_mm": list(component.at_mm) if component.at_mm else None,
+                "turn_deg": component.turn_deg,
                 "material": {
                     "id": component.material.id,
                     "name": component.material.name,

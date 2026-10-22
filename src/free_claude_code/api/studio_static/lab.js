@@ -7,6 +7,9 @@
 (() => {
   "use strict";
 
+  // Where this script was served from, for loading the 3D build view.
+  const BASE = document.currentScript ? new URL(".", document.currentScript.src).href : "";
+
   const MODES = [
     ["bench", "Chemistry", "⚗"],
     ["make", "Make", "🧴"],
@@ -306,6 +309,8 @@
 
   function drawMode() {
     if (!stage) return;
+    design3d?.dispose();
+    design3d = null;
     const draw = {
       bench: drawBench,
       make: drawMake,
@@ -1303,6 +1308,30 @@
       ],
     },
     {
+      name: "Computer motherboard (in 3D)",
+      wet: false,
+      parts: [
+        { name: "Motherboard", material: "fr4", shape: "board", size_mm: [305, 1.6, 244], role: "structure", at_mm: [0, 0, 0], how: "The circuit board every part plugs into: copper traces in its layers carry power and signals between them." },
+        { name: "CPU socket", material: "steel", shape: "box", size_mm: [50, 5, 50], role: "electronics", at_mm: [60, 1.6, -40], how: "Holds the processor and presses its pads onto hundreds of spring contacts." },
+        { name: "CPU (processor)", material: "silicon", shape: "box", size_mm: [37, 2, 37], role: "electronics", at_mm: [60, 6.6, -40], how: "Runs the programs: billions of transistors switching on a silicon chip." },
+        { name: "VRM heat sink", material: "aluminium", shape: "box", size_mm: [40, 30, 40], role: "other", at_mm: [0, 1.6, -80], how: "Aluminium fins spread the heat of the power stage into the air." },
+        { name: "Inductor (coil)", material: "copper", shape: "box", size_mm: [10, 8, 10], role: "electronics", count: 3, at_mm: [-10, 1.6, -45], how: "Copper coils smooth the CPU's power supply." },
+        { name: "Capacitors", part: "capacitor", size_mm: [8, 12, 8], role: "electronics", count: 6, at_mm: [30, 1.6, -95] },
+        { name: "Memory slot", material: "abs", shape: "box", size_mm: [7, 9, 130], role: "electronics", count: 4, at_mm: [110, 1.6, 10], how: "Holds a RAM stick; its pins carry data to the memory controller." },
+        { name: "PCIe x16 slot", material: "abs", shape: "box", size_mm: [8, 11, 90], role: "electronics", at_mm: [-40, 1.6, -35], how: "Where a graphics card plugs in: 16 lanes of fast serial links." },
+        { name: "PCI slot", material: "abs", shape: "box", size_mm: [8, 10, 85], role: "electronics", count: 3, at_mm: [-94, 1.6, -40], how: "Older expansion card slots." },
+        { name: "Northbridge heat sink", material: "aluminium", shape: "box", size_mm: [35, 15, 35], role: "other", at_mm: [10, 1.6, 0] },
+        { name: "Southbridge heat sink", material: "aluminium", shape: "box", size_mm: [35, 12, 35], role: "other", at_mm: [-30, 1.6, 60] },
+        { name: "Super I/O controller", material: "silicon", shape: "box", size_mm: [24, 2, 24], role: "electronics", at_mm: [60, 1.6, 95], how: "A chip that runs the slow ports: fans, sensors, keyboard." },
+        { name: "24-pin power connector", material: "abs", shape: "box", size_mm: [52, 12, 10], role: "electronics", at_mm: [120, 1.6, 110], how: "Brings 3.3 V, 5 V and 12 V in from the power supply." },
+        { name: "SATA connector", material: "abs", shape: "box", size_mm: [6, 8, 12], role: "electronics", count: 4, at_mm: [-20, 1.6, 105], how: "Data cables to the drives plug in here." },
+        { name: "CMOS battery", part: "cr2032", shape: "cylinder", size_mm: [20, 3.2], role: "electronics", at_mm: [-80, 1.6, 80], how: "Keeps the clock and settings while the computer is off." },
+        { name: "USB ports", material: "steel", shape: "box", size_mm: [15, 16, 14], role: "electronics", count: 2, at_mm: [-100, 1.6, -112] },
+        { name: "Ethernet port", material: "steel", shape: "box", size_mm: [16, 13, 21], role: "electronics", at_mm: [-60, 1.6, -110] },
+        { name: "Audio jack", material: "abs", shape: "box", size_mm: [10, 12, 10], role: "electronics", count: 3, at_mm: [-30, 1.6, -115] },
+      ],
+    },
+    {
       name: "Garden lamp (iron post, outdoors)",
       wet: true,
       parts: [
@@ -1335,6 +1364,9 @@
   function drawDesign() {
     const canvas = h("div", { class: "design-canvas" });
     const results = h("section", { class: "card design-results" });
+    const view = h("div", { class: "lab3d-host", hidden: true });
+    const info = h("p", { class: "lab3d-info muted small", "aria-live": "polite", hidden: true });
+    design3dParts = { view, info };
     const library = h("div", { class: "design-library" }, [h("p", { class: "muted small", text: "Loading saved parts…" })]);
     const name = h("input", { type: "text", value: state.designName, "aria-label": "Design name", class: "grow" });
     name.addEventListener("input", () => { state.designName = name.value; });
@@ -1345,6 +1377,8 @@
       paintDesign(canvas, results);
     });
     stage.append(...clean([
+      view,
+      info,
       h("div", { class: "tech-grid" }, [
         h("div", { class: "tech-column" }, [
           addComponentCard(canvas, results),
@@ -1579,6 +1613,117 @@
     return tile;
   }
 
+  /* The 3D build view (lab3d.js): the design drawn as the real thing. */
+  let design3d = null;
+  let design3dParts = null;
+  let design3dLoading = null;
+  const PART_MATERIAL = { power: "steel", charger: "fr4", regulator: "fr4", light: "epoxy", motion: "steel", sound: "abs", brain: "fr4", sensor: "fr4", display: "glass", control: "abs", passive: "copper", structure: "abs" };
+  // How big a part looks when the design doesn't say (mm: w, h, d).
+  const PART_SIZE = { light: [5, 8, 5], passive: [8, 12, 8], power: [18, 65, 18], motion: [24, 30, 24], brain: [53, 1.6, 68], sensor: [20, 1.6, 20], regulator: [22, 1.6, 17], charger: [26, 1.6, 17], display: [60, 5, 40], sound: [28, 6, 28], control: [12, 8, 12] };
+
+  function matchRows() {
+    const rows = state.lastDesign ? state.lastDesign.components || [] : [];
+    const unused = [...rows];
+    return state.designParts.map((entry) => {
+      if (entry.assembly) return null;
+      const at = unused.findIndex((row) => row.name === entry.name && (!entry.material || row.material.id === entry.material));
+      return at >= 0 ? unused.splice(at, 1)[0] : null;
+    });
+  }
+
+  function itemsFor3d() {
+    const matched = matchRows();
+    return state.designParts.map((entry, index) => {
+      const row = matched[index];
+      const part = entry.part ? partOf(entry.part) : null;
+      const material = materialOf(entry.material || (row && row.material.id) || (part ? PART_MATERIAL[part.kind] || "abs" : "abs"));
+      const shape = entry.shape || (row && row.shape) || (entry.assembly ? "box" : material && material.id === "fr4" ? "board" : part && part.kind === "power" ? "cylinder" : "box");
+      const size = entry.size_mm || (part && PART_SIZE[part.kind]) || (row && row.size_mm) || (entry.assembly ? [60, 30, 60] : shape === "board" ? [50, 1.6, 70] : shape === "wire" ? [1, 100, 0] : [40, 40, 40]);
+      return {
+        index,
+        name: entry.name || (part ? part.name : material ? material.name : "Component"),
+        shape,
+        size_mm: [0, 1, 2].map((i) => Number(size[i]) || (i === 2 ? 0 : 1)),
+        colour: (row && row.material.colour) || (material ? material.colour : "#8a8f98"),
+        finish: (row && row.material.finish) || finishOf(material),
+        materialName: (row && row.material.name) || (material ? material.name : ""),
+        part_kind: part ? part.kind : "",
+        part_id: entry.part || "",
+        count: entry.count || 1,
+        role: entry.assembly ? "other" : entry.role || (part ? "electronics" : "structure"),
+        at_mm: Array.isArray(entry.at_mm) && entry.at_mm.length === 3 ? entry.at_mm.map(Number) : null,
+        turn_deg: Number(entry.turn_deg) || 0,
+        state: row ? row.state : "",
+        verdict: row ? row.verdict : "",
+        how: row ? row.how : entry.how || (part ? part.note : ""),
+        mass: row ? row.mass_g : null,
+      };
+    });
+  }
+
+  function paint3d() {
+    if (!design3dParts) return;
+    const { view, info } = design3dParts;
+    if (!view.isConnected) return;
+    if (!state.designParts.length) {
+      view.hidden = true;
+      info.hidden = true;
+      return;
+    }
+    if (!design3d) {
+      if (design3dLoading === "unavailable" || !BASE) return; // the tiles stay
+      if (!window.FCCLab3D) {
+        design3dLoading = design3dLoading || import(`${BASE}lab3d.js`).catch(() => {
+          design3dLoading = "unavailable";
+        });
+        if (design3dLoading instanceof Promise) design3dLoading.then(() => window.FCCLab3D && paint3d());
+        return;
+      }
+      view.hidden = false;
+      design3d = window.FCCLab3D.mount(view, {
+        onSelect: (index) => {
+          const item = index === null ? null : itemsFor3d()[index];
+          if (!item) {
+            info.hidden = true;
+            return;
+          }
+          info.hidden = false;
+          info.textContent = `${item.name}${item.materialName ? ` · ${item.materialName}` : ""}${item.mass != null ? ` · ${item.mass} g` : ""}${item.how ? ` · ${item.how}` : ""}`;
+        },
+        onPlace: (placed) => {
+          for (const { index, at_mm: at, turn_deg: turn } of placed) {
+            if (!state.designParts[index]) continue;
+            state.designParts[index].at_mm = at;
+            state.designParts[index].turn_deg = turn;
+          }
+          paint3d();
+        },
+        onLayout: () => {
+          for (const entry of state.designParts) {
+            delete entry.at_mm;
+            delete entry.turn_deg;
+          }
+          paint3d();
+        },
+        onAsk: (text) => {
+          const current = state.designParts.length
+            ? `\n\nChange my current Lab design "${state.designName}" and keep what I didn't ask to change, including each part's at_mm and turn_deg: ${JSON.stringify(state.designParts)}`
+            : "";
+          say(`Design this in the Lab, laid out in 3D: ${text}${current}`);
+          ctx.notify("Asked the Lab AI: the new design opens here when it's done.");
+        },
+        onHint: (text) => ctx.notify(text),
+      });
+      if (!design3d) {
+        design3dLoading = "unavailable";
+        view.hidden = true;
+        return;
+      }
+    }
+    view.hidden = false;
+    design3d.show(itemsFor3d(), { works: Boolean(state.lastDesign && state.lastDesign.works) });
+  }
+
   function componentCard(entry, row, material, part) {
     const facts = [];
     if (material) facts.push(["Material", material.name], ["Strength", `${material.strength} MPa`], ["Density", `${material.density} g/cm³`], ["Melts", `${material.melts} °C`], ["Rusts", material.rusts]);
@@ -1596,6 +1741,7 @@
   }
 
   function paintDesign(canvas, results) {
+    paint3d();
     canvas.classList.remove("spark");
     const answer = state.lastDesign;
     const rows = answer ? answer.components || [] : [];

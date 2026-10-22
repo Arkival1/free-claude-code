@@ -159,3 +159,85 @@ def test_a_design_shows_its_materials_checks_physics_and_is_kept(
     library.get_by_role("button", name="Add").first.click()
     expect(page.locator(".dtile.fin-group")).to_have_count(1)
     shot(page, "lab-design")
+
+
+def test_a_design_is_built_in_3d_with_labels_and_parts_move(
+    page: Page, admin_base_url: str
+) -> None:
+    open_lab(page, admin_base_url, "design")
+    page.get_by_role("button", name="Robot cart (steel frame)").click()
+    view = page.locator(".lab3d-host")
+    expect(view.locator("canvas")).to_be_visible()
+    labels = view.locator(".lab3d-label")
+    expect(labels.first).to_be_visible()
+    count = labels.count()
+    assert count == page.locator(".dtile").count()
+    expect(view.get_by_role("button", name="Show or hide the labels")).to_be_visible()
+    page.get_by_role("button", name="⚙ Check physics").click()
+    expect(page.locator(".design-results")).to_contain_text("Would work")
+    # A label chooses its part and says what it is.
+    labels.filter(has_text="Frame").first.click()
+    expect(page.locator(".lab3d-info")).to_contain_text("Frame")
+    expect(page.locator(".lab3d-info")).to_contain_text("steel")
+    shot(page, "lab-design-3d")
+    # Dragging a part pins every part where it is, ready to save.
+    line = view.locator(".lab3d-lines line").nth(count - 1)
+    x = float(line.get_attribute("x2") or 0)
+    y = float(line.get_attribute("y2") or 0)
+    box = view.bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + x, box["y"] + y + 3)
+    page.mouse.down()
+    page.mouse.move(box["x"] + x + 60, box["y"] + y + 23, steps=6)
+    page.mouse.up()
+    placed = page.evaluate("() => document.querySelectorAll('.lab3d-label').length")
+    assert placed == count
+    view.get_by_role("button", name="Turn the chosen part a quarter").click()
+    view.get_by_role("button", name="Let the view lay out every part again").click()
+    expect(labels).to_have_count(count)
+
+
+def test_the_motherboard_example_is_laid_out_where_it_says(
+    page: Page, admin_base_url: str
+) -> None:
+    open_lab(page, admin_base_url, "design")
+    page.get_by_role("button", name="Computer motherboard (in 3D)").click()
+    view = page.locator(".lab3d-host")
+    expect(view.locator(".lab3d-label")).to_have_count(18)
+    expect(
+        view.locator(".lab3d-label", has_text=re.compile(r"Memory slot .4"))
+    ).to_be_visible()
+    page.get_by_role("button", name="⚙ Check physics").click()
+    expect(page.locator(".design-results")).to_contain_text("Weighs")
+    page.evaluate("window.scrollTo(0, 0)")
+    view.locator(".lab3d-label", has_text="CPU socket").click()
+    expect(page.locator(".lab3d-info")).to_contain_text("spring contacts")
+    shot(page, "lab-motherboard-3d")
+
+
+def test_a_part_added_after_moving_the_board_sits_on_it_and_choices_reset(
+    page: Page, admin_base_url: str
+) -> None:
+    open_lab(page, admin_base_url, "design")
+    page.get_by_role("button", name="Robot cart (steel frame)").click()
+    view = page.locator(".lab3d-host")
+    expect(view.locator(".lab3d-label").first).to_be_visible()
+    # The 3D layout puts a new part on top of a board that was moved.
+    spot = page.evaluate(
+        """() => {
+          const items = [
+            { index: 0, name: "Board", shape: "board", size_mm: [100, 2, 80],
+              role: "structure", at_mm: [40, 5, -10], count: 1 },
+            { index: 1, name: "Chip", shape: "box", size_mm: [10, 2, 10],
+              role: "electronics", at_mm: null, count: 1 },
+          ];
+          return window.FCCLab3D.layout(items).get(1)[0];
+        }"""
+    )
+    assert spot["y"] == 7
+    assert -10 <= spot["x"] <= 90 and -50 <= spot["z"] <= 30
+    # Choosing a part, then removing an earlier one, drops the choice.
+    view.locator(".lab3d-label", has_text="Power switch").click()
+    expect(page.locator(".lab3d-info")).to_contain_text("Power switch")
+    page.get_by_role("button", name="Remove Frame").click()
+    expect(page.locator(".lab3d-info")).to_be_hidden()

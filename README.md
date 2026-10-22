@@ -1323,6 +1323,15 @@ along the top, and the **Lab chat** with Jarvis sits on the right.
   match. Three examples (a steel-frame robot cart, an iron garden lamp, an
   aluminium desk fan) are one tap away. These are estimates for a sketch
   (straight loads, still air), not an engineer's sign-off.
+- **Build in 3D.** Above the design, the build is drawn as the real thing on
+  a studio floor: boards with their traces and pads, chips with legs,
+  capacitors, batteries, motors, wheels, heat sinks with fins, connectors
+  with pins, each in its material, every part labelled with a pointer line.
+  Turn the view, click a part (or its label) to see what it is and how it
+  works, drag parts to move them, and **Turn**, **Up**, **Down** or **Auto
+  layout**; the places are saved with the design. **Ask AI** under the view
+  has the Lab AI build or change it, placing each part in 3D (`at_mm`,
+  `turn_deg`). A fourth example, a computer motherboard, shows the look.
 - **Keep and reuse.** **Keep as a part** (or ➕ on **Made**) saves a design or
   a build as a part; **Saved parts** adds it to any other design, where it
   opens into its components. **⧉** on **Made** copies anything to change
