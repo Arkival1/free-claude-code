@@ -16,7 +16,9 @@ In `src/free_claude_code/studio/game_library/`:
   size, tile sheets, sounds, fonts, glTF models; vector copies, double-size
   copies and other engines' project files are left out). `PACKS.md` lists
   the packs and checksums.
-- `kenney-core.zip`: the 49 core packs (platformers, top-down, dungeon,
+- `kenney-core-1.zip` and `kenney-core-2.zip`: the 49 core packs (split by
+  `split_core.py`, whole packs per part, so each release zip stays under
+  25 MB) (platformers, top-down, dungeon,
   space, racing, puzzle, cards, UI, icons, particles, input prompts, fonts
   and all the sound packs), shipped inside FCC. Their sounds are converted to
   mp3 so they play on iPhones; the particle sprites are scaled to 128 px.
@@ -29,7 +31,8 @@ the catalogue, checks the SHA-256, and keeps the zip in the PC's game vault
 (`<data>/game-vault/`) for good, so a pack downloaded once keeps working if
 kenney.nl changes or goes away. Downloaded packs keep their .ogg sounds.
 
-`pack.py` built both files from the downloaded zips:
+`pack.py` built the catalogue and `kenney-core.zip` from the downloaded zips,
+then `split_core.py` split it into the two parts:
 `python3 -I pack.py <zips> <sizes.tsv> <out folder>` (sizes.tsv: id,
 category, size, address). `SHA256SUMS` holds the files' checksums (a test
 checks them).

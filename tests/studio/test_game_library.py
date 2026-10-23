@@ -34,7 +34,9 @@ def digest(path: Path) -> str:
 
 def test_everything_ships_with_its_checksum_and_licence():
     here = game_library.HERE
-    assert f"{digest(game_library.CORE)}  kenney-core.zip" in sums("kenney")
+    for part in game_library.CORE_PARTS:
+        assert f"{digest(here / part)}  {part}" in sums("kenney")
+        assert (here / part).stat().st_size < 25 * 1024 * 1024
     assert f"{digest(game_library.CATALOGUE)}  kenney-catalogue.json.gz" in sums(
         "kenney"
     )
@@ -52,8 +54,11 @@ def test_everything_ships_with_its_checksum_and_licence():
     assert all(len(item.sha256) == 64 for item in packs)
     assert all(item.url.startswith(game_library.KENNEY) for item in packs)
     # Shipped sounds are mp3 (they play on iPhones); every shipped file is in the zip.
-    with zipfile.ZipFile(game_library.CORE) as bundle:
-        names = set(bundle.namelist())
+    names: set[str] = set()
+    for part in game_library.CORE_PARTS:
+        with zipfile.ZipFile(here / part) as bundle:
+            names |= set(bundle.namelist())
+    assert {item.bundle for item in shipped} == set(game_library.CORE_PARTS)
     for item in shipped:
         assert not any(path.endswith(".ogg") for path in item.files), item.id
         assert all(f"{item.id}/{path}" in names for path in item.files), item.id

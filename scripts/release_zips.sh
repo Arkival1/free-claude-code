@@ -18,10 +18,15 @@ name="FCC-Studio-$version"
 limit=$((25 * 1024 * 1024))
 image_src=$(git ls-files 'vendor/stable-diffusion-cpp/*-src-*.zip')
 mapfile -t repos < <(git ls-files 'vendor/repos/*.zip')
+# FCC's own big libraries (website layouts, Kenney game art) get parts too.
+mapfile -t libs < <(git ls-files 'src/free_claude_code/studio/site_layouts/*.zip' \
+    'src/free_claude_code/studio/game_library/kenney-core-*.zip')
 
 git archive --format=zip --prefix=fcc/ -o "$out/$name.zip" HEAD -- . \
     ':!tests' ':!e2e' ':!smoke' ':!docs' ':!vendor/cua' \
-    ':!vendor/repos/*.zip' ":!$image_src"
+    ':!vendor/repos/*.zip' ":!$image_src" \
+    ':!src/free_claude_code/studio/site_layouts/*.zip' \
+    ':!src/free_claude_code/studio/game_library/kenney-core-*.zip'
 
 part=2
 batch=()
@@ -33,7 +38,7 @@ flush() {
     batch=()
     size=0
 }
-for file in "${repos[@]}"; do
+for file in "${repos[@]}" "${libs[@]}"; do
     bytes=$(stat -c %s "$file")
     if [ $((size + bytes)) -gt "$limit" ]; then flush; fi
     batch+=("$file")

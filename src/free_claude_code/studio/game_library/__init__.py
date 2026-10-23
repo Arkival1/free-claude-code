@@ -5,7 +5,7 @@
   share, so it is left out) in `phaser-examples.json.gz`.
 - Kenney's 217 asset packs (CC0, public domain): every pack is listed in
   `kenney-catalogue.json.gz` with its files and checksum. The core packs ship
-  inside FCC (`kenney-core.zip`, sounds as mp3); any other pack is
+  inside FCC (`kenney-core-1.zip` and `-2.zip`, sounds as mp3); any other pack is
   downloaded once from kenney.nl, checked against its recorded SHA-256, and
   kept in the PC's game vault for good.
 See `vendor/kenney/` and `vendor/phaser/`.
@@ -21,7 +21,8 @@ from functools import cache
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-CORE = HERE / "kenney-core.zip"
+CORE_PARTS = ("kenney-core-1.zip", "kenney-core-2.zip")
+"""The shipped packs, split so each release zip stays under 25 MB."""
 CATALOGUE = HERE / "kenney-catalogue.json.gz"
 EXAMPLES = HERE / "phaser-examples.json.gz"
 PHASER = HERE / "phaser" / "phaser.min.js"
@@ -45,6 +46,8 @@ class Pack:
     size: int
     shipped: bool
     files: tuple[str, ...]
+    bundle: str = ""
+    """Which kenney-core part holds a shipped pack."""
     """Usable files: sprites, sheets, sounds, fonts, 3D models."""
 
 
@@ -83,6 +86,7 @@ def packs() -> tuple[Pack, ...]:
             size=row["size"],
             shipped=row["shipped"],
             files=tuple(row["files"]),
+            bundle=row.get("bundle", ""),
         )
         for row in rows
     )
@@ -202,7 +206,7 @@ def read_files(
             f"{item.name} has no {unknown[0]!r}. Use action find or packs."
         )
     if item.shipped:
-        with zipfile.ZipFile(CORE) as bundle:
+        with zipfile.ZipFile(HERE / item.bundle) as bundle:
             return {path: bundle.read(f"{item.id}/{path}") for path in wanted}
     if vault is None or not vault.has(item):
         raise GameLibraryError(
