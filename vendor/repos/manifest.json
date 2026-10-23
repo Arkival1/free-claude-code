@@ -446,6 +446,16 @@
       "file": "morluto__rea.zip",
       "sha256": "50bcfda4c9f33e1d895758a025aa25ea51c69636b1c9dea5a1909ce40b55bdd6",
       "size": 1645527
+    },
+    {
+      "owner": "alexgreensh",
+      "repo": "token-optimizer",
+      "commit": "549bb58b27c6d687e682ca44eaba51d55425176d",
+      "licence": "PolyForm Noncommercial 1.0.0 (+ small-business permission)",
+      "about": "Token Optimizer: guides and skills for cutting wasted tokens (audit, coaching, checkpoints); its hook scripts, other scripts and dashboard are left out.",
+      "file": "alexgreensh__token-optimizer.zip",
+      "sha256": "331fa4af46d98422e5b95ffae60bc65701b14b78728eca9a52eb3d6b31efed39",
+      "size": 604238
     }
   ]
 }

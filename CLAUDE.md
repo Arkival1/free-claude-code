@@ -14,8 +14,8 @@ releases) is deleted later.
 - Code that downloads from GitHub at runtime must keep the bytes in the
   Repo vault (`free_claude_code.studio.vault.RepoVault`) and fall back to
   the vault copy when GitHub no longer has it.
-- Repos that come with FCC go in `vendor/repos/` (they install switched off;
-  the owner turns on the ones they want): a zip
+- Repos that come with FCC go in `vendor/repos/` (they install switched on,
+  read only when a job needs them; their MCP servers stay off): a zip
   of the parts Studio uses, a `manifest.json` row (commit, licence, sha256),
   and `SHA256SUMS`; `studio/starter.py` installs them. A repo whose licence
   forbids sharing gets a manifest row with `left_out` and no zip.
@@ -167,7 +167,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.86.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.87.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -182,7 +182,11 @@ Notes carried over from the long session that built FCC Studio (LCC).
 
 - Server agents share one memory area (`server:team`), separate from the
   local agents' memory; `remember` with `private` keeps a note to one agent.
-- Starter repos install switched off; the owner turns each one on.
+- Starter repos install switched on (owner, 6.87; also switched on once on
+  PCs where they were off): agents read their skills only when a job needs
+  them and put a used skill away (`agents.put_away_skills`); their MCP
+  servers stay off; repos FCC switched on join the relay "off" until the
+  owner switches them; a repo the owner turns off stays off.
 - The ideas board sorts ideas into website, app, lab and general; each
   agent reads its own category (builder: website, coder/tester: app).
 - Agents that write files get the Builder's step budget (40); relays run

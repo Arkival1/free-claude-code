@@ -674,3 +674,32 @@ async def test_an_agent_asking_for_itself_is_told_to_do_it(make_studio):
 
     (asked,) = [m for m in await studio.transcript(chat.id) if m.role == "tool"]
     assert "You are Builder: do this yourself" in asked.text
+
+
+def test_a_skill_read_earlier_is_put_away_even_in_a_short_history():
+    # Skills are loaded when a job needs them and put away once used.
+    skill_text = "Skill impeccable (from FCC skills):\n" + "rule\n" * 300
+    history = [
+        ChatMessage.user("Polish the page."),
+        ChatMessage(
+            role="assistant",
+            tool_calls=(ToolCall(id="s1", name="skill", arguments={"action": "read"}),),
+        ),
+        ChatMessage(role="tool", content=skill_text, tool_call_id="s1"),
+    ]
+    assert compact_history(history) == history, "still in use: kept whole"
+    for index in range(4):
+        history.append(
+            ChatMessage(
+                role="assistant",
+                tool_calls=(ToolCall(id=f"r{index}", name="read_file", arguments={}),),
+            )
+        )
+        history.append(
+            ChatMessage(role="tool", content="small", tool_call_id=f"r{index}")
+        )
+    kept = compact_history(history)
+    assert kept[2].content.startswith("Skill impeccable (from FCC skills):")
+    assert "put away to save tokens" in kept[2].content
+    assert len(kept[2].content) < 300
+    assert kept[-1].content == "small"

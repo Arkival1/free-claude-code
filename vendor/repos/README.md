@@ -23,7 +23,7 @@ added cards for them (see **Agent cards FCC wrote** below).
 
 It is all read-only data. Studio unpacks a repo into its own folder and
 reads it, and nothing in it runs. MCP servers from these repos (hindsight,
-paperclip, openviking, agentmemory) start **switched off**; the user turns
+paperclip, openviking, agentmemory) start **switched off** (the repos themselves are on, read on demand); the user turns
 each one on after seeing its command. Agents in them (paperclip, OpenMontage,
 langflow) join the team only when the user clicks **Add to team**. Removing
 a starter repo sticks, and **Repos that come with FCC** on the More page
@@ -76,6 +76,7 @@ adds it back.
 | [pbakaus/impeccable](https://github.com/pbakaus/impeccable) | `e07dc019a7` | Apache-2.0 | `pbakaus__impeccable.zip` (5.66 MB) | Impeccable: frontend design guidance, 24 design commands and rules against AI-looking pages. |
 | [Creatorberry/flick](https://github.com/Creatorberry/flick) | `4442fe3556` | MIT | `Creatorberry__flick.zip` (0.08 MB) | Flick: turn a video, link or transcript into short scene animations (skills and agents). |
 | [morluto/rea](https://github.com/morluto/rea) | `fd5cd1b058` | MIT | `morluto__rea.zip` (1.65 MB) | REA: reverse-engineer apps and binaries; its guides, skills and agents (its MCP server starts off). Its `third_party/` folder holds only READMEs and the licences of the tools it points to (evmole MIT, pwndbg MIT). |
+| [alexgreensh/token-optimizer](https://github.com/alexgreensh/token-optimizer) | `549bb58b27` | PolyForm Noncommercial 1.0.0 + small-business permission | `alexgreensh__token-optimizer.zip` (0.60 MB) | Token Optimizer: its guides and skills for cutting wasted tokens (audit, coaching, checkpoints). Its hooks, scripts and dashboard are left out (they would run on every action); free for personal and noncommercial use, and for organisations under 5 people and US$20,000 a month, with its licence and Required Notice kept. |
 
 ## Left out, and why
 

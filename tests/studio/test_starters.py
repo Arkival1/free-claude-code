@@ -325,13 +325,15 @@ async def test_agents_search_every_repo_and_read_the_part_they_need(
         return outcome.text
 
     # The tool adds the starter repos itself if the app hasn't yet. They come
-    # switched off, so nothing of them reaches the agents until turned on.
+    # switched on, read only when a search or read asks for them; a repo the
+    # owner switches off is left out.
+    found = await skill(action="search", query="kubernetes rbac")
+    security = next(e for e in await repos(studio) if "security" in e.name)
+    assert all(extension.enabled for extension in await repos(studio))
+    await studio.switch_extension(security.id, on=False)
     off = await skill(action="search", query="kubernetes rbac")
     assert "auditing-kubernetes-rbac" not in off and "k8s-rbac" not in off
-    for extension in await repos(studio):
-        assert not extension.enabled
-        await studio.switch_extension(extension.id, on=True)
-    found = await skill(action="search", query="kubernetes rbac")
+    await studio.switch_extension(security.id, on=True)
     assert "- auditing-kubernetes-rbac: Find risky Kubernetes RBAC bindings." in found
     assert "skills/k8s-rbac/SKILL.md" in found
 
@@ -526,3 +528,34 @@ async def test_repo_agents_added_before_get_their_memory_tools(make_studio):
     fixed = await studio._store.require(Agent, auditor.id)
     assert {"remember", "recall"} <= set(fixed.tools)
     assert fixed.all_tools is False
+
+
+@pytest.mark.asyncio
+async def test_repos_switched_off_before_come_on_once_and_the_owners_choice_sticks(
+    make_studio, tmp_path
+):
+    from free_claude_code.studio.models import StudioFlag
+    from free_claude_code.studio.service import STARTERS_ON_FLAG
+
+    studio, _ = make_studio([])
+    studio._starter_folder = bundle(
+        tmp_path / "bundle", {"mukul975/security-skills": SECURITY_SKILLS}
+    )
+    # An older install: the repo was added switched off.
+    await studio.ensure_starters()
+    (security,) = await repos(studio)
+    await studio.switch_extension(security.id, on=False)
+    await studio._store.delete(StudioFlag, STARTERS_ON_FLAG)
+    studio._starters_checked = False
+    await studio.ensure_starters()
+    (security,) = await repos(studio)
+    assert security.enabled, "on once, for its skills"
+    assert security.id in await studio._auto_on(), "FCC switched it: relay off"
+    assert [s.enabled for s in security.servers] == [False], "MCP servers stay off"
+    # The owner switches it off: it stays off from then on.
+    await studio.switch_extension(security.id, on=False)
+    assert security.id not in await studio._auto_on(), "the owner's choice now"
+    studio._starters_checked = False
+    await studio.ensure_starters()
+    (security,) = await repos(studio)
+    assert not security.enabled

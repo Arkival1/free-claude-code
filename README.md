@@ -917,11 +917,14 @@ GitHub release is gone. Outside repos built into FCC itself are kept under
 (`vendor/claw-code` holds Claw Code's source; `vendor/cua` holds trycua/cua's
 MIT-licensed Cua Driver and agent source).
 
-**Repos that come with FCC.** FCC ships 35 outside repos, installed when
-Studio first starts and **switched off**: none of their skills, agents, or MCP
-servers run, and none join the relay, until you turn the repo on. Turn each
-one on or off under **Repos** (the Turn on / Turn off button by its name).
-Repos you add yourself from GitHub or a zip start on. Among the ones that come
+**Repos that come with FCC.** FCC ships 46 outside repos, installed when
+Studio first starts and **switched on** (since 6.87, also on PCs where they
+were off): an agent reads a repo's skills only when a job needs them (the
+`skill` tool searches and reads on demand), and a skill it read a few steps
+ago is put away to save tokens (it can read it again). Their MCP servers stay
+off, and they join the relay switched off, until you switch them yourself.
+Turn each one on or off under **Repos** (the Turn on / Turn off button by its
+name); a repo you turn off stays off. Among the ones that come
 with FCC:
 
 - agent teams: awesome-claude-code-subagents (160 Claude Code subagents),
@@ -1440,8 +1443,8 @@ updates. Add your own note from the Changer page; **Use for the whole team**
 moves all four Changer agents to one model at once. The HQ shows the update:
 its goal, the milestone, who is working on it now, and the newest notes.
 
-**Helper team.** wshobson/agents (202 coding agents, MIT) comes with FCC,
-switched off. **Add the helper team** on the Changer page turns it on and adds
+**Helper team.** wshobson/agents (202 coding agents, MIT) comes with FCC.
+**Add the helper team** on the Changer page turns it on and adds
 eight lean agents (debugger, error detective, test automator, security auditor,
 Python and JavaScript experts, UI designer, search specialist) the Changer can
 hand parts to. Each agent asks for a light, everyday or strong model; FCC gives
@@ -1473,8 +1476,8 @@ run Headroom in front of it until their compatibility is checked.
 
 **More starter repos.** FCC now also ships agent-reach, Vercel's agent skills
 (web design guidelines), awesome-design-md, playwright-cli, awesome-free-llm-apis,
-superpowers, impeccable, flick and rea, switched off like the others: turn them
-on from the More page and every agent can search their skills and guides.
+superpowers, impeccable, flick and rea, on like the others: every agent can
+search their skills and guides when a job needs them.
 
 **Free AI services in the brain pickers.** Choose brain and Team brains list
 the free services: FreeLLMAPI's choices (`auto`, `auto:coding`, `auto:smartest`,

@@ -98,7 +98,7 @@ docs/             GitHub Pages: index.html and docs/phone (built phone app)
 | `models.py`, `store.py` | Pydantic records (Agent, Chat, Task, Idea, Extension...) and the SQLite store (`studio.db` in Studio's data folder under `~/.fcc`) |
 | `memory.py` | `MemoryService`: per-agent, team and `server:team` memory |
 | `crew.py`, `orders.py`, `teamplan.py`, `relay.py`, `rooms.py` | Jarvis hands work out; direct orders from what the user says; team plans; repo relays; chat rooms |
-| `extensions.py`, `mcp.py`, `starter.py`, `vault.py`, `connectors.py` | Add from GitHub (skills, plugin agents, MCP servers), MCP client, starter repo pack (installs switched off), Repo vault, connectors |
+| `extensions.py`, `mcp.py`, `starter.py`, `vault.py`, `connectors.py` | Add from GitHub (skills, plugin agents, MCP servers), MCP client, starter repo pack (installs on, read on demand; MCP servers off), Repo vault, connectors |
 | `sites.py`, `templates*.py`, `project_check.py`, `polish.py`, `page_try.py`, `commands.py`, `code_loop.py` | Project workspaces, starter templates (`templates_3d.py`: 3d-landing, 3d-dashboard, the FCC web kit; three.js copied in with `copy_library`), checks, design once-over, page tryout, approved commands, Coder/Tester loop |
 | `ideas.py`, `photos.py`, `images.py`, `image_engine.py`, `image_cloud.py` | Ideas board, business photos, free photos (Openverse), AI images |
 | `research.py`, `search.py`, `platforms.py`, `videos.py`, `video_ears.py`, `desk.py`, `connectivity.py` | Web research, search, Reddit/YouTube, video notes, desktop browser, online check |

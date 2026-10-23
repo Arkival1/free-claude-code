@@ -588,7 +588,10 @@ PICTURE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 take it away again)."""
 """Repo agents already on the team were given the toolshed."""
 IDEAS_FLAG = "extension_agent_ideas_v1"
-STARTERS_OFF_FLAG = "starter_repos_off_v1"
+STARTERS_ON_FLAG = "starter_repos_on_v1"
+AUTO_ON_FLAG = "starter_repos_auto_on"
+"""The ids of repos FCC switched on itself (not the owner): they join the
+relay switched off until the owner switches them on or off."""
 """Starter repos added before they started switched off are turned off once."""
 """Repo agents already on the team were given the ideas board."""
 REPO_AGENT_EXTRAS = (*OWN_MEMORY_TOOLS, TOOLSHED_TOOL, IDEAS_TOOL)
@@ -7799,16 +7802,18 @@ class StudioService:
                 if await self._store.get(StudioFlag, flag) is None:
                     await self._give_repo_agents(extra)
                     await self._store.put(StudioFlag(id=flag, value="1"))
-            if await self._store.get(StudioFlag, STARTERS_OFF_FLAG) is None:
-                # Repos run only when the user wants them: the ones that came
-                # with FCC go off until the user turns each on.
+            if await self._store.get(StudioFlag, STARTERS_ON_FLAG) is None:
+                # The owner's call (6.87): the repos that come with FCC are on,
+                # once; agents read their skills only when a job needs them
+                # (the skill tool), their MCP servers stay off and they join
+                # the relay switched off. A repo turned off later stays off.
                 starting = {
                     s.source.lower() for s in load_starters(self._starter_folder)
                 }
                 for extension in await self._extensions.all():
-                    if extension.source.lower() in starting and extension.enabled:
-                        await self.switch_extension(extension.id, on=False)
-                await self._store.put(StudioFlag(id=STARTERS_OFF_FLAG, value="1"))
+                    if extension.source.lower() in starting and not extension.enabled:
+                        await self.switch_extension(extension.id, on=True, chosen=False)
+                await self._store.put(StudioFlag(id=STARTERS_ON_FLAG, value="1"))
             added: list[Extension] = []
             waiting = False
             present = {e.source.lower(): e.id for e in await self._extensions.all()}
@@ -7854,8 +7859,9 @@ class StudioService:
                 await self.update_agent(agent.id, {"tools": [*agent.tools, *missing]})
 
     async def _add_starter(self, starter: StarterRepo) -> Extension:
-        """Add a repo that comes with FCC, switched off: it is there, ready,
-        and does nothing until the user turns it on."""
+        """Add a repo that comes with FCC, switched on: its skills are there
+        for agents to read when a job needs them; its MCP servers stay off and
+        it joins the relay switched off."""
         folder = self._starter_folder
         if starter.bundled and folder is not None:
             data = await anyio.to_thread.run_sync(bundled_bytes, folder, starter)
@@ -7870,13 +7876,30 @@ class StudioService:
             )
         else:
             extension = await self._extensions.add_github(starter.source)
-        extension.enabled = False
+        extension.enabled = True
+        await self._mark_auto_on(extension.id, auto=True)
         return await self._extensions.save(extension)
 
-    async def switch_extension(self, ext_id: str, *, on: bool) -> Extension:
+    async def _auto_on(self) -> set[str]:
+        flag = await self._store.get(StudioFlag, AUTO_ON_FLAG)
+        return set(flag.value.split(",")) - {""} if flag else set()
+
+    async def _mark_auto_on(self, ext_id: str, *, auto: bool) -> None:
+        ids = await self._auto_on()
+        changed = ids | {ext_id} if auto else ids - {ext_id}
+        if changed != ids:
+            await self._store.put(
+                StudioFlag(id=AUTO_ON_FLAG, value=",".join(sorted(changed)))
+            )
+
+    async def switch_extension(
+        self, ext_id: str, *, on: bool, chosen: bool = True
+    ) -> Extension:
         """Turn a repo on or off. Off: its skills, MCP servers, and agents
-        are left out of every job and the relay until it is turned on."""
+        are left out of every job and the relay until it is turned on.
+        ``chosen`` is False when FCC switches it, not the owner."""
         extension = await self._extension(ext_id)
+        await self._mark_auto_on(ext_id, auto=not chosen and on)
         extension.enabled = on
         if not on:
             for server in extension.servers:
@@ -8070,6 +8093,8 @@ class StudioService:
                 "wshobson/agents isn't added yet: on the More page, open Repos "
                 "that come with FCC and add it back."
             )
+        # The owner's own click: the helper repo joins the relay as they set it.
+        await self._mark_auto_on(extension.id, auto=False)
         if not extension.enabled:
             extension.enabled = True
             await self._extensions.save(extension)
@@ -9333,8 +9358,11 @@ class StudioService:
 
     async def relay_settings(self) -> RelaySettings:
         """The saved relay, with repos added since put in their place."""
-        installed = [extension.name for extension in await self._relay_repos()]
-        return arranged(self._relay.load(), installed)
+        repos = await self._relay_repos()
+        installed = [extension.name for extension in repos]
+        auto = await self._auto_on()
+        quiet = [e.name for e in repos if e.id in auto]
+        return arranged(self._relay.load(), installed, quiet=quiet)
 
     async def relay_view(self) -> JsonObject:
         settings = await self.relay_settings()

@@ -21,7 +21,7 @@ installed from there when GitHub no longer has it.
 | [`cua/`](cua/README.md) | https://github.com/trycua/cua | MIT | Kept for a planned PC-control feature (not used yet) |
 | [`stable-diffusion-cpp/`](stable-diffusion-cpp/README.md) | https://github.com/leejet/stable-diffusion.cpp | MIT | The Image engine: painted cartoon places and characters (Settings → Image engine) |
 | [`three/`](three/README.md) | https://github.com/mrdoob/three.js | MIT | The 3D views: the Trading Bank's debate arena, the Ops page, and the 3D site templates |
-| [`repos/`](repos/README.md) | 45 repos, 43 shipped as zips (OpenHands, MetaGPT, crewAI, superpowers, impeccable, awesome-design-md, wshobson/agents, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, switched off until the owner turns them on |
+| [`repos/`](repos/README.md) | 46 repos, 44 shipped as zips (OpenHands, MetaGPT, crewAI, superpowers, impeccable, awesome-design-md, wshobson/agents, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, switched off until the owner turns them on |
 | [`ruflo-core/`](ruflo-core/README.md) | https://github.com/ruvnet/ruflo | MIT | Ruflo's agents, skills and MCP server for Claude Code sessions on this repo (`.claude/`, `.mcp.json`) |
 | [`hyperliquid-python-sdk/`](hyperliquid-python-sdk/README.md) | https://github.com/hyperliquid-dex/hyperliquid-python-sdk | MIT | The reference signing code and test values FCC's own Hyperliquid (Invo) signing is checked against |
 

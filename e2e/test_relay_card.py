@@ -23,20 +23,18 @@ def test_the_relay_lists_every_repo_and_keeps_changes(
     page.goto(f"{admin_base_url}/studio#hq")
     relay = page.locator(".hq-relay")
     # Starter repos install in the background on the first load, switched
-    # off: none of them is in the relay until the user turns it on.
+    # on for their skills (read only when a job needs them), but they join
+    # the relay switched off until the owner switches a repo themselves.
     api = f"{admin_base_url}/studio/api/extensions"
     for _ in range(30):
         added = page.request.get(api).json()["extensions"]
         if any(item["source"].endswith(VOLT) for item in added):
             break
         page.wait_for_timeout(1000)
-    # FCC's own skills come switched on; every starter repo comes off.
-    starters = [item for item in added if item.get("origin") != "builtin"]
-    assert starters and not any(item["enabled"] for item in starters)
-    assert all(item["enabled"] for item in added if item.get("origin") == "builtin")
+    assert added and all(item["enabled"] for item in added)
     page.reload()
     expect(relay).to_be_visible()
-    assert relay.locator(f"[data-repo='{VOLT}']").count() == 0
+    expect(relay.get_by_label(f"When {VOLT} runs")).to_have_value("off")
     for item in added:
         page.request.post(f"{api}/{item['id']}/switch", data={"on": True})
     page.reload()

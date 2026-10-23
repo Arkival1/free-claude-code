@@ -411,9 +411,15 @@ def default_mode(repo: str) -> Mode:
     return "fits"
 
 
-def arranged(saved: RelaySettings, installed: Sequence[str]) -> RelaySettings:
+def arranged(
+    saved: RelaySettings, installed: Sequence[str], *, quiet: Sequence[str] = ()
+) -> RelaySettings:
     """The saved order for repos still installed, then repos added since:
-    the first repos in their order, then the rest as they were added."""
+    the first repos in their order, then the rest as they were added. Repos
+    in ``quiet`` (the ones that come with FCC, on by default for their
+    skills) join switched off, so they add no relay turns until the user
+    sets them."""
+    hushed = {repo_key(name) for name in quiet}
     present = {repo_key(name): name for name in installed}
     stages = [
         RelayStage(present[repo_key(s.repo)], s.mode, list(s.use))
@@ -425,7 +431,8 @@ def arranged(saved: RelaySettings, installed: Sequence[str]) -> RelaySettings:
     for name in [*first, *installed]:
         if repo_key(name) not in known:
             known.add(repo_key(name))
-            stages.append(RelayStage(name, default_mode(name)))
+            mode: Mode = "off" if repo_key(name) in hushed else default_mode(name)
+            stages.append(RelayStage(name, mode))
     return RelaySettings(
         on=saved.on, first=saved.first, stages=stages, check=saved.check
     )

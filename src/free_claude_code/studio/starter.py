@@ -8,10 +8,10 @@ allow FCC to share it is listed without a copy: Studio adds it from GitHub on
 first load, and the Repo vault on the PC keeps that copy from then on.
 
 On first load every starter repo is added like an "Add from GitHub" link,
-switched off: none of its skills, agents, or MCP servers run, and it stays out
-of the relay, until the user turns the repo on. Even then its MCP servers stay
-off until the user turns each one on, and its agents join the team only when
-the user adds them. Removing a starter repo sticks: it isn't added
+switched on: agents read its skills only when a job needs them (the skill
+tool), its MCP servers stay off until the user turns each one on, it joins
+the relay switched off until the user switches the repo, and its agents join
+the team only when the user adds them. Removing a starter repo sticks: it isn't added
 back on the next load.
 """
 

@@ -422,6 +422,42 @@ def _context_full(error: StudioLLMError) -> bool:
     )
 
 
+SKILL_PUT_AWAY = (
+    "[skill text put away to save tokens once used; read it again with the "
+    "skill tool if you need it]"
+)
+
+
+def put_away_skills(history: list[ChatMessage]) -> list[ChatMessage]:
+    """Skills are loaded when a job needs them and put away after: a skill
+    the agent read more than KEEP_RECENT messages ago shrinks to its first
+    line and a note, whatever the size of the history."""
+    skill_calls = {
+        call.id
+        for message in history
+        for call in message.tool_calls
+        if call.name == "skill"
+    }
+    if not skill_calls:
+        return history
+    kept = list(history)
+    for index in range(1, max(1, len(kept) - KEEP_RECENT)):
+        message = kept[index]
+        if (
+            message.role == "tool"
+            and message.tool_call_id in skill_calls
+            and len(message.content) > 400
+            and SKILL_PUT_AWAY not in message.content
+        ):
+            first = message.content.splitlines()[0][:200]
+            kept[index] = ChatMessage(
+                role="tool",
+                content=f"{first}\n{SKILL_PUT_AWAY}",
+                tool_call_id=message.tool_call_id,
+            )
+    return kept
+
+
 def compact_history(
     history: list[ChatMessage], *, budget: int = HISTORY_BUDGET
 ) -> list[ChatMessage]:
@@ -439,6 +475,7 @@ def compact_history(
             for m in messages
         )
 
+    history = put_away_skills(history)
     if size(history) <= budget:
         return history
     kept = list(history)
