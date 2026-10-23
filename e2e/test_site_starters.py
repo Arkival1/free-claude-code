@@ -2,9 +2,12 @@
 bookings are priced and sent, the projects filter and open, and nothing
 scrolls sideways on a phone."""
 
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
-from playwright.sync_api import Page, expect
+import pytest
+from playwright.sync_api import Browser, Page, expect
 
 from e2e.test_3d_templates import make_project
 
@@ -43,6 +46,35 @@ def test_the_lessons_site_draws_waves_and_books(
     page.set_viewport_size({"width": 390, "height": 844})
     assert page.evaluate("document.documentElement.scrollWidth - innerWidth") == 0
     assert errors == []
+
+
+@pytest.mark.parametrize("zone", ["America/New_York", "Australia/Sydney"])
+def test_the_booking_day_is_the_visitors_own_tomorrow(
+    browser: Browser, admin_base_url: str, tmp_path: Path, zone: str
+) -> None:
+    # Dates read as UTC gave Sydney mornings today and New York evenings the
+    # day after tomorrow, and showed the wrong weekday west of UTC.
+    context = browser.new_context(timezone_id=zone)
+    page = context.new_page()
+    page.goto(make_project(admin_base_url, tmp_path, "lessons"))
+    tomorrow = (datetime.now(ZoneInfo(zone)) + timedelta(days=1)).date()
+    expect(page.locator("#date")).to_have_value(tomorrow.isoformat())
+    assert page.get_attribute("#date", "min") == tomorrow.isoformat()
+    page.route(
+        "**/booking-test", lambda route: route.fulfill(status=200, body='{"ok": true}')
+    )
+    page.evaluate(
+        "document.getElementById('booking').dataset.endpoint = '/booking-test'"
+    )
+    page.fill("#name", "Sam")
+    page.get_by_role("button", name="Book it").click()
+    expect(page.locator("#done")).to_contain_text(
+        f"{tomorrow:%A} {tomorrow.day} {tomorrow:%B}"
+    )
+    # After the booking the form is ready for the next one.
+    expect(page.locator("#date")).to_have_value(tomorrow.isoformat())
+    expect(page.get_by_role("button", name="Book it")).to_be_enabled()
+    context.close()
 
 
 def test_the_portfolio_filters_and_opens_projects(

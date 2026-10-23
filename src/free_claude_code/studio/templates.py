@@ -734,6 +734,8 @@ STARTER_TEXT: tuple[str, ...] = (
     "studio@yourstudio.example",
     "Wattle Terrace",
     "Riverbank Library",
+    "A practice of seven in Redfern",
+    "Seven people and never more than twelve projects",
 )
 """Placeholder copy in the templates, which a finished project replaces."""
 

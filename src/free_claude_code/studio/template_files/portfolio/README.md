@@ -11,5 +11,5 @@ colours, light and dark.
 - `styles.css`: the design tokens are at the top (`:root`), light and dark.
 - `portfolio.js`: `PROJECTS` (name, kind, place, year, area, rating, text),
   `KIND` (the filter names, matching the buttons' `data-filter`), and
-  `elevation()`, which draws each project. To show real photos instead, give a
-  project an `image` and put an `<img>` in its card in place of the drawing.
+  `elevation()`, which draws each project. To show real photos instead, change
+  `paint()` and `open()` to put an `<img>` where they put `elevation(...)`.

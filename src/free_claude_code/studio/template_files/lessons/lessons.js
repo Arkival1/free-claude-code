@@ -63,8 +63,10 @@
   // Lesson buttons fill in the form.
   document.querySelectorAll("[data-lesson]").forEach((a) => a.addEventListener("click", () => { $("lesson").value = a.dataset.lesson; }));
   const today = new Date(); today.setDate(today.getDate() + 1);
-  $("date").min = today.toISOString().slice(0, 10);
-  $("date").value = today.toISOString().slice(0, 10);
+  // Tomorrow in the visitor's own time zone (toISOString would give UTC's).
+  const tomorrow = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  $("date").min = tomorrow;
+  $("date").value = tomorrow;
 
   const form = $("booking");
   form.addEventListener("submit", (e) => {
@@ -77,13 +79,16 @@
     if (!day || day < $("date").min) { err.textContent = "Pick a day from tomorrow on."; return $("date").focus(); }
     const lesson = $("lesson").value;
     const price = PRICES[lesson] * (lesson === "Private coaching" ? Math.ceil(people / 2) : people);
-    const summary = `${lesson} for ${people}, ${new Date(day).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" })}: ${money.format(price)} on the day.`;
+    const summary = `${lesson} for ${people}, ${new Date(`${day}T12:00`).toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" })}: ${money.format(price)} on the day.`;
     done.hidden = false;
     if (form.dataset.endpoint) {
       done.textContent = "Sending…";
+      const button = form.querySelector("[type=submit]");
+      button.disabled = true;
       fetch(form.dataset.endpoint, { method: "POST", body: new FormData(form), headers: { Accept: "application/json" } })
-        .then((r) => { if (!r.ok) throw new Error(); done.textContent = `Booked: ${summary}`; form.reset(); })
-        .catch(() => { done.textContent = "That didn't send. Please email us instead."; });
+        .then((r) => { if (!r.ok) throw new Error(); done.textContent = `Booked: ${summary}`; form.reset(); $("date").value = tomorrow; })
+        .catch(() => { done.textContent = "That didn't send. Please email us instead."; })
+        .finally(() => { button.disabled = false; });
       return;
     }
     location.href = `mailto:${form.dataset.email}?subject=${encodeURIComponent(`Lesson booking: ${name}`)}&body=${encodeURIComponent(`${summary}\nLevel: ${$("level").value}`)}`;
