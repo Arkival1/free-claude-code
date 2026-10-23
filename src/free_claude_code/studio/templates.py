@@ -732,6 +732,14 @@ STARTER_TEXT: tuple[str, ...] = (
     # portfolio
     "20 Sample Lane",
     "studio@yourstudio.example",
+    # site layouts (Start Bootstrap)
+    "Lorem ipsum",
+    "dummyimage.com",
+    "Start Bootstrap",
+    "Your Website 20",
+    "Company Name",
+    "free Bootstrap theme",
+    "free bootstrap theme",
     "Wattle Terrace",
     "Riverbank Library",
     "A practice of seven in Redfern",

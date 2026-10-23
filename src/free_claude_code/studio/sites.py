@@ -512,12 +512,21 @@ class SiteWorkspace:
         """Copy one of Studio's own library files (three.js) into the site byte
         for byte. Only Studio calls this, with files it ships; agents write
         through write(), which keeps the smaller limit."""
-        target = self.resolve(site_id, relative_path)
+        data = await anyio.to_thread.run_sync(source.read_bytes)
+        return await self.copy_library_bytes(site_id, relative_path, data)
+
+    async def copy_library_bytes(
+        self, site_id: str, relative_path: str, data: bytes
+    ) -> SiteFile:
+        """Put one file from Studio's own libraries (layouts, game art and
+        sound) into the site. Pictures, fonts, sound and video are allowed:
+        only Studio calls this, with files it ships."""
+        target = self.resolve(site_id, relative_path, for_preview=True)
+        name = Path(relative_path).name
 
         def work() -> SiteFile:
-            data = source.read_bytes()
             if len(data) > MAX_LIBRARY_BYTES:
-                raise SiteError(f"{source.name} is too big to copy into a site.")
+                raise SiteError(f"{name} is too big to copy into a site.")
             directory = self.directory(site_id)
             if not target.exists() and self._count(directory) >= MAX_SITE_FILES:
                 raise SiteError("This site already has the maximum number of files.")

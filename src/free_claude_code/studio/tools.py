@@ -54,8 +54,14 @@ from .project_check import (
 )
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
+from .site_layouts import KINDS as LAYOUT_KINDS
+from .site_layouts import SAMPLE_NOTE as LAYOUT_SAMPLE_NOTE
+from .site_layouts import LayoutError, layout_files, name_layout
+from .site_layouts import find as find_layouts
+from .site_layouts import layout as find_layout
 from .sites import (
     IMAGE_SUFFIXES,
+    MAX_FILE_BYTES,
     STARTER_STYLES,
     SiteError,
     SiteWorkspace,
@@ -120,6 +126,8 @@ CHANGER_TOOL = "fcc_changer"
 LOOK_PAGE_TOOL = "look_page"
 AIDER_TOOL = "aider"
 UI_LIBRARY_TOOL = "ui_library"
+SITE_LAYOUTS_TOOL = "site_layouts"
+TEXT_KIT_SUFFIXES = frozenset({".html", ".css", ".js", ".svg", ".md", ".txt", ".json"})
 MAX_PIECE_CHARS = 12_000
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
@@ -1057,6 +1065,39 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                     "(off: plain CSS only, which fits any site).",
                 },
                 "id": {"type": "string", "description": "get: a piece id from search."},
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
+        name=SITE_LAYOUTS_TOOL,
+        description=(
+            "FCC's 26 whole-website layouts from Start Bootstrap (MIT, Bootstrap "
+            "5, phone-ready): agency, landing pages, portfolios, blogs, shops, a "
+            "CV, a multi-page business site, an admin dashboard and more. list "
+            "shows them (optionally one kind); use copies one into the project "
+            "with Bootstrap and its icons in vendor/, so it works offline. Then "
+            "replace every sample word, photo and form address with the "
+            "business's own, and restyle it; add pieces with ui_library."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "use"]},
+                "kind": {
+                    "type": "string",
+                    "enum": list(LAYOUT_KINDS),
+                    "description": "list: only this kind of layout.",
+                },
+                "layout": {
+                    "type": "string",
+                    "description": "use: a layout id from list, e.g. 'agency'.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "use: the business's name, put where the layout says 'Start Bootstrap'.",
+                },
+                "overwrite": {"type": "boolean"},
             },
             "required": ["action"],
         },
@@ -2097,6 +2138,8 @@ class AgentToolbox:
                     return await self._find_images(call)
                 case "ui_library":
                     return self._ui_library(call)
+                case "site_layouts":
+                    return await self._site_layouts(call, context)
                 case "save_image":
                     return await self._save_image(call, context)
                 case "ideas":
@@ -2736,6 +2779,110 @@ class AgentToolbox:
         ]
         lines.append("Get one's code with action get and its id.")
         return ToolOutcome(text="\n".join(lines), data=data)
+
+    async def _copy_kit(
+        self,
+        site_id: str,
+        files: dict[str, bytes],
+        *,
+        overwrite: bool,
+        replace_starters: bool = False,
+    ) -> tuple[list[str], list[str]]:
+        """Put files from one of Studio's libraries into the project.
+
+        Text goes through write (so restore_file can undo it); pictures,
+        fonts, sound, video and big library scripts are copied as they are.
+        The project's own work is kept unless overwrite is set; with
+        replace_starters, untouched starter files the kit doesn't use go.
+        """
+        existing = {item.path for item in await self._sites.files(site_id)}
+        written: list[str] = []
+        kept: list[str] = []
+        for path, data in files.items():
+            if path in existing and not overwrite:
+                current = await self._sites.read(site_id, path)
+                if not is_starter(path, current):
+                    kept.append(path)
+                    continue
+            suffix = Path(path).suffix.lower()
+            if suffix in TEXT_KIT_SUFFIXES and len(data) <= MAX_FILE_BYTES:
+                await self._sites.write(site_id, path, data.decode("utf-8"))
+            else:
+                await self._sites.copy_library_bytes(site_id, path, data)
+            written.append(path)
+        if replace_starters:
+            for path in sorted(existing - set(files)):
+                if Path(path).suffix.lower() in TEXT_KIT_SUFFIXES and is_starter(
+                    path, await self._sites.read(site_id, path)
+                ):
+                    await self._sites.delete(site_id, path)
+        return written, kept
+
+    async def _site_layouts(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        action = str(call.arguments.get("action") or "list").strip() or "list"
+        try:
+            if action == "list":
+                found = find_layouts(str(call.arguments.get("kind") or ""))
+                lines = [
+                    f"{item.id} ({item.kind}): {item.name}. {item.about}. Pages: "
+                    f"{', '.join(item.pages)}."
+                    for item in found
+                ]
+                lines.append("Copy one into the project with action use and its id.")
+                return ToolOutcome(
+                    text="\n".join(lines),
+                    data={
+                        "tool": SITE_LAYOUTS_TOOL,
+                        "layouts": [item.id for item in found],
+                    },
+                )
+            if action != "use":
+                raise LayoutError("Use action list or use.")
+            chosen = find_layout(call.arguments.get("layout"))
+        except LayoutError as error:
+            return ToolOutcome(
+                text=str(error), data={"tool": SITE_LAYOUTS_TOOL}, failed=True
+            )
+        title = str(call.arguments.get("title") or "").strip()[:80]
+        made = ""
+        if not context.site_id and self._new_project is not None:
+            made = await self._new_project(context, title or chosen.name)
+        site_id = made or self._require_site(context)
+        files = layout_files(chosen)
+        if title:
+            files = {
+                path: name_layout(data, title) if path.endswith(".html") else data
+                for path, data in files.items()
+            }
+        written, kept = await self._copy_kit(
+            site_id,
+            files,
+            overwrite=call.arguments.get("overwrite") is True,
+            replace_starters=True,
+        )
+        lines = [
+            f"Copied the {chosen.name} layout ({len(written)} files; pages: "
+            f"{', '.join(chosen.pages)}).",
+            LAYOUT_SAMPLE_NOTE,
+        ]
+        if kept:
+            lines.append(
+                f"Kept your existing {', '.join(kept)} (set overwrite to replace them)."
+            )
+        lines.append("Then run check_project and try_page.")
+        if made:
+            lines.insert(0, f"Made the project {title or chosen.name} for this chat.")
+        return ToolOutcome(
+            text=" ".join(lines),
+            data={
+                "tool": SITE_LAYOUTS_TOOL,
+                "site_id": site_id,
+                "layout": chosen.id,
+                "written": written,
+                "kept": kept,
+                "attached_site": made,
+            },
+        )
 
     async def _save_image(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         site_id = self._require_site(context)

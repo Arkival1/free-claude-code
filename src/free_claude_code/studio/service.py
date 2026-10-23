@@ -485,6 +485,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "find_images",
         "save_image",
         "ui_library",
+        "site_layouts",
         "list_photos",
         "use_photo",
         "ideas",
@@ -496,8 +497,8 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     LAB_AGENT_NAME: LAB_AGENT_TOOLS,
     FARM_AGENT_NAME: FARM_AGENT_TOOLS,
     # Made from presets, so saved ones get the UI library too.
-    "Designer": ("ui_library",),
-    "Developer": ("ui_library",),
+    "Designer": ("ui_library", "site_layouts"),
+    "Developer": ("ui_library", "site_layouts"),
 }
 _PRESET_ROLES = {"Designer": "builder", "Developer": "developer"}
 """Agents made from a preset are upgraded only while they keep its role, so
