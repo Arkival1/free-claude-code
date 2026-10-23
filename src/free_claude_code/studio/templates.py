@@ -722,8 +722,32 @@ STARTER_TEXT: tuple[str, ...] = (
     "It changed how I work.",
     "A happy customer",
     *PLACEHOLDER_TEXT,
+    # lessons
+    "hello@yourschool.example",
+    "the green shed by the north ramp",
+    "Jess Morales",
+    "Kai Tran",
+    "Amara Bello",
+    "Sample numbers for this starter",
+    # portfolio
+    "20 Sample Lane",
+    "studio@yourstudio.example",
+    "Wattle Terrace",
+    "Riverbank Library",
 )
 """Placeholder copy in the templates, which a finished project replaces."""
+
+_FOLDERS = Path(__file__).resolve().parent / "template_files"
+
+
+def _folder(name: str) -> dict[str, str]:
+    """A starter kept as plain files in template_files/<name>."""
+    return {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted((_FOLDERS / name).iterdir())
+        if path.is_file()
+    }
+
 
 TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
     "business": (
@@ -755,6 +779,19 @@ TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
         "cards whose photos are rendered from the same 3D models and tilt and "
         "float, a step-by-step process, hours and an order form",
         SHOP_3D,
+    ),
+    "lessons": (
+        "A lessons or classes site (starts as a surf school): a hero with live "
+        "canvas waves, lesson cards with prices, a conditions table, the "
+        "coaches, safety notes, and a booking form that works out the price",
+        _folder("lessons"),
+    ),
+    "portfolio": (
+        "A portfolio for a studio or practice (starts as an architecture firm): "
+        "big type hero with key figures, a filterable project grid, a detail "
+        "view per project with each project drawn from its numbers, the "
+        "practice's principles and contact (light and dark)",
+        _folder("portfolio"),
     ),
     "python-tool": ("A Python command-line tool with a test", _PYTHON_TOOL),
     "python-web": ("A Python web API with a page (FastAPI)", _PYTHON_WEB),

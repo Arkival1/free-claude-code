@@ -86,6 +86,8 @@ def test_every_template_is_listed_and_known():
         "3d-landing",
         "3d-dashboard",
         "3d-shop",
+        "lessons",
+        "portfolio",
         "python-tool",
         "python-web",
         "node-api",

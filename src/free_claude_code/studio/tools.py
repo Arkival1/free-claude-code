@@ -573,7 +573,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "counting numbers), 3d-dashboard (live dashboard with a 3D view of "
             "services and an activity log, fed by JSON), 3d-shop (shop or bakery "
             "with a 3D product scene to turn by hand and tilting product cards "
-            "rendered from the 3D models), python-tool, "
+            "rendered from the 3D models), lessons (classes or lessons, e.g. a "
+            "surf school: animated waves hero, lesson prices, coaches, booking "
+            "form), portfolio (studio or architect: filterable project grid "
+            "with detail views), python-tool, "
             "python-web (FastAPI), node-api. Existing work is never overwritten "
             "unless overwrite is set."
         ),
@@ -591,6 +594,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "3d-landing",
                         "3d-dashboard",
                         "3d-shop",
+                        "lessons",
+                        "portfolio",
                         "python-tool",
                         "python-web",
                         "node-api",

@@ -1926,7 +1926,14 @@ still looks finished.
   menu, contact form), `landing` (hero, features, testimonial, pricing,
   signup), `webapp` (single-page app with saved state), `game` (canvas game
   loop, score, best score, touch controls), `3d-landing`, `3d-dashboard`
-  and `3d-shop` (below), `python-tool` (command line with a test), `python-web` (FastAPI
+  and `3d-shop` (below), `lessons` (a classes or lessons site, starting as a
+  surf school: live canvas waves in the hero, lesson cards with prices, a
+  conditions table, coaches, safety notes, and a booking form that works out
+  the price and goes to a form service or the school's email), `portfolio` (a
+  studio or practice, starting as an architecture firm: big type hero, a
+  filterable project grid with a detail view per project, each project drawn
+  from its own numbers in the page's light or dark colours, principles and
+  contact), `python-tool` (command line with a test), `python-web` (FastAPI
   API with a page), and `node-api` (Node server with no dependencies). Every
   template passes `check_project`. It only replaces a new project's
   placeholder files, never real work, unless told to.

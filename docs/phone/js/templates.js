@@ -57,7 +57,7 @@ export const TEMPLATES = {
 };
 
 /** Placeholder lines in the templates, which a finished project replaces. */
-export const STARTER_TEXT = ["A short line that says what this is and who it is for.", "Tell the story here.", "What it is.", "One sentence on the problem it solves and why it is better.", "A benefit, not a feature.", "It changed how I work.", "A happy customer", "Say what makes this one special.", "12 Your Street, Your Town", "(000) 000-0000", "hello@example.com", "Photo credits go here."];
+export const STARTER_TEXT = ["A short line that says what this is and who it is for.", "Tell the story here.", "What it is.", "One sentence on the problem it solves and why it is better.", "A benefit, not a feature.", "It changed how I work.", "A happy customer", "Say what makes this one special.", "12 Your Street, Your Town", "(000) 000-0000", "hello@example.com", "Photo credits go here.", "hello@yourschool.example", "the green shed by the north ramp", "Jess Morales", "Kai Tran", "Amara Bello", "Sample numbers for this starter", "20 Sample Lane", "studio@yourstudio.example", "Wattle Terrace", "Riverbank Library"];
 
 /** The files of one starter project, filled in with the project's title. */
 export function templateFiles(name, title) {
