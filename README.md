@@ -1925,15 +1925,20 @@ still looks finished.
   mobile-first starter instead of a blank page: `business` (above), `website` (sections, phone
   menu, contact form), `landing` (hero, features, testimonial, pricing,
   signup), `webapp` (single-page app with saved state), `game` (canvas game
-  loop, score, best score, touch controls), `3d-landing` and `3d-dashboard`
-  (below), `python-tool` (command line with a test), `python-web` (FastAPI
+  loop, score, best score, touch controls), `3d-landing`, `3d-dashboard`
+  and `3d-shop` (below), `python-tool` (command line with a test), `python-web` (FastAPI
   API with a page), and `node-api` (Node server with no dependencies). Every
   template passes `check_project`. It only replaces a new project's
   placeholder files, never real work, unless told to.
 - **3D starters and the FCC web kit.** `3d-landing` is a landing page whose
   hero is a slowly turning constellation of linked points that leans toward
   the pointer, with features, counting numbers, and a contact form.
-  `3d-dashboard` is a live dashboard: key numbers, a 3D view of services
+  `3d-shop` is a shop or bakery site with a 3D look that moves: a baker's
+  peel you turn by hand with products built from shapes (tap one for its name
+  and price), product cards whose photos are rendered from the same models
+  and tilt and float, a step-by-step process, hours, and an order form that
+  goes to a form service or the shop's email; the `interactive-3d-site` skill
+  tells the Builder how to adapt it. `3d-dashboard` is a live dashboard: key numbers, a 3D view of services
   (bars for load, light running along their links), and an activity log,
   read every few seconds from JSON at the address in `data-source` (or sent
   in with `window.dashboard.push()`); its sample data drifts gently until

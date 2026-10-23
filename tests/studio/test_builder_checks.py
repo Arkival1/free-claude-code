@@ -255,3 +255,20 @@ async def test_every_agent_works_to_a_business_level(make_studio):
     chat = await studio.create_chat(agent_id=helper.id)
     await studio.send(chat.id, "write a note for my shop window")
     assert "Hold what you make to a business level" in str(model.calls[-1]["system"])
+
+
+@pytest.mark.parametrize(
+    ("code", "found"),
+    [
+        ('const a = `x ${b ? `<i>${c}</i>` : ""} y`;', None),
+        ("const a = `${ {k: 1}.k }`;", None),
+        ("const a = `{ not code }`;", None),
+        ("const a = `${ f(1)) }`;", "unexpected ')' on line 1"),
+        ("const a = `${ f(1) `;", "'${' opened on line 1 is never closed"),
+    ],
+)
+def test_template_strings_inside_template_strings_are_checked_right(code, found):
+    # Valid modern JavaScript isn't reported, and a real slip inside one is.
+    from free_claude_code.studio.project_check import _balanced
+
+    assert _balanced(code) == found

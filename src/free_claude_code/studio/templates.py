@@ -9,6 +9,8 @@ from .templates_3d import (
     KIT_FILES,
     LANDING_3D,
     LIBRARY_DIR,
+    SHOP_3D,
+    SHOP_LIBRARIES,
     THREE_FILES,
 )
 from .templates_business import BUSINESS, FORM_JS, PLACEHOLDER_TEXT
@@ -747,6 +749,13 @@ TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
         "light along their links), and an activity log, fed by JSON from an API",
         {**KIT_FILES, **DASHBOARD_3D},
     ),
+    "3d-shop": (
+        "A shop or bakery site with a live 3D product scene you turn by hand "
+        "(products built from shapes; tap one for its name and price), product "
+        "cards whose photos are rendered from the same 3D models and tilt and "
+        "float, a step-by-step process, hours and an order form",
+        SHOP_3D,
+    ),
     "python-tool": ("A Python command-line tool with a test", _PYTHON_TOOL),
     "python-web": ("A Python web API with a page (FastAPI)", _PYTHON_WEB),
     "node-api": ("A Node web server with a JSON API, no dependencies", _NODE_API),
@@ -756,6 +765,7 @@ TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
 LIBRARIES: Mapping[str, Mapping[str, str]] = {
     "3d-landing": THREE_FILES,
     "3d-dashboard": THREE_FILES,
+    "3d-shop": SHOP_LIBRARIES,
 }
 """Files a starter copies byte for byte from Studio's own vetted copies."""
 

@@ -76,4 +76,5 @@ templated), `impeccable` (shape, audit, polish, typography, colour, motion;
 its guides are in `impeccable/reference/`), `redesign-existing-projects`
 (upgrading a site that already exists), a style to match the mood
 (`minimalist-ui`, `high-end-visual-design`, `industrial-brutalist-ui`,
-`gpt-taste`), and `web-design-guidelines` to check the finished pages.
+`gpt-taste`), `web-design-guidelines` to check the finished pages, and
+`interactive-3d-site` for a 3D look that moves (template `3d-shop`).

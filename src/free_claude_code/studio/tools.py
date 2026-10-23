@@ -571,7 +571,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "state), game (canvas game loop with touch controls), 3d-landing "
             "(landing page with an interactive 3D hero, scroll reveals and "
             "counting numbers), 3d-dashboard (live dashboard with a 3D view of "
-            "services and an activity log, fed by JSON), python-tool, "
+            "services and an activity log, fed by JSON), 3d-shop (shop or bakery "
+            "with a 3D product scene to turn by hand and tilting product cards "
+            "rendered from the 3D models), python-tool, "
             "python-web (FastAPI), node-api. Existing work is never overwritten "
             "unless overwrite is set."
         ),
@@ -588,6 +590,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "game",
                         "3d-landing",
                         "3d-dashboard",
+                        "3d-shop",
                         "python-tool",
                         "python-web",
                         "node-api",

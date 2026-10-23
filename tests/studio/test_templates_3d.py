@@ -135,3 +135,39 @@ def test_the_starters_scripts_parse(tmp_path, name):
             check=False,
         )
         assert result.returncode == 0, (path, result.stderr)
+
+
+def test_the_3d_shop_is_complete_and_only_needs_real_content():
+    files = template_files("3d-shop", "Crumb Club")
+    assert {"index.html", "styles.css", "shop.js", "README.md"} <= set(files)
+    assert "MIT License" in files["vendor/three/LICENSE"]
+    page = files["index.html"]
+    assert "<title>Crumb Club</title>" in page and "$title" not in "".join(
+        files.values()
+    )
+    mapped = re.search(r'<script type="importmap">(.*?)</script>', page, re.S)
+    assert mapped is not None
+    assert json.loads(mapped.group(1))["imports"]["three"] == (
+        "./vendor/three/three.module.js"
+    )
+    libraries = template_libraries("3d-shop")
+    assert set(libraries) == {
+        "vendor/three/three.module.js",
+        "vendor/three/three.core.js",
+    }
+    scene = files["shop.js"]
+    # Light, accessible, and working without WebGL.
+    assert "prefers-reduced-motion: reduce" in scene
+    assert "IntersectionObserver" in scene and "devicePixelRatio || 1, 2" in scene
+    assert 'id="fallback"' in page and "aria-label=" in page
+    # The order form always reaches the shop: a form service or the email app.
+    assert 'data-email="' in page and "form.dataset.endpoint" in scene
+    problems = check_project(
+        {path: text for path, text in files.items() if not path.startswith("vendor/")},
+        others=[*libraries, "vendor/three/LICENSE"],
+    )
+    assert len(problems) == 1 and "placeholder text" in problems[0], problems
+    spec = TOOL_SPEC_BY_NAME["start_project"]
+    parameters: Any = spec.parameters
+    assert "3d-shop" in parameters["properties"]["template"]["enum"]
+    assert "3d-shop" in spec.description

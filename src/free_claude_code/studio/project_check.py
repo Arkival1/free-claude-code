@@ -117,6 +117,14 @@ def _balanced(code: str) -> str | None:
             if char == "\\":
                 index += 2
                 continue
+            if quote == "`" and code.startswith("${", index):
+                # Code inside a template string, which may hold its own
+                # strings and template strings: checked like the rest.
+                stack.append(("${", line))
+                quote = ""
+                last = "{"
+                index += 2
+                continue
             if char == quote:
                 quote = ""
         elif code.startswith("//", index):
@@ -136,8 +144,13 @@ def _balanced(code: str) -> str | None:
             continue
         elif char in _PAIRS:
             stack.append((char, line))
+        elif char == "}" and stack and stack[-1][0] == "${":
+            stack.pop()
+            quote = "`"  # back inside the template string
+            index += 1
+            continue
         elif char in _PAIRS.values():
-            if not stack or _PAIRS[stack[-1][0]] != char:
+            if not stack or _PAIRS.get(stack[-1][0]) != char:
                 return f"unexpected '{char}' on line {line}"
             stack.pop()
         if not quote and not char.isspace():

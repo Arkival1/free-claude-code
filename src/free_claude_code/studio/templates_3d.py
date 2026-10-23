@@ -51,6 +51,11 @@ PLACEHOLDER_3D: tuple[str, ...] = (
     "Replace these with your own numbers.",
     "Tell visitors what to do next.",
     "Say what this dashboard watches, and where its numbers come from.",
+    "14 Kiln Street",
+    "(02) 9550 0418",
+    "Bread that rose",
+    "+61295500418",
+    "yourbakery.example",
 )
 """Placeholder copy in the 3D starters, which a finished project replaces."""
 
@@ -1052,3 +1057,24 @@ and data.json don't load from a plain file.
 
 KIT_FILES: Mapping[str, str] = {"fcc-kit.css": KIT_CSS, "fcc-kit.js": KIT_JS}
 """The web kit, part of every 3D starter."""
+
+SHOP_DIR = Path(__file__).resolve().parent / "template_files" / "3d-shop"
+SHOP_3D: Mapping[str, str] = {
+    **{
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(SHOP_DIR.iterdir())
+        if path.is_file()
+    },
+    "vendor/three/LICENSE": THREE_LICENSE,
+}
+"""A shop or bakery site with a live 3D product scene: products built from
+shapes that turn by hand, card photos rendered from the same models that
+tilt and float, a step-by-step process, hours and an order form (its own
+design tokens; three.js from the project's copy)."""
+
+SHOP_LIBRARIES: Mapping[str, str] = {
+    path: source
+    for path, source in THREE_FILES.items()
+    if not path.endswith("OrbitControls.js")
+}
+"""The 3D shop turns its scene by hand, so it needs no OrbitControls."""
