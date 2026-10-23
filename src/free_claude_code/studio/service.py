@@ -484,6 +484,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "knowledge",
         "find_images",
         "save_image",
+        "ui_library",
         "list_photos",
         "use_photo",
         "ideas",
@@ -494,7 +495,13 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     CODER_AGENT_NAME: CODER_TOOLS,
     LAB_AGENT_NAME: LAB_AGENT_TOOLS,
     FARM_AGENT_NAME: FARM_AGENT_TOOLS,
+    # Made from presets, so saved ones get the UI library too.
+    "Designer": ("ui_library",),
+    "Developer": ("ui_library",),
 }
+_PRESET_ROLES = {"Designer": "builder", "Developer": "developer"}
+"""Agents made from a preset are upgraded only while they keep its role, so
+the owner's own agent called Developer is left alone."""
 _DEFAULT_ROLES = {
     BUILDER_AGENT_NAME: "builder",
     RESEARCHER_AGENT_NAME: "researcher",
@@ -2399,10 +2406,14 @@ class StudioService:
             if agent.role == MAIN_ROLE:
                 wanted = MAIN_TOOL_NAMES
                 role = MAIN_ROLE
-            elif agent.name in _DEFAULT_UPGRADES:
+            elif agent.name in _DEFAULT_UPGRADES and (
+                _PRESET_ROLES.get(agent.name, agent.role) == agent.role
+            ):
                 wanted = _DEFAULT_UPGRADES[agent.name]
                 role = (
-                    _DEFAULT_ROLES[agent.name] if agent.role == "agent" else agent.role
+                    _DEFAULT_ROLES.get(agent.name, agent.role)
+                    if agent.role == "agent"
+                    else agent.role
                 )
             else:
                 continue

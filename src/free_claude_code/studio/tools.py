@@ -63,6 +63,11 @@ from .sites import (
     tidy_html,
 )
 from .templates import template_files, template_libraries
+from .ui_library import KINDS as UI_KINDS
+from .ui_library import UiLibraryError
+from .ui_library import credit as ui_credit
+from .ui_library import piece as ui_piece
+from .ui_library import search as ui_search
 from .videos import VideoStudy, at, clock, passages, render_note, studied
 
 FINISH_TOOL = "finish"
@@ -114,6 +119,8 @@ MCP_TOOL = "mcp"
 CHANGER_TOOL = "fcc_changer"
 LOOK_PAGE_TOOL = "look_page"
 AIDER_TOOL = "aider"
+UI_LIBRARY_TOOL = "ui_library"
+MAX_PIECE_CHARS = 12_000
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
 MAX_REMEMBERED_IMAGES = 60
 MAX_LISTED_PHOTOS = 30
@@ -146,6 +153,7 @@ PARALLEL_TOOLS = frozenset(
         KNOWLEDGE_TOOL,
         FIND_IMAGES_TOOL,
         LIST_PHOTOS_TOOL,
+        UI_LIBRARY_TOOL,
     }
 )
 RESEARCHER_ROLE = "researcher"
@@ -1013,6 +1021,44 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "orientation": {"type": "string", "enum": ["wide", "tall", "square"]},
             },
             "required": ["query"],
+        },
+    ),
+    ToolSpec(
+        name=UI_LIBRARY_TOOL,
+        description=(
+            "FCC's library of 3,802 ready-made web design pieces from Uiverse "
+            "(MIT): buttons, cards, forms, inputs, toggles, checkboxes, radios, "
+            "loaders, tooltips, notifications and backgrounds, each small HTML "
+            "and CSS. search finds pieces by words (e.g. 'glass card', 'neon "
+            "button', 'dark login form'); get gives one piece's code. Copy it "
+            "into the site, rename its classes to fit, swap its colours and "
+            "fonts for the site's own, and keep its credit comment."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["search", "get"]},
+                "query": {
+                    "type": "string",
+                    "description": "search: what it looks like, e.g. 'animated toggle'.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": list(UI_KINDS),
+                    "description": "search: only this kind of piece.",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "search: 1 to 12 (default 6).",
+                },
+                "tailwind": {
+                    "type": "boolean",
+                    "description": "search: also show pieces that need Tailwind "
+                    "(off: plain CSS only, which fits any site).",
+                },
+                "id": {"type": "string", "description": "get: a piece id from search."},
+            },
+            "required": ["action"],
         },
     ),
     ToolSpec(
@@ -2049,6 +2095,8 @@ class AgentToolbox:
                     return self._calculate(call)
                 case "find_images":
                     return await self._find_images(call)
+                case "ui_library":
+                    return self._ui_library(call)
                 case "save_image":
                     return await self._save_image(call, context)
                 case "ideas":
@@ -2618,6 +2666,75 @@ class AgentToolbox:
             "Save one with save_image (url, path like images/hero.jpg), then "
             "show its credit line in the footer."
         )
+        return ToolOutcome(text="\n".join(lines), data=data)
+
+    def _ui_library(self, call: ToolCall) -> ToolOutcome:
+        action = str(call.arguments.get("action", "search")).strip() or "search"
+        try:
+            if action == "get":
+                found = ui_piece(call.arguments.get("id"))
+                code = found.html
+                cut = len(code) > MAX_PIECE_CHARS
+                if cut:
+                    # Keep the designer's credit even when its comment is
+                    # past the cut.
+                    code = f"{ui_credit(found)}\n{code[:MAX_PIECE_CHARS]}"
+                notes = [
+                    f"{found.id}: a {found.kind} by {found.author} on Uiverse "
+                    f"(MIT). Tags: {found.tags or 'none'}.",
+                ]
+                if found.tailwind:
+                    notes.append(
+                        "It is styled with Tailwind classes: rewrite them as CSS "
+                        "in the site's stylesheet (the site has no Tailwind)."
+                    )
+                if found.script:
+                    notes.append("It has a script: keep it only if it works offline.")
+                if cut:
+                    notes.append(
+                        f"[Cut at {MAX_PIECE_CHARS:,} of {len(found.html):,} "
+                        "characters: the end is missing, so finish or simplify "
+                        "it, or pick a shorter piece.]"
+                    )
+                notes.append(
+                    "Put the HTML where it belongs and the CSS in the site's "
+                    "stylesheet; rename classes so they don't clash, use the "
+                    "site's colour and font tokens, and keep the credit comment."
+                )
+                return ToolOutcome(
+                    text="\n".join([*notes, "", code]),
+                    data={"tool": UI_LIBRARY_TOOL, "id": found.id},
+                )
+            if action != "search":
+                raise UiLibraryError("Use action search or get.")
+            query = str(call.arguments.get("query", "")).strip()
+            found_list = ui_search(
+                query,
+                kind=str(call.arguments.get("kind", "") or ""),
+                count=_int_arg(call.arguments.get("count")) or 6,
+                plain_only=str(call.arguments.get("tailwind", "")).casefold()
+                not in {"true", "yes", "1"},
+            )
+        except UiLibraryError as error:
+            return ToolOutcome(
+                text=str(error), data={"tool": UI_LIBRARY_TOOL}, failed=True
+            )
+        data: JsonObject = {
+            "tool": UI_LIBRARY_TOOL,
+            "query": query,
+            "ids": [item.id for item in found_list],
+        }
+        if not found_list:
+            return ToolOutcome(
+                text=f"No pieces match {query!r}. Try one plain word or a kind.",
+                data=data,
+            )
+        lines = [
+            f"{index}. {item.id} ({item.kind} by {item.author}"
+            f"{', Tailwind' if item.tailwind else ''}): {item.tags or 'no tags'}"
+            for index, item in enumerate(found_list, start=1)
+        ]
+        lines.append("Get one's code with action get and its id.")
         return ToolOutcome(text="\n".join(lines), data=data)
 
     async def _save_image(self, call: ToolCall, context: ToolContext) -> ToolOutcome:

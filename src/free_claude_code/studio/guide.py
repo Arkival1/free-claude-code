@@ -1924,6 +1924,30 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="UI library (Uiverse)",
+        route="/studio#agents",
+        where="Ask the Builder: 'use a glass card and a neon button from the UI library'.",
+        terms=(
+            "ui library",
+            "uiverse",
+            "web design library",
+            "components",
+            "buttons",
+            "toggle",
+            "loader",
+            "design library",
+        ),
+        body=(
+            "The Builder, Coder and Designer have FCC's UI library: 3,802 "
+            "ready-made web design pieces from Uiverse (MIT), made by its "
+            "designers: buttons, cards, forms, inputs, toggles, checkboxes, "
+            "radios, loaders, tooltips, notifications and backgrounds. They "
+            "search it by words (plain CSS first), copy a piece into the site "
+            "and restyle it with the site's colours and fonts, keeping the "
+            "designer's credit. It comes with FCC, so nothing is downloaded."
+        ),
+    ),
+    GuideTopic(
         title="Jarvis's playbook",
         route="/studio#more",
         where=(

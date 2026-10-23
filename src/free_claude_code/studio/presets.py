@@ -556,6 +556,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "restore_file",
             "find_images",
             "save_image",
+            "ui_library",
             "list_photos",
             "use_photo",
             "ideas",
@@ -659,6 +660,7 @@ CODER_TOOLS: tuple[str, ...] = (
     "conversation",
     "skill",
     "mcp",
+    "ui_library",
     *_WEB,
     *_MEMORY,
 )
@@ -863,6 +865,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "ask_researcher",
             "ask_helper",
             "ideas",
+            "ui_library",
             *_MEMORY,
         ),
     ),

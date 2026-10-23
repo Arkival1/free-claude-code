@@ -1937,6 +1937,14 @@ still looks finished.
   API with a page), and `node-api` (Node server with no dependencies). Every
   template passes `check_project`. It only replaces a new project's
   placeholder files, never real work, unless told to.
+- **UI library.** The `ui_library` tool gives the Builder, Coder and Designer
+  3,802 ready-made web design pieces from Uiverse (MIT): buttons, cards,
+  forms, inputs, toggles, checkboxes, radios, loaders, tooltips,
+  notifications and backgrounds. `search` finds pieces by words ("glass
+  card", "dark login form"; plain CSS first), `get` gives one piece's HTML
+  and CSS to copy into the site and restyle with its own colours and fonts,
+  keeping the designer's credit comment. The library ships with FCC
+  (`vendor/uiverse/`), so nothing is downloaded.
 - **3D starters and the FCC web kit.** `3d-landing` is a landing page whose
   hero is a slowly turning constellation of linked points that leans toward
   the pointer, with features, counting numbers, and a contact form.
