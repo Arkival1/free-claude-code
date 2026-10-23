@@ -52,10 +52,11 @@ PLACEHOLDER_3D: tuple[str, ...] = (
     "Tell visitors what to do next.",
     "Say what this dashboard watches, and where its numbers come from.",
     "14 Kiln Street",
-    "(02) 9550 0418",
+    "(02) 5550 0418",
     "Bread that rose",
-    "+61295500418",
+    "+61255500418",
     "yourbakery.example",
+    "Ana Ruiz",
 )
 """Placeholder copy in the 3D starters, which a finished project replaces."""
 
