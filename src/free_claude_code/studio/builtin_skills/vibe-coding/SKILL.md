@@ -29,3 +29,6 @@ description: How to turn a loose idea into working software quickly without brea
 8. **Done means proven.** Finish only when every check from step 1 passes.
    Say what you built, the checks you ran and what they showed, and
    anything not done. Never say it works without a run that shows it.
+
+For careful edits to existing code, also follow `karpathy-guidelines`
+(think first, simplest change, touch only what you must, verify).

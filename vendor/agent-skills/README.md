@@ -16,6 +16,7 @@ came from, and checksums, so they keep working if the upstream repos go away.
 | impeccable (its whole `scripts/` folder, launcher and downloaded binary left out; a note in its SKILL.md says to skip every launcher step and use `reference/` directly) | https://github.com/pbakaus/impeccable | e07dc019a75e973db1c71843143bf6f9fd33d87c | Apache 2.0 (`LICENSE-pbakaus-impeccable`, `NOTICE-pbakaus-impeccable.md`) |
 | systematic-debugging, verification-before-completion, receiving-code-review, writing-plans (scripts left out) | https://github.com/obra/superpowers | 2ce8aa15d05bd57213e6f746f953aafb7ded7a8b | MIT (`LICENSE-obra-superpowers`) |
 | writing-guidelines | https://github.com/vercel-labs/agent-skills | 063bee94c3f4df8453406c830b0a7df0f2860278 | MIT (stated in its SKILL.md) |
+| karpathy-guidelines (also an FCC built-in skill, with a note for agents that can't stop to ask) | https://github.com/multica-ai/andrej-karpathy-skills | 2c606141936f1eeef17fa3043a72095b4765b9c2 | MIT (stated in its README, plugin.json and SKILL.md; `LICENSE-multica-ai-andrej-karpathy-skills.md`) |
 | find-skills | https://github.com/vercel-labs/skills | a80e4c9d12d607631249d4d7d059f835d4b2f13a | MIT (`LICENSE-vercel-labs-skills`) |
 | playwright-cli (written by `playwright-cli install --skills`, @playwright/cli 0.1.22) | https://github.com/microsoft/playwright-cli | b1a5903c5b633b8c9f843ad7b629c2a78437040c | Apache 2.0 (`LICENSE-microsoft-playwright-cli`) |
 

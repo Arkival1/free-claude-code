@@ -50,7 +50,21 @@ Work in this order. Each step has a rule you can check.
 10. **Content.** Real, specific words for this business or person: names,
     services, prices, hours, places. No lorem ipsum, no "Your text here",
     no template lines left.
-11. **Before finishing.** Run `check_project` and `polish_check` and fix
+11. **Designed, not generated.** One bold move that fits the mood (an
+    oversized serif headline, a colour block, an off-centre hero, a
+    full-bleed photo); the rest quiet. One accent, for actions only.
+    Headline at least 2.5x body size; text `max-width: 65ch`. Vary the
+    sections (not cards everywhere, not all centred); no purple gradients,
+    emoji icons or stock lines ("Welcome to our website"). Buttons start
+    with a verb ("Book a groom").
+12. **Everything works.** No `href="#"`: nav links hit real section `id`s,
+    the phone menu opens and closes, forms check their fields then send
+    (`mailto:`) or thank, phones are `tel:` links, every image path exists.
+    Check at 360, 768 and 1280px.
+13. **Spend steps on writing.** Read the starter once, write each file whole
+    with `write_file`, don't re-read what you just wrote, keep a third of
+    the steps for checks.
+14. **Before finishing.** Run `check_project` and `polish_check` and fix
     everything they report; use the page with `try_page` and see it with
     `look_page` (PC and phone screenshots the Vision Model judges), fix what
     it shows and look again (3 rounds at most); then say what you built and

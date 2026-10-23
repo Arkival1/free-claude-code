@@ -30,7 +30,10 @@ def test_the_relay_lists_every_repo_and_keeps_changes(
         if any(item["source"].endswith(VOLT) for item in added):
             break
         page.wait_for_timeout(1000)
-    assert added and not any(item["enabled"] for item in added)
+    # FCC's own skills come switched on; every starter repo comes off.
+    starters = [item for item in added if item.get("origin") != "builtin"]
+    assert starters and not any(item["enabled"] for item in starters)
+    assert all(item["enabled"] for item in added if item.get("origin") == "builtin")
     page.reload()
     expect(relay).to_be_visible()
     assert relay.locator(f"[data-repo='{VOLT}']").count() == 0

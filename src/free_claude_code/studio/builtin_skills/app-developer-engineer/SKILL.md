@@ -38,7 +38,17 @@ Work in this order. Each step has a rule you can check.
 9. **Delivery.** A README: what it does, how to install, run and test it,
    and its settings. Pinned dependencies (`package.json`, `pyproject.toml`
    or `requirements.txt`). No errors in the console when it runs.
-10. **Before finishing.** Run `check_project`, run the tests and the app
+10. **Details that break apps.** Field numbers via `Number()`; refuse
+    `NaN`/empty with a message by the field. Money with
+    `Intl.NumberFormat` (2 decimals). `localStorage` under one versioned
+    key, read in `try`/`catch` (bad data starts fresh). Main fields and
+    buttons get clear `id`s and labels. One render function updates list,
+    totals and empty state after every change.
+11. **Minimum code, surgical edits** (`karpathy-guidelines`): nothing
+    unasked, edit only the lines the task needs, turn the task into checks.
+12. **Spend steps on writing:** write files whole, keep a third of the
+    steps for tests and fixes.
+13. **Before finishing.** Run `check_project`, run the tests and the app
     itself (`try_page` and `look_page` for its pages), fix everything they
     show, then say what you built, how you checked it, and anything left to
     do. A focused edit can go to `aider` (task + files) as a draft; check
