@@ -1,5 +1,6 @@
 """One chat surface over the FCC proxy and over local OpenAI-style servers."""
 
+import asyncio
 import contextlib
 import html
 import json
@@ -1084,6 +1085,29 @@ def _unreachable(
     return f"Model endpoint unreachable: {error or type(error).__name__}"
 
 
+REPLY_START_SECONDS = 1800.0
+"""How long a streamed call waits for its reply to begin. FCC's own proxy
+holds a request until one of the provider's few slots is free (with several
+agents at work it queues there), sends nothing until the model starts, and
+reports a real failure itself; once the reply flows, the silence limit
+applies again."""
+
+
+async def _within[T](
+    pieces: AsyncIterator[T], seconds: float, request: httpx.Request
+) -> AsyncIterator[T]:
+    """The pieces of a reply, failing when none comes for ``seconds``."""
+    iterator = aiter(pieces)
+    while True:
+        try:
+            line = await asyncio.wait_for(anext(iterator), seconds)
+        except StopAsyncIteration:
+            return
+        except TimeoutError as error:
+            raise httpx.ReadTimeout("", request=request) from error
+        yield line
+
+
 async def _post_stream(
     url: str,
     payload: JsonObject,
@@ -1093,12 +1117,17 @@ async def _post_stream(
     transport: httpx.AsyncBaseTransport | None,
 ) -> JsonObject:
     """Send a streamed Anthropic call and put the reply back together. The
-    timeout is the longest wait for the next piece, not for the whole reply."""
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    timeout is the longest wait for the next piece, not for the whole reply;
+    the wait for the reply to begin may be longer (REPLY_START_SECONDS)."""
+    start = max(timeout, REPLY_START_SECONDS)
+    begun = False
+    limits = httpx.Timeout(timeout, read=start)
+    async with httpx.AsyncClient(timeout=limits, transport=transport) as client:
         try:
             async with client.stream(
                 "POST", url, json=payload, headers=dict(headers)
             ) as response:
+                begun = True
                 if response.status_code >= 400:
                     text = (await response.aread()).decode("utf-8", "replace")
                     raise StudioLLMError(
@@ -1106,12 +1135,23 @@ async def _post_stream(
                         f"{error_detail(text)}"
                     )
                 if "text/event-stream" in response.headers.get("content-type", ""):
-                    return await _streamed_reply(response.aiter_lines())
+                    return await _streamed_reply(
+                        _within(response.aiter_lines(), timeout, response.request)
+                    )
                 # A server that answered all at once instead.
-                raw = await response.aread()
+                raw = b"".join(
+                    [
+                        chunk
+                        async for chunk in _within(
+                            response.aiter_bytes(), timeout, response.request
+                        )
+                    ]
+                )
         except httpx.HTTPError as error:
+            # Only the wait for the reply to begin may run to ``start``.
+            queued = not begun and isinstance(error, httpx.ReadTimeout)
             raise StudioLLMError(
-                _unreachable(error, timeout, streaming=True)
+                _unreachable(error, start if queued else timeout, streaming=True)
             ) from error
     try:
         body = json.loads(raw)

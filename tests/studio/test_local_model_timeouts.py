@@ -215,3 +215,95 @@ async def test_a_server_model_streams_too_so_a_whole_site_is_not_cut_off(make_st
     studio, _ = make_studio([])
     router = studio._build_router(studio.settings)
     assert router._proxy._stream_for("nvidia_nim/x") is True
+
+
+@pytest.mark.asyncio
+async def test_a_reply_may_wait_its_turn_but_not_go_quiet_once_it_starts(
+    monkeypatch,
+):
+    # FCC's proxy queues a request while the provider's few slots are busy
+    # and sends nothing until the model starts: that wait isn't a dead
+    # model. Once the reply flows, a long silence still is.
+    import asyncio
+
+    from free_claude_code.studio import llm
+
+    monkeypatch.setattr(llm, "REPLY_START_SECONDS", 2.0)
+
+    async def queued(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.5)  # longer than the silence limit
+        return httpx.Response(
+            200, content=STREAMED, headers={"content-type": "text/event-stream"}
+        )
+
+    async def stalls(request: httpx.Request) -> httpx.Response:
+        async def body():
+            cut = STREAMED.index(b"\n\n") + 2  # one whole event first
+            yield STREAMED[:cut]
+            await asyncio.sleep(0.6)
+            yield STREAMED[cut:]
+
+        return httpx.Response(
+            200, content=body(), headers={"content-type": "text/event-stream"}
+        )
+
+    def client_for(handler) -> ProxyLLM:
+        return ProxyLLM(
+            base_url="http://proxy.test",
+            default_model="nvidia_nim/m",
+            transport=httpx.MockTransport(handler),
+            timeout_for=lambda model: 0.2,
+            stream_for=lambda model: True,
+        )
+
+    hello = [ChatMessage(role="user", content="hi")]
+    assert (await client_for(queued).complete(hello)).text
+    with pytest.raises(StudioLLMError, match="sent nothing for"):
+        await client_for(stalls).complete(hello)
+
+
+@pytest.mark.asyncio
+async def test_the_reply_start_wait_is_set_and_errors_name_the_real_limit(
+    monkeypatch,
+):
+    import asyncio
+
+    from free_claude_code.studio import llm
+
+    limits: list[dict] = []
+
+    def records(request: httpx.Request) -> httpx.Response:
+        limits.append(request.extensions["timeout"])
+        return httpx.Response(
+            200, content=STREAMED, headers={"content-type": "text/event-stream"}
+        )
+
+    def unreachable(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("", request=request)
+
+    async def slow_json(request: httpx.Request) -> httpx.Response:
+        async def body():
+            await asyncio.sleep(0.6)
+            yield b'{"content": [{"type": "text", "text": "late"}]}'
+
+        return httpx.Response(
+            200, content=body(), headers={"content-type": "application/json"}
+        )
+
+    def client_for(handler, seconds: float) -> ProxyLLM:
+        return ProxyLLM(
+            base_url="http://proxy.test",
+            default_model="nvidia_nim/m",
+            transport=httpx.MockTransport(handler),
+            timeout_for=lambda model: seconds,
+            stream_for=lambda model: True,
+        )
+
+    hello = [ChatMessage(role="user", content="hi")]
+    await client_for(records, 420).complete(hello)
+    assert limits[0]["read"] == llm.REPLY_START_SECONDS
+    assert limits[0]["connect"] == 420
+    with pytest.raises(StudioLLMError, match=r"for 420 s \(ConnectTimeout\)"):
+        await client_for(unreachable, 420).complete(hello)
+    with pytest.raises(StudioLLMError, match="sent nothing for"):
+        await client_for(slow_json, 0.2).complete(hello)
