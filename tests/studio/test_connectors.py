@@ -51,6 +51,13 @@ def test_each_connector_checks_its_values_and_builds_its_server():
     url = mcp_server(supabase, {"token": "t", "project_ref": "abc"}).url
     assert url == "https://mcp.supabase.com/mcp?read_only=true&project_ref=abc"
 
+    apify = connector("apify")
+    with pytest.raises(ConnectorError, match="needs API token"):
+        check_values(apify, {})
+    server = mcp_server(apify, check_values(apify, {"token": "apify_api_x"}))
+    assert server.url == "https://mcp.apify.com?telemetry-enabled=false"
+    assert server.headers == {"Authorization": "Bearer apify_api_x"}
+
     with pytest.raises(ConnectorError, match="https://"):
         check_values(connector("webhook"), {"url": "http://example.com/hook"})
     email = connector("email")

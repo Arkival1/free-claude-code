@@ -2233,6 +2233,7 @@ from that service; agents then use it with the `mcp` tool ("check my inbox",
 | Supabase | A project's tables, logs, and docs, read only | A personal access token |
 | Context7 | Up-to-date docs for programming libraries | Nothing (a free key gives more) |
 | DeepWiki | How any public GitHub repo works | Nothing |
+| Apify | Find and run ready-made scrapers (Actors) for Google Maps, Instagram, TikTok, Amazon, any website; results come back as data. Each run uses your Apify credit (the free plan gives $5 a month and pauses when it runs out, with no charge) | An API token from console.apify.com → Settings → API & Integrations |
 | Email (built in) | Read the inbox; write emails | Your address and an app password (Gmail, iCloud, Yahoo, or any IMAP/SMTP server) |
 | Webhook (built in) | Post to a Discord or Slack channel, or any web address | The webhook address |
 

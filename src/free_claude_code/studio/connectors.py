@@ -2,7 +2,7 @@
 
 Most are MCP servers the service itself runs on the web (GitHub, Zapier for
 Gmail, Google Sheets and Calendar, Slack, Notion and thousands more, Hugging
-Face, Stripe, Supabase, Context7, DeepWiki): nothing is downloaded, the token
+Face, Stripe, Supabase, Context7, DeepWiki, Apify): nothing is downloaded, the token
 goes in a header, and agents use them with the mcp tool like any MCP server.
 Two are built in: email (read the inbox over IMAP; sending writes a draft the
 user approves first, unless they let agents send) and a webhook (post to a
@@ -158,6 +158,20 @@ CONNECTORS: tuple[Connector, ...] = (
         url="https://mcp.deepwiki.com/mcp",
         fields=(),
         get_it="Nothing to set up: switch it on.",
+    ),
+    Connector(
+        "apify",
+        "Apify (ready-made scrapers)",
+        "Find and run Apify Actors: ready-made scrapers for Google Maps, "
+        "Instagram, TikTok, Amazon, any website and more, with the results "
+        "back as data. Each run uses your Apify credit; the free plan gives "
+        "$5 a month and pauses when it runs out instead of charging you.",
+        "mcp",
+        url="https://mcp.apify.com",
+        fields=(Field("token", "API token", placeholder="apify_api_..."),),
+        get_it="console.apify.com → Settings → API & Integrations → copy your "
+        "API token (sign up free, no card needed).",
+        query={"telemetry-enabled": "false"},
     ),
     Connector(
         "email",
