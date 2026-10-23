@@ -1924,6 +1924,50 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Website layouts (Start Bootstrap)",
+        route="/studio#agents",
+        where="Ask the Builder: 'start my shop from a website layout'.",
+        terms=(
+            "website layouts",
+            "layouts",
+            "start bootstrap",
+            "bootstrap",
+            "website template",
+            "landing page template",
+        ),
+        body=(
+            "The Builder, Coder, Designer and Developer can start a site from "
+            "26 whole-website layouts from Start Bootstrap (MIT): agency, "
+            "landing pages, portfolios, blogs, shops, a CV, a multi-page "
+            "business site, an admin dashboard and more. Bootstrap and its "
+            "icons come with it, so it works offline. They then replace every "
+            "sample word, photo and form address with the business's own."
+        ),
+    ),
+    GuideTopic(
+        title="Game library (Phaser and Kenney)",
+        route="/studio#agents",
+        where="Ask the Coder: 'make a space shooter game I can play on my phone'.",
+        terms=(
+            "game library",
+            "games",
+            "phaser",
+            "kenney",
+            "game art",
+            "sprites",
+            "sound effects",
+            "game assets",
+        ),
+        body=(
+            "Games start from the phaser-game starter (Phaser 3, keyboard and "
+            "touch). The game_assets tool finds art and sound in Kenney's 217 "
+            "free packs: 49 come with FCC, the rest download once and stay on "
+            "your PC. It also shows Phaser's 2,298 example programs for any "
+            "mechanic, and the game-dev skill holds the recipes for movement, "
+            "animation, effects, enemies, levels and phone controls."
+        ),
+    ),
+    GuideTopic(
         title="UI library (Uiverse)",
         route="/studio#agents",
         where="Ask the Builder: 'use a glass card and a neon button from the UI library'.",

@@ -22,6 +22,8 @@ installed from there when GitHub no longer has it.
 | [`stable-diffusion-cpp/`](stable-diffusion-cpp/README.md) | https://github.com/leejet/stable-diffusion.cpp | MIT | The Image engine: painted cartoon places and characters (Settings → Image engine) |
 | [`uiverse/`](uiverse/README.md) | https://github.com/uiverse-io/galaxy | MIT | The UI library: 3,802 ready-made web design pieces the Builder, Coder and Designer search and copy (`ui_library` tool) |
 | [`startbootstrap/`](startbootstrap/README.md) | https://github.com/StartBootstrap | MIT (libraries MIT, CC BY 4.0, LGPL-3.0) | 26 whole-website layouts the Builder starts sites from (`site_layouts` tool) |
+| [`kenney/`](kenney/README.md) | https://kenney.nl/assets | CC0 (public domain) | Game art and sound: 49 packs ship, all 217 catalogued and downloaded once into the game vault (`game_assets` tool) |
+| [`phaser/`](phaser/README.md) | https://github.com/phaserjs/phaser, https://github.com/phaserjs/examples | MIT (example assets left out) | The `phaser-game` starter's engine and 2,298 example programs (`game_assets` tool) |
 | [`three/`](three/README.md) | https://github.com/mrdoob/three.js | MIT | The 3D views: the Trading Bank's debate arena, the Ops page, and the 3D site templates |
 | [`repos/`](repos/README.md) | 46 repos, 44 shipped as zips (OpenHands, MetaGPT, crewAI, superpowers, impeccable, awesome-design-md, wshobson/agents, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, switched off until the owner turns them on |
 | [`ruflo-core/`](ruflo-core/README.md) | https://github.com/ruvnet/ruflo | MIT | Ruflo's agents, skills and MCP server for Claude Code sessions on this repo (`.claude/`, `.mcp.json`) |

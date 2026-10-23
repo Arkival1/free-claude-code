@@ -9,7 +9,7 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun
 from free_claude_code.studio.polish import polish_notes
 
-SKILL_COUNT = 16
+SKILL_COUNT = 18
 DESIGN_SKILLS = {
     "design-taste-frontend",
     "impeccable",
@@ -40,6 +40,8 @@ async def test_the_skills_install_refresh_and_keep_the_owners_switch(make_studio
             "code-review",
             "karpathy-guidelines",
             "interactive-3d-site",
+            "game-dev",
+            "add-a-library",
         }
         | DESIGN_SKILLS
     )
@@ -136,6 +138,25 @@ BUILD_GOAL = (
         ("Changer Reviewer", "REVIEW milestone 1 of an update.", {"# Code review"}),
         ("Changer Security", "REVIEW milestone 1 of an update.", {"# Code review"}),
         ("Changer Planner", "PLAN an update: fix the broken page.", set()),
+        (
+            "Changer Planner",
+            "PLAN an update: add a free icon library for the Builder.",
+            {"# Add a library to FCC"},
+        ),
+        (
+            "Changer Planner",
+            "PLAN an update: fix the card layout on the HQ page.",
+            set(),
+        ),
+        (
+            "Changer",
+            BUILD_GOAL.format(
+                request="Add the Kenney art packs to the library",
+                title="Pack the catalogue",
+                files="src/free_claude_code/studio/game_library/__init__.py",
+            ),
+            {"# Vibe coding", "# Add a library to FCC"},
+        ),
     ],
 )
 async def test_the_changer_team_gets_the_skill_for_its_step(
@@ -160,6 +181,7 @@ async def test_the_changer_team_gets_the_skill_for_its_step(
         "# Code review",
         "# Website design engineer",
         "# App developer engineer",
+        "# Add a library to FCC",
     }
     assert {title for title in every if title in prompt} == wanted
 
@@ -368,3 +390,18 @@ def test_impeccable_never_asks_to_run_its_missing_launcher():
     text = (folder / "SKILL.md").read_text(encoding="utf-8")
     assert "is skipped too: don't try to run it" in text
     assert '1. Run `"${CLAUDE_SKILL_DIR}/scripts/impeccable" context`' not in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("role", "goal", "game"),
+    [
+        ("coder", "Make a space shooter game for my phone", True),
+        ("builder", "Make a platformer", True),
+        ("coder", "Fix the login function", False),
+        ("coder", "code me a snake game in python", False),
+    ],
+)
+async def test_a_game_job_brings_the_game_recipes(make_studio, role, goal, game):
+    prompt = await task_prompt(make_studio, role, goal)
+    assert ("# Game development" in prompt) is game

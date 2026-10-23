@@ -15,6 +15,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import aiohttp
+import anyio.to_thread
 import httpx
 
 from free_claude_code.application.web_tools.ports import (
@@ -29,6 +30,20 @@ from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .desk import DeskBrowser, DeskError
 from .desk import render as render_desk
+from .game_library import KENNEY as KENNEY_ASSETS
+from .game_library import KINDS as GAME_KINDS
+from .game_library import MAX_PACK_BYTES as MAX_GAME_PACK_BYTES
+from .game_library import GameLibraryError, GameVault
+from .game_library import Pack as GamePack
+from .game_library import choose as choose_game_files
+from .game_library import example as game_example
+from .game_library import find_examples as find_game_examples
+from .game_library import find_files as find_game_files
+from .game_library import find_packs as find_game_packs
+from .game_library import pack as game_pack
+from .game_library import project_path as game_path
+from .game_library import read_files as read_game_files
+from .game_library import ready as game_ready
 from .ideas import ROLE_CATEGORIES, IdeaBoard, IdeaError
 from .ideas import describe as describe_idea
 from .images import FoundImage, ImageError, download_image, find_images
@@ -127,6 +142,9 @@ LOOK_PAGE_TOOL = "look_page"
 AIDER_TOOL = "aider"
 UI_LIBRARY_TOOL = "ui_library"
 SITE_LAYOUTS_TOOL = "site_layouts"
+GAME_ASSETS_TOOL = "game_assets"
+MAX_EXAMPLE_CHARS = 12_000
+MAX_KIT_FILES = 300
 TEXT_KIT_SUFFIXES = frozenset({".html", ".css", ".js", ".svg", ".md", ".txt", ".json"})
 MAX_PIECE_CHARS = 12_000
 IMAGE_TOOLS = frozenset({FIND_IMAGES_TOOL, SAVE_IMAGE_TOOL})
@@ -589,7 +607,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "counting numbers), 3d-dashboard (live dashboard with a 3D view of "
             "services and an activity log, fed by JSON), 3d-shop (shop or bakery "
             "with a 3D product scene to turn by hand and tilting product cards "
-            "rendered from the 3D models), lessons (classes or lessons, e.g. a "
+            "rendered from the 3D models), phaser-game (a Phaser browser game "
+            "with Kenney art and sound, keyboard and touch; starts as a "
+            "platformer), lessons (classes or lessons, e.g. a "
             "surf school: animated waves hero, lesson prices, coaches, booking "
             "form), portfolio (studio or architect: filterable project grid "
             "with detail views), python-tool, "
@@ -612,6 +632,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "3d-shop",
                         "lessons",
                         "portfolio",
+                        "phaser-game",
                         "python-tool",
                         "python-web",
                         "node-api",
@@ -1098,6 +1119,53 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                     "description": "use: the business's name, put where the layout says 'Start Bootstrap'.",
                 },
                 "overwrite": {"type": "boolean"},
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
+        name=GAME_ASSETS_TOOL,
+        description=(
+            "FCC's game library: Kenney's 217 free (CC0) art and sound packs "
+            "(sprites, tile sheets, characters, UI, particles, fonts, sound "
+            "effects, jingles; 49 ship with FCC, the rest download once) and "
+            "2,298 Phaser example programs. find searches files by words "
+            "('coin', 'laser sound', 'grass tile'); packs lists packs; use "
+            "copies a pack's files (paths, a folder or a word) into "
+            "assets/<pack>/; download fetches a pack that isn't on this PC; "
+            "examples and example find and show Phaser code for a mechanic. "
+            "Read the game-dev skill for the recipes."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["find", "packs", "use", "download", "examples", "example"],
+                },
+                "query": {
+                    "type": "string",
+                    "description": "find, packs, examples: plain words.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": list(GAME_KINDS),
+                    "description": "find: only sprites, sheets, sounds, fonts or 3D models.",
+                },
+                "pack": {"type": "string", "description": "use, download: a pack id."},
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "use: file paths from find, a folder, or a word.",
+                },
+                "id": {
+                    "type": "string",
+                    "description": "example: an id from examples.",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "find, examples: how many.",
+                },
             },
             "required": ["action"],
         },
@@ -1958,7 +2026,10 @@ class AgentToolbox:
         screen: Callable[[ToolCall, ToolContext], Awaitable[ToolOutcome | None]]
         | None = None,
         new_project: Callable[[ToolContext, str], Awaitable[str]] | None = None,
+        game_vault: GameVault | None = None,
     ) -> None:
+        self._game_vault = game_vault
+        """Kenney packs downloaded on this PC, kept for good."""
         # Sees each call first and may answer it instead (Studio turns a
         # hand-off back to the mcp tool when the user named a connected service).
         self._screen = screen
@@ -2140,6 +2211,8 @@ class AgentToolbox:
                     return self._ui_library(call)
                 case "site_layouts":
                     return await self._site_layouts(call, context)
+                case "game_assets":
+                    return await self._game_assets(call, context)
                 case "save_image":
                     return await self._save_image(call, context)
                 case "ideas":
@@ -2805,8 +2878,14 @@ class AgentToolbox:
                     kept.append(path)
                     continue
             suffix = Path(path).suffix.lower()
+            text = None
             if suffix in TEXT_KIT_SUFFIXES and len(data) <= MAX_FILE_BYTES:
-                await self._sites.write(site_id, path, data.decode("utf-8"))
+                try:
+                    text = data.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = None  # not UTF-8: copied as it is
+            if text is not None:
+                await self._sites.write(site_id, path, text)
             else:
                 await self._sites.copy_library_bytes(site_id, path, data)
             written.append(path)
@@ -2881,6 +2960,167 @@ class AgentToolbox:
                 "written": written,
                 "kept": kept,
                 "attached_site": made,
+            },
+        )
+
+    async def _game_assets(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        action = str(call.arguments.get("action") or "find").strip() or "find"
+        query = str(call.arguments.get("query") or "").strip()
+        count = _int_arg(call.arguments.get("count"))
+        data: JsonObject = {"tool": GAME_ASSETS_TOOL, "action": action}
+        vault = self._game_vault
+        try:
+            if action == "find":
+                found = find_game_files(
+                    query, kind=str(call.arguments.get("kind") or ""), count=count or 10
+                )
+                lines = [
+                    f"{index}. {item.id}: {path}"
+                    + ("" if game_ready(item, vault) else " (download the pack first)")
+                    for index, (item, path) in enumerate(found, start=1)
+                ]
+                data["files"] = [f"{item.id}/{path}" for item, path in found]
+                lines.append(
+                    "Copy what you need with action use (pack, files)."
+                    if found
+                    else f"Nothing matches {query!r}: try one plain word."
+                )
+                return ToolOutcome(text="\n".join(lines), data=data)
+            if action == "packs":
+                found = find_game_packs(
+                    query, str(call.arguments.get("category") or "")
+                )
+                lines = [
+                    f"{item.id} ({item.category}, {len(item.files)} files"
+                    + (", ready" if game_ready(item, vault) else ", download first")
+                    + ")"
+                    for item in found[:60]
+                ]
+                if len(found) > 60:
+                    lines.append(
+                        f"…and {len(found) - 60} more: add words to narrow it."
+                    )
+                data["packs"] = [item.id for item in found]
+                return ToolOutcome(
+                    text="\n".join(lines) or "No packs match.", data=data
+                )
+            if action == "download":
+                return await self._download_pack(game_pack(call.arguments.get("pack")))
+            if action == "use":
+                return await self._use_pack(call, context)
+            if action == "examples":
+                found_examples = find_game_examples(query, count or 8)
+                lines = [f"{item.id} ({item.topic})" for item in found_examples]
+                lines.append(
+                    "Read one with action example and its id."
+                    if found_examples
+                    else f"No examples match {query!r}."
+                )
+                data["examples"] = [item.id for item in found_examples]
+                return ToolOutcome(text="\n".join(lines), data=data)
+            if action == "example":
+                item = game_example(call.arguments.get("id"))
+                code = item.code[:MAX_EXAMPLE_CHARS]
+                note = (
+                    f"Phaser example {item.id} (MIT). Its assets/... files are "
+                    "Phaser's own art, which isn't free to use: load Kenney files "
+                    "you copied with game_assets instead."
+                )
+                if len(item.code) > MAX_EXAMPLE_CHARS:
+                    note += f" [Cut at {MAX_EXAMPLE_CHARS:,} characters.]"
+                data["id"] = item.id
+                return ToolOutcome(text=f"{note}\n\n{code}", data=data)
+            raise GameLibraryError(
+                "Use action find, packs, use, download, examples or example."
+            )
+        except GameLibraryError as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+
+    async def _download_pack(self, item: GamePack) -> ToolOutcome:
+        data: JsonObject = {
+            "tool": GAME_ASSETS_TOOL,
+            "action": "download",
+            "pack": item.id,
+        }
+        if item.shipped or (self._game_vault and self._game_vault.has(item)):
+            return ToolOutcome(text=f"{item.name} is already on this PC.", data=data)
+        if self._game_vault is None:
+            raise GameLibraryError("Packs can't be downloaded here.")
+        if not item.url.startswith(KENNEY_ASSETS) or item.size > MAX_GAME_PACK_BYTES:
+            raise GameLibraryError(f"{item.name} can't be downloaded safely.")
+        async with httpx.AsyncClient(
+            transport=self._image_transport, timeout=120.0, follow_redirects=True
+        ) as client:
+            try:
+                response = await client.get(item.url)
+                response.raise_for_status()
+            except httpx.HTTPError as error:
+                raise GameLibraryError(
+                    f"Couldn't download {item.name} from kenney.nl ({error})."
+                ) from error
+        if len(response.content) > MAX_GAME_PACK_BYTES:
+            raise GameLibraryError(f"{item.name} came back too big to keep.")
+        vault = self._game_vault
+        await anyio.to_thread.run_sync(vault.keep, item, response.content)
+        data["bytes"] = len(response.content)
+        return ToolOutcome(
+            text=f"Downloaded {item.name} ({len(response.content) // 1000:,} KB, "
+            "checksum matches) and kept it on this PC. Now use it.",
+            data=data,
+        )
+
+    async def _use_pack(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        item = game_pack(call.arguments.get("pack"))
+        files = call.arguments.get("files")
+        asked = (
+            [files]
+            if isinstance(files, str)
+            else [str(entry) for entry in files]
+            if isinstance(files, list)
+            else []
+        )
+        wanted = choose_game_files(item, asked)
+        if not wanted:
+            raise GameLibraryError(
+                f"Say which of {item.name}'s files to copy (paths from find, a "
+                "folder, or a word)."
+            )
+        if len(wanted) > MAX_KIT_FILES:
+            raise GameLibraryError(
+                f"That is {len(wanted)} files: pick fewer (at most {MAX_KIT_FILES})."
+            )
+        licence = [path for path in item.files if path.casefold().startswith("license")]
+        contents = await anyio.to_thread.run_sync(
+            read_game_files, item, [*wanted, *licence[:1]], self._game_vault
+        )
+        site_id = self._require_site(context)
+        placed = {game_path(item, path): body for path, body in contents.items()}
+        written, kept = await self._copy_kit(site_id, placed, overwrite=True)
+        sounds = [path for path in written if path.endswith((".mp3", ".ogg", ".wav"))]
+        lines = [
+            f"Copied {len(written)} files from {item.name} into assets/{item.id}/ "
+            "(load them by these paths):"
+        ]
+        lines.extend(f"- {path}" for path in written[:25])
+        if len(written) > 25:
+            lines.append(f"- …and {len(written) - 25} more")
+        if any(path.endswith(".ogg") for path in sounds):
+            lines.append(
+                ".ogg sounds play on computers but not on iPhones: prefer the "
+                "shipped packs' .mp3 sounds for phone games."
+            )
+        lines.append(
+            "Load images with this.load.image or this.load.spritesheet, sounds "
+            "with this.load.audio (paths as above)."
+        )
+        return ToolOutcome(
+            text="\n".join(lines),
+            data={
+                "tool": GAME_ASSETS_TOOL,
+                "action": "use",
+                "pack": item.id,
+                "written": written,
+                "kept": kept,
             },
         )
 

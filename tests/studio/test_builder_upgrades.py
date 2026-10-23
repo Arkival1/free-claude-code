@@ -88,6 +88,7 @@ def test_every_template_is_listed_and_known():
         "3d-shop",
         "lessons",
         "portfolio",
+        "phaser-game",
         "python-tool",
         "python-web",
         "node-api",

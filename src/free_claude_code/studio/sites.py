@@ -530,6 +530,8 @@ class SiteWorkspace:
             directory = self.directory(site_id)
             if not target.exists() and self._count(directory) >= MAX_SITE_FILES:
                 raise SiteError("This site already has the maximum number of files.")
+            # A file it replaces is kept, so restore_file can bring it back.
+            self._keep_version(site_id, target, replacing=data)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             return SiteFile(

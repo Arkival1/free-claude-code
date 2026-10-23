@@ -103,6 +103,7 @@ TOOL_STATION: dict[str, str] = {
             "find_images",
             "ui_library",
             "site_layouts",
+            "game_assets",
             "weather",
             "desktop_browser",
         ),

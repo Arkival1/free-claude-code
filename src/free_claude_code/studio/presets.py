@@ -558,6 +558,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "save_image",
             "ui_library",
             "site_layouts",
+            "game_assets",
             "list_photos",
             "use_photo",
             "ideas",
@@ -663,6 +664,7 @@ CODER_TOOLS: tuple[str, ...] = (
     "mcp",
     "ui_library",
     "site_layouts",
+    "game_assets",
     *_WEB,
     *_MEMORY,
 )
@@ -869,6 +871,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "ideas",
             "ui_library",
             "site_layouts",
+            "game_assets",
             *_MEMORY,
         ),
     ),

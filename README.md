@@ -1945,6 +1945,27 @@ still looks finished.
   and CSS to copy into the site and restyle with its own colours and fonts,
   keeping the designer's credit comment. The library ships with FCC
   (`vendor/uiverse/`), so nothing is downloaded.
+- **Website layouts.** The `site_layouts` tool copies one of 26 whole-site
+  layouts from Start Bootstrap (MIT, Bootstrap 5) into a project: agency,
+  landing pages, portfolios, blogs, shops, a CV, a multi-page business site,
+  an admin dashboard and more. Bootstrap, its icons and Font Awesome come
+  with it in `vendor/`, so the site works offline; the business's name goes
+  in the title and logo, and `check_project` flags the sample words, photos
+  and grey placeholder boxes until they are replaced (`vendor/startbootstrap/`).
+- **Game library.** The `phaser-game` starter is a working Phaser 3
+  platformer with Kenney's art and sound, keyboard and touch controls. The
+  `game_assets` tool searches Kenney's 217 free (CC0) packs by words
+  (sprites, tile sheets, UI, particles, fonts, sound effects, jingles):
+  49 ship with FCC (sounds as mp3), the rest download once from kenney.nl,
+  are checked against their recorded SHA-256 and kept in the PC's game
+  vault. It also finds and shows Phaser's 2,298 example programs (the code
+  only; their art isn't free). The `game-dev` skill holds the recipes for
+  movement, animation, juice, enemies, levels and phone controls, and comes
+  with any game job (`vendor/kenney/`, `vendor/phaser/`).
+- **Adding a library.** Ask the Changer to add another library and it
+  gets the `add-a-library` skill: find it, check the licence, show you a
+  preview and wait for your yes, keep a copy inside FCC with its licence
+  and checksums, give agents a tool, test it and ship it.
 - **3D starters and the FCC web kit.** `3d-landing` is a landing page whose
   hero is a slowly turning constellation of linked points that leans toward
   the pointer, with features, counting numbers, and a contact form.

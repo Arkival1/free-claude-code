@@ -134,6 +134,7 @@ from .farm.formats import style_of
 from .farm.render import video_tools
 from .farm.requests import FarmJob, farm_job
 from .farm.visuals import Visuals
+from .game_library import GameVault
 from .guide import (
     GUIDE_TOPICS,
     STARTER_QUESTIONS,
@@ -413,6 +414,17 @@ VIBE_SKILL = "vibe-coding"
 DEBUG_SKILL = "debugging"
 LOOK_SKILL = "visual-review"
 REVIEW_SKILL = "code-review"
+LIBRARY_SKILL = "add-a-library"
+GAME_SKILL = "game-dev"
+_LIBRARY_WORDS = re.compile(
+    r"\b(librar(y|ies)|asset packs?|art packs?|sound packs?|kenney|uiverse|"
+    r"bootstrap|phaser)\b",
+    re.I,
+)
+_OTHER_ENGINES = re.compile(r"\b(python|pygame|unity|godot|unreal|c\+\+|java)\b", re.I)
+_GAME_WORDS = re.compile(
+    r"\b(game|games|platformer|arcade|shooter|puzzle game|rpg|dungeon)\b", re.I
+)
 CHANGER_GOAL_LINES = ("The owner's request:", "This milestone:", "Files it owns:")
 """The lines of a Changer step's task that say what the job is about."""
 _BUG_WORDS = re.compile(
@@ -486,6 +498,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "save_image",
         "ui_library",
         "site_layouts",
+        "game_assets",
         "list_photos",
         "use_photo",
         "ideas",
@@ -497,8 +510,8 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     LAB_AGENT_NAME: LAB_AGENT_TOOLS,
     FARM_AGENT_NAME: FARM_AGENT_TOOLS,
     # Made from presets, so saved ones get the UI library too.
-    "Designer": ("ui_library", "site_layouts"),
-    "Developer": ("ui_library", "site_layouts"),
+    "Designer": ("ui_library", "site_layouts", "game_assets"),
+    "Developer": ("ui_library", "site_layouts", "game_assets"),
 }
 _PRESET_ROLES = {"Designer": "builder", "Developer": "developer"}
 """Agents made from a preset are upgraded only while they keep its role, so
@@ -952,6 +965,8 @@ class StudioService:
         # A copy of every repo and release Studio downloads, so they still
         # install after the original is deleted from GitHub.
         self.vault = RepoVault(sites_dir.parent / "vault")
+        # Kenney packs downloaded for games, kept like the repo vault.
+        self.game_vault = GameVault(sites_dir.parent / "game-vault")
         self._extensions = ExtensionLibrary(
             sites_dir.parent / "extensions",
             transport=search_transport,
@@ -1758,6 +1773,7 @@ class StudioService:
             page_tryer=self._page_tryer,
             screen=self._screen_call,
             new_project=self._new_chat_project,
+            game_vault=self.game_vault,
         )
 
     async def _new_chat_project(self, context: ToolContext, title: str) -> str:
@@ -7728,16 +7744,16 @@ class StudioService:
             # The Changer's steps: BUILD (vibe coding, visual review for
             # pages), FIX (debugging); its reviewers review code; the
             # Planner plans from the map alone.
+            about = "\n".join(
+                line
+                for line in goal.splitlines()
+                if line.startswith(CHANGER_GOAL_LINES)
+            )
             if agent.name in {CHANGER_REVIEWER_NAME, CHANGER_SECURITY_NAME}:
                 wanted.append(REVIEW_SKILL)
             elif agent.name != CHANGER_PLANNER_NAME:
                 # A step's own instructions mention fixing and pages; judge
                 # by the owner's request and the milestone only.
-                about = "\n".join(
-                    line
-                    for line in goal.splitlines()
-                    if line.startswith(CHANGER_GOAL_LINES)
-                )
                 if goal.lstrip().startswith("FIX") or (
                     not about and _BUG_WORDS.search(goal)
                 ):
@@ -7746,6 +7762,13 @@ class StudioService:
                     wanted.append(VIBE_SKILL)
                 if _PAGE_WORDS.search(about or goal):
                     wanted.append(LOOK_SKILL)
+            if agent.name in {
+                "Changer",
+                CHANGER_PLANNER_NAME,
+            } and _LIBRARY_WORDS.search(about or goal):
+                # Adding a library like the owner's Uiverse, Start Bootstrap
+                # and Kenney ones: the whole procedure, planned and built.
+                wanted.append(LIBRARY_SKILL)
         else:
             web = agent.role == "builder" or writes_like_builder(agent)
             app = agent.role in {"coder", "developer", "tester"}
@@ -7763,6 +7786,9 @@ class StudioService:
                 wanted.append(APP_SKILL)
             if _BUG_WORDS.search(goal):
                 wanted.append(DEBUG_SKILL)
+            if _GAME_WORDS.search(goal) and not _OTHER_ENGINES.search(goal):
+                # Browser games (Phaser); a Python or Unity game isn't one.
+                wanted.append(GAME_SKILL)
         if not wanted:
             return ""
         return await self._skill_texts(wanted)

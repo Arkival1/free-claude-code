@@ -545,6 +545,12 @@ def fit(name: str, goal: str, kinds: Iterable[str]) -> float:
     return score + best
 
 
+BRIEFED_SKILLS = frozenset({"game-dev", "add-a-library"})
+"""FCC's own skills that come with every job they fit (game jobs, the
+Changer adding a library), so a relay never makes a stage of them: a game
+job stays with the Coder and the Tester."""
+
+
 def choose(
     extension: Extension,
     stage: RelayStage,
@@ -554,7 +560,12 @@ def choose(
     """The agent or skill a repo gives this job, or None when it has nothing
     for it."""
     agents = list(extension.agents)
-    skills = [s for s in extension.skills if s.kind in RELAY_SKILL_KINDS]
+    skills = [
+        s
+        for s in extension.skills
+        if s.kind in RELAY_SKILL_KINDS
+        and not (extension.origin == "builtin" and s.name in BRIEFED_SKILLS)
+    ]
     role = KNOWN.get(repo_key(extension.name))
     fits_job = role is not None and bool(role.kinds & kinds)
     if stage.mode == "fits" and role is not None and not fits_job:

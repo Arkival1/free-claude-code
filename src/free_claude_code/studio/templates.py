@@ -15,6 +15,18 @@ from .templates_3d import (
 )
 from .templates_business import BUSINESS, FORM_JS, PLACEHOLDER_TEXT
 
+_GAME = Path(__file__).resolve().parent / "game_library"
+GAME_STARTER_FILES: Mapping[str, str] = {
+    "vendor/phaser/phaser.min.js": str(_GAME / "phaser" / "phaser.min.js"),
+    "vendor/phaser/LICENSE.md": str(_GAME / "phaser" / "LICENSE.md"),
+    **{
+        f"assets/{path.relative_to(_GAME / 'starter').as_posix()}": str(path)
+        for path in sorted((_GAME / "starter").rglob("*"))
+        if path.is_file()
+    },
+}
+"""The game starter's engine and Kenney art and sound, copied byte for byte."""
+
 _HEAD = """<!doctype html>
 <html lang="en">
 <head>
@@ -803,6 +815,12 @@ TEMPLATES: Mapping[str, tuple[str, Mapping[str, str]]] = {
         "practice's principles and contact (light and dark)",
         _folder("portfolio"),
     ),
+    "phaser-game": (
+        "A Phaser 3 browser game with Kenney's free art and sound (starts as a "
+        "platformer: run, jump, stomp, coins, a flag), keyboard and touch "
+        "controls, on FCC's own copy of Phaser",
+        _folder("phaser-game"),
+    ),
     "python-tool": ("A Python command-line tool with a test", _PYTHON_TOOL),
     "python-web": ("A Python web API with a page (FastAPI)", _PYTHON_WEB),
     "node-api": ("A Node web server with a JSON API, no dependencies", _NODE_API),
@@ -813,6 +831,7 @@ LIBRARIES: Mapping[str, Mapping[str, str]] = {
     "3d-landing": THREE_FILES,
     "3d-dashboard": THREE_FILES,
     "3d-shop": SHOP_LIBRARIES,
+    "phaser-game": GAME_STARTER_FILES,
 }
 """Files a starter copies byte for byte from Studio's own vetted copies."""
 
