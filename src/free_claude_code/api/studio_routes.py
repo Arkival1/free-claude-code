@@ -58,6 +58,14 @@ from free_claude_code.studio.lora import (
     LoraError,
 )
 from free_claude_code.studio.models import Agent, LoraJob, PhoneLink, VideoNote
+from free_claude_code.studio.notebook import (
+    TEACHER_FILE,
+    TEACHER_REPO,
+    NotebookError,
+    teacher_notebook,
+    training_notebook,
+)
+from free_claude_code.studio.notebook import dumps as notebook_dumps
 from free_claude_code.studio.phone_link import PhoneAuthError, PhoneLinkError
 from free_claude_code.studio.photos import MAX_PHOTO_BYTES, PhotoError
 from free_claude_code.studio.playbook import PlaybookNote
@@ -94,6 +102,8 @@ _ASSET_FILENAMES = frozenset(
         "changer.js",
         "tutor.css",
         "tutor.js",
+        "classroom.css",
+        "classroom.js",
         "fcc3d.js",
         "trade3d.js",
         "lab3d.js",
@@ -2444,6 +2454,88 @@ async def lora_file(
     return FileResponse(studio.lora.file_path(job_id, name), filename=name)
 
 
+class ClassTrainPayload(BaseModel):
+    where: Literal["pc", "kaggle", "colab"] = "pc"
+    base_model: str = ""
+
+
+@router.post("/studio/api/school/courses/{course_id}/train")
+async def train_class_student(
+    course_id: str,
+    payload: ClassTrainPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Train the student (LoRA) on this class: on this PC, Kaggle or Colab."""
+    try:
+        job = await studio.class_train(course_id, payload.where, payload.base_model)
+    except LoraError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    view = _lora_view(job)
+    if payload.where != "pc":
+        view["notebook_url"] = (
+            f"/studio/api/lora/jobs/{job.id}/notebook?target={payload.where}"
+        )
+    return view
+
+
+@router.post("/studio/api/school/courses/{course_id}/use-trained")
+async def use_trained_student(
+    course_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Point the student at the model the teacher trained for it."""
+    try:
+        return _lora_view(await studio.class_use_trained(course_id))
+    except LoraError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+def _notebook_download(notebook: JsonObject, name: str) -> Response:
+    return Response(
+        notebook_dumps(notebook),
+        media_type="application/x-ipynb+json",
+        headers={"content-disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@router.get("/studio/api/lora/jobs/{job_id}/notebook", include_in_schema=False)
+async def lora_notebook(
+    job_id: str,
+    request: Request,
+    target: str = "kaggle",
+    studio: StudioService = Depends(get_studio),
+    settings: Settings = Depends(get_settings),
+    _: None = Access,
+) -> Response:
+    """A Kaggle or Colab notebook that trains this job on a free GPU."""
+    job = await studio.store.require(LoraJob, job_id)
+    if job.status in {"succeeded", "failed", "cancelled"}:
+        raise HTTPException(status_code=400, detail="This training job has ended.")
+    commands = studio.lora.worker_commands(job, _worker_url(request, settings))
+    try:
+        notebook = training_notebook(commands, target)
+    except NotebookError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _notebook_download(notebook, f"fcc-train-{target}.ipynb")
+
+
+@router.get("/studio/api/school/teacher-notebook", include_in_schema=False)
+async def teacher_notebook_download(
+    target: str = "kaggle",
+    repo: str = TEACHER_REPO,
+    file: str = TEACHER_FILE,
+    _: None = Access,
+) -> Response:
+    """A Kaggle or Colab notebook that serves the classroom's teacher model."""
+    try:
+        notebook = teacher_notebook(target, repo=repo, file=file)
+    except NotebookError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _notebook_download(notebook, f"fcc-teacher-{target}.ipynb")
+
+
 @router.get("/studio/lora/worker.py", include_in_schema=False)
 def lora_worker_script() -> FileResponse:
     """Serve the standalone trainer so a GPU machine can download it."""
@@ -2574,9 +2666,52 @@ async def start_course(
     studio: StudioService = Depends(get_studio),
     _: None = Access,
 ) -> JsonObject:
-    """Start or resume teaching one class in the background."""
-    studio.start_class(course_id)
+    """Teach a class whose plan the owner confirmed (again) in the background."""
+    await studio.start_class(course_id)
     return {"started": True, "course_id": course_id}
+
+
+class ClassTalkPayload(BaseModel):
+    text: str
+
+
+class ClassOutPayload(BaseModel):
+    query: str
+
+
+@router.post("/studio/api/school/courses/{course_id}/talk")
+async def talk_to_teacher(
+    course_id: str,
+    payload: ClassTalkPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Tell the teacher what to teach (it writes or changes the plan), or ask it."""
+    await studio.class_talk(course_id, payload.text)
+    return {"sent": True, "course_id": course_id}
+
+
+@router.post("/studio/api/school/courses/{course_id}/confirm")
+async def confirm_lesson_plan(
+    course_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Confirm the lesson plan; the teacher starts teaching."""
+    course = await studio.class_confirm(course_id)
+    return course.model_dump()
+
+
+@router.post("/studio/api/school/courses/{course_id}/send-out")
+async def send_teacher_out(
+    course_id: str,
+    payload: ClassOutPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Send the teacher out of the classroom to learn more about something."""
+    await studio.class_send_out(course_id, payload.query)
+    return {"sent": True, "course_id": course_id}
 
 
 @router.get("/studio/api/memory/{agent_id}")

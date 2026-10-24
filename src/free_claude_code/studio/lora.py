@@ -114,6 +114,12 @@ KNOWN_BASES: tuple[LoraBase, ...] = (
         gated=True,
     ),
     LoraBase(
+        "Qwen/Qwen3-4B",
+        "qwen3:4b",
+        "4B",
+        "Fits a 6 GB GPU with 4-bit training (QLoRA); the classroom's pick on a PC.",
+    ),
+    LoraBase(
         "Qwen/Qwen2.5-Coder-1.5B-Instruct",
         "qwen2.5-coder:1.5b",
         "1.5B",

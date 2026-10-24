@@ -931,6 +931,7 @@ async def test_create_provider_instantiates_each_builtin():
         sambanova_api_key="test_sambanova_key",
         freellmapi_api_key="test_freellmapi_key",
         omniroute_api_key="test_omniroute_key",
+        notebook_api_key="test_notebook_key",
     )
     cases = {
         "nvidia_nim": NvidiaNimProvider,
@@ -962,6 +963,7 @@ async def test_create_provider_instantiates_each_builtin():
         "cloudflare": CloudflareProvider,
         "lmstudio": LMStudioProvider,
         "llamacpp": OpenAIChatProvider,
+        "notebook": OpenAIChatProvider,
         "ollama": OpenAIChatProvider,
         "ollama_cloud": OpenAIChatProvider,
         "wafer": OpenAIChatProvider,
@@ -1397,3 +1399,21 @@ async def test_freellmapi_is_a_router_on_this_pc_not_a_local_model():
     assert isinstance(provider, OpenAIChatProvider)
     assert str(provider._client.base_url).startswith("http://127.0.0.1:31415/v1")
     assert provider._client.api_key == "freellmapi-unified"
+
+
+@pytest.mark.asyncio
+async def test_a_cloud_notebook_is_the_owners_own_model_behind_a_key():
+    descriptor = PROVIDER_CATALOG["notebook"]
+    assert descriptor.credential_env == "NOTEBOOK_API_KEY"
+    # A notebook is a cloud machine, so it never gets the owner's private memory.
+    assert descriptor.local is False
+    settings = _make_settings(
+        notebook_api_key="notebook-secret",
+        notebook_base_url="https://teacher.trycloudflare.com/v1",
+    )
+    provider = await create_provider("notebook", settings)
+    assert isinstance(provider, OpenAIChatProvider)
+    assert provider._client.api_key == "notebook-secret"
+    assert str(provider._client.base_url).startswith(
+        "https://teacher.trycloudflare.com/v1"
+    )

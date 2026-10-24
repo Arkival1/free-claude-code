@@ -2502,6 +2502,36 @@ class — coached by the teacher's model and scored on the student's.
 `STUDIO_TEACHER_MODEL` and `STUDIO_STUDENT_MODEL` set the default Teacher and
 Student agents' models.
 
+**The classroom page** looks like the PocketPal AI app. The classroom is for
+watching: the teacher and the student talk, the teacher leaves the room to
+read up (a lesson's research, or facts for marking the test), a student's
+test question waits until the teacher is back, and every answer is graded.
+**Talk to the teacher** (the pencil, or the bar at the bottom) opens the
+teacher chat: say what the student should learn, change the plan the teacher
+writes, and **Confirm plan and start**. While the class runs you can still ask
+the teacher how the student is doing, or send it out to look something up.
+
+After a pass, **Train the student** trains its weights (LoRA) on the class,
+with extra worked examples the teacher writes for each lesson: on **This PC**
+(Qwen3 4B, 4-bit, fits a 6 GB card), or on **Kaggle** or **Google Colab**'s
+free T4 (Qwen3 8B) with a notebook FCC downloads for you (it reaches FCC over
+Tailscale, like the remote trainer). When training ends, **Give the student
+its trained model** in the teacher chat.
+
+Every teacher call carries short class notes (about 400 tokens: the goal, the
+plan, what the student learned, the grades, the training), so when an API that
+rotates models (FreeLLMAPI, NVIDIA) gives the teacher a new model mid-class,
+the new one carries on, and the classroom shows the switch.
+
+**A teacher on Kaggle or Colab**: the settings (⚙ in the teacher chat)
+download a notebook that serves a model (Qwen3 14B by default) with
+llama.cpp behind a key the notebook makes, over a free Cloudflare tunnel.
+Paste the address and key it prints into Settings, Providers, **Cloud notebook
+(Kaggle, Colab)**, then set the teacher's model to `notebook/teacher`. The
+notebook downloads llama.cpp's wheel and cloudflared from GitHub and the model
+from Hugging Face on the notebook machine, so those can't be kept in FCC's
+Repo vault.
+
 </details>
 
 <details>

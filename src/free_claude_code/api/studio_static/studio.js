@@ -2293,7 +2293,7 @@
         [
           el("p", {
             class: "muted",
-            text: "The teacher agent plans lessons, teaches the student agent in a shared chat, then tests it and grades every answer.",
+            text: "Tell the teacher what the student should learn and confirm its lesson plan. Then watch: the teacher teaches, steps out to learn more, tests and grades the student, and can train it.",
           }),
           el("label", {}, ["Topic", topic]),
           el("label", {}, ["Teacher", teacherPicker]),
@@ -2305,17 +2305,18 @@
           el("label", {}, ["Lessons", count]),
           el("button", {
             class: "primary",
-            text: "Start class",
+            text: "Open class",
             onclick: async () => {
               if (!topic.value.trim()) return notify("Pick a topic.");
               const course = await post("/studio/api/school/courses", {
                 topic: topic.value.trim(),
                 lesson_count: Number(count.value) || 3,
-                start: true,
+                start: false,
                 teacher_id: teacherPicker.value,
                 student_id: studentPicker.value,
               });
-              go(`class/${course.id}`);
+              // The owner plans it with the teacher first.
+              go(`class/${course.id}/teacher`);
             },
           }),
           data.enabled
@@ -2350,95 +2351,26 @@
     view.replaceChildren(...nodes);
   }
 
+  // A class lives in classroom.js (PocketPal's look): the classroom to
+  // watch, and the teacher chat to plan, ask, and train the student.
   async function renderClass(courseId) {
     const generation = renderGeneration;
-    const data = await api(`/studio/api/school/courses/${courseId}`);
-    const course = data.course;
-    setChrome("class", course.topic);
-    const questions = data.questions || [];
-    if (generation !== renderGeneration) return;
-    view.replaceChildren(
-      card("Progress", [
-        el("div", { class: "row-between" }, [
-          statusPill(course.status),
-          el("span", {
-            class: "pill",
-            text: `${course.lesson_done}/${course.lesson_total} lessons`,
-          }),
-        ]),
-        meter(data.progress || 0),
-        course.score != null
-          ? el("p", {
-              class: "muted",
-              text: `Test score ${percent(course.score)} — ${course.passed ? "passed" : "below the pass mark"}.`,
-            })
-          : null,
-        el("div", { class: "row" }, [
-          el("button", {
-            class: "secondary",
-            text: "Run again",
-            onclick: async () => {
-              await post(`/studio/api/school/courses/${courseId}/start`);
-              notify("Class started.");
-            },
-          }),
-          el("button", {
-            class: "secondary",
-            text: "To Obsidian",
-            onclick: async () => {
-              const result = await post("/studio/api/obsidian/sync", {
-                course_id: courseId,
-              });
-              notify(`Wrote ${result.note}`);
-            },
-          }),
-        ]),
-      ]),
-      card(
-        "Lessons",
-        (data.lessons || []).length
-          ? data.lessons.map((lesson) =>
-              el("div", { class: "list-item" }, [
-                el("span", { class: "grow" }, [
-                  el("strong", { text: `${lesson.ordinal}. ${lesson.topic}` }),
-                  el("span", { text: lesson.notes || lesson.objective }),
-                ]),
-                statusPill(lesson.status),
-              ])
-            )
-          : empty("The teacher is still planning.")
-      ),
-      questions.length
-        ? card(
-            "Test",
-            questions.map((question) =>
-              el("div", { class: "card" }, [
-                el("div", { class: "row-between" }, [
-                  el("strong", { text: `Q${question.ordinal}` }),
-                  el("span", {
-                    class: `pill ${question.score >= course.pass_mark ? "good" : "bad"}`,
-                    text: question.score == null ? "—" : percent(question.score),
-                  }),
-                ]),
-                el("p", { class: "muted", text: question.prompt }),
-                el("p", { text: question.answer }),
-                question.feedback
-                  ? el("p", { class: "muted", text: question.feedback })
-                  : null,
-              ])
-            )
-          )
-        : null,
-      card(
-        "Classroom",
-        el("div", { class: "transcript" }, (data.messages || []).map(messageBubble))
-      )
-    );
-    if (["planning", "teaching", "examining"].includes(course.status)) {
-      pollPage(() => renderClass(courseId));
-    } else {
-      stopPolling();
-    }
+    if (!window.FCCClassroom) throw new Error("The classroom didn't load. Reload the page.");
+    stopPolling();
+    const [id, pane] = String(courseId || "").split("/");
+    setChrome("class", "Classroom");
+    await window.FCCClassroom.render({
+      view,
+      el,
+      api,
+      post,
+      notify,
+      go,
+      token,
+      courseId: id,
+      pane,
+      alive: () => generation === renderGeneration,
+    });
   }
 
   // Model Control: the built-in engine, like LM Studio inside Studio.

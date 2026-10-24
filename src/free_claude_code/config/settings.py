@@ -365,6 +365,17 @@ class Settings(BaseModel):
         validation_alias="FREELLMAPI_BASE_URL",
     )
 
+    # ==================== Cloud notebook Config ====================
+    # A model the owner runs in a Kaggle or Colab notebook (or any GPU box):
+    # llama.cpp's server behind a tunnel, protected by this key.
+    notebook_api_key: OptionalNonEmptyString = Field(
+        default=None, validation_alias="NOTEBOOK_API_KEY"
+    )
+    notebook_base_url: NonEmptyString = Field(
+        default="http://localhost:8090/v1",
+        validation_alias="NOTEBOOK_BASE_URL",
+    )
+
     # ==================== OmniRoute Config ====================
     # Another free-tier router the owner may run on this PC; it calls outside
     # providers, so it is not a local model.
@@ -535,6 +546,9 @@ class Settings(BaseModel):
     )
     omniroute_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="OMNIROUTE_PROXY"
+    )
+    notebook_proxy: OptionalNonEmptyString = Field(
+        default=None, validation_alias="NOTEBOOK_PROXY"
     )
     lightning_proxy: OptionalNonEmptyString = Field(
         default=None, validation_alias="LIGHTNING_PROXY"

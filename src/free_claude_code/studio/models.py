@@ -53,7 +53,7 @@ type RunStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"
 type PlanStatus = Literal["running", "done", "failed", "stopped"]
 type StepStatus = Literal["waiting", "running", "done", "failed", "skipped", "stopped"]
 type CourseStatus = Literal[
-    "planning", "teaching", "examining", "passed", "failed", "cancelled"
+    "planning", "proposed", "teaching", "examining", "passed", "failed", "cancelled"
 ]
 type SampleSplit = Literal["train", "eval"]
 type LoraRunner = Literal["local", "remote"]
@@ -288,6 +288,18 @@ class Course(Record):
     passed: bool = False
     tune_job_id: str | None = None
     error: str | None = None
+    goal: str = ""
+    """What the owner told the teacher the student should learn."""
+    plan_confirmed: bool = False
+    teacher_present: bool = True
+    teacher_away: str = ""
+    """Where the teacher went, while out of the classroom."""
+    activity: str = ""
+    """What is happening in the classroom right now, in plain words."""
+    knowledge: str = ""
+    """What the teacher found when it left the classroom to learn more."""
+    teacher_model: str = ""
+    """The model that last answered as the teacher (APIs can switch it)."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 
@@ -309,6 +321,8 @@ class Lesson(Record):
     objective: str = ""
     status: Literal["pending", "teaching", "done", "failed"] = "pending"
     notes: str = ""
+    research: str = ""
+    """What the teacher looks up before teaching it (web search words)."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
 
@@ -324,6 +338,10 @@ class ExamQuestion(Record):
     answer: str = ""
     score: float | None = None
     feedback: str = ""
+    state: Literal["pending", "working", "waiting", "answered", "graded"] = "pending"
+    help_request: str = ""
+    """The student's question to the teacher during the test."""
+    help_reply: str = ""
     created_at: int = Field(default_factory=now_ms)
 
 

@@ -771,6 +771,15 @@ OPENAI_CHAT_PROFILES: dict[str, OpenAIChatProfile] = {
         ),
         NO_REASONING,
     ),
+    "notebook": OpenAIChatProfile(
+        _policy(
+            "NOTEBOOK",
+            ReasoningReplayMode.THINK_TAGS,
+            default_max_tokens=ANTHROPIC_DEFAULT_MAX_OUTPUT_TOKENS,
+        ),
+        LLAMACPP_REASONING,
+        normalize_base_url=True,
+    ),
     "llamacpp": OpenAIChatProfile(
         _policy(
             "LLAMACPP",

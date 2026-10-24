@@ -336,7 +336,7 @@ from .relay import (
 )
 from .research import DeepResearch, ResearchMix, ResearchReport, relevance
 from .rooms import RoomError, RoomOutcome, RoomService
-from .school import School
+from .school import School, SchoolError
 from .search import SearchBudget, SearchError, StudioSearch
 from .sites import SiteWorkspace, slugify
 from .starter import StarterRepo, bundled_bytes, load_starters
@@ -390,6 +390,12 @@ from .videos import VIDEO_TAGS, VideoError, VideoStudy, memory_line
 from .voice import SpeechAudio, VoiceError, VoiceService, speakable
 from .weather import WeatherError, forecast, weather_request
 from .workers import WorkerPool
+
+CLASS_TRAIN_PLACES = frozenset({"pc", "kaggle", "colab"})
+CLASS_PC_BASE = "Qwen/Qwen3-4B"
+"""Fits the owner's 6 GB card with 4-bit training."""
+CLASS_NOTEBOOK_BASE = "Qwen/Qwen3-8B"
+"""Fits Kaggle and Colab's free 16 GB T4."""
 
 GUIDE_AGENT_NAME = "Guide"
 BUILDER_AGENT_NAME = "Builder"
@@ -715,6 +721,8 @@ MAIN_PROMPT_NOTE = (
 _LOCAL_PROBE_SECONDS = 15.0
 _DASHBOARD_SECONDS = 4.0
 TEACH_MATERIAL_CHARS = 12_000
+CLASS_PAGE_CHARS = 1_500
+"""How much of the best page the teacher brings back from a search."""
 TEACH_PROMPT = (
     "You are turning material into a skill an AI agent will follow later. "
     "Write a short, practical how-to: when to use it, the exact commands, "
@@ -1050,6 +1058,8 @@ class StudioService:
         self._builtin_lock = asyncio.Lock()
         """Seconds before a task that hit a brief rate limit carries on."""
         self._lab_busy = 0
+        self._class_busy: set[str] = set()
+        """Classes with a step running (one at a time per class)."""
         self._lab_error: str | None = None
         self._farm = ContentFarm(
             store,
@@ -1929,7 +1939,28 @@ class StudioService:
             tuner=self._tuner(),
             default_model=self.default_model,
             sealed=self.is_private_from,
+            researcher=self._class_research,
         )
+
+    async def _class_research(self, query: str) -> str:
+        """Where the teacher goes when it leaves the classroom: a web search
+        and the best page, as short notes."""
+        try:
+            report = await self._search().search(query, limit=5)
+        except SearchError as error:
+            logger.info("Studio class search failed: {}", error)
+            return ""
+        lines = [f"- {hit.title}: {hit.snippet} ({hit.url})" for hit in report.hits[:5]]
+        for hit in report.hits[:2]:
+            try:
+                page = await self._web_tools.fetch(hit.url, egress=self._egress())
+            except httpx.HTTPError, OSError, ValueError:
+                continue
+            text = " ".join(page.data.split())[:CLASS_PAGE_CHARS]
+            if text:
+                lines.append(f"From {hit.url}: {text}")
+                break
+        return "\n".join(lines)
 
     def _rooms(self) -> RoomService:
         return RoomService(
@@ -10891,11 +10922,14 @@ class StudioService:
             pass_mark=self.settings.studio_class_pass_mark,
         )
         if start:
-            self.spawn(self.run_class(course.id))
+            # The owner confirms every plan: "start" has the teacher write
+            # one for the topic, waiting in the teacher chat.
+            await self.class_talk(course.id, f"Teach the student {topic}.")
         return course
 
     async def run_class(self, course_id: str) -> Course:
-        """Teach and test one class, tuning the student when it passes."""
+        """Plan, teach and test a class with no owner in the loop (scripts and
+        tests). The owner's routes confirm a plan first (start_class)."""
         course = await self._school().run_course(
             course_id, tune_on_pass=self.settings.studio_light_tuning_enabled
         )
@@ -10904,13 +10938,197 @@ class StudioService:
         )
         return course
 
-    def start_class(self, course_id: str) -> None:
-        """Run a class in the background so the UI can watch it live."""
-        self.spawn(self.run_class(course_id))
+    async def start_class(self, course_id: str) -> None:
+        """Run a confirmed class again in the background, to watch it live."""
+        course = await self._store.require(Course, course_id)
+        if not course.plan_confirmed:
+            raise StudioError("Confirm the lesson plan in the teacher chat first.")
+
+        async def teach() -> None:
+            done = await self._school().run_confirmed(
+                course_id, tune_on_pass=self.settings.studio_light_tuning_enabled
+            )
+            await self._after_memory_change(
+                [done.teacher_agent_id, done.student_agent_id]
+            )
+
+        self._class_job(course_id, teach)
+
+    def _class_job(self, course_id: str, work: Callable[[], Awaitable[object]]) -> None:
+        """Run one classroom step in the background, one at a time per class;
+        a step that fails says why in the classroom instead of vanishing."""
+        if course_id in self._class_busy:
+            raise StudioError("The teacher is busy: wait for this step to finish.")
+        self._class_busy.add(course_id)
+
+        async def run() -> None:
+            try:
+                await work()
+            except (SchoolError, StudioLLMError, TuningError) as error:
+                course = await self._store.get(Course, course_id)
+                if course is not None:
+                    await self._store.append_message(
+                        chat_id=course.chat_id,
+                        role="event",
+                        text=f"The teacher couldn't do that: {error}",
+                        author="studio",
+                        data={"kind": "class_error"},
+                    )
+            finally:
+                self._class_busy.discard(course_id)
+
+        self.spawn(run())
+
+    async def class_talk(self, course_id: str, text: str) -> None:
+        """The owner tells the teacher what to teach, or asks it something."""
+        course = await self._store.require(Course, course_id)
+        if not text.strip():
+            raise StudioError("Write a message for the teacher.")
+        if course_id in self._class_busy and course.plan_confirmed:
+            # The class is running: the teacher answers on the side, so the
+            # owner can ask how the student is doing without stopping it.
+            async def side_chat() -> None:
+                try:
+                    await self._school().talk(course_id, text)
+                except (SchoolError, StudioLLMError) as error:
+                    await self._school()._event(
+                        course,
+                        "studio",
+                        f"The teacher couldn't answer: {error}",
+                        "class_error",
+                    )
+
+            self.spawn(side_chat())
+            return
+        self._class_job(course_id, lambda: self._school().talk(course_id, text))
+
+    async def class_confirm(self, course_id: str) -> Course:
+        """The owner confirms the lesson plan; the class starts at once."""
+        if course_id in self._class_busy:
+            raise StudioError("The teacher is busy: wait for this step to finish.")
+        # Held busy across the confirm itself, so a second press can't
+        # confirm the same plan twice.
+        self._class_busy.add(course_id)
+        try:
+            course = await self._school().confirm(course_id)
+        finally:
+            self._class_busy.discard(course_id)
+
+        async def teach() -> None:
+            done = await self._school().run_confirmed(
+                course_id, tune_on_pass=self.settings.studio_light_tuning_enabled
+            )
+            await self._after_memory_change(
+                [done.teacher_agent_id, done.student_agent_id]
+            )
+
+        self._class_job(course_id, teach)
+        return course
+
+    async def class_send_out(self, course_id: str, query: str) -> None:
+        """The owner sends the teacher out of the classroom to learn more."""
+        await self._store.require(Course, course_id)
+        if not query.strip():
+            raise StudioError("Say what the teacher should look up.")
+        self._class_job(course_id, lambda: self._school().send_out(course_id, query))
+
+    async def class_train(
+        self, course_id: str, where: str, base_model: str = ""
+    ) -> LoraJob:
+        """Train the student's weights (LoRA) on what this class taught.
+
+        ``where`` is ``pc`` (this computer's GPU), ``kaggle`` or ``colab``
+        (a notebook the owner downloads). The teacher's own model, local or
+        not, writes extra worked examples on each lesson's topic.
+        """
+        course = await self._store.require(Course, course_id)
+        if where not in CLASS_TRAIN_PLACES:
+            raise StudioError("Train on this PC, Kaggle or Colab.")
+        if course.status != "passed":
+            raise StudioError("Train the student after it passes the class test.")
+        if course_id in self._class_busy:
+            raise StudioError("The teacher is busy; train once the class is quiet.")
+        # Held until the job is recorded, so a double press makes one job.
+        self._class_busy.add(course_id)
+        try:
+            current = await self._class_lora(course)
+            if current is not None and current.status in {"queued", "running"}:
+                raise StudioError("The student is already being trained on this class.")
+            return await self._start_class_training(course, where, base_model)
+        finally:
+            self._class_busy.discard(course_id)
+
+    async def _start_class_training(
+        self, course: Course, where: str, base_model: str
+    ) -> LoraJob:
+        course_id = course.id
+        teacher = await self._store.require(Agent, course.teacher_agent_id)
+        lessons = await self._store.find(
+            Lesson, where={"course_id": course_id}, order_by="ordinal ASC"
+        )
+        base = base_model.strip() or (
+            CLASS_PC_BASE if where == "pc" else CLASS_NOTEBOOK_BASE
+        )
+        job = await self.lora.create(
+            agent_id=course.student_agent_id,
+            base_model=base,
+            runner="local" if where == "pc" else "remote",
+            sources=("classes", "topics"),
+            topics=[lesson.topic for lesson in lessons] or [course.topic],
+            teacher_model=await self.effective_model(
+                teacher.model or self.default_model
+            ),
+        )
+        await self._school()._set(course_id, tune_job_id=job.id)
+        place = {"pc": "this PC", "kaggle": "Kaggle", "colab": "Colab"}[where]
+        await self._school()._event(
+            course,
+            "system",
+            f"Training the student on {place} ({base}): the teacher writes "
+            "worked examples for each lesson first.",
+            "training",
+        )
+        return job
+
+    async def class_use_trained(self, course_id: str) -> LoraJob:
+        """Give the student the model the teacher trained for it."""
+        course = await self._store.require(Course, course_id)
+        job = await self._class_lora(course)
+        if job is None:
+            raise StudioError("This class hasn't trained the student yet.")
+        switched = await self.lora.switch(job.id)
+        await self._school()._event(
+            course,
+            "system",
+            switched.message or "The student now uses its trained model.",
+            "trained_in_use",
+        )
+        return switched
+
+    async def _class_lora(self, course: Course) -> LoraJob | None:
+        if not course.tune_job_id or not course.tune_job_id.startswith("lora"):
+            return None
+        return await self._store.get(LoraJob, course.tune_job_id)
 
     async def courses(self) -> tuple[Course, ...]:
         """Return every class, newest first."""
         return await self._store.find(Course, order_by="created_at DESC")
+
+    async def _pal(self, agent_id: str) -> JsonObject:
+        """A classroom agent as its card shows it: who, which model, where."""
+        agent = await self._store.get(Agent, agent_id)
+        if agent is None:
+            return {"id": agent_id, "name": "Missing agent", "model": "", "where": ""}
+        model = await self.effective_model(agent.model or self.default_model)
+        provider = parse_provider_type(model) if "/" in model else ""
+        where = (
+            "notebook"
+            if provider == "notebook"
+            else "local"
+            if self._is_local(model)
+            else "cloud"
+        )
+        return {"id": agent.id, "name": agent.name, "model": model, "where": where}
 
     async def course_detail(self, course_id: str) -> JsonObject:
         """Return one class with its lessons, test, and transcript."""
@@ -10924,6 +11142,15 @@ class StudioService:
         transcript = await self._store.transcript(course.chat_id)
         return {
             "course": course.model_dump(),
+            "busy": course_id in self._class_busy,
+            "pals": {
+                "teacher": await self._pal(course.teacher_agent_id),
+                "student": await self._pal(course.student_agent_id),
+            },
+            "training": _class_training(
+                await self._class_lora(course),
+                await self._store.get(Agent, course.student_agent_id),
+            ),
             "progress": course.progress,
             "lessons": [lesson.model_dump() for lesson in lessons],
             "questions": [question.model_dump() for question in questions],
@@ -11362,3 +11589,25 @@ def idea_view(idea: Idea) -> JsonObject:
 def photo_view(photo: Photo) -> JsonObject:
     """One business photo for the app."""
     return photo.model_dump() | {"url": f"/studio/api/photos/{photo.id}/file"}
+
+
+def _class_training(job: LoraJob | None, student: Agent | None) -> JsonObject | None:
+    """A class's LoRA job as the teacher chat shows it (never its token)."""
+    if job is None:
+        return None
+    return {
+        "id": job.id,
+        "status": job.status,
+        "runner": job.runner,
+        "base_model": job.base_model,
+        "message": job.message,
+        "error": job.error,
+        "step": job.step,
+        "total_steps": job.total_steps,
+        "served_model": job.served_model,
+        "in_use": bool(
+            job.previous_model
+            and student is not None
+            and student.model != job.previous_model
+        ),
+    }
