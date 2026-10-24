@@ -16,6 +16,8 @@ import anyio.to_thread
 MAX_FILE_BYTES = 512_000
 MAX_LIBRARY_BYTES = 4_000_000
 """Studio's own vetted library files (three.js) may be bigger than an agent's."""
+MAX_GODOT_ASSET_BYTES = 32_000_000
+"""Godot demo art (HDR skies, models) FCC ships may be bigger still."""
 MAX_SITE_FILES = 1_500
 MAX_DEPTH = 12
 ALLOWED_SUFFIXES = frozenset(
@@ -138,6 +140,47 @@ PREVIEW_ONLY_SUFFIXES = frozenset(
         ".mp3",
         ".mp4",
         ".webm",
+        ".mov",
+        ".m4v",
+    }
+)
+# Art, sound, models and Godot's import notes in the Godot demos FCC ships:
+# only Studio copies these (copy_library_bytes with godot=True).
+GODOT_ASSET_SUFFIXES = frozenset(
+    {
+        *PREVIEW_ONLY_SUFFIXES,
+        ".import",
+        ".uid",
+        ".wav",
+        ".ogg",
+        ".res",
+        ".scn",
+        ".mesh",
+        ".glb",
+        ".gltf",
+        ".bin",
+        ".blend",
+        ".obj",
+        ".mtl",
+        ".dae",
+        ".fbx",
+        ".hdr",
+        ".exr",
+        ".tga",
+        ".psd",
+        ".occ",
+        ".lmbake",
+        ".unwrap_cache",
+        ".silly_mat_importable",
+        ".silly_mat_loadable",
+        ".mtxt",
+        ".bmp",
+        ".glsl",
+        ".po",
+        ".pot",
+        ".gitattribute",
+        ".license",
+        ".zip",
     }
 )
 # Dependency and cache folders: huge, regenerated, never listed or zipped.
@@ -158,6 +201,7 @@ SKIP_DIRS = frozenset(
         ".parcel-cache",
         "target",
         ".studio-history",
+        ".godot",
     }
 )
 HISTORY_DIR = ".studio-history"
@@ -192,9 +236,13 @@ _CONTENT_TYPES = {
     ".map": "application/json; charset=utf-8",
     ".mp3": "audio/mpeg",
     ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
     ".webm": "video/webm",
 }
 _SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+# Godot's demos name a few files with spaces ("House In a Forest Loop.ogg").
+_GODOT_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9._-]+( [A-Za-z0-9._-]+)*$")
 # Windows refuses these names in any folder, with or without an extension.
 WINDOWS_RESERVED = frozenset(
     {"con", "prn", "aux", "nul"}
@@ -455,7 +503,12 @@ class SiteWorkspace:
         return self._root / site_id
 
     def resolve(
-        self, site_id: str, relative_path: str, *, for_preview: bool = False
+        self,
+        site_id: str,
+        relative_path: str,
+        *,
+        for_preview: bool = False,
+        godot: bool = False,
     ) -> Path:
         """Return an absolute path inside the site, or raise ``SiteError``."""
         candidate = (relative_path or "").strip().replace("\\", "/").lstrip("/")
@@ -465,7 +518,8 @@ class SiteWorkspace:
         if not segments or len(segments) > MAX_DEPTH:
             raise SiteError("That file path is not allowed.")
         for segment in segments:
-            if segment == ".." or not _SEGMENT_PATTERN.match(segment):
+            pattern = _GODOT_SEGMENT_PATTERN if godot else _SEGMENT_PATTERN
+            if segment == ".." or not pattern.match(segment):
                 raise SiteError(f"Unsafe path segment: {segment!r}")
             if is_windows_reserved(segment):
                 raise SiteError(f"{segment!r} is a reserved name on Windows.")
@@ -474,6 +528,8 @@ class SiteWorkspace:
         allowed = suffix in ALLOWED_SUFFIXES or name in ALLOWED_NAMES
         if for_preview:
             allowed = allowed or suffix in PREVIEW_ONLY_SUFFIXES
+        if godot:
+            allowed = allowed or suffix in GODOT_ASSET_SUFFIXES
         if not allowed:
             raise SiteError(f"{name!r} is not a text file type agents can write here.")
         target = self.directory(site_id).joinpath(*segments)
@@ -522,16 +578,18 @@ class SiteWorkspace:
         return await self.copy_library_bytes(site_id, relative_path, data)
 
     async def copy_library_bytes(
-        self, site_id: str, relative_path: str, data: bytes
+        self, site_id: str, relative_path: str, data: bytes, *, godot: bool = False
     ) -> SiteFile:
         """Put one file from Studio's own libraries (layouts, game art and
         sound) into the site. Pictures, fonts, sound and video are allowed:
-        only Studio calls this, with files it ships."""
-        target = self.resolve(site_id, relative_path, for_preview=True)
+        only Studio calls this, with files it ships. godot also allows the
+        Godot demos' models, skies and import notes, and bigger files."""
+        target = self.resolve(site_id, relative_path, for_preview=True, godot=godot)
         name = Path(relative_path).name
+        limit = MAX_GODOT_ASSET_BYTES if godot else MAX_LIBRARY_BYTES
 
         def work() -> SiteFile:
-            if len(data) > MAX_LIBRARY_BYTES:
+            if len(data) > limit:
                 raise SiteError(f"{name} is too big to copy into a site.")
             directory = self.directory(site_id)
             if not target.exists() and self._count(directory) >= MAX_SITE_FILES:

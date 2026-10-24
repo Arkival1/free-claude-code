@@ -1970,7 +1970,10 @@ still looks finished.
   frame to `screenshots/frame.png`, and exports a Windows game. Godot
   downloads once, is checked against Godot's SHA-512 list and kept in the
   Repo vault; export templates (about 1 GB) download only for an export. It
-  also searches and reads Godot's 133 official demo projects, and the
+  also searches and reads Godot's 133 official demo projects, and `use`
+  copies a whole demo into the project with all its art, sound, models and
+  skies (2,159 files shipped in FCC, each checked against its SHA-256), ready
+  to change into your game. The
   `godot-dev` skill holds the genre book (18 genres) and the guide to art
   styles, animation, physics, worlds and story (`vendor/godot/`).
 - **App kit.** The `ui_kit` tool brings Tabler (MIT, Bootstrap 5, light and
@@ -2251,8 +2254,10 @@ then **Add note or link**, or **Add photos or videos** (JPEG, PNG, WebP, or
 GIF photos up to 25 MB; MP4, MOV, or WebM videos up to 200 MB). Files stay on
 this PC.
 
-Each idea goes in a category: **Websites**, **Apps**, **Lab**, or **General**
-(for everything). The buttons above the board show one category at a time,
+Each idea goes in a category: **Websites**, **Apps**, **Games**, **Lab**, or
+**General** (for everything). **Games** is your own game library: photos and
+videos of games you like, or your own art; the Builder and Coder (the game
+makers) read it too. The buttons above the board show one category at a time,
 with how many ideas each has. LCC's agents look in their own category and
 General: the Builder in Websites, the Coder and Tester in Apps, the Lab agent
 in Lab, so a website's references never steer lab work. Repo agents see every
@@ -2262,9 +2267,23 @@ The Builder, Coder, Lab, Helper, and every repo agent get the `ideas` tool.
 When the board has anything on it, they are told so before they start, then
 search it (`ideas` with `search`), read an idea in full (`read`), and can put
 a reference photo into the project (`use`). They go in the direction your
-references point and make their own work at a business level, not a copy. A
-text-only local model can't watch a video or look at a photo, so what you
-write about each one is what it goes by: say what you like.
+references point and make their own work at a business level, not a copy.
+
+**Photos and videos into code.** The Builder, Coder and their presets also
+get `look_reference`: an ideas-board photo or video, a business photo, or a
+picture or video in the project goes to the Vision Model (Settings, Studio).
+A video is sent as 9 frames taken evenly through it, in time order, so the
+model can tell how things move and animate. It writes a build brief: for a
+game the genre, camera, player, moves and animations, enemies, level (as a
+text map), HUD, physics feel, art style, palette and how to build it in
+Godot 4 (with the closest Godot demos); for a site or app the sections,
+layout, colours, type and parts. The brief is saved in the project's
+`reference-notes/` (with the video's frame sheet), and the agent builds from
+it. Mechanics and style are copied freely; your own art is used as it is;
+another game's characters, logos and names are flagged and drawn as
+originals. ffmpeg (the `studio_video` extra the Windows installer adds)
+shrinks photos and takes the frames. Without a Vision Model, agents go by
+what you write about each reference, so say what you like.
 
 </details>
 

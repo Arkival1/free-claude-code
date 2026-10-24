@@ -555,7 +555,7 @@ class Idea(Record):
 
     id: str = Field(default_factory=lambda: new_id("ida"))
     kind: Literal["note", "photo", "video", "link"] = "note"
-    category: Literal["website", "app", "lab", "general"] = "general"
+    category: Literal["website", "app", "game", "lab", "general"] = "general"
     """What kind of work it is for: agents look in their own category (and
     general) first."""
     title: str

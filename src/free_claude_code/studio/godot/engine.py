@@ -66,6 +66,7 @@ WARNING = re.compile(r"(WARNING:|USER WARNING)")
 NOISE = (
     "Couldn't find the given section",
     "Failed loading resource: res://.godot",
+    "resources still in use at exit",
 )
 """Lines Godot prints that aren't the game's problem."""
 LOAD_ALL = """extends SceneTree

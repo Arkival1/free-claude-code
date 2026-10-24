@@ -26,12 +26,27 @@ downloaded the same way, only when a game is exported.
 **The demos**: `studio/godot/demos.json.gz`, built by `pack_demos.py`: the
 133 GDScript demo projects' scripts, scenes, resources, shaders, project
 files and READMEs (each file at most 120 KB). Left out: the 6 C# copies in
-`mono/`, and the demos' art, sound and models (listed by name only; the
-agents use Kenney's CC0 packs instead). `SHA256SUMS` holds its checksum.
+`mono/` (and C# project files elsewhere), screenshots and dotfiles.
+
+**The demos' art** (owner asked for it, 24 October 2026):
+`studio/godot/art/demo-art-01.zip` ... `-12.zip`, built by `pack_art.py`:
+every other file of the 133 demos (2,159 files, 267 MB unpacked, 214 MB
+packed): pictures, sound, music, fonts, models (glTF, Blender, OBJ),
+skies (HDR, EXR) and Godot's `.import`/`.uid` notes, so a copied demo opens
+and runs. Each part is under 23 MB (the release splits parts at 25 MB); a
+file bigger than 16 MB (four skies) is stored in chunks across parts.
+`art/art.json.gz` lists every file's SHA-256, size and chunks;
+`SHA256SUMS` holds every part's checksum, and FCC checks each file against
+its SHA-256 before copying it. The demo repo is MIT; some art inside carries
+its own open licence (CC0 skies and models, CC-BY / CC BY-SA music and
+sounds, SIL OFL fonts), with its licence file or README credit next to it,
+copied along with the demo. `art/LICENSE-demos.txt` (the repo's MIT text) is
+put into every copied demo as `LICENSE-godot-demos.txt`.
 
 **The starters** in `studio/godot/starters/` are FCC's own (platformer-2d,
 rpg-topdown, third-person-3d); the 2D ones take Kenney's Pixel Platformer,
 Tiny Town and Tiny Dungeon (CC0) from FCC's game library. All three were
 checked with Godot 4.7.2 headless and on screen before shipping.
 
-Agents use all of it through the `godot` tool and the `godot-dev` skill.
+Agents use all of it through the `godot` tool (`use` copies a whole demo,
+code and art, into a project) and the `godot-dev` skill.

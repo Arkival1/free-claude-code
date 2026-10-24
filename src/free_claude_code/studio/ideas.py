@@ -19,8 +19,8 @@ from .photos import PhotoError, clean_name, image_info
 from .store import StudioStore
 
 IdeaKind = Literal["note", "photo", "video", "link"]
-IdeaCategory = Literal["website", "app", "lab", "general"]
-CATEGORIES: tuple[IdeaCategory, ...] = ("website", "app", "lab", "general")
+IdeaCategory = Literal["website", "app", "game", "lab", "general"]
+CATEGORIES: tuple[IdeaCategory, ...] = ("website", "app", "game", "lab", "general")
 _CATEGORY_WORDS: dict[str, IdeaCategory] = {
     "website": "website",
     "websites": "website",
@@ -28,7 +28,8 @@ _CATEGORY_WORDS: dict[str, IdeaCategory] = {
     "web": "website",
     "app": "app",
     "apps": "app",
-    "game": "app",
+    "game": "game",
+    "games": "game",
     "lab": "lab",
     "science": "lab",
 }
@@ -39,6 +40,9 @@ ROLE_CATEGORIES: dict[str, IdeaCategory] = {
     "lab": "lab",
 }
 """The category each of LCC's own agents works in."""
+GAME_ROLES = frozenset({"builder", "coder"})
+"""The game makers: they also read the Games references (the owner's own
+game library of photos and videos)."""
 MAX_IDEA_PHOTO_BYTES = 25 * 1024 * 1024
 MAX_IDEA_VIDEO_BYTES = 200 * 1024 * 1024
 MAX_TITLE = 120

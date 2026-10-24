@@ -144,7 +144,13 @@ async def test_the_board_through_the_app(make_studio):
             await client.get("/studio/api/ideas", params={"category": "app"})
         ).json()
         assert [i["id"] for i in apps["ideas"]] == [note.json()["id"]]
-        assert apps["categories"] == {"website": 0, "app": 1, "lab": 0, "general": 0}
+        assert apps["categories"] == {
+            "website": 0,
+            "app": 1,
+            "game": 0,
+            "lab": 0,
+            "general": 0,
+        }
         photo = await client.post(
             "/studio/api/ideas/upload",
             params={"name": "look.jpg", "title": "The look", "tags": "ui, hero"},

@@ -36,7 +36,7 @@ from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject, JsonValue
 from free_claude_code.core.version import package_version
 
-from . import system_monitor
+from . import reference_look, system_monitor
 from .agents import (
     SEALED_TOOLS,
     AgentRunner,
@@ -135,6 +135,7 @@ from .farm.render import video_tools
 from .farm.requests import FarmJob, farm_job
 from .farm.visuals import Visuals
 from .game_library import GameVault
+from .godot import GodotLibraryError, find_demos
 from .godot.engine import GodotEngine
 from .guide import (
     GUIDE_TOPICS,
@@ -342,7 +343,7 @@ from .scanner import MAX_FINDINGS, MODE_NOTES, Scanner, changer_request
 from .scanner import MODES as SCAN_MODES
 from .school import School, SchoolError
 from .search import SearchBudget, SearchError, StudioSearch
-from .sites import SiteWorkspace, slugify
+from .sites import SiteError, SiteWorkspace, content_type_for, slugify
 from .starter import StarterRepo, bundled_bytes, load_starters
 from .store import StudioNotFoundError, StudioStore
 from .subagents import SUBAGENT_ROLES, helper_goal, pick, when
@@ -371,6 +372,7 @@ from .tools import (
     DEFAULT_TOOL_NAMES,
     IDEAS_TOOL,
     LOOK_PAGE_TOOL,
+    LOOK_REFERENCE_TOOL,
     MAIN_ONLY_TOOLS,
     MAIN_ROLE,
     MAIN_TOOL_NAMES,
@@ -518,6 +520,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "game_assets",
         "ui_kit",
         "godot",
+        "look_reference",
         "list_photos",
         "use_photo",
         "ideas",
@@ -529,8 +532,22 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     LAB_AGENT_NAME: LAB_AGENT_TOOLS,
     FARM_AGENT_NAME: FARM_AGENT_TOOLS,
     # Made from presets, so saved ones get the UI library too.
-    "Designer": ("ui_library", "site_layouts", "game_assets", "ui_kit", "godot"),
-    "Developer": ("ui_library", "site_layouts", "game_assets", "ui_kit", "godot"),
+    "Designer": (
+        "ui_library",
+        "site_layouts",
+        "game_assets",
+        "ui_kit",
+        "godot",
+        "look_reference",
+    ),
+    "Developer": (
+        "ui_library",
+        "site_layouts",
+        "game_assets",
+        "ui_kit",
+        "godot",
+        "look_reference",
+    ),
 }
 _PRESET_ROLES = {"Designer": "builder", "Developer": "developer"}
 """Agents made from a preset are upgraded only while they keep its role, so
@@ -1831,6 +1848,8 @@ class StudioService:
             return await self._changer_tool(call, context)
         if call.name == LOOK_PAGE_TOOL:
             return await self._look_page(call, context)
+        if call.name == LOOK_REFERENCE_TOOL:
+            return await self._look_reference(call, context)
         if call.name == AIDER_TOOL:
             return await self._aider_tool(call, context)
         said = self._turn_said.get(context.chat_id, "")
@@ -4262,6 +4281,176 @@ class StudioService:
         data["page"] = page
         data["problems"] = [p for report in reports for p in report.problems][:20]
         return ToolOutcome(text=text, data=data)
+
+    async def _look_reference(
+        self, call: ToolCall, context: ToolContext
+    ) -> ToolOutcome:
+        """A photo or video the owner sent, turned into a build brief by the
+        Vision Model, and saved in the project's reference-notes/."""
+        data: JsonObject = {"tool": LOOK_REFERENCE_TOOL}
+        try:
+            return await self._looked_reference(call, context, data)
+        except (
+            reference_look.ReferenceLookError,
+            IdeaError,
+            PhotoError,
+            SiteError,
+        ) as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+
+    async def _looked_reference(
+        self, call: ToolCall, context: ToolContext, data: JsonObject
+    ) -> ToolOutcome:
+        model = self.settings.studio_vision_model
+        if not model:
+            raise reference_look.ReferenceLookError(
+                "Seeing photos and videos needs a Vision Model: set one in "
+                "Settings, Studio (a model that can see, e.g. one of NVIDIA's "
+                "vision models). Until then, go by what the owner wrote."
+            )
+        arguments = call.arguments
+        ffmpeg = reference_look.find_ffmpeg()
+        title = notes = ""
+        category = ""
+        source_id = ""
+        video: Path | None = None
+        picture: bytes = b""
+        content_type = ""
+        if str(arguments.get("idea") or "").strip():
+            idea = await self._ideas.find(str(arguments["idea"]))
+            title, notes, category = idea.title, idea.text, idea.category
+            if idea.kind == "video" and idea.file:
+                video = self._ideas.path(idea)
+            elif idea.kind == "photo":
+                picture, content_type = await self._ideas.read(idea), idea.content_type
+            else:
+                raise reference_look.ReferenceLookError(
+                    f"{idea.title} is a {idea.kind} with no photo or video file "
+                    "to look at; go by what the owner wrote."
+                )
+            data["idea"] = source_id = idea.id
+        elif str(arguments.get("photo") or "").strip():
+            photo = await self._photos.find(str(arguments["photo"]))
+            title, notes = photo.name, photo.note
+            picture, content_type = await self._photos.read(photo), photo.content_type
+            data["photo"] = source_id = photo.id
+        elif str(arguments.get("file") or "").strip():
+            if not context.site_id:
+                raise reference_look.ReferenceLookError(
+                    "file works in a project; use idea or photo otherwise."
+                )
+            wanted = str(arguments["file"])
+            target = self._sites.resolve(context.site_id, wanted, for_preview=True)
+            if not target.is_file():
+                raise reference_look.ReferenceLookError(
+                    f"{wanted} isn't in the project."
+                )
+            title = target.name
+            if target.suffix.lower() in {".mp4", ".webm", ".mov", ".m4v"}:
+                video = target
+            else:
+                picture = await self._sites.read_bytes(context.site_id, wanted)
+                content_type = content_type_for(target.name)
+            data["file"] = wanted
+        else:
+            raise reference_look.ReferenceLookError(
+                "Say which reference: idea (ideas board), photo (business "
+                "photos) or file (in the project)."
+            )
+        seconds = 0.0
+        if video is not None:
+            picture, seconds = await reference_look.video_sheet(video, ffmpeg)
+            content_type = "image/jpeg"
+        else:
+            content_type, picture = await reference_look.photo_picture(
+                picture, content_type, ffmpeg
+            )
+        asked = str(arguments.get("make") or "").strip()
+        godot_project = (
+            bool(context.site_id)
+            and (self._sites.directory(context.site_id) / "project.godot").is_file()
+        )
+        make = reference_look.MAKE_BY_NAME.get(asked) or (
+            "game"
+            if category == "game" or godot_project
+            else "website"
+            if category == "website" or context.agent_role == "builder"
+            else "app"
+        )
+        system, prompt = reference_look.brief_prompt(
+            make,
+            title=title,
+            notes=notes,
+            focus=str(arguments.get("focus") or ""),
+            video_seconds=seconds,
+        )
+        image = f"data:{content_type};base64," + base64.b64encode(picture).decode()
+        try:
+            reply = await asyncio.wait_for(
+                self._router.complete(
+                    [ChatMessage.user(prompt, images=(image,))],
+                    model=model,
+                    system=system,
+                    max_tokens=VISION_REPLY_TOKENS,
+                ),
+                VISION_SECONDS,
+            )
+        except Exception as error:  # a model that can't see, or a network fault
+            logger.warning("The Vision Model {} didn't answer: {}", model, error)
+            raise reference_look.ReferenceLookError(
+                f"The Vision Model ({model}) didn't answer: "
+                f"{str(error).splitlines()[0][:200] if str(error) else type(error).__name__}. "
+                "Check it is a model that can see."
+            ) from error
+        brief = reply.text.strip()
+        if not brief:
+            raise reference_look.ReferenceLookError(
+                f"The Vision Model ({model}) sent back nothing; try again."
+            )
+        data.update({"make": make, "video_seconds": round(seconds, 1)})
+        lines = [
+            f"What {model} sees in {title or 'the reference'} (for a {make}):",
+            brief,
+        ]
+        if make == "game":
+            genre = reference_look.genre_of(brief)
+            try:
+                demos = find_demos(genre, 4) if genre else []
+            except GodotLibraryError:
+                demos = []
+            if demos:
+                data["demos"] = [item.id for item in demos]
+                lines.append(
+                    "Closest Godot demos (godot action demo to read, use to copy "
+                    "with its art): " + ", ".join(item.id for item in demos)
+                )
+            lines.append(
+                "Build it: godot action start (or use a demo), then match the "
+                "brief scene by scene, check after each change, and compare "
+                "with godot frames."
+            )
+        else:
+            lines.append(
+                "Build it section by section, then look_page and compare with "
+                "the brief."
+            )
+        if context.site_id:
+            name = reference_look.slug(title)
+            if source_id:
+                name = f"{name}-{source_id[-6:].lower()}"
+            note = f"reference-notes/{name}.md"
+            await self._sites.write(
+                context.site_id,
+                note,
+                f"# {title or 'Reference'} ({make})\n\nSeen by {model}.\n\n{brief}\n",
+            )
+            data["note"] = note
+            if video is not None:
+                sheet = f"reference-notes/{name}-frames.jpg"
+                await self._sites.write_image(context.site_id, sheet, picture)
+                data["frames"] = sheet
+            lines.append(f"Saved in {note}.")
+        return ToolOutcome(text="\n\n".join(lines), data=data)
 
     async def _aider_tool(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         """A job for Aider in this project's folder (or the Changer's copy),

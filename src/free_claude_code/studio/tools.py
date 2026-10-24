@@ -51,7 +51,15 @@ from .game_library import read_files as read_game_files
 from .game_library import ready as game_ready
 from .godot import MAX_SHOW as GODOT_MAX_SHOW
 from .godot import STARTER_NOTES as GODOT_STARTERS
-from .godot import GodotLibraryError, find_demos, godot_demo, godot_starter_files
+from .godot import (
+    GodotLibraryError,
+    find_demos,
+    godot_demo,
+    godot_demo_art,
+    godot_demo_project,
+    godot_starter_files,
+    untouched_starter,
+)
 from .godot.engine import GodotEngine, GodotError
 from .ideas import ROLE_CATEGORIES, IdeaBoard, IdeaError
 from .ideas import describe as describe_idea
@@ -149,6 +157,7 @@ TOOLSHED_TOOL = "toolshed"
 MCP_TOOL = "mcp"
 CHANGER_TOOL = "fcc_changer"
 LOOK_PAGE_TOOL = "look_page"
+LOOK_REFERENCE_TOOL = "look_reference"
 AIDER_TOOL = "aider"
 UI_LIBRARY_TOOL = "ui_library"
 SITE_LAYOUTS_TOOL = "site_layouts"
@@ -989,8 +998,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "what they say about each. Search it before you design or build, "
             "go in the direction it points, and make your own business-level "
             "work, not a copy. action: search (query, tag, and category narrow "
-            "it; your own category is searched by default), read (one idea in "
-            "full), or use (put one of its photos into the project, at path)."
+            "it; your own category is searched by default; category game holds "
+            "game references), read (one idea in full), or use (put one of its "
+            "photos into the project, at path). look_reference turns a photo "
+            "or video into a build brief."
         ),
         parameters={
             "type": "object",
@@ -1000,7 +1011,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "tag": {"type": "string"},
                 "category": {
                     "type": "string",
-                    "enum": ["website", "app", "lab", "general"],
+                    "enum": ["website", "app", "game", "lab", "general"],
                     "description": "What the work is: ideas for that and general ones.",
                 },
                 "idea": {"type": "string", "description": "Its id or title."},
@@ -1149,7 +1160,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "makes a Windows game the owner can play (Godot's export "
             "templates download once, about 1 GB). demos and demo search and "
             "read Godot's 133 official demo projects (MIT) for how to do "
-            "things. The game-dev skill holds the genre book."
+            "things; use copies a whole demo (code, art, sound, models) into "
+            "the project to build on. The godot-dev skill holds the genre book."
         ),
         parameters={
             "type": "object",
@@ -1163,6 +1175,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                         "export",
                         "demos",
                         "demo",
+                        "use",
                         "setup",
                     ],
                 },
@@ -1178,7 +1191,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 },
                 "id": {
                     "type": "string",
-                    "description": "demo: a demo id, e.g. '2d/platformer'.",
+                    "description": "demo, use: a demo id, e.g. '2d/platformer'.",
                 },
                 "file": {
                     "type": "string",
@@ -1712,6 +1725,49 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "question": {
                     "type": "string",
                     "description": "What to check, e.g. 'is the menu readable on a phone'.",
+                },
+            },
+        },
+    ),
+    ToolSpec(
+        name=LOOK_REFERENCE_TOOL,
+        description=(
+            "Turn a photo or video the owner sent into a build brief: the "
+            "Vision Model looks at it (a video as 9 frames taken through it) "
+            "and writes, for a game, the genre, camera, player, moves and "
+            "animations, enemies, level (as a text map), HUD, physics feel, "
+            "art style, palette and how to build it in Godot 4; for a website "
+            "or app, the sections, layout, colours, type and parts. Use it on "
+            "ideas-board photos and videos (category game holds the owner's "
+            "game references), business photos, or a picture or video in the "
+            "project, before you build from it. The brief is saved in "
+            "reference-notes/. Copy mechanics and style freely; the owner's "
+            "own art may be used as it is; draw original versions of anything "
+            "that belongs to another game or brand."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "idea": {
+                    "type": "string",
+                    "description": "An ideas-board photo or video (id or title).",
+                },
+                "photo": {
+                    "type": "string",
+                    "description": "Or a business photo (name or id).",
+                },
+                "file": {
+                    "type": "string",
+                    "description": "Or a picture or video in the project.",
+                },
+                "make": {
+                    "type": "string",
+                    "enum": ["game", "website", "app"],
+                    "description": "What it will become (default from the reference).",
+                },
+                "focus": {
+                    "type": "string",
+                    "description": "What to look at most, e.g. 'the jump and the enemies'.",
                 },
             },
         },
@@ -2752,8 +2808,11 @@ class AgentToolbox:
                     text += " Put it in the project with action use."
                 elif idea.kind == "video":
                     text += (
-                        " It's a video: go by what the user says about it (and "
-                        "its link)."
+                        " It's a video: look_reference sees its frames (and "
+                        "what the user says about it)."
+                        if idea.file
+                        else " It's a video link: go by what the user says "
+                        "about it (and its link)."
                     )
                 return ToolOutcome(
                     text=text, data={"tool": IDEAS_TOOL, "idea": idea.id}
@@ -3007,6 +3066,8 @@ class AgentToolbox:
         *,
         overwrite: bool,
         replace_starters: bool = False,
+        godot: bool = False,
+        untouched: Callable[[str, bytes], bool] | None = None,
     ) -> tuple[list[str], list[str]]:
         """Put files from one of Studio's libraries into the project.
 
@@ -3014,17 +3075,21 @@ class AgentToolbox:
         fonts, sound, video and big library scripts are copied as they are.
         The project's own work is kept unless overwrite is set; with
         replace_starters, untouched starter files the kit doesn't use go.
+        godot lets the Godot demos' models, skies and import notes in;
+        untouched says which other existing files may be replaced.
         """
         existing = {item.path for item in await self._sites.files(site_id)}
         written: list[str] = []
         kept: list[str] = []
         for path, data in files.items():
-            if path in existing and not overwrite:
-                current = await self._sites.read(site_id, path)
-                if not is_starter(path, current):
-                    kept.append(path)
-                    continue
             suffix = Path(path).suffix.lower()
+            if (
+                path in existing
+                and not overwrite
+                and not await self._replaceable(site_id, path, untouched)
+            ):
+                kept.append(path)
+                continue
             text = None
             if suffix in TEXT_KIT_SUFFIXES and len(data) <= MAX_FILE_BYTES:
                 try:
@@ -3034,7 +3099,7 @@ class AgentToolbox:
             if text is not None:
                 await self._sites.write(site_id, path, text)
             else:
-                await self._sites.copy_library_bytes(site_id, path, data)
+                await self._sites.copy_library_bytes(site_id, path, data, godot=godot)
             written.append(path)
         if replace_starters:
             for path in sorted(existing - set(files)):
@@ -3043,6 +3108,26 @@ class AgentToolbox:
                 ):
                     await self._sites.delete(site_id, path)
         return written, kept
+
+    async def _replaceable(
+        self,
+        site_id: str,
+        path: str,
+        untouched: Callable[[str, bytes], bool] | None,
+    ) -> bool:
+        """Whether an existing file is a placeholder a kit may replace: a web
+        starter file, or one untouched says is still as a kit wrote it."""
+        if Path(path).suffix.lower() in TEXT_KIT_SUFFIXES and is_starter(
+            path, await self._sites.read(site_id, path)
+        ):
+            return True
+        if untouched is None:
+            return False
+        try:
+            current = await self._sites.read_bytes(site_id, path)
+        except SiteError:
+            return False
+        return untouched(path, current)
 
     async def _site_layouts(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         action = str(call.arguments.get("action") or "list").strip() or "list"
@@ -3128,6 +3213,8 @@ class AgentToolbox:
                 return ToolOutcome(text="\n".join(lines), data=data)
             if action == "demo":
                 return self._godot_demo(call, data)
+            if action == "use":
+                return await self._godot_use(call, context, data)
             engine = self._godot_engine
             if engine is None:
                 raise GodotError("Godot isn't available in this FCC.")
@@ -3178,7 +3265,7 @@ class AgentToolbox:
                     data=data,
                 )
             raise GodotLibraryError(
-                "Use action start, check, frames, export, demos, demo or setup."
+                "Use action start, check, frames, export, demos, demo, use or setup."
             )
         except (GodotLibraryError, GodotError) as error:
             return ToolOutcome(text=str(error), data=data, failed=True)
@@ -3206,15 +3293,69 @@ class AgentToolbox:
         shown = "\n\n".join(
             f"--- {path}\n{item.files[path][:3000]}" for path in scripts[:3]
         )
+        art = godot_demo_art(item.id)
+        size = sum(entry.size for entry in art)
+        named = [
+            entry.path for entry in art if not entry.path.endswith((".import", ".uid"))
+        ]
         lines = [
             f"{item.id}: {item.title} (Godot demo, MIT). {item.about}",
             "Text files: " + ", ".join(sorted(item.files)),
-            f"Art and sound it uses ({len(item.assets)}): "
-            + ", ".join(item.assets[:30])
-            + " (not copied into FCC; use Kenney art from game_assets instead)",
+            f"Art, sound and models it ships with ({len(art)} files, "
+            f"{size / 1_000_000:.1f} MB): "
+            + ", ".join(named[:30])
+            + ". Action use copies the whole demo, art included, into the project.",
             shown[:GODOT_MAX_SHOW],
         ]
         return ToolOutcome(text="\n".join(lines), data=data)
+
+    async def _godot_use(
+        self, call: ToolCall, context: ToolContext, data: JsonObject
+    ) -> ToolOutcome:
+        item = godot_demo(call.arguments.get("id"))
+        files = await anyio.to_thread.run_sync(godot_demo_project, item.id)
+        title = str(call.arguments.get("title") or "").strip()[:80]
+        made = ""
+        if not context.site_id and self._new_project is not None:
+            made = await self._new_project(context, title or item.title)
+        site_id = made or self._require_site(context)
+        written, kept = await self._copy_kit(
+            site_id,
+            files,
+            overwrite=call.arguments.get("overwrite") is True,
+            replace_starters=True,
+            godot=True,
+            untouched=untouched_starter,
+        )
+        # A starter's scenes and scripts the demo doesn't use go too, so the
+        # project is the demo; changed ones stay.
+        for path in sorted(
+            {entry.path for entry in await self._sites.files(site_id)} - set(files)
+        ):
+            if Path(path).suffix.lower() in {".gd", ".tscn"} and untouched_starter(
+                path, await self._sites.read_bytes(site_id, path)
+            ):
+                await self._sites.delete(site_id, path)
+        data.update(
+            {
+                "id": item.id,
+                "site_id": site_id,
+                "written": len(written),
+                "kept": kept,
+                "attached_site": made,
+            }
+        )
+        lines = [
+            f"Copied Godot's {item.title} demo ({item.id}, MIT; {len(written)} "
+            "files: code, scenes, art, sound and models). Keep LICENSE-godot-demos.txt "
+            "and the art's own licence files and README credits, change it into "
+            "the game asked for, then run action check and fix every problem.",
+        ]
+        if kept:
+            lines.append(
+                f"Kept your existing {', '.join(kept[:20])} (set overwrite to replace)."
+            )
+        return ToolOutcome(text=" ".join(lines), data=data)
 
     async def _godot_start(
         self, call: ToolCall, context: ToolContext, data: JsonObject

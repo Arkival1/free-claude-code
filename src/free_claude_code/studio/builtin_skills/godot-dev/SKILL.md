@@ -21,7 +21,10 @@ description: How to make real Godot 4 games in FCC (Godot 4.7.2, GDScript) on th
 5. When it plays well, `export` makes a Windows game for the owner.
 6. Stuck on how to do something? `godot` action `demos` with plain words
    ("tilemap", "ragdoll", "dialogue", "state machine"), then `demo` to read
-   the code. They're Godot's own MIT demos: copy the patterns freely.
+   the code. They're Godot's own MIT demos: copy the patterns freely. When
+   a demo is close to the game asked for, `use` copies the whole demo (code,
+   art, sound, models, skies) into the project to build on; keep its licence
+   files and credits.
 
 ## 2. GDScript 2 (Godot 4), the rules that trip models up
 - Typed variables: `var speed := 120.0`. When `:=` can't infer (a value

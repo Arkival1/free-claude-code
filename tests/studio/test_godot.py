@@ -1,6 +1,7 @@
 """Godot 4 in FCC: the engine (downloaded once, SHA-512 checked, kept in the
 Repo vault), the demo library, the starters, and the godot tool."""
 
+import dataclasses
 import hashlib
 import io
 import os
@@ -19,6 +20,7 @@ from free_claude_code.studio.godot.engine import (
     Report,
     read_lines,
 )
+from free_claude_code.studio.sites import MAX_GODOT_ASSET_BYTES, SiteWorkspace
 from free_claude_code.studio.vault import RepoVault
 
 from .test_builder_images import builder_in_project, run
@@ -364,3 +366,103 @@ async def test_frames_clamps_any_length_and_resets_after_errors(tmp_path, monkey
         assert engine.state == "failed"
     counts = [int(args[args.index("--quit-after") + 1]) for args in asked]
     assert counts == [600, 9, 90]
+
+
+def test_the_demo_art_ships_in_checked_parts_under_the_release_limit(tmp_path):
+    sums = (ROOT / "vendor/godot/SHA256SUMS").read_text()
+    manifest = godot.ART_MANIFEST.read_bytes()
+    assert f"{hashlib.sha256(manifest).hexdigest()}  art.json.gz" in sums
+    parts = sorted(godot.ART.glob("demo-art-*.zip"))
+    assert parts
+    for part in parts:
+        assert part.stat().st_size < 24 * 1024 * 1024, part.name
+        assert f"{hashlib.sha256(part.read_bytes()).hexdigest()}  {part.name}" in sums
+    sites = SiteWorkspace(tmp_path)
+    for item in godot.demos():
+        for entry in godot.demo_art(item.id):
+            sites.resolve("game", entry.path, for_preview=True, godot=True)
+            assert entry.size <= MAX_GODOT_ASSET_BYTES, entry.path
+    assert "Permission is hereby granted" in godot.ART_LICENCE.read_text()
+
+
+def test_a_whole_demo_comes_with_its_art_and_checks_it(monkeypatch):
+    files = godot.demo_project("2d/platformer")
+    assert "project.godot" in files and "player/player.gd" in files
+    assert godot.DEMO_LICENCE_NAME in files
+    art = godot.demo_art("2d/platformer")
+    assert art and all(files[entry.path] for entry in art)
+    pictures = [entry for entry in art if entry.path.endswith(".webp")]
+    assert files[pictures[0].path].startswith(b"RIFF")
+    bad = {
+        "2d/platformer": (
+            dataclasses.replace(art[0], sha256="0" * 64),
+            *art[1:],
+        )
+    }
+    monkeypatch.setattr(godot, "_art", lambda: bad)
+    with pytest.raises(godot.GodotLibraryError, match="checksum"):
+        godot.demo_project("2d/platformer")
+
+
+def test_a_big_file_split_across_parts_is_joined_whole():
+    split = [
+        (item.id, entry)
+        for item in godot.demos()
+        for entry in godot.demo_art(item.id)
+        if len(entry.at) > 1
+    ]
+    assert split, "the biggest skies are stored in chunks"
+    demo_id, entry = split[0]
+    data = godot.demo_project(demo_id)[entry.path]
+    assert len(data) == entry.size
+
+
+@pytest.mark.asyncio
+async def test_agents_copy_a_whole_demo_into_their_project(make_studio):
+    studio, _ = make_studio([])
+    site, context = await builder_in_project(studio)
+    used = await run(studio, context, "godot", action="use", id="2d/platformer")
+    assert not used.failed, used.text
+    paths = {item.path for item in await studio.workspace.files(site.id)}
+    art = {entry.path for entry in godot.demo_art("2d/platformer")}
+    assert art <= paths and "player/player.gd" in paths
+    assert "index.html" not in paths  # the untouched web starter went
+    again = await run(studio, context, "godot", action="use", id="2d/platformer")
+    assert not again.failed, again.text
+    assert "enemy/hit.wav" in again.data["kept"]
+    shown = await run(studio, context, "godot", action="demo", id="2d/platformer")
+    assert "Action use copies the whole demo" in shown.text
+
+
+@pytest.mark.asyncio
+async def test_a_demo_copied_over_a_starter_replaces_it_but_keeps_changes(
+    make_studio,
+):
+    studio, _ = make_studio([])
+    site, context = await builder_in_project(studio)
+    await run(studio, context, "godot", action="start", title="Mine")
+    await studio.workspace.write(site.id, "enemy.gd", "extends Node2D\n# my enemy\n")
+    used = await run(studio, context, "godot", action="use", id="2d/platformer")
+    assert not used.failed, used.text
+    demo = godot.demo_project("2d/platformer")
+    project = await studio.workspace.read_bytes(site.id, "project.godot")
+    assert project == demo["project.godot"]
+    paths = {item.path for item in await studio.workspace.files(site.id)}
+    assert "main.gd" not in paths and "player.gd" not in paths
+    assert "enemy.gd" in paths  # the owner's change stays
+    assert "project.godot" not in used.data["kept"]
+
+
+@pytest.mark.skipif(not REAL_GODOT, reason="set FCC_GODOT_BIN to a Godot 4.7.2 program")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("demo_id", ["2d/platformer", "3d/platformer"])
+async def test_a_copied_demo_runs_in_real_godot(tmp_path, demo_id):
+    root = tmp_path / "godot"
+    (root / godot_engine.VERSION).mkdir(parents=True)
+    shutil.copy(REAL_GODOT, root / godot_engine.VERSION / Path(REAL_GODOT).name)
+    project = tmp_path / "game"
+    for path, data in godot.demo_project(demo_id).items():
+        (project / path).parent.mkdir(parents=True, exist_ok=True)
+        (project / path).write_bytes(data)
+    report = await GodotEngine(root, platform="linux").check(project)
+    assert report.passed, report.problems

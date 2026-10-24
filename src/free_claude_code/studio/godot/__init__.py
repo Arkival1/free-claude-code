@@ -6,16 +6,20 @@ Repo vault), Godot's own demo projects to learn from, and starters.
   keeps it in the Repo vault, and runs it headless to check projects, record
   frames and export games.
 - 133 official demo projects (MIT, `godotengine/godot-demo-projects`): their
-  GDScript, scenes, resources, shaders and READMEs in `demos.json.gz`; art
-  and sound are listed by name only.
+  GDScript, scenes, resources, shaders and READMEs in `demos.json.gz`; their
+  art, sound, models and skies (and Godot's import notes for them) in
+  `art/demo-art-NN.zip`, listed with SHA-256 checksums in `art/art.json.gz`,
+  so `demo_project` copies a whole demo that opens and runs.
 - Starters in `starters/`: platformer-2d and rpg-topdown (Kenney art, CC0,
   from FCC's game library) and third-person-3d (shapes only).
 See `vendor/godot/`.
 """
 
 import gzip
+import hashlib
 import json
 import re
+import zipfile
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
@@ -25,6 +29,10 @@ from .. import game_library
 HERE = Path(__file__).resolve().parent
 DEMOS = HERE / "demos.json.gz"
 STARTERS = HERE / "starters"
+ART = HERE / "art"
+ART_MANIFEST = ART / "art.json.gz"
+ART_LICENCE = ART / "LICENSE-demos.txt"
+DEMO_LICENCE_NAME = "LICENSE-godot-demos.txt"
 MAX_RESULTS = 15
 MAX_SHOW = 12_000
 """Most characters of demo code shown in one go."""
@@ -137,6 +145,71 @@ def demo(demo_id: object) -> Demo:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ArtFile:
+    path: str
+    sha256: str
+    size: int
+    at: tuple[tuple[str, str], ...]
+    """(part zip, member) for each chunk, in order."""
+
+
+@cache
+def _art() -> dict[str, tuple[ArtFile, ...]]:
+    if not ART_MANIFEST.is_file():
+        return {}
+    payload = json.loads(gzip.decompress(ART_MANIFEST.read_bytes()))
+    return {
+        str(demo_id): tuple(
+            ArtFile(
+                path=str(row["path"]),
+                sha256=str(row["sha256"]),
+                size=int(row["size"]),
+                at=tuple((str(at["zip"]), str(at["member"])) for at in row["at"]),
+            )
+            for row in rows
+        )
+        for demo_id, rows in payload.items()
+    }
+
+
+def demo_art(demo_id: object) -> tuple[ArtFile, ...]:
+    """The art, sound and models a demo uses (names, sizes, checksums)."""
+    return _art().get(demo(demo_id).id, ())
+
+
+def demo_project(demo_id: object) -> dict[str, bytes]:
+    """A whole demo, code and art, ready to copy into a project. Every art
+    file is checked against its SHA-256 before it is handed out."""
+    item = demo(demo_id)
+    files = {path: text.encode("utf-8") for path, text in item.files.items()}
+    files[DEMO_LICENCE_NAME] = ART_LICENCE.read_bytes()
+    art = _art().get(item.id, ())
+    by_part: dict[str, set[str]] = {}
+    for entry in art:
+        for part, member in entry.at:
+            by_part.setdefault(part, set()).add(member)
+    chunks: dict[str, bytes] = {}
+    for part, members in by_part.items():
+        path = ART / part
+        if not path.is_file():
+            raise GodotLibraryError(
+                f"The Godot demo art file {part} is missing; reinstall FCC's parts."
+            )
+        with zipfile.ZipFile(path) as bundle:
+            for member in members:
+                chunks[member] = bundle.read(member)
+    for entry in art:
+        data = b"".join(chunks[member] for _, member in entry.at)
+        if hashlib.sha256(data).hexdigest() != entry.sha256:
+            raise GodotLibraryError(
+                f"{item.id}/{entry.path} doesn't match its checksum; reinstall "
+                "FCC's parts."
+            )
+        files[entry.path] = data
+    return files
+
+
 def starter_names() -> tuple[str, ...]:
     return tuple(STARTER_ART)
 
@@ -168,5 +241,28 @@ def starter_files(name: str, title: str = "") -> dict[str, bytes]:
     return files
 
 
+_NAME_LINE = re.compile(rb'^config/name=".*"$', re.MULTILINE)
+
+
+@cache
+def _starter_prints() -> frozenset[tuple[str, bytes]]:
+    prints: set[tuple[str, bytes]] = set()
+    for name in STARTER_ART:
+        try:
+            files = starter_files(name)
+        except game_library.GameLibraryError:
+            continue  # its Kenney pack isn't on this PC: nothing to match
+        prints.update((path, _NAME_LINE.sub(b"", data)) for path, data in files.items())
+    return frozenset(prints)
+
+
+def untouched_starter(path: str, data: bytes) -> bool:
+    """True when a project file is still exactly as a starter wrote it (its
+    game name aside), so copying a demo over it loses no work."""
+    return (path, _NAME_LINE.sub(b"", data)) in _starter_prints()
+
+
 godot_demo = demo
+godot_demo_art = demo_art
+godot_demo_project = demo_project
 godot_starter_files = starter_files

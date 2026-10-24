@@ -4271,6 +4271,7 @@
   const IDEA_CATEGORIES = [
     ["website", "Websites"],
     ["app", "Apps"],
+    ["game", "Games"],
     ["lab", "Lab"],
     ["general", "General"],
   ];

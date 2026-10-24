@@ -561,6 +561,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "game_assets",
             "ui_kit",
             "godot",
+            "look_reference",
             "list_photos",
             "use_photo",
             "ideas",
@@ -670,6 +671,7 @@ CODER_TOOLS: tuple[str, ...] = (
     "game_assets",
     "ui_kit",
     "godot",
+    "look_reference",
     *_WEB,
     *_MEMORY,
 )
@@ -881,6 +883,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "game_assets",
             "ui_kit",
             "godot",
+            "look_reference",
             *_MEMORY,
         ),
     ),

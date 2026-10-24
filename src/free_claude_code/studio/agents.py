@@ -15,7 +15,7 @@ from free_claude_code.core.json_types import JsonObject
 from .call_guard import guarded
 from .convo_notes import NOTES_HEADER, NotesKeeper
 from .farm.requests import farm_job
-from .ideas import ROLE_CATEGORIES
+from .ideas import GAME_ROLES, ROLE_CATEGORIES
 from .lab.bench import LAB_PROMPT
 from .lab.requests import lab_job
 from .limits import brief_limit, daily_limit
@@ -1023,7 +1023,10 @@ class AgentRunner:
             own = ROLE_CATEGORIES.get(agent.role)
             if own:
                 # The Lab hears about lab ideas, the Builder website ones.
-                board = [i for i in board if i.category in {own, "general"}]
+                shown = {own, "general"} | (
+                    {"game"} if agent.role in GAME_ROLES else set()
+                )
+                board = [i for i in board if i.category in shown]
             if board:
                 parts.append(ideas_prompt([idea.title for idea in board[:IDEAS_SHOWN]]))
         if "web_search" in self._toolbox.tool_names(agent.tools, role=agent.role):

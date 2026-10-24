@@ -100,11 +100,12 @@ docs/             GitHub Pages: index.html and docs/phone (built phone app)
 | `crew.py`, `orders.py`, `teamplan.py`, `relay.py`, `rooms.py` | Jarvis hands work out; direct orders from what the user says; team plans; repo relays; chat rooms |
 | `extensions.py`, `mcp.py`, `starter.py`, `vault.py`, `connectors.py` | Add from GitHub (skills, plugin agents, MCP servers), MCP client, starter repo pack (installs on, read on demand; MCP servers off), Repo vault, connectors |
 | `sites.py`, `templates*.py`, `project_check.py`, `polish.py`, `page_try.py`, `commands.py`, `code_loop.py` | Project workspaces, starter templates (`templates_3d.py`: 3d-landing, 3d-dashboard, the FCC web kit; three.js copied in with `copy_library`), checks, design once-over, page tryout, approved commands, Coder/Tester loop |
+| `reference_look.py` | `look_reference`: photos and videos (9-frame sheet via ffmpeg) to a Vision Model build brief for a game, site or app |
 | `ideas.py`, `photos.py`, `images.py`, `image_engine.py`, `image_cloud.py` | Ideas board, business photos, free photos (Openverse), AI images |
 | `research.py`, `search.py`, `platforms.py`, `videos.py`, `video_ears.py`, `desk.py`, `connectivity.py` | Web research, search, Reddit/YouTube, video notes, desktop browser, online check |
 | `engine*.py`, `downloads.py`, `model_*.py`, `gguf_info.py`, `team_models.py` | Built-in engine, model downloads, model files, Team brains |
 | `scanner.py` | Bug scanner: read-only rounds (routes, records, odd inputs, pages, logs, data, files), findings kept by fingerprint |
-| `godot/` | Godot 4.7.2: `engine.py` (download once, SHA-512, Repo vault, headless check, frames, export), demo library, starters (`godot` tool, `godot-dev` skill) |
+| `godot/` | Godot 4.7.2: `engine.py` (download once, SHA-512, Repo vault, headless check, frames, export), demo library with all its art in `art/` (12 checked parts; `use` copies a whole demo), starters (`godot` tool, `godot-dev` skill) |
 | `ui_kit/`, `bug_library/` | Tabler app kit and icons (`ui_kit` tool); 490 real bug fixes for the Changer (`bug_library` tool) |
 | `tuning.py`, `lora.py`, `lora_worker.py`, `school.py`, `notebook.py`, `learning.py` | Tuning, LoRA, classroom (owner plans and confirms, teacher steps out, class notes for model switches), Kaggle/Colab notebooks, Learn mode |
 | `guide.py` | The in-app Guide's knowledge of every page and setting. Keep it in step with features |
