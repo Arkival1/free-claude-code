@@ -956,7 +956,13 @@ it doesn't have, it walks to the HQ **Toolshed** and takes it (`toolshed`,
 action `list` then `take`), for that job only. The shelf never holds the
 user's own things (to-dos, photos, projects, this PC's status), memory on a
 server AI, running the team, or the Content Farm; those come only from the
-agent's card. The Toolshed is locked while **Every Tool** is off, and
+agent's card. Every agent can reach every tool, skill and plugin: agents
+with **Every Tool** have them all, and the Changer and subagents (which
+start with a small kit) take the rest from the Toolshed, so a tool, a skill
+(`skill`) or a plugin (`mcp`) is used only when a job needs it. The
+Changer's shelf leaves out the tools that start a new project, since its
+project is the copy of FCC that becomes an update zip; its Planner and
+reviewers stay read-only. The Toolshed is locked while **Every Tool** is off, and
 commands still wait for your approval. Every agent only ever uses tools it
 has: a call to any other tool is refused. Jarvis and the other
 agents on this PC team up with it: say *"have token-auditor check the

@@ -616,11 +616,14 @@ OWN_MEMORY_FLAG = "extension_agent_memory_v1"
 OWN_MEMORY_TOOLS = ("remember", "recall")
 """A repo agent's own memory (its own area while it thinks on a server)."""
 TOOLSHED_FLAG = "extension_agent_toolshed_v1"
+SUBAGENT_TOOLSHED_FLAG = "subagent_toolshed_v1"
+"""Subagents made before 6.98 get the toolshed once."""
 CHANGER_AIDER_FLAG = "changer_aider_v1"
 CHANGER_NEW_TOOLS = (
     (CHANGER_AIDER_FLAG, AIDER_TOOL),
     ("changer_bug_library_v1", "bug_library"),
     ("changer_look_reference_v1", "look_reference"),
+    ("changer_toolshed_v1", TOOLSHED_TOOL),
 )
 """Tools an existing Changer gets once, each behind its own flag."""
 HELPER_REPO = "https://github.com/wshobson/agents"
@@ -2287,6 +2290,7 @@ class StudioService:
     async def ensure_defaults(self) -> tuple[Agent, ...]:
         """Create the starter agents the app expects on first run."""
         async with self._defaults_lock:
+            await self._subagents_get_the_toolshed()
             return await self._ensure_defaults()
 
     async def _ensure_defaults(self) -> tuple[Agent, ...]:
@@ -6340,6 +6344,8 @@ class StudioService:
             for _, preset_role, preset_prompt, preset_tools in PRESETS
             if preset_role == role
         )
+        # Every other tool waits on the toolshed, taken only when a job needs it.
+        tools = tuple(dict.fromkeys((*tools, TOOLSHED_TOOL)))
         agent = await self.create_agent(
             name=name,
             role=role,
@@ -8068,6 +8074,22 @@ class StudioService:
             "and check your work against them before you finish):\n\n"
             + "\n\n".join(parts)
         )
+
+    async def _subagents_get_the_toolshed(self) -> None:
+        """Subagents made before 6.98 get the toolshed, once."""
+        if await self._store.get(StudioFlag, SUBAGENT_TOOLSHED_FLAG) is not None:
+            return
+        for helper in await self.subagents():
+            if TOOLSHED_TOOL not in helper.tools:
+                await self._store.put(
+                    helper.model_copy(
+                        update={
+                            "tools": (*helper.tools, TOOLSHED_TOOL),
+                            "updated_at": now_ms(),
+                        }
+                    )
+                )
+        await self._store.put(StudioFlag(id=SUBAGENT_TOOLSHED_FLAG, value="1"))
 
     async def ensure_starters(self) -> list[Extension]:
         """Add every starter repo not added before; a removed one stays removed.

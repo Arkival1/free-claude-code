@@ -1928,6 +1928,9 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
         CHANGER_TOOL,
     }
 )
+NEW_PROJECT_TOOLS = frozenset({"start_project", "site_layouts", "godot"})
+"""Tools that lay a new project's files down: never on the Changer's shelf,
+whose project is the copy of FCC that becomes an update zip."""
 NOT_IN_THE_SHED = frozenset(
     {
         *MAIN_ONLY_TOOLS,

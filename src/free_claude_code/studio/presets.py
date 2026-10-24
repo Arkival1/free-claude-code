@@ -852,6 +852,7 @@ CHANGER_TOOLS: tuple[str, ...] = (
     "look_reference",
     "ask_researcher",
     "skill",
+    "toolshed",
     *_WEB,
     "remember",
     "recall",

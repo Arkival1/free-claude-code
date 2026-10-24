@@ -126,3 +126,42 @@ async def test_repo_agents_already_on_the_team_get_the_toolshed(make_studio):
 
     fixed = await studio._store.require(Agent, auditor.id)
     assert "toolshed" in fixed.tools and fixed.all_tools is False
+
+
+@pytest.mark.asyncio
+async def test_the_changer_and_subagents_reach_every_tool_through_the_toolshed(
+    make_studio,
+):
+    from free_claude_code.studio.service import SUBAGENT_TOOLSHED_FLAG
+
+    studio, _ = make_studio([], STUDIO_ALL_TOOLS=True)
+    changer = await studio._changer_agent()
+    assert "toolshed" in changer.tools
+    shed = studio._runner()._toolshed(changer, changer.tools, sealed=False)
+    assert "skill" in changer.tools and "mcp" in shed.shelf
+    # The Changer's project is the copy of FCC: nothing lays a new project there.
+    assert not {"start_project", "site_layouts", "godot"} & set(shed.shelf)
+    helper = await studio.create_subagent(name="Dev-1", role="developer")
+    assert "toolshed" in helper.tools
+    helper_shed = studio._runner()._toolshed(helper, helper.tools, sealed=False)
+    assert "start_project" in helper_shed.shelf or "start_project" in helper.tools
+    assert not set(NOT_IN_THE_SHED) & set(helper_shed.shelf)
+    # Subagents made before this release get it once.
+    await studio.update_agent(
+        helper.id, {"tools": [t for t in helper.tools if t != "toolshed"]}
+    )
+    await studio._store.delete(StudioFlag, SUBAGENT_TOOLSHED_FLAG)
+    await studio.ensure_defaults()
+    assert "toolshed" in (await studio._store.require(Agent, helper.id)).tools
+
+
+@pytest.mark.asyncio
+async def test_a_toolshed_the_owner_takes_off_the_changer_stays_off(make_studio):
+    studio, _ = make_studio([])
+    changer = await studio._changer_agent()
+    await studio._store.put(
+        changer.model_copy(
+            update={"tools": tuple(t for t in changer.tools if t != "toolshed")}
+        )
+    )
+    assert "toolshed" not in (await studio._changer_agent()).tools

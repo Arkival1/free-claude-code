@@ -36,11 +36,13 @@ from .recall_messages import Found, recall_note, search
 from .store import StudioStore
 from .team_models import model_label
 from .tools import (
+    CHANGER_TOOL,
     CHECK_PROJECT_TOOL,
     COMMAND_TOOL,
     FINISH_TOOL,
     LEAD_TOOLS,
     MAIN_ROLE,
+    NEW_PROJECT_TOOLS,
     NOT_IN_THE_SHED,
     PARALLEL_TOOLS,
     SEALED_TOOLS,
@@ -2044,6 +2046,7 @@ class AgentRunner:
             and name not in NOT_IN_THE_SHED
             and not (sealed and name in SEALED_TOOLS)
             and not (name == COMMAND_TOOL and not self._toolbox.commands_enabled)
+            and not (CHANGER_TOOL in names and name in NEW_PROJECT_TOOLS)
         ]
         return Toolshed(shelf=self._toolbox.tool_names(candidates, role=agent.role))
 
