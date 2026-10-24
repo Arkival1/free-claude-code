@@ -345,7 +345,7 @@ async def test_agents_search_every_repo_and_read_the_part_they_need(
     assert "Open-Meteo" in part and "Filler 70" in part and "Filler 150" not in part
 
     listed = await skill(action="list")
-    assert "110 skills in 4 repos" in listed and "- owner/many: 90 skills" in listed
+    assert "111 skills in 4 repos" in listed and "- owner/many: 90 skills" in listed
     one_repo = await skill(action="list", repo="security")
     assert one_repo.startswith("Skills:") and "auditing-kubernetes-rbac" in one_repo
     with pytest.raises(ValueError, match="no file"):

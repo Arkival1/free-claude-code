@@ -167,7 +167,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.94.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.95.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -215,7 +215,10 @@ Notes carried over from the long session that built FCC Studio (LCC).
 Build these only when the owner says yes:
 
 - A colour palette taken from the ideas-board photos, and sending those
-  photos to models that can see.
+  photos to models that can see. The owner also asked (24 Oct 2026) whether
+  game makers can make games from their own photos and videos of games:
+  this is the piece that would let them (game references read by a vision
+  model, video frames included).
 - A clear "ran out of steps: wrote X, say continue" message, and more
   Builder steps for multi-page sites.
 - The professional-website relay test was stopped before the site was

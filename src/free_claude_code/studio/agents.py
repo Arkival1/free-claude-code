@@ -79,6 +79,7 @@ WRITE_TOOLS = frozenset(
         "site_layouts",
         "game_assets",
         "ui_kit",
+        "godot",
     }
 )
 CONTENT_WRITES = frozenset({"write_file", "edit_file"})

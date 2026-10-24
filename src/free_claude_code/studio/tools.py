@@ -4,6 +4,7 @@ import asyncio
 import difflib
 import fnmatch
 import json
+import math
 import re
 import shutil
 import sys
@@ -48,6 +49,10 @@ from .game_library import pack as game_pack
 from .game_library import project_path as game_path
 from .game_library import read_files as read_game_files
 from .game_library import ready as game_ready
+from .godot import MAX_SHOW as GODOT_MAX_SHOW
+from .godot import STARTER_NOTES as GODOT_STARTERS
+from .godot import GodotLibraryError, find_demos, godot_demo, godot_starter_files
+from .godot.engine import GodotEngine, GodotError
 from .ideas import ROLE_CATEGORIES, IdeaBoard, IdeaError
 from .ideas import describe as describe_idea
 from .images import FoundImage, ImageError, download_image, find_images
@@ -149,6 +154,7 @@ UI_LIBRARY_TOOL = "ui_library"
 SITE_LAYOUTS_TOOL = "site_layouts"
 UI_KIT_TOOL = "ui_kit"
 BUG_LIBRARY_TOOL = "bug_library"
+GODOT_TOOL = "godot"
 GAME_ASSETS_TOOL = "game_assets"
 MAX_EXAMPLE_CHARS = 12_000
 MAX_KIT_FILES = 300
@@ -1131,6 +1137,63 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name=GODOT_TOOL,
+        description=(
+            "Make real Godot 4 games (Godot 4.7.2, GDScript) on this PC. start "
+            "begins a project from a starter: platformer-2d, rpg-topdown or "
+            "third-person-3d. Write .gd scripts and .tscn scenes with "
+            "write_file/edit_file. check runs Godot headless and lists every "
+            "script error, missing file and warning (file and line): run it "
+            "after every change and fix them all. frames plays the game for a "
+            "few seconds and saves its last frame to screenshots/. export "
+            "makes a Windows game the owner can play (Godot's export "
+            "templates download once, about 1 GB). demos and demo search and "
+            "read Godot's 133 official demo projects (MIT) for how to do "
+            "things. The game-dev skill holds the genre book."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "start",
+                        "check",
+                        "frames",
+                        "export",
+                        "demos",
+                        "demo",
+                        "setup",
+                    ],
+                },
+                "starter": {
+                    "type": "string",
+                    "enum": list(GODOT_STARTERS),
+                    "description": "start: which starter.",
+                },
+                "title": {"type": "string", "description": "start: the game's name."},
+                "query": {
+                    "type": "string",
+                    "description": "demos: what you need, e.g. 'tilemap', 'ragdoll'.",
+                },
+                "id": {
+                    "type": "string",
+                    "description": "demo: a demo id, e.g. '2d/platformer'.",
+                },
+                "file": {
+                    "type": "string",
+                    "description": "demo: one file of the demo.",
+                },
+                "seconds": {
+                    "type": "number",
+                    "description": "frames: how long to play (default 3).",
+                },
+                "overwrite": {"type": "boolean"},
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
         name=BUG_LIBRARY_TOOL,
         description=(
             "FCC's bug-fix library: 490 real bugs from big Python projects "
@@ -2102,7 +2165,10 @@ class AgentToolbox:
         | None = None,
         new_project: Callable[[ToolContext, str], Awaitable[str]] | None = None,
         game_vault: GameVault | None = None,
+        godot: GodotEngine | None = None,
     ) -> None:
+        self._godot_engine = godot
+        """Godot on this PC (downloaded once into the Repo vault)."""
         self._game_vault = game_vault
         """Kenney packs downloaded on this PC, kept for good."""
         # Sees each call first and may answer it instead (Studio turns a
@@ -2290,6 +2356,8 @@ class AgentToolbox:
                     return await self._ui_kit(call, context)
                 case "bug_library":
                     return self._bug_library(call)
+                case "godot":
+                    return await self._godot(call, context)
                 case "game_assets":
                     return await self._game_assets(call, context)
                 case "save_image":
@@ -3041,6 +3109,147 @@ class AgentToolbox:
                 "attached_site": made,
             },
         )
+
+    async def _godot(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        action = str(call.arguments.get("action") or "demos").strip() or "demos"
+        data: JsonObject = {"tool": GODOT_TOOL, "action": action}
+        try:
+            if action == "demos":
+                found = find_demos(str(call.arguments.get("query") or ""), 8)
+                data["demos"] = [item.id for item in found]
+                lines = [
+                    f"{item.id}: {item.title}. {item.about[:200]}" for item in found
+                ]
+                lines.append(
+                    "Read one with action demo (id), then one of its files with file."
+                    if found
+                    else "No demo matches: try one plain word."
+                )
+                return ToolOutcome(text="\n".join(lines), data=data)
+            if action == "demo":
+                return self._godot_demo(call, data)
+            engine = self._godot_engine
+            if engine is None:
+                raise GodotError("Godot isn't available in this FCC.")
+            if action == "setup":
+                program = await engine.install()
+                return ToolOutcome(text=f"Godot is ready: {program.name}.", data=data)
+            if action == "start":
+                return await self._godot_start(call, context, data)
+            site_id = self._require_site(context)
+            project = self._sites.directory(site_id)
+            if action == "check":
+                report = await engine.check(project)
+                data.update({"passed": report.passed, "problems": report.problems})
+                if report.passed:
+                    text = "PASSED: Godot loaded every script and scene and ran the game with no errors."
+                    if report.warnings:
+                        text += " Warnings:\n" + "\n".join(report.warnings[:15])
+                    return ToolOutcome(text=text, data=data)
+                return ToolOutcome(
+                    text=f"FAILED ({len(report.problems)}). Fix each, then check again:\n"
+                    + "\n".join(report.problems[:25]),
+                    data=data,
+                    failed=True,
+                )
+            if action == "frames":
+                seconds = call.arguments.get("seconds")
+                length = float(seconds) if isinstance(seconds, int | float) else 3.0
+                if not math.isfinite(length):
+                    length = 3.0
+                length = min(max(length, 0.3), 20.0)
+                shot = self._godot_engine_root() / "shots" / f"{site_id}.png"
+                await engine.frames(project, shot, seconds=length)
+                await self._sites.copy_library_bytes(
+                    site_id, "screenshots/frame.png", shot.read_bytes()
+                )
+                data["picture"] = "screenshots/frame.png"
+                return ToolOutcome(
+                    text="Saved the game's frame after "
+                    f"{length:g} seconds to screenshots/frame.png.",
+                    data=data,
+                )
+            if action == "export":
+                target = self._godot_engine_root() / "exports" / site_id / "game.exe"
+                made = await engine.export(project, target)
+                data["export"] = str(made)
+                return ToolOutcome(
+                    text=f"Exported the game: {made}. The owner can run it on this PC.",
+                    data=data,
+                )
+            raise GodotLibraryError(
+                "Use action start, check, frames, export, demos, demo or setup."
+            )
+        except (GodotLibraryError, GodotError) as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+
+    def _godot_engine_root(self) -> Path:
+        assert self._godot_engine is not None
+        return self._godot_engine.root
+
+    def _godot_demo(self, call: ToolCall, data: JsonObject) -> ToolOutcome:
+        item = godot_demo(call.arguments.get("id"))
+        wanted = str(call.arguments.get("file") or "").strip()
+        data["id"] = item.id
+        if wanted:
+            if wanted not in item.files:
+                raise GodotLibraryError(
+                    f"{item.id} has no text file {wanted!r}. Files: "
+                    + ", ".join(sorted(item.files)[:40])
+                )
+            text = item.files[wanted]
+            return ToolOutcome(
+                text=f"{item.id}/{wanted} (Godot demo, MIT):\n{text[:GODOT_MAX_SHOW]}",
+                data=data,
+            )
+        scripts = [path for path in sorted(item.files) if path.endswith(".gd")]
+        shown = "\n\n".join(
+            f"--- {path}\n{item.files[path][:3000]}" for path in scripts[:3]
+        )
+        lines = [
+            f"{item.id}: {item.title} (Godot demo, MIT). {item.about}",
+            "Text files: " + ", ".join(sorted(item.files)),
+            f"Art and sound it uses ({len(item.assets)}): "
+            + ", ".join(item.assets[:30])
+            + " (not copied into FCC; use Kenney art from game_assets instead)",
+            shown[:GODOT_MAX_SHOW],
+        ]
+        return ToolOutcome(text="\n".join(lines), data=data)
+
+    async def _godot_start(
+        self, call: ToolCall, context: ToolContext, data: JsonObject
+    ) -> ToolOutcome:
+        name = str(call.arguments.get("starter") or "platformer-2d")
+        title = str(call.arguments.get("title") or "").strip()[:80]
+        files = godot_starter_files(name, title)
+        made = ""
+        if not context.site_id and self._new_project is not None:
+            made = await self._new_project(context, title or "My game")
+        site_id = made or self._require_site(context)
+        written, kept = await self._copy_kit(
+            site_id,
+            files,
+            overwrite=call.arguments.get("overwrite") is True,
+            replace_starters=True,
+        )
+        data.update(
+            {
+                "site_id": site_id,
+                "written": written,
+                "kept": kept,
+                "attached_site": made,
+            }
+        )
+        lines = [
+            f"Started a Godot 4 {name} game ({len(written)} files). {GODOT_STARTERS[name]}",
+            "Change it into the game asked for, then run action check and fix every "
+            "problem; action frames shows how it looks.",
+        ]
+        if kept:
+            lines.append(
+                f"Kept your existing {', '.join(kept)} (set overwrite to replace)."
+            )
+        return ToolOutcome(text=" ".join(lines), data=data)
 
     def _bug_library(self, call: ToolCall) -> ToolOutcome:
         action = str(call.arguments.get("action") or "find").strip() or "find"

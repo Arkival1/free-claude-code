@@ -1962,6 +1962,17 @@ still looks finished.
   only; their art isn't free). The `game-dev` skill holds the recipes for
   movement, animation, juice, enemies, levels and phone controls, and comes
   with any game job (`vendor/kenney/`, `vendor/phaser/`).
+- **Godot games.** Game jobs are made in Godot 4.7.2 (MIT) on the PC
+  unless you ask for a browser or phone game (those use Phaser). The
+  `godot` tool starts a project from `platformer-2d`, `rpg-topdown` or
+  `third-person-3d`, checks it with Godot headless after every change
+  (every script error and missing file, with file and line), records a
+  frame to `screenshots/frame.png`, and exports a Windows game. Godot
+  downloads once, is checked against Godot's SHA-512 list and kept in the
+  Repo vault; export templates (about 1 GB) download only for an export. It
+  also searches and reads Godot's 133 official demo projects, and the
+  `godot-dev` skill holds the genre book (18 genres) and the guide to art
+  styles, animation, physics, worlds and story (`vendor/godot/`).
 - **App kit.** The `ui_kit` tool brings Tabler (MIT, Bootstrap 5, light and
   dark) for app and game screens: dashboards, menus, settings, leaderboards,
   forms, tables, pricing and sign-in, plus 5,184 Tabler icons found by words

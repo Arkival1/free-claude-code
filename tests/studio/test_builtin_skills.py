@@ -9,7 +9,7 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun
 from free_claude_code.studio.polish import polish_notes
 
-SKILL_COUNT = 18
+SKILL_COUNT = 19
 DESIGN_SKILLS = {
     "design-taste-frontend",
     "impeccable",
@@ -41,6 +41,7 @@ async def test_the_skills_install_refresh_and_keep_the_owners_switch(make_studio
             "karpathy-guidelines",
             "interactive-3d-site",
             "game-dev",
+            "godot-dev",
             "add-a-library",
         }
         | DESIGN_SKILLS
@@ -394,14 +395,20 @@ def test_impeccable_never_asks_to_run_its_missing_launcher():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("role", "goal", "game"),
+    ("role", "goal", "browser", "godot"),
     [
-        ("coder", "Make a space shooter game for my phone", True),
-        ("builder", "Make a platformer", True),
-        ("coder", "Fix the login function", False),
-        ("coder", "code me a snake game in python", False),
+        ("coder", "Make a space shooter game for my phone", True, False),
+        ("builder", "Make a platformer for my website", True, False),
+        ("builder", "Make a platformer", False, True),
+        ("coder", "Make a Godot RPG with a village", False, True),
+        ("coder", "Fix the login function", False, False),
+        ("coder", "code me a snake game in python", False, False),
     ],
 )
-async def test_a_game_job_brings_the_game_recipes(make_studio, role, goal, game):
+async def test_a_game_job_brings_the_game_recipes(
+    make_studio, role, goal, browser, godot
+):
+    """Games are made in Godot on the PC unless they're for a browser or phone."""
     prompt = await task_prompt(make_studio, role, goal)
-    assert ("# Game development" in prompt) is game
+    assert ("# Game development" in prompt) is browser
+    assert ("# Godot 4 games" in prompt) is godot

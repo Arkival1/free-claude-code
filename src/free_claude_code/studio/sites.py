@@ -89,6 +89,12 @@ ALLOWED_SUFFIXES = frozenset(
         ".ps1",
         ".bat",
         ".cmd",
+        # Godot 4 projects
+        ".gd",
+        ".gdshader",
+        ".tscn",
+        ".tres",
+        ".godot",
     }
 )
 ALLOWED_NAMES = frozenset(

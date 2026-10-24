@@ -26,6 +26,7 @@ installed from there when GitHub no longer has it.
 | [`pocketpal-ai/`](pocketpal-ai/README.md) | https://github.com/a-ghorbani/pocketpal-ai | MIT | The classroom page's look (colours, layout); design only, no code copied |
 | [`tabler/`](tabler/README.md) | https://github.com/tabler/tabler | MIT | App and game screens (Tabler 1.7.1) and 5,184 Tabler Icons, through the `ui_kit` tool |
 | [`swe-bench/`](swe-bench/README.md) | https://github.com/SWE-bench/SWE-bench | MIT (fixes under their projects' BSD, MIT, Apache licences) | 490 real bugs, fixes and tests the Changer learns from (`bug_library` tool) |
+| [`godot/`](godot/README.md) | https://github.com/godotengine/godot | MIT (engine and demos) | Godot 4.7.2 for games on the PC (downloaded once, kept in the Repo vault, SHA-512 checked), 133 demo projects, three starters (`godot` tool) |
 | [`phaser/`](phaser/README.md) | https://github.com/phaserjs/phaser, https://github.com/phaserjs/examples | MIT (example assets left out) | The `phaser-game` starter's engine and 2,298 example programs (`game_assets` tool) |
 | [`three/`](three/README.md) | https://github.com/mrdoob/three.js | MIT | The 3D views: the Trading Bank's debate arena, the Ops page, and the 3D site templates |
 | [`repos/`](repos/README.md) | 46 repos, 44 shipped as zips (OpenHands, MetaGPT, crewAI, superpowers, impeccable, awesome-design-md, wshobson/agents, public-apis, …) | Each repo's own (MIT, Apache-2.0, CC0, AGPL-3.0) | Starter repos: skills, guides and lists every agent can search, switched off until the owner turns them on |

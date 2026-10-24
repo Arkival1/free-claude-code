@@ -135,6 +135,7 @@ from .farm.render import video_tools
 from .farm.requests import FarmJob, farm_job
 from .farm.visuals import Visuals
 from .game_library import GameVault
+from .godot.engine import GodotEngine
 from .guide import (
     GUIDE_TOPICS,
     STARTER_QUESTIONS,
@@ -427,12 +428,17 @@ LOOK_SKILL = "visual-review"
 REVIEW_SKILL = "code-review"
 LIBRARY_SKILL = "add-a-library"
 GAME_SKILL = "game-dev"
+GODOT_SKILL = "godot-dev"
+_BROWSER_GAME = re.compile(
+    r"\b(browser|web|website|phaser|phone|html5?|in the page)\b", re.I
+)
+"""A game for a browser or a phone uses Phaser (game-dev); others Godot."""
 _LIBRARY_WORDS = re.compile(
     r"\b(librar(y|ies)|asset packs?|art packs?|sound packs?|kenney|uiverse|"
     r"bootstrap|phaser)\b",
     re.I,
 )
-_OTHER_ENGINES = re.compile(r"\b(python|pygame|unity|godot|unreal|c\+\+|java)\b", re.I)
+_OTHER_ENGINES = re.compile(r"\b(python|pygame|unity|unreal|c\+\+|java)\b", re.I)
 _GAME_WORDS = re.compile(
     r"\b(game|games|platformer|arcade|shooter|puzzle game|rpg|dungeon)\b", re.I
 )
@@ -511,6 +517,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "site_layouts",
         "game_assets",
         "ui_kit",
+        "godot",
         "list_photos",
         "use_photo",
         "ideas",
@@ -522,8 +529,8 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     LAB_AGENT_NAME: LAB_AGENT_TOOLS,
     FARM_AGENT_NAME: FARM_AGENT_TOOLS,
     # Made from presets, so saved ones get the UI library too.
-    "Designer": ("ui_library", "site_layouts", "game_assets", "ui_kit"),
-    "Developer": ("ui_library", "site_layouts", "game_assets", "ui_kit"),
+    "Designer": ("ui_library", "site_layouts", "game_assets", "ui_kit", "godot"),
+    "Developer": ("ui_library", "site_layouts", "game_assets", "ui_kit", "godot"),
 }
 _PRESET_ROLES = {"Designer": "builder", "Developer": "developer"}
 """Agents made from a preset are upgraded only while they keep its role, so
@@ -986,6 +993,9 @@ class StudioService:
         self.vault = RepoVault(sites_dir.parent / "vault")
         # Kenney packs downloaded for games, kept like the repo vault.
         self.game_vault = GameVault(sites_dir.parent / "game-vault")
+        self.godot = GodotEngine(
+            sites_dir.parent / "godot", vault=self.vault, transport=search_transport
+        )
         self._extensions = ExtensionLibrary(
             sites_dir.parent / "extensions",
             transport=search_transport,
@@ -1797,6 +1807,7 @@ class StudioService:
             screen=self._screen_call,
             new_project=self._new_chat_project,
             game_vault=self.game_vault,
+            godot=self.godot,
         )
 
     async def _new_chat_project(self, context: ToolContext, title: str) -> str:
@@ -7831,7 +7842,14 @@ class StudioService:
                 wanted.append(APP_SKILL)
             if _BUG_WORDS.search(goal):
                 wanted.append(DEBUG_SKILL)
-            if _GAME_WORDS.search(goal) and not _OTHER_ENGINES.search(goal):
+            if re.search(r"\bgodot\b", goal, re.I) or (
+                _GAME_WORDS.search(goal)
+                and not _OTHER_ENGINES.search(goal)
+                and not _BROWSER_GAME.search(goal)
+            ):
+                # Games are made in Godot on the PC unless asked for a browser.
+                wanted.append(GODOT_SKILL)
+            elif _GAME_WORDS.search(goal) and not _OTHER_ENGINES.search(goal):
                 # Browser games (Phaser); a Python or Unity game isn't one.
                 wanted.append(GAME_SKILL)
         if not wanted:
