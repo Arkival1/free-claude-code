@@ -15,7 +15,7 @@
 [![Code style: Ruff](https://img.shields.io/badge/code%20formatting-ruff-f5a623.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Logging: Loguru](https://img.shields.io/badge/logging-loguru-4ecdc4.svg?style=for-the-badge)](https://github.com/Delgan/loguru)
 
-[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
+[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Studio](#studio) · [Clients](#connect-your-client) · [Integrations](#optional-integrations) · [Manage](#manage-your-installation)
 
 </div>
 
@@ -29,6 +29,7 @@
 - **10 coding agents. One model catalog.** Run [Claude Code](https://code.claude.com/docs/en/overview), [Codex](https://github.com/openai/codex), [Pi](https://github.com/earendil-works/pi), [OpenCode](https://github.com/anomalyco/opencode), [Cline](https://github.com/cline/cline), [Hermes](https://github.com/NousResearch/hermes-agent), [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), [Grok Build](https://github.com/xai-org/grok-build), [Muse Code](https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2/), or [Aider](https://aider.chat/) with your FCC models.
 - **Keep coding through provider outages.** After retries are exhausted, FCC automatically tries your next configured model without making you restart the turn—across every client.
 - **Up to 90% fewer terminal-output tokens.** Optional [RTK](https://github.com/rtk-ai/rtk) filters common command output, while five FCC optimizations handle quota probes, command-prefix detection, titles, suggestions, and filepaths without calling a provider.
+- **Studio: your own agents, on your own models.** A phone-first app at `/studio` that runs agents which search the web and build real websites, downloads local models to this device, runs very light on-device tuning, gives every agent its own memory, mirrors work into Obsidian, and lets a teacher AI teach and then test a student AI in a classroom you can watch.
 - **Native Code sessions in your browser.** Choose a folder and run Codex in the browser with real-time and background support. Freely switch providers/models in the same session. Support for switching harnesses in the same session coming soon!
 - **Terminal, desktop, IDE, or phone.** Work through native launchers, [VS Code](https://code.visualstudio.com/), [Codex App](https://learn.chatgpt.com/docs/app), [JetBrains](https://www.jetbrains.com/), [Discord](https://discord.com/), or [Telegram](https://telegram.org/).
 - **Voice notes in. Code out.** Talk to your agent using local [Whisper](https://github.com/openai/whisper) or [NVIDIA NIM](https://docs.nvidia.com/nim/speech/latest/asr/deploy-asr-models/whisper.html) transcription.
@@ -351,6 +352,2435 @@ Providers that do not support a selected control retain their own behavior.
 
 </details>
 
+<a id="studio"></a>
+
+## Studio
+
+Studio is an app served by the same local server: open
+`http://<server-host>:8082/studio` in a browser. It is built phone-first — on
+iOS, open it in Safari, tap **Share → Add to Home Screen**, and it runs full
+screen with its own icon, safe-area padding, and touch-sized controls. Turn the
+whole app off with `STUDIO_ENABLED=false`.
+
+Everything Studio stores lives under `~/.fcc/studio/`: `studio.db` for agents,
+chats, memory, tuning, and classes; `models/` for downloaded model files; and
+`sites/` for websites agents build.
+
+<details>
+<summary><strong>Studio as a desktop app on Windows</strong></summary>
+
+1. Download this branch as a zip and extract it, for example to `C:\fcc`.
+2. Open `scripts\windows` and double-click **install-studio-app.cmd** once.
+   It installs uv, Python 3.14, the app's packages, and the main AI's voice
+   (a few minutes the first time), then adds an **FCC Studio** icon to your
+   Desktop and Start menu and opens the app. Add `-StartWithWindows` from
+   PowerShell to open it when you sign in; `-Uninstall` removes the icons.
+3. From then on, double-click **FCC Studio**. A small "Waking Jarvis up"
+   window shows while the server starts in the background (no black console
+   window), then Studio opens in its own app window with its own taskbar
+   icon, using Microsoft Edge (or Chrome) without tabs or an address bar.
+   Closing the window stops the server. Run `studio-app.ps1 -KeepServer` to
+   leave it running for your phone.
+4. Every Free Claude Code setting is inside the app: **Settings** in the left
+   menu (or **More → Open settings**) shows the full settings page, with its
+   search box. Settings only open on the PC running Studio.
+
+Server logs are in `%LOCALAPPDATA%\FCC Studio\logs` if the app will not start.
+
+**Replies as they are written.** With a local model, the HUD shows the main
+AI's reply word by word while LM Studio writes it, and **Agents at work**
+shows the watched agent's reply the same way. The HUD checks for news twice a
+second while anyone is working and every few seconds otherwise; the CPU and
+memory gauges and the mission list are only rebuilt when something changed.
+On phones and PCs with four or fewer processor cores, the gold core draws
+fewer particles at 30 frames a second so the processor stays free for the AI.
+
+</details>
+
+<details>
+<summary><strong>Running Studio on Windows, step by step</strong></summary>
+
+1. Get the code: download this branch as a zip and extract it, or run
+   `git clone` in PowerShell. Put it somewhere without spaces if you can,
+   such as `C:\fcc`.
+2. Open the folder, then `scripts\windows`, and double-click
+   **start-studio.cmd**. The first run installs [uv](https://docs.astral.sh/uv/)
+   if it is missing, lets uv install Python 3.14 for you, and installs the
+   app's packages into the folder. That takes a few minutes once; later starts
+   take seconds. You do not need to install Python yourself.
+3. Your browser opens `http://localhost:8082/studio`. Leave the black window
+   open — it is the server. Press Ctrl+C in it to stop.
+4. Open `http://localhost:8082/admin` on the same PC to add a provider key or
+   point **Local Model Server** at LM Studio, `llama-server`, or Ollama.
+5. When Windows Firewall asks, allow Python on **Private networks** only. Your
+   phone can then open the address listed under **More → Install on your
+   iPhone**.
+
+From PowerShell you can pass options instead:
+`.\scripts\windows\start-studio.ps1 -Port 9000 -NoBrowser`. Add
+`-WithTraining` to also install PyTorch, transformers, and PEFT so this PC can
+train LoRA adapters (a few GB; an NVIDIA GPU is strongly advised). Add
+`-DryRun` to see every step without running it. If PowerShell refuses to run scripts,
+the `.cmd` file above already bypasses that for this one script.
+
+</details>
+
+<details>
+<summary><strong>The HUD and your main AI</strong></summary>
+
+Home is a command center for your main AI (named **Jarvis** by default,
+`STUDIO_MAIN_AGENT_NAME`), and every other page (Agents, Chats, Classroom,
+Models, Tuning, More) uses the same dark console look. **More** has a search
+box for its settings, and the admin page has one search box that looks
+through every settings page at once.
+
+In the middle of the HUD is his core: a gold sphere of glowing particles and
+filaments that floats, turns, and reacts. It swirls while he works, swells
+with your voice while he listens, pulses as he speaks, and dims if the link to
+the server drops. Tap it to start a spoken conversation. Around it:
+
+- **Agent chat room** (top right): the latest team room. Start one with
+  **START TEAM ROOM**, then talk to all the agents at once.
+- **AI core overview** and **brain status**: which model he runs on, whether
+  your local models are reachable, web search, voice, and ears.
+- **Agents at work** (bottom left): every agent with a READY or ACTIVE light.
+  Tap one to watch it work live: its task, each tool it uses (searches, files,
+  commands), what it is thinking, and its report. The first agent that starts
+  working is shown until you pick one; **OPEN ›** opens its full chat. Tap
+  **+** to add an agent.
+- **Mission timeline** (tasks, rooms, classes, and training) and the **live
+  intelligence feed** (running jobs and commands waiting for **Run it**).
+- **Quick commands**: voice chat, an executive briefing, and shortcuts to give
+  Builder, Researcher, or Helper a job.
+- **System monitor** (CPU, RAM, and disk of the PC running Studio) and
+  **memory insights**.
+- The sidebar goes to the rest of Studio; **ASK THE GUIDE** explains anything.
+
+On an iPhone the same panels stack into one column, with the talk bar pinned
+to the bottom of the screen.
+
+**Choosing his brain.** Press **CHOOSE BRAIN** (or the **Choose brain** quick
+command, or **Choose a model from this PC** on the Models page). It lists the
+models LM Studio has on this PC; press **Use** on one. **Find a model file on
+this PC…** opens a normal file window on the PC running Studio: pick any
+`.gguf` model and Studio adds it to LM Studio's models folder (a hard link, so
+no second copy on the same drive) and switches to it. It changes the main AI
+only; tick **Use it for every agent too** to move the whole team. The choice is
+saved as the Main AI Model (and, for the whole team, Studio Default Model)
+setting.
+
+If the Studio default is a server model whose provider has no key, or a local
+model this PC doesn't have, Studio uses the model loaded in LM Studio instead
+of failing, and the HUD shows which one.
+
+**Team brains: a different model for each agent.** Open **Team brains** (a
+quick command on the HUD, a card on **Agents**, or **Give each agent its own
+brain…** in Choose brain). Every agent has a list of the models in LM Studio,
+plus server models; pick one per agent and **Save**. **Suggest a mix** fills in
+a starting point from the models on this PC: a coding model (one with *coder*
+in its name) for the Builder and Tester, the biggest general model for the
+Researcher, a reasoning model (such as a DeepSeek R1 distill) for the Helper, a
+mid-sized one for Jarvis so he answers quickly, and the smallest for the Guide.
+Where Model Control can read a model's file, models trained for tools go to
+the agents that use tools most, and models with a thinking mode count as
+reasoning models.
+Or just tell Jarvis: *"give the Builder qwen coder"*, *"switch the Researcher
+to llama 3.1 8b"*, *"use gemma for the Guide"*; he switches it at once, and his
+`agent_model` tool lists who uses what. If an agent's model can't be found,
+the agent borrows the loaded one; Team brains and the HUD say which it is
+really using.
+
+**Who thinks where.** Studio starts the team split in two: Jarvis, the
+Guide, and the Helper think on this PC (the Helper shares Jarvis's local
+model), and the Builder, Researcher, and Tester think on a server AI (the
+Studio default model when it is a server model, otherwise the proxy's
+`MODEL`). Jarvis directs everyone: he hands the server agents jobs with a
+briefing, checks on them, and stops or re-tools them. Existing installs are
+moved to this layout once; after that, any change you make in Team brains
+sticks. Class students keep their own models.
+
+**Which brain for the Builder?** The templates, photos, and checks help any
+model, but a whole multi-page site is a lot of careful writing. A small
+model (the 0.5–3B ones that fit a phone, or a 7B on an 8 GB graphics card)
+does best filling in the `business` template and fixing what the checks
+report; a large server model writes whole custom pages well. A good split is
+a server model for the Builder (Team brains, or tell Jarvis *"give the
+Builder gemini"*) and local models for everyone else, so only building work
+leaves the PC. Server agents keep their own memory area and can't read your
+main memory.
+
+In LM Studio, turn on **Just-in-Time model loading** (Developer → Settings).
+Without it LM Studio lists only the model that is loaded, so every agent ends
+up on that one. With it, every downloaded model is listed and LM Studio loads
+whichever one an agent asks for.
+
+A graphics card with 8 GB holds one mid-sized model at a time. With **Local
+Models Take Turns** on (`STUDIO_LOCAL_MODEL_TURNS`, the default), agents on
+different local models take turns: the model that is working keeps going while
+its agent is busy (and for a few seconds between its steps), then the next one
+loads. Nobody waits more than about a minute before getting a turn, and models
+LM Studio has loaded side by side run together. Turn it off if your card holds
+all your models at once.
+
+**Model Control: LM Studio inside Studio.** Open **Model Control** (the menu,
+or the **Model control** quick command on the HUD). Press **Install engine**
+once: Studio downloads the official llama.cpp server from its GitHub releases,
+the Vulkan build for your graphics card (AMD, NVIDIA, Intel; RX 580 included),
+into its own folder. Tick **Use the built-in engine for local models** and
+agents on `local/…` models run through it instead of LM Studio; it starts by
+itself when an agent first needs a model and stops when Studio closes. It runs
+llama.cpp in router mode, so each model loads when asked for, with its own
+settings, and **Models Loaded At Once** (1 by default) unloads the oldest to
+make room.
+
+**If Install engine doesn't download.** Studio asks GitHub's API for the
+newest llama.cpp release, then the last few releases, and when the API is
+blocked or rate limited it reads the version from the release page and
+downloads the file directly. If none of that gets through (a firewall,
+antivirus, or no internet on that PC), Model Control says why and how to do
+it by hand: open github.com/ggml-org/llama.cpp/releases, download the file
+named like `llama-b1234-bin-win-vulkan-x64.zip`, and drop that zip on the
+**Drop a file here** box. Studio unpacks it and the engine is installed.
+
+Every `.gguf` model in Studio's models folder, LM Studio's models folder, and
+any **Extra Model Folders** you add in settings is listed with its size,
+parameters, quantization, and state (loaded, loading, unloaded). Each shows
+how much graphics memory it needs at its settings, read from the model file
+itself, against your **Graphics Memory (GB)** setting, with a warning when it
+will not fit. Badges show what each model can do, read from its own files: **Tools** (its
+chat template takes a tool list and has a tool-call format, so it follows an
+agent's tool steps better), **Vision** (its image encoder, an `mmproj` file, is
+beside it, as LM Studio stores vision models), and **Reasoning** (its template
+has a thinking mode, or it is a known reasoning model such as an R1 distill or
+QwQ; Fast Local Replies skips the thinking for speed). The **All / Tools /
+Vision / Reasoning** buttons above the list show only the models that can.
+**Load** and **Unload** it, and open **Settings** on a model to
+change:
+
+- **Context**: how many tokens it holds at once (8,192 by default).
+- **Graphics card layers**: all of them, or fewer to spill into system memory.
+- **Flash attention**: auto, on, or off.
+- **Memory for context**: full quality, q8 (half the memory), or q4.
+- **CPU threads**: 0 lets llama.cpp choose.
+- **Reading batch**: how many tokens it reads per step (512 standard; bigger
+  reads long agent prompts faster on many cards, for a little more memory).
+
+The memory estimate updates as you change these, before saving. The engine
+finds your graphics card itself (`llama-server --list-devices`) and uses its
+memory; every model without saved settings is fitted to it automatically:
+the largest context up to 16,384 tokens that fits with every layer on the card
+(about 1 GB is left for Windows and the screen), q8 context memory before
+giving up layers, and for a model too big for the card, as many layers as fit
+with the rest on the processor's cores. **Tune for my PC** (or **Tune all for
+my PC**) saves those settings; **Test speed** loads the model and times a short
+answer, in tokens per second for reading and writing. The **Health check** at
+the top says in plain words when the engine can't see the graphics card (and
+so runs on the processor), when it stopped unexpectedly (and why: a busy port,
+say), when a model failed to load or doesn't fit, when a card can't use
+compressed context memory, and when LM Studio is also running and may be
+holding graphics memory.
+
+**Make it fastest.** Press **⚡ Make it fastest** on a model and Studio tunes
+it by measuring instead of guessing: it times a real reply (about a thousand
+tokens read, 128 written) with your settings now, then with flash attention on
+and off, bigger reading batches, full or q8 context memory, and, for a model
+that doesn't fit whole, more layers on the graphics card. A change is kept only
+when it makes a typical agent turn at least 3% faster, the winner is saved for
+every agent on that model, and the card shows each try with its tokens per
+second. It also says what would help beyond settings: a Q8 or F16 file of the
+same model as Q4_K_M writes about 1.8x or 3.3x faster, and a model that doesn't
+fit on the card is held back most by the part on the processor. Agents using
+the model wait a few seconds each time it reloads. The engine also keeps its
+reading of each agent's instructions between turns (prompt caching with
+`cache-reuse`), so only the new part of a conversation is read each time.
+
+How fast is possible depends on the card: writing speed is roughly the card's
+memory speed divided by the model file's size. A 4B model at Q4_K_M (about
+2.5 GB) writes roughly 40 to 60 tokens a second on an RX 580 8 GB, 80 to 100
+on an RTX 3060, and 150 or more on an RTX 4090; a 0.6 to 1B model can pass 150
+on a mid-range card. LM Studio runs the same llama.cpp engine, so it is no
+faster at the same settings.
+
+**Add any file.** Drop a file on the box at the top of **Models on this PC**
+(or tap it to choose one). Studio reads the first bytes and says what it is
+before a large upload starts. A `.gguf` model is saved into Studio's models
+folder and you get a report: **Use tools**, **See images**, **Reason step by
+step**, and **Fit on your graphics card**, each yes or no with what it means,
+the settings it will run with, and the agents it suits best. Anything else is
+explained with what to do instead: a raw safetensors or PyTorch model needs its
+GGUF version from Hugging Face, a ZIP needs unzipping, a document belongs in a
+chat. An upload that is not a model stops after its first chunk, a broken
+upload leaves nothing behind, and there must be room on the disk first. On the
+PC running Studio, **Find a model on this PC…** opens a normal file window and
+adds the model without copying it (a hard link where the drive allows). Every
+model in the list has a **What can it do?** button for the same report.
+
+Saving reloads a loaded model with the new settings. The last reply's speed
+shows in tokens per second, and **Engine log** shows what llama.cpp prints.
+Model names follow LM Studio's style (`qwen2.5-coder-7b-instruct`), so agents
+set up for LM Studio keep working. Advanced: **Engine Build** picks Vulkan or
+processor-only, and **Engine Program** points at your own `llama-server`.
+
+**Speed on a small GPU.** Studio keeps the start of every prompt the same
+between turns (tool list and instructions first, this turn's memories last),
+so LM Studio reuses what it already read instead of re-reading thousands of
+words before each reply. **Fast Local Replies** (`STUDIO_LOCAL_FAST_REPLIES`,
+on by default) also switches off the hidden "thinking" pass that reasoning
+models such as Qwen3 write before every answer; turn it off for hard problems.
+In LM Studio, load the model with GPU Offload at maximum and a Context Length
+of 8192; a larger context can spill out of an 8 GB card and slow every reply.
+
+**Every message, word for word.** Nothing an agent was told is ever lost:
+
+- **Automatic recall.** Every time you speak, Studio searches the whole
+  conversation, including the part out of view, and the agent's five most
+  recent earlier conversations. The earlier messages that match what you
+  said are attached to your message exactly as they were said, with their
+  message numbers and how long ago. "What colours did we pick for the bakery
+  site?" brings back the exact message, however long ago it was.
+- **The `conversation` tool.** Every agent can search every message of its
+  conversations (`query`, with `scope: all` for earlier ones) or reread any
+  stretch in full by number (`from`, `to`), and is told to check instead of
+  guessing whenever you mention something from before.
+- **Running notes with a timeline.** When a conversation outgrows the view,
+  the messages about to leave it are also folded into notes by the agent's own
+  model: goal, a timeline with message numbers, decisions, facts (exact
+  names, numbers, links, files), work in progress, and open questions, in
+  under 400 words. Every reply starts with them. Messages leave the view only
+  once the notes hold them, and stay in view if no model can write notes.
+  Notes update in the background about once every 20 messages, so replies are
+  not slowed. **NOTES** on the HUD shows them.
+- Agents also see what tools and teammates reported earlier in the
+  conversation, and when a teammate finishes in the background.
+
+Replies start sooner in long conversations, with the same context:
+
+- Each agent sees the last 40 to 60 messages, and where that window starts
+  moves in steps of 20 instead of one message at a time. The instructions and
+  the earlier conversation are then word-for-word the same from reply to
+  reply, so LM Studio reuses what it already read and only reads the new
+  messages. Before, once a chat passed 40 messages, the whole history was
+  re-read before every reply.
+- Tool arguments are listed in a compact form (about 10% fewer tokens for
+  the same information), which helps whenever another agent used the model in
+  between and the tool list has to be read again.
+- While a reply is being written, the HUD shows new words every quarter
+  second instead of every half second.
+
+Jarvis's voice starts sooner and flows better, with the same voice:
+
+- The first spoken piece is one short sentence (or its first clause), so the
+  voice starts as soon as possible; later pieces are longer.
+- Pieces are voiced one at a time, in order, one ahead of playback, instead
+  of all at once, so the first one gets the whole voice engine.
+- The voice model loads in the background when the HUD opens, so the first
+  reply does not wait for it, and recently spoken pieces are kept so repeats
+  play at once.
+- The default speaking rate is 1.12 (was 1.05); change it with Voice Speed in
+  Settings, under Studio.
+
+The HUD also asks the server for less: the team's memory and task history are
+counted in the database instead of being read in full on every update (about
+five times faster with thousands of memories), and a hidden, idle window
+checks in every 10 seconds instead of every 2.5 (talk mode and replies being
+written keep the usual pace). Model downloads write to disk on a worker
+thread, so a big download never makes replies or the HUD stutter.
+
+More speed-ups that keep answers and memory exactly the same:
+
+- **Memory on the message.** What memory recalls for a message is attached to
+  that message instead of the instructions, so the instructions and the whole
+  earlier conversation stay word-for-word the same and LM Studio reuses them
+  instead of re-reading them. Every memory still reaches the agent.
+- **Look-ups together.** Agents may ask for several tools in one reply; web
+  searches, page reads, file reads, recall, research, and questions to the
+  Researcher or Helper then run at the same time. Anything that changes files
+  or runs commands still runs one at a time, in order.
+- **He talks while he writes.** The main AI starts speaking his first finished
+  sentence while the rest of the reply is still being written, instead of
+  waiting for the whole answer.
+- **No waiting on the notes.** When memory is mirrored into Obsidian, that
+  happens in the background after an agent's reply, not before it counts as
+  done. Memory itself is saved first, as before.
+- **Agent Temperature** (`STUDIO_AGENT_TEMPERATURE`, default 0.2) sets how much
+  agents vary their wording; low values keep tool use steady.
+
+You talk to the main AI in the HUD by typing or with the mic button (when the
+browser supports speech recognition), and it can read its replies aloud
+(**VOICE ON/OFF**). It answers simple questions itself and runs the rest of
+the team:
+
+- `ask_agent` gives one agent a task and waits for its report, for example
+  "Have Builder make a landing page for my bakery". Build work lands in a
+  project; the main AI names one, and Studio creates it when it doesn't exist.
+- `team_task` puts several agents in a room to work on one goal together.
+
+The HUD shows which agents are working, recent jobs, commands waiting for
+**Run it**, and the team's shared memory. Tap a hand-off to open that agent's
+own chat. Only the main AI can hand work off, so agents can't start loops of
+delegation. Give it a local model to keep everything on your machine:
+`STUDIO_MAIN_AGENT_MODEL=local/qwen2.5-coder:7b`. Without that setting it uses
+the Studio default model.
+
+**His voice.** The main AI talks and listens on your PC with no server and no
+internet: speech is Kokoro, a small neural voice (the default `jarvis` voice
+blends two of its British men, with a subtle "AI in the room" effect), and
+your voice is understood by Whisper. Both run on the CPU. The Windows launcher
+installs them (`-NoVoice` skips it; elsewhere use `--extra studio_voice`), and
+the HUD downloads the model files once (about 500 MB), after which they work
+offline. Tap the orb or **TALK** for a spoken conversation: you speak, he
+answers out loud, then he listens again until you press **END TALK**. The ● button sends one spoken message.
+**More → Main AI voice** has a **Hear him** button and the download status.
+Voice settings are under admin → Studio: engine, voice (`jarvis`,
+`bm_george`, `bm_lewis`, `bm_daniel`, `bm_fable`, and others), effect, speed,
+and the speech-recognition size. A voice server (Kokoro-FastAPI, Speaches,
+whisper.cpp's server, or OpenAI) can be used instead of the built-in engine.
+
+Browsers only share the microphone with secure pages. On the PC,
+`http://localhost:8082/studio` counts as secure. On an iPhone, use HTTPS:
+install Tailscale on both devices and run `tailscale serve --bg 8082` on the
+PC, then open the `https://…ts.net/studio` address it prints.
+
+**Shared memory.** With `STUDIO_SHARED_MEMORY` on (the default), every agent's
+`remember` goes into one team memory that all agents recall from, tagged with
+who wrote it, unless the agent marks it `private`. Finished tasks and room
+outcomes go there too, so the main AI and the team build on each other's work.
+Each agent still keeps its own working notes. You can add to it from the HUD,
+and it mirrors into Obsidian as a **Team memory** hub.
+
+**Memory stays on this PC.** With `STUDIO_PRIVATE_MEMORY` on (the default,
+**Keep Memory on This PC** in settings), only agents whose model runs on this
+PC (`local/…`, LM Studio, Ollama, llama.cpp) can use the memory bank. An agent
+on a server or cloud AI gets no memory notes, no taught skills, no recall of
+earlier conversations, and no `knowledge`, `video_notes`, `conversation`,
+`todo`, or `learn` tools; Studio refuses those calls even if the model tries.
+
+**Server agents' own memory.** The agents on server AIs share a memory of
+their own, apart from the memory on this PC: what one of them saves with
+`remember` the others can `recall`, and it shows in their memory notes. With
+`private`, an agent saves to its own memory area instead, which no other agent
+reads. Neither ever includes the team memory on this PC, Obsidian, or what the
+agent remembered back when it ran on this PC, and agents on this PC don't read
+the server agents' shared memory. The agent's page shows the
+area (**<name>'s own memory area**) where you can add notes, forget one, or
+clear it; deleting the agent deletes it too. The Obsidian vault only reaches agents through
+memory, so it stays private too. If a server agent's model has no key and it
+borrows the model loaded in LM Studio, it counts as local while it does.
+
+When you give a server agent a job through Jarvis (*"have the Builder make a
+landing page for the bakery"*, or Jarvis handing it work himself), Jarvis
+writes it a **briefing** on this PC: what you want done, and the requirements,
+preferences, and facts from the conversation and memory the job needs, leaving
+out personal details it doesn't. The briefing is posted in your chat with
+Jarvis, so you see exactly what was sent, and the server agent gets your words
+plus the briefing. Team brains and the HUD mark server agents "no memory".
+What a local agent says in a team room is seen by every member of that room,
+server agents included. And if you put Jarvis himself on a server AI, he is
+kept out of memory too, and no briefings are written.
+
+**Jarvis's own memory.** With **Main AI Has Its Own Memory**
+(`STUDIO_MAIN_OWN_MEMORY`, on by default), what Jarvis remembers goes into a
+memory of his own that the other agents can't read; he puts a fact in the team
+memory only when it's for everyone (`remember` with `share`). He reads every
+agent's memory as well as the team's, and each result says whose it is (*(Builder)*,
+*(Researcher's server area)*), so his answers and briefings draw on all of it.
+He adds to the team in his own way: team facts with `share`, a note for one
+agent with `manage_agent add_memory`, and jobs and questions with `ask_agent`.
+The same holds in FCC Phone: Jarvis's own memories are marked *only Jarvis reads
+it* on the Memory page and stay on the phone.
+
+**Jarvis's playbook.** With **Jarvis's Playbook** (`STUDIO_JARVIS_PLAYBOOK`,
+on by default), a small model learns when and how to use each tool without a
+model change. The playbook is one Markdown note per tool: the words that call
+for it (`When the user says: remind me, reminder, …`), an example call, and
+tips, plus a Rules note on reading the Studio note, earlier messages, memory,
+and the group chat. Before each reply Studio puts the Rules and the one or two
+notes that match your message on it (about 700 tokens). When Studio has already
+done the job itself (a hand-off, the Lab, weather), only the Rules go on, so
+he isn't pushed to do it twice. When one of Jarvis's tool calls works, your words and the
+call are added to that note's Learned list (the newest five), and a message
+like it later brings that example back. The notes also stop a misroute: a
+message that matches one of Jarvis's own tools (a reminder, a sum, your
+projects, the PC's status, memory) is never handed to an agent by the one-word
+router, so *"remind me to call the dentist"* goes on the to-do list instead of to
+the Helper. Tool calls are also held to your words: a question
+(*"which model is the Builder using?"*) only looks, and never switches a model
+or changes an agent, unless the message also asks for the change; and a to-do
+gets a reminder time only when your message names one. The notes live in the Obsidian vault's
+`FCC Studio/Playbook` folder; until a vault is set they live in Studio's own
+`playbook` folder and are copied into the vault when you set one. Edit them in
+Obsidian or on the HUD's **Jarvis's playbook** card (Save note, Reset to
+starting note).
+
+**Studio agents over an API.** Other apps can talk to Jarvis and every agent
+the OpenAI way, from this PC: point any OpenAI-compatible app or SDK at
+`http://localhost:8082/studio/v1` with your proxy token as the API key (any
+key when proxy auth is off), and use an agent's name as the model (`jarvis`,
+`builder`, `coder`, `researcher`, `lab`, ...). `GET /studio/v1/models` lists
+the team, and `POST /studio/v1/chat/completions` sends the newest user message
+to that agent in its own API chat (set `user` to keep separate conversations;
+`stream: true` works; `wait: true` also returns what teammates reported back).
+The server listens on your network for the phone app, so keep a proxy token
+set if others share it.
+
+**Claude Code subagents through FCC.** Claude Code's subagents, plugins, and
+MCP servers run inside Claude Code and work through FCC as they are, with
+`MODEL_OPUS`, `MODEL_SONNET`, and `MODEL_HAIKU` choosing the model a subagent
+asks for. FCC keeps every subagent (the Task tool) in the foreground by
+default, which works with every provider; turn on **Allow Background
+Subagents** (`ALLOW_BACKGROUND_SUBAGENTS`) to let several run in the
+background at once.
+
+**FCC's own skills and Active plug-ins.** FCC comes with two skills of its
+own (**FCC skills**, on unless you turn them off): the **website design
+engineer** (a design system first, then layout, type, colour, states,
+pictures, motion, accessibility, speed and real content) goes to the Builder
+on every job, and the **app developer engineer** (a short spec, clear
+structure, every error handled, safe input and output, real tests, a README)
+goes to the Coder, Developer and Tester; each gets the other too when the job
+calls for it. FCC skills also carry deeper web design guides the Builder can
+read when a site needs them: **impeccable**, **taste-skill**
+(design-taste-frontend), a redesign guide, four style guides (minimalist,
+high-end, brutalist, GPT taste) and Vercel's **web design guidelines**
+checklist. A guide longer than 16,000 characters says where it was cut and
+which line to read on from. The Builder's **polish_check** holds pages to the design skill
+(one h1, headings in order, page language, safe new-tab links, link text,
+reduced motion, and more). The **Active plug-ins** card at the top of the
+More page lists everything switched on, what each does, and which agents use
+it.
+
+**Add from GitHub: skills, plugins, and MCP servers.** On the More page, paste
+a GitHub link (`https://github.com/owner/repo`, a `/tree/branch/folder` link,
+or `owner/repo`) and Studio pulls in what the repo holds, the Claude Code way:
+every `SKILL.md` becomes a skill, a Claude Code plugin's `agents/*.md` become
+agents you can add to the team (their Read, Write, Bash, Grep tools mapped to
+Studio's), its `commands/*.md` become skills named `/command`, and MCP servers
+from `.mcp.json` or the plugin's `plugin.json` are listed. A plain repo becomes
+one skill from its README. Agents read skills with the `skill` tool and use MCP
+servers with the `mcp` tool (`servers`, `tools`, `call`). MCP servers from a
+repo start **off**: running one runs that repo's code, so turn each on after
+reading its command, and use **Check** to start it and see its tools. You can
+also add a server by hand (`npx -y @modelcontextprotocol/server-filesystem
+C:\Users\you\Documents`, a `uvx` command, or an HTTP address). npx servers
+need Node.js; uvx ones run with the uv that Studio already uses. Everything is
+kept in Studio's `extensions` folder.
+
+**Coder, Tester, and Lab.** The starter team includes a **Coder** and a
+**Lab** agent. Say *"code me a snake game"*, *"build a todo app"*, *"write a
+script that renames my photos"*, or *"make a HUD"* (websites still go to the
+Builder) and Studio hands it to the Coder and the Tester together. The Coder
+codes for as long as the job needs (`STUDIO_CODER_MAX_STEPS`, 80 steps by
+default): it plans, writes every file, runs the code, and fixes what fails.
+Then the Tester tests it, fixes small bugs itself, and hands the rest back as a
+numbered list. They go round like that up to `STUDIO_CODE_TEST_ROUNDS` times (3
+by default), stopping as soon as the Tester says it works, posting each
+hand-off in the group chat, and Jarvis tells you how it went. Jarvis can start
+one himself with the `code_and_test` tool. Lab jobs from the main chat
+(*"make soap in the lab"*) go to the **Lab** agent, which works the Lab with
+the lab tool and reports back; if its model only talks, Studio runs the make
+or mix for it. In the Lab's own chat, Studio still does it at once.
+
+**HQ.** The **HQ** tab shows the whole team as a pixel office. Every part
+of the agent workflow is a station: Jarvis's command desk, the research
+library, the code workshop, the test bench, the Lab, the video studio, the
+memory archive, the classroom, the model room, the approval desk, the
+toolshed, the mailroom, and the break room. Each agent walks to the station
+of the tool it is using right now and goes back to the break room when it's
+done (the Coder and the Tester wait in the mailroom for their next coding
+job); monitors, server lights, flasks, and the studio camera come alive
+while someone works there. Click an agent to see its task and steps, send it
+a message, or stop it; click a station to see what's waiting there (the
+approval desk lists commands waiting for your yes, with Allow and Refuse).
+A job you send the Coder from the HQ runs the same way as one from Jarvis:
+in its own project (named as you named it: *"an app called Tip Calculator"*),
+coded by the Coder, then tested by the Tester, up to three rounds; a job for
+the Builder or the Tester works in the project it names (*"test the Tip
+Calculator"*), or gets a new one. **Stop** stops whatever the agent is doing:
+a job you gave it in the HQ, its turn in a Coder/Tester job (which then ends
+there), or a task from Jarvis. A task cut off by closing Studio (or a
+crash) is closed when Studio starts again, with a note in its chat, so its
+agent doesn't look busy forever. The HQ's *Newest steps* list each agent's
+steps from all of its recent work. Starter agents an
+update adds (like the Coder and the Tester) join a team made before it, and
+a starter agent you delete stays deleted. A model on this PC (llama.cpp, LM
+Studio, Ollama) gets up to 20 minutes per step, so a slow PC finishes long
+agent prompts instead of timing out.
+
+**Repo vault.** Every repo added from GitHub is kept on the PC, byte for
+byte with its SHA-256, in the **Repo vault** (Settings). If the original is
+later deleted from GitHub, adding it again uses the kept copy, and any copy
+can be restored or downloaded. The built-in engine (llama.cpp) and the voice
+files are kept the same way when they download (as a hard link, so the big
+files take no extra space), and install from the kept copy when their
+GitHub release is gone. Outside repos built into FCC itself are kept under
+`vendor/` with their licence, release files, checksums, and source
+(`vendor/claw-code` holds Claw Code's source; `vendor/cua` holds trycua/cua's
+MIT-licensed Cua Driver and agent source).
+
+**Repos that come with FCC.** FCC ships 46 outside repos, installed when
+Studio first starts and **switched on** (since 6.87, also on PCs where they
+were off): an agent reads a repo's skills only when a job needs them (the
+`skill` tool searches and reads on demand), and a skill it read a few steps
+ago is put away to save tokens (it can read it again). Their MCP servers stay
+off, and they join the relay switched off, until you switch them yourself.
+Turn each one on or off under **Repos** (the Turn on / Turn off button by its
+name); a repo you turn off stays off. Among the ones that come
+with FCC:
+
+- agent teams: awesome-claude-code-subagents (160 Claude Code subagents),
+  MetaGPT's software company, FinRobot's finance agents, crewAI's crews, and
+  the OpenHands engineer (from its SDK), all on the **Relay**,
+- OpenHands, hindsight, paperclip, orca, substrate, OpenMontage,
+  taste-skill, OpenViking, diagram-design, agentmemory, strix, Langflow,
+  supermemory, Letta and Letta Code, and claw-code,
+- the cybersecurity and scientific agent-skill packs (about 1,000 skills),
+- guides and lists: Google AX, app-ideas, OSSU computer science, the
+  generative AI guide (with its agentic AI crash course),
+  awesome-harness-engineering, awesome-generative-ai, public-apis,
+  free-for-dev, roadmap.sh and two more roadmaps, and an auto-clip Shorts
+  generator.
+
+Each is added like a GitHub link, so every agent can search and read it with
+the `skill` tool (`search` finds the right skill and the matching lines in
+every repo's text). `vendor/repos` keeps a checked copy (SHA-256) of the 33
+whose licences allow it, so they install with no download and survive the
+original being deleted. roadmap.sh and free-for-dev don't allow sharing, so
+they come from GitHub on first load and are kept in the Repo vault from then
+on. Their MCP servers start switched off, and their agents join the team
+only when you click **Add to team**. A repo agent thinks on your server AI,
+so it never sees your memory, and since someone else wrote its instructions
+it gets only the tools it asks for (give it more on its card if you trust
+it), plus **remember** and **recall** for its own memory area: what it
+learns stays its own, and comes back to it next time. When a job needs a tool
+it doesn't have, it walks to the HQ **Toolshed** and takes it (`toolshed`,
+action `list` then `take`), for that job only. The shelf never holds the
+user's own things (to-dos, photos, projects, this PC's status), memory on a
+server AI, running the team, or the Content Farm; those come only from the
+agent's card. Every agent can reach every tool, skill and plugin: agents
+with **Every Tool** have them all, and the Changer and subagents (which
+start with a small kit) take the rest from the Toolshed, so a tool, a skill
+(`skill`) or a plugin (`mcp`) is used only when a job needs it. The
+Changer's shelf leaves out the tools that start a new project, since its
+project is the copy of FCC that becomes an update zip; its Planner and
+reviewers stay read-only. The Toolshed is locked while **Every Tool** is off, and
+commands still wait for your approval. Every agent only ever uses tools it
+has: a call to any other tool is refused. Jarvis and the other
+agents on this PC team up with it: say *"have token-auditor check the
+spacing"* and Jarvis hands it the job with a briefing written from what Jarvis
+knows, so the repo agent gets what the job needs and nothing more. Only real
+agents (a named, described Claude Code agent file) are offered. Removing one sticks; **Repos that come
+with FCC** on the Add from GitHub card adds it back. **Upload a repo zip**
+adds a repo from your PC: Studio only reads it, and it is kept in the vault.
+
+**Content Farm.** The **Farm** tab makes faceless videos on this PC, start
+to finish: **YouTube Shorts** (and TikToks or Reels) and **two-hour videos to
+fall asleep to** that walk through a show's entire lore, a what-if, or its fan
+theories. A **channel** is one account: a show, movie, or game (or any
+niche), a style, a caption look (bold, clean, neon, cinema), a voice, a
+length, and the times it posts.
+
+- **Short styles:** story over gameplay (a gripping story told over muted
+  gameplay with big word-by-word captions), what-if, lore drop, fact list,
+  story time, motivation, quick tips, AI art reel, explainer, what's new.
+  Shorts are 9:16 and up to three minutes; the AI polishes each script once
+  more for a stronger hook (`AI polishes each short`).
+- **Long styles:** entire lore to sleep to, what-if to sleep to, theories to
+  sleep to. The writer plans chapters, then writes each one with what the
+  show's **Fandom wiki** says (found by the show's name, or paste its
+  address), in a calm voice. Every chapter is kept as it is written, so a
+  video stopped halfway carries on from there. Long videos are 16:9, slower
+  and darker, with a chapter title at each chapter, a YouTube description
+  with chapter timestamps, and a thumbnail. Two hours takes a few hours to
+  make on an older PC: leave it overnight.
+- **Pictures and clips:** each scene gets, in order, your own clips and
+  pictures from the **Media library** (matched by their names, tags, notes,
+  and show), real stills from the show's Fandom wiki, stock (Openverse photos;
+  Pexels clips with a free key in `STUDIO_FARM_PEXELS_KEY`), then pictures
+  made by your own Stable Diffusion (`STUDIO_FARM_IMAGE_URL`) or art cards.
+  Turn off **Allow AI-made pictures** and only real clips, stills, and stock
+  are used. Clips play muted under the voice.
+- **Media library:** upload clips and pictures, or link a folder on this PC
+  (nothing is copied; folder and file names become tags, so name clips for
+  what they show). Tick **Background** on gameplay to play it under a whole
+  short, then pick it as the channel's background video.
+- **Editing:** every video opens in the editor. Change any scene's line or big
+  on-screen words, reorder, add, or delete scenes, swap a scene's picture or
+  clip (your library, the wiki, or an upload), or tell the AI what to change
+  (*"make the hook scarier"*; a long video is edited a chapter at a time).
+  **Save and render** renders it again; voice clips are kept for lines you
+  didn't change, so it is quick.
+- **Posting queue:** finished videos wait at the channel's next free time
+  with the title, description, and hashtags to copy (YouTube gets #Shorts):
+  download, post it, and mark it posted. **Autopilot** keeps a day of videos
+  ready while the app is open.
+- **Animated cartoon stories** (style *Animated cartoon story*): the look of
+  the big history cartoon accounts. Characters with big, detailed heads
+  (hair with a real hairline, strands and shine, coloured eyes, inked
+  outlines) on stick bodies act out a story in 16 painted places drawn in
+  layers with light and shade (a hut with a cooking fire, a market village,
+  the savanna, a palace hall with columns and a throne, a forest, a city, a
+  night sky, a classroom, a beach, snow, space, and more), filmed with a
+  moving camera (wide, medium, close-up, push in, pan). Close-ups are drawn
+  at up to three times the size, so faces stay sharp. A narrator tells it with one big word at a time
+  on screen. A tall short shows the 16:9 cartoon on a wooden board under a
+  white series-title box. Add your own characters on the **Characters**
+  tab: their skin, hair, head wear, age, beard, earrings, glasses, or a face
+  picture from your library, plus their own voice for their lines. Tick them
+  in the channel and say *"make a cartoon about the king who couldn't
+  walk"*. The writer plans every shot (who is in it, what they do, where
+  they stand, the camera). In the editor, change any line, place, camera,
+  or who is in a shot (*"Sundiata crawl left, Sogolon cry right"*).
+- **Painted cartoons** (the image engine): set up **Knowledge & Memory →
+  Image engine** once and cartoons are painted instead of drawn, in the
+  early-2000s superhero cartoon style (Teen Titans, Ben 10: Alien Force,
+  Justice League). [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)
+  runs on your graphics card (the Vulkan build, so AMD cards like an RX 580
+  work) with Pony Diffusion V6 XL, a DC-animated style LoRA, and
+  SDXL-Lightning for speed (8 steps). **Set up the image engine** downloads
+  the engine and the style once (about 5 GB; *superhero-small* is about
+  3.4 GB for 4–6 GB cards), checks every file's SHA-256, and keeps them in
+  the Repo vault, so they still install if they leave GitHub or Hugging
+  Face. **Paint a test** shows a character or place in the style. The
+  writer says where each shot happens in its own words (*"a rooftop over
+  the city at night"*), and each place is painted once, with the full
+  24-step recipe and real colour guidance (a few minutes on an 8 GB card),
+  since it is kept and reused. Each character is
+  painted once, full body, and cut out, plus a talking mouth and the
+  feelings the story needs, made from that same picture so they look the
+  same in every shot and every video; they breathe, walk, lean into
+  punches, jump and fall as cut-outs, and only their mouth moves when they
+  talk. Settings: **Cartoon Art** (auto: painted once the engine is ready;
+  painted; drawn), **Image Engine** (this PC, or an online OpenAI-style
+  images service with **Online Image Service**, **Key**, and **Model**),
+  **Image Engine Build** (Vulkan or CPU), **Image Style**.
+- **Music edits** (style *Music edit (beat for beat)*): upload the song to
+  the Media library (MP3, WAV, M4A, or a video with the song in it) along
+  with clips from the show. The farm finds the song's tempo and every beat,
+  picks its loudest part (or the part you choose), and cuts between your
+  clips on the beat. Loud parts get more cuts, and the big hits punch in,
+  flash, or shake. The words being sung build up across the middle, and the
+  big words are spelled out huge, letter by letter, in the channel's colour.
+  Lyrics come from timed lyrics you paste (`[00:12.34] words`) or from the
+  built-in Whisper (the `studio_voice` extra), lined up with any plain
+  lyrics you paste. Without either, the pasted lines are spread over the
+  beat. Pick any cut's clip yourself in the editor; it stays when you
+  render again.
+- **Farm chat** on the same page takes *"make 3 shorts about Breaking Bad
+  lore"* or *"make a 2 hour sleep video about the entire lore of Breaking
+  Bad"*; said in the main chat, it goes to the **Farm** agent, a local agent.
+
+Videos need the `studio_video` extra (Pillow, ffmpeg, and numpy for the
+beat), which the Windows
+installer adds. Video size is `STUDIO_FARM_VIDEO_SIZE` (720p renders faster);
+`STUDIO_FARM_MUSIC` can play a music file you have the rights to under every
+video. Show clips and stills are other people's work: use short pieces with
+your own narration, and the farm credits the wiki in the description.
+Posting stays with you: the platforms only allow it from their own apps or
+business APIs.
+
+**Trading Bank.** The **Trade** tab is a trading desk run by five model
+seats: a **Technical Analyst** (charts and indicators), a **Researcher** (news,
+earnings, ASX announcements, coin facts), a **Macro & Sentiment** seat (the
+market's mood, rates, the index), a **Risk Guardian** (the devil's advocate),
+and a **Portfolio Manager**, who decides. Every few minutes the desk scans
+your watchlist and the day's movers (ASX shares, US shares, crypto, and meme
+coins, each switchable), scores each setup in plain code, and debates only
+the best few. Each seat can think with its own model (Setup, *Seats and
+their models*): server models run side by side, models on this PC take
+turns on the graphics card.
+
+- **The debate.** Every seat reads the same briefing (prices on three
+  timeframes, the market's regime, how this setup did in the symbol's own
+  history, the Researcher's findings, lessons from earlier debriefs, and the
+  seat's own track record). The analysts open blind (in *Max* depth each
+  opening is asked three times and averaged), cross-examine each other, then
+  the Guardian runs a pre-mortem (*"assume this lost money: why?"*) with
+  objections marked blocking or not. Rebuttal rounds follow until the seats
+  settle (Fast 1, Balanced 2, Max 4), closing forecasts, the PM's decision
+  (it must answer every blocking objection), and the Guardian's final
+  challenge to the actual order. Every line streams live on the **Debate**
+  tab and lights up the 3D arena on the **Desk** tab; **Download the log**
+  saves a round, and a plain log of every day is kept in Studio's data
+  folder (`trading/logs`, 30 days).
+- **Checked information first.** Before any seat is asked, the desk checks
+  the data: each price's own time against its market's age limit (stale,
+  future-dated or delayed prices are flagged, never passed off as live), a
+  real bid and ask (Coinbase, Kraken, Hyperliquid, or the platform), the
+  spread, volume and turnover, missing candles, prices that disagree between
+  sources, dated news (ASX announcements, Yahoo Finance) and whether a story
+  is confirmed or already priced in. A failing critical check stops new buys
+  (holdings are still reviewed). Everything the seats see comes as a
+  numbered **evidence pack** (facts, calculations, news, each with source and
+  time); seats must cite items by number, and web text is fenced off as data.
+- **Four long debate rounds** (Setup, *Debate rounds*, 1-6): between rounds
+  the desk researches the seats' open questions (dated news, web, market
+  data), collects their ideas, and **simulates** the plan on the asset's own
+  past returns (2,000 paths: chance stop first or target first, the worst
+  5%). Seat answers are checked against a strict format (one repair, then
+  the seat is ignored). Before any buy an **information stress test** checks
+  the evidence the decision rests on (stale or unconfirmed support blocks or
+  shrinks it), the Guardian reviews a draft plan with a veto, and plain code
+  runs a **decision engine** (every rule with what was measured and the
+  limit), a scorecard, the market regime's policy (no new trades in an
+  extreme market), and an **investment stress test** (worst day and week,
+  gaps, a crash across the portfolio, liquidity) that can only make an order
+  smaller or stop it. A decision that went stale during a long debate is
+  discarded and analysed again.
+- **Forecasts are scored and learning is controlled.** Every seat's forecast
+  (traded or not) is checked when it comes due. Vote weights change only in
+  checked, versioned steps: 50+ scored forecasts per seat, tested on the
+  newest 30% held back, at most 10% a step, between ×0.5 and ×2; every
+  version is kept and can be rolled back (Debriefs, *Learning*). Learning
+  never touches limits, keys or safety settings.
+- **The risk period.** Before any order: a risk report (money at risk,
+  reward for risk, expected value, a quarter-Kelly cap, stop distance against
+  normal swings, share of a day's volume, correlation with what you hold,
+  currency risk), stress tests (a 1-3 ATR drop, a gap through the stop, a
+  market fall, a meme-coin crash), an event check (earnings, RBA, FOMC, CPI,
+  token unlocks), and a risk round where all five seats grade it A to F. The
+  PM may only make the order smaller or wait. Then a cooling-off wait (2
+  minutes for shares, 1 for crypto) re-checks the price, volatility, spread,
+  and headlines before going on. The **Risk** tab shows the latest one.
+- **Hard limits** (Setup) are plain code no model can talk past: risk per
+  trade, largest position, largest order, open positions, trades a day, a
+  daily loss stop, minimum confidence and agreement, a cool-down per symbol,
+  meme-coin caps (1% each, 5% in all, minimum liquidity and age), a
+  do-not-trade list, and the risk period's settings (minimum grade, reward
+  for risk, correlation, earnings blackout, cooling-off).
+- **The account check.** Right before every order the desk reads the live
+  account: it must be the exact account you verified (Test, then *Yes, this
+  is my account*), active, in the right currency, with enough buying power,
+  the market open, the price still near the decision, and no duplicate order.
+- **Every decision is recorded.** Each cycle keeps a decision record (the
+  evidence pack, every seat's answer, every rule checked, timings and prices
+  at each step, the order and its result), searchable on **Orders**, and an
+  audit trail of orders, fills, settings, mode changes, key changes and the
+  kill switch that is never pruned (download it as CSV).
+- **Protection.** A **circuit breaker** pauses new trades after a daily loss,
+  a losing streak, a slippage spike, a burst of errors, repeated bad data, or
+  orders FCC can't match with the account; positions are still managed. The
+  **kill switch** latches until you release it on the PC, keeps the
+  platform's own stops on what you hold, and closing everything needs the
+  typed phrase *CLOSE EVERYTHING*. An order whose answer was lost stays open
+  (never sent twice) until FCC can match it.
+- **Realistic practice fills and a position manager.** Practice orders pay
+  the live ask and get the bid (an assumed spread, labelled, when there is
+  no live book), with slippage that grows with size and partial fills in
+  thin markets; limits expire after a day. Each holding's highest and lowest
+  price are kept, the stop moves to the entry at +1R (and trails when the
+  plan says so), and the plan's holding period ends with a time exit.
+- **Backtest** (Debriefs): the desk's rules replayed on past daily candles
+  (closed candles only, filled at the next open, gaps, halts, fees),
+  labelled a historical simulation, never a prediction.
+- **Four modes.** **Practice** trades practice money on real live prices (AUD
+  10,000 to start; reset any time). **Alert only** analyses and alerts but
+  never orders. **Live: I approve** puts each real order
+  on the Desk tab with its risk grade and account check, waiting for your
+  **Approve** (it re-checks first) or **Deny**. **Live: automatic** trades on
+  its own inside every limit and needs the phrase *I accept real-money
+  trades*. Switching to live, saving keys, and verifying accounts work only
+  on the PC. After a restart only practice carries on; live needs
+  **Start** again, and a red banner stays up while real money is automatic.
+  Each market (coins, US shares, ASX shares) can trade on its own verified
+  account. Keys that fail their regular check switch real money off.
+- **Platforms** (Setup, each with where to get keys): **Alpaca** (US shares
+  and crypto, free paper account), **Interactive Brokers** (ASX and US shares
+  through IBKR's Client Portal Gateway on this PC), **Kraken**, **Coinbase**,
+  **BTC Markets**, **Independent Reserve**, **CoinSpot (beta)** and **Swyftx
+  (beta)** for crypto and meme coins, and **Any platform (webhook)**, which
+  posts each approved order as JSON (with an optional signature) to
+  TradersPost, your own bot, or an automation, and **Hyperliquid / Invo
+  (beta)**: the exchange the Invo app trades on, reached through an API
+  wallet you create for your Invo account (it can trade but can't withdraw).
+  FCC trades it at 1x, isolated, long only, with the stop and target held by
+  the exchange, and you can practise on Hyperliquid's live book first
+  (Setup, *Practice coin prices*). Keys are encrypted on the PC with
+  Windows' own protection (without it, keys can't be saved and FCC stays in
+  practice), never shown back, blanked out of every log, and a key that can
+  withdraw or transfer is refused; FCC refuses any call that would move
+  money. A lost answer mid-order is looked up by the order's own id before
+  anything is sent again, so an order is never placed twice.
+- **Debriefs.** After each closed trade every seat says what it predicted and
+  what it missed and the PM writes the lesson into the desk's memory (the
+  next briefing recalls it); misses among scored forecasts get a one-line
+  self-critique; each market close gets a session debrief (ASX and US at 4pm
+  local, crypto daily); and a weekly review suggests changes you can
+  **Accept** (limits never change by themselves).
+- **For Australia.** Money is shown in AUD, ASX and New York hours follow
+  their own daylight-saving rules, ASX orders are whole shares with the $500
+  first parcel, and **Orders → Download the tax CSV** lists every sale
+  first-in first-out in AUD with the 12-month flag for the CGT discount (a
+  record for your accountant, not tax advice).
+- **Honestly:** no system can promise returns, and a debate can be
+  confidently wrong. Run paper for a few weeks, read the debriefs and the
+  leaderboard, and start live small. **Desk → Engine** shows whether the loop
+  is running, each step's errors, and fill and slippage figures; only one
+  FCC runs the desk at a time. Meme coins on DEXes are research-only
+  (buying there would need a wallet key inside the app); sites without an
+  API (CommSec, SelfWealth, Stake) aren't connected, but a webhook covers
+  anything that takes a web signal.
+
+**Ops.** **Ops (what the PC is doing)** in the menu shows the PC's load (CPU,
+memory, each NVIDIA card and its memory, disk), Studio's background lanes
+(web, data, the local model, server models, CPU jobs) with what's running and
+waiting in each, which agents are working, the local model queue, and the
+trading desk, with a 3D system pulse on top. Background work runs in those
+lanes so it never swamps the PC: one local model turn at a time, quiet jobs
+wait (up to 30 seconds) while the processor is busier than **Busy-Processor
+Pause** (`STUDIO_CPU_THROTTLE`, 85% by default), and **Low-Power Mode**
+(`STUDIO_LOW_POWER`) halves the lanes and draws the 3D at 20 frames a second.
+
+**3D views.** The Trading Bank's debate arena and the Ops pulse are drawn
+with three.js (kept in `vendor/three`), loaded only when a 3D view opens. They
+stay light: at most 30 frames a second, a capped pixel ratio, nothing drawn
+while the page is hidden or the view off-screen, and everything freed when
+you leave the page. With reduced motion switched on, or without WebGL, the
+pages show their flat views instead. Pages cross-fade as you move between
+them.
+
+**Local agents direct server agents.** With **Local Agents Direct Server
+Agents** (`STUDIO_LOCAL_CONTROL`, on by default), every agent thinking on this
+PC gets `ask_agent`, `team_status`, `stop_agent`, and `manage_agent` over the
+agents that think on a server AI: it hands them jobs (with everything the job
+needs, since they can't see memory), checks on them, stops them, and changes
+their tools or leaves them notes. Agents on this PC take orders from Jarvis
+only, and server agents never direct agents on this PC, which read your
+memory. Who is on which side follows each agent's model right now, so
+switching a model (Team brains, the agent's page, or *"switch the Researcher to
+gemini"*) moves the agent between the groups on its next message. Each agent's
+page shows its side and role under **Team** (*This PC · Directs the agents on
+server AIs*). Agents you chose for every tool on this PC can still ask anyone.
+FCC Phone follows the same rule: an agent on a cloud AI can't hand work to an
+agent thinking on the phone.
+
+**Business photos.** Attach photos of the real business (the shop, team,
+food, work) to any message, on the PC (📎) or in FCC Phone (🖼): what you
+write with them is kept as their note, such as what they show, prices, hours,
+or the story. They're also on **Agents → Business photos** on the PC and on
+**Projects** on the phone, where you add more, edit notes, or delete them.
+Photos are shrunk and turned upright before they're kept (at most 2000px on
+the PC, 1600px on the phone). The Builder checks `list_photos` first, puts
+yours on the site with `use_photo` (into `images/`, with the right width and
+height), uses your notes as facts, and only fills gaps with free stock
+photos. Your own photos need no credit line. iPhone HEIC photos open in FCC
+Phone; on the PC, send them as JPEG (iPhone: Settings → Camera → Formats →
+Most Compatible).
+
+</details>
+
+<details>
+<summary><strong>The Lab: mix, make, forge, build, and design with real results</strong></summary>
+
+Open **Lab** in the tab bar (or the HUD menu). It is a science sandbox that
+works like a game but answers with real chemistry and physics. Benches run
+along the top, and the **Lab chat** with Jarvis sits on the right.
+
+- **Chemistry.** The shelf holds about 130 real chemicals (acids, bases, salts,
+  metals, oxidisers, indicators, household products, oils, soaps, cosmetic
+  ingredients) plus all 118 elements. Tap a bottle, or drag it, and it pours
+  into the beaker; set the millilitres or grams, then press **Mix**. **Heat**
+  and **Flame test** are switches. The bench animates what really happens:
+  the colour change, bubbles of gas, a precipitate clouding and settling in
+  its true colour (lead nitrate + potassium iodide rains bright yellow), foam
+  (elephant toothpaste erupts over the top), heat or cold on the thermometer,
+  the pH meter, oil floating in a layer, a coloured flame. Underneath are the
+  balanced equations, what you would see, what was made (in grams), what is
+  still dissolved, and safety warnings. The rules cover neutralisation (with
+  its heat), carbonates fizzing, metals in acid and in water, precipitation by
+  the solubility rules, metal displacement, ammonia complexes, catalysed
+  peroxide, bleach mixes, starch-iodine, permanganate, indicators, dissolving
+  heat and saturation, saponification (soap), slime, curdling, emulsions, and
+  what heating does to crystals, baking soda, and sugar. Not on the shelf?
+  Type any name under **Look it up**: the Lab learns it from PubChem (formula
+  and molar mass) and keeps it. When a mix goes beyond the rules, the Lab's
+  AI (a server model) predicts it, labelled **AI prediction**.
+- **Make.** Type *shampoo* (or tap one of 17 products: conditioner, body
+  wash, hand soap, cold-process bar soap, toothpaste, the WHO hand sanitiser,
+  lotion, lip balm, dish soap, bath bomb, slime, candle, perfume, mineral sun
+  cream, glass cleaner, elephant toothpaste). You get the real formula with
+  every ingredient, its percentage and grams for the batch, and why it's
+  there; the bottle shows each ingredient as a layer inside it (**Show it
+  mixed** blends them); tap any ingredient to see its molecule and elements,
+  and the whole product is broken down element by element. Anything without a
+  recipe is written by the Lab's AI from the shelf. Products with a reaction
+  (bath bomb, slime) have **Test it on the bench**.
+- **Materials.** Pick materials (metals, alloys, plastics, ceramics,
+  composites, woods, fibres, semiconductors), set the percentages, and
+  **Forge**. Known recipes become the real alloy (88% copper + 12% tin is
+  bronze; iron with 0.25% carbon is mild steel); anything else is estimated
+  with the rule of mixtures and says so. Then run the **pull**, **float**,
+  **heat**, and **electric** test rigs.
+- **Tech.** Put batteries, LEDs, motors, fans, sensors, microcontrollers,
+  regulators, and more on the board and press **Power on**: it works out the
+  voltage, the resistor each LED needs, the current, how long the battery
+  lasts, and what would burn out, won't switch on, or needs a driver, and
+  lights, spins, or smokes each part to match. Nine ready builds (flashlight,
+  power bank, weather station, robot car, plant waterer…) are one tap away.
+- **Design.** Build a piece of technology from real materials: each
+  component has a material from the shelf (mild steel, cast iron, copper,
+  aluminium, a circuit board (FR-4), glass, oak, ABS, carbon fibre, …), a
+  shape, a size, a role (structure, casing, electronics, moving parts,
+  wiring, fasteners), and can be an electronics part. Each one is drawn in
+  its material, brushed steel, copper, a green board with gold tracks, wood
+  grain, rubber, glass, carbon weave, and tapping it says how it works.
+  **Check physics** weighs every part (casings are hollow), checks each
+  load-bearing member against its material's strength, runs the
+  electronics on the circuit bench, works out the heat and how hot the
+  casing gets, and warns about a metal case around live parts, rust in the
+  wet (**Outdoors / wet**), metals that corrode each other, and whether it
+  floats; parts then light up, spin, glow hot, rust, crack, or smoke to
+  match. Three examples (a steel-frame robot cart, an iron garden lamp, an
+  aluminium desk fan) are one tap away. These are estimates for a sketch
+  (straight loads, still air), not an engineer's sign-off.
+- **Build in 3D.** Above the design, the build is drawn as the real thing on
+  a studio floor: boards with their traces and pads, chips with legs,
+  capacitors, batteries, motors, wheels, heat sinks with fins, connectors
+  with pins, each in its material, every part labelled with a pointer line.
+  Turn the view, click a part (or its label) to see what it is and how it
+  works, drag parts to move them, and **Turn**, **Up**, **Down** or **Auto
+  layout**; the places are saved with the design. **Ask AI** under the view
+  has the Lab AI build or change it, placing each part in 3D (`at_mm`,
+  `turn_deg`). A fourth example, a computer motherboard, shows the look.
+- **Keep and reuse.** **Keep as a part** (or ➕ on **Made**) saves a design or
+  a build as a part; **Saved parts** adds it to any other design, where it
+  opens into its components. **⧉** on **Made** copies anything to change
+  without losing the first.
+- **Elements** is the periodic table: tap an element for its facts, flame
+  colour, and uses, and add it to the beaker. **Made** keeps everything you
+  and the agents made.
+
+In the **Lab chat**, say *"Hey Jarvis, make a shampoo"*: Jarvis uses his `lab`
+tool, the bench shows the result as it arrives, and he tells you what's inside.
+He can mix, forge, build, design (*"design a robot cart with a steel frame"*:
+he picks the materials and parts, and the Design bench shows it), and look
+things up the same way, and he can still
+search the web, run deep research, learn a topic, and study videos when he
+needs to know more. The Lab refuses weapons, explosives, drugs, and poisons;
+dangerous household mixes (bleach with acid or ammonia) still simulate, with
+the warning, so you know never to do them.
+
+</details>
+
+<details>
+<summary><strong>Subagents: helpers that join fitting work on their own</strong></summary>
+
+On the **Agents** page, the **Subagents** card adds helpers with a role:
+**Developer** (new: builds whole programs, front end to back end), **Coder**,
+**Builder**, **Researcher**, **Tester**, or **Reviewer**. When any agent
+starts a task that fits a subagent's role, the subagent joins by itself in
+the same project, at most two per task:
+
+- Developers, coders and builders take a separate part of the job while it
+  runs; researchers report what they find.
+- Testers and reviewers come in when the task has finished and check it.
+- Their progress shows in that task's chat, and they appear in the **HQ**
+  (marked subagent). Subagents never call more subagents.
+
+Pick each subagent's model when you add it (any server model, such as an
+OpenRouter or NVIDIA NIM one, or a model on your PC), or change it later on
+its page. **Make subagent** turns any agent on the team into one, including
+agents added from GitHub repos (**Knowledge & Memory → Add from GitHub**);
+those join tasks that fit the skills their description names. Untick **On**
+to switch one off, **Back to team** keeps it as a normal agent, and the bin
+deletes it.
+
+</details>
+
+<details>
+<summary><strong>The Changer: an AI that changes FCC itself</strong></summary>
+
+Open the HUD menu, **The Changer**. Type what to change or fix in FCC and
+press **Start the change**. The Changer is an agent on a server model (change
+its model on its agent page) that works in a copy of FCC's own files, the
+**FCC (Changer copy)** project, never the app you're using:
+
+- It reads the app's map (`CLAUDE.md`, the fcc-studio skill), finds the code,
+  and edits it, with undo for every file like any project.
+- **Check** syntax-checks every changed file and loads the app from the copy.
+- **Screenshots** run the changed copy on a spare port with no keys and an
+  empty data folder, and take pictures of the Studio pages you name (needs
+  Playwright's browser: `uv run playwright install chromium`).
+- **Small fixes** go straight through. **Bigger jobs become an update
+  project**: the **Changer Planner** reads the code and plans it in
+  milestones (with a spec for a new area) for you to **Approve**; anything
+  touching the Trading Bank, Content Farm, keys or settings always waits for
+  you. Vague requests get up to three suggestions first; press **Build this**.
+- Each milestone is saved as a checkpoint, built by the Changer, checked,
+  reviewed by a **different agent** (the **Changer Reviewer**, plus the
+  **Changer Security** reviewer when protected files change), fixed (up to two
+  rounds), screenshotted if a page changed, and saved again. **Pause**,
+  **Resume**, **Change the plan**, **Cancel**, and **Roll back to here** on any
+  checkpoint. If FCC restarts mid-job, the project waits for Resume.
+- The Changer hands separate parts to **helpers** (a helper Changer or any
+  team member by name): at most two at a time, each owning its own files, and
+  helpers can't hand work on again.
+- Before work starts it checks each agent's model answers; the Changer team
+  never switches to another model on its own. A token **budget** (normal, big
+  or very big) pauses the project with what's done and what's left.
+- Its copy holds FCC's tests too, and each check runs only the tests related to
+  the change (changed tests first; anything it can't match is named). Changed
+  Python files are tidied the way FCC's checks expect.
+- It doesn't stop half way: a busy provider (a rate limit) is waited out, and a
+  step that runs out of steps, times out or answers empty carries on (up to two
+  more tries). A used-up daily allowance pauses the project with a plain note,
+  ready for **Resume**. If the Planner writes its findings but never hands in a
+  plan, FCC turns them into a one-step plan that waits for your **Approve**.
+- It tests like a person: **try** runs the changed copy (empty data, no keys)
+  and uses a Studio page step by step (fill, click, read what it shows),
+  reporting script errors, missing files, pop-ups and sideways scrolling;
+  **tests** runs the test files it names; **look** takes PC and phone
+  screenshots and sends them to the **Vision Model** (Settings, Studio), which
+  says what looks wrong, and the Changer fixes it and looks again (three rounds
+  at most). With no Vision Model it reads each page as text instead. Its checks
+  and tests run with an empty home folder, so code it writes can't reach your
+  keys.
+- It follows FCC's built-in skills for each step: **vibe coding** and **visual
+  review** when it builds, **debugging** when it fixes; its reviewers follow
+  **code review** and can run tests and try pages to confirm a finding.
+
+**Team notebook.** Everyone working on an update (the Changer, its Planner and
+reviewers, helpers, team agents and Aider) shares one notebook that FCC keeps,
+not the model: the goal in your words pinned on top, the plan and which
+milestone is on now, and short notes of what each one found, decided and
+finished (FCC also writes one after every step and every check). Every agent
+reads it before each step, so nothing is looked up twice and a switch of model
+or API (NVIDIA to FreeLLMAPI, say) loses nothing. Lessons can be kept for later
+updates. Add your own note from the Changer page; **Use for the whole team**
+moves all four Changer agents to one model at once. The HQ shows the update:
+its goal, the milestone, who is working on it now, and the newest notes.
+
+**Helper team.** wshobson/agents (202 coding agents, MIT) comes with FCC.
+**Add the helper team** on the Changer page turns it on and adds
+eight lean agents (debugger, error detective, test automator, security auditor,
+Python and JavaScript experts, UI designer, search specialist) the Changer can
+hand parts to. Each agent asks for a light, everyday or strong model; FCC gives
+it the **Light Model** or **Strong Model** (Settings, Studio) or the default, so
+simple jobs don't spend a strong model's tokens.
+
+**Aider helper.** If you install [Aider](https://aider.chat) (once:
+`uv tool install aider-chat`), the Changer, Builder, Coder and Developer can
+hand it a focused coding job with the **aider** tool. FCC doesn't bundle
+Aider. It runs only in a project folder or the Changer's copy, never the app
+itself, after the same Ask/Auto approval as any command (Agents Can Run
+Commands). It talks to the agent's own model through FCC's own address (a
+local model at your model server), so it never sees a provider key. Git,
+commits, shell commands, link reading, analytics and update checks are off,
+and its history files stay outside the project. Each job also gets FCC's skills
+(and, in the Changer's copy, the team notebook) as read-only guides; the tests
+FCC picks for the files (related tests in the copy, pytest or npm test in a
+project) run after its edits and it fixes failures (three tries at most); its
+own syntax check runs too. Agents can ask for **architect** mode (one model
+plans, the **Aider Editor Model** writes), a **project map** for big codebases
+(about 1,000 tokens a request), and **screenshots** a Vision Model looks at.
+
+**OmniRoute.** Like FreeLLMAPI, if you run
+[OmniRoute](https://github.com/cheaper-inference/OmniRoute) on your PC, paste its
+key as **OmniRoute** in Admin, Providers (`OMNIROUTE_API_KEY`; address
+`http://localhost:20128/v1`, or set `OMNIROUTE_BASE_URL`) and pick
+`omniroute/auto`. FCC doesn't bundle it and treats it as a server model. Don't
+run Headroom in front of it until their compatibility is checked.
+
+**More starter repos.** FCC now also ships agent-reach, Vercel's agent skills
+(web design guidelines), awesome-design-md, playwright-cli, awesome-free-llm-apis,
+superpowers, impeccable, flick and rea, on like the others: every agent can
+search their skills and guides when a job needs them.
+
+**Free AI services in the brain pickers.** Choose brain and Team brains list
+the free services: FreeLLMAPI's choices (`auto`, `auto:coding`, `auto:smartest`,
+`auto:fast`) and OmniRoute's `auto` are always there, OpenRouter and Kilo show
+their free models, and NVIDIA, Groq, Gemini, Mistral, Cerebras, Cohere, Z.ai,
+Cloudflare, Hugging Face, LLM7 and Ollama Cloud show their models once they have
+a key.
+A service without a key shows a **Get a free key** link and where to paste it.
+
+**FreeLLMAPI.** If you run [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi)
+on your PC (it spreads requests over free tiers of many providers), add its
+unified key as **FreeLLMAPI** in Admin, Providers (`FREELLMAPI_API_KEY`; its
+address is `http://localhost:3001/v1` unless you change `FREELLMAPI_BASE_URL`).
+Then use models like `freellmapi/auto`, `freellmapi/auto:coding` or
+`freellmapi/auto:smartest` for any agent or the whole Changer team. FCC doesn't
+bundle it. It sends your prompts to outside providers, so FCC treats it as a
+server model (your private memory stays away from it), and its answers vary
+with which free model it picks.
+
+**Seeing pages.** The Builder, Designer, Coder, Developer and Tester also get
+**look_page**: PC and phone screenshots of a project page go to the Vision
+Model, which says what looks broken or unfinished. On NVIDIA NIM,
+`nvidia_nim/nvidia/nemotron-3.5-super-vl-120b-a12b` (thorough, about three
+minutes) and `nvidia_nim/meta/llama-3.2-90b-vision-instruct` (quicker) both
+work as the Vision Model.
+
+Every agent's background task carries on the same way (the Builder, Coder,
+Researcher, relays and subagents too), and every model call waits out a brief
+rate limit instead of losing its work.
+- **Make update zip** first scans the new lines for keys, `eval`/shell
+  commands, turned-off certificate checks, unsafe loading, new web addresses
+  and switched-off checks; anything flagged waits for **Pack anyway**. The
+  update (`FCC-Studio-update-<version>.zip`) unzips over your fcc folder and
+  carries `_update/<version>/` with CHANGELOG, UPDATE_INSTRUCTIONS, MANIFEST,
+  SHA256SUMS and TEST-REPORT (including what was **not** tested); a
+  `-rollback.zip` undoes it. An update project raises the minor version.
+
+To install an update: close FCC, unzip it into the folder that holds your
+`fcc` folder (choose Replace), and start FCC. To undo it, unzip the rollback the
+same way. **Start over from a fresh copy** drops changes not yet in a zip.
+
+</details>
+
+<details>
+<summary><strong>Maths tutor: the maths to become an electrician in NSW</strong></summary>
+
+Open **Learn** in the tab bar and press **Open the maths tutor** (or the HUD
+menu, **Maths tutor**). It is for you, not the agents: 28 topics in six
+stages, from apprenticeship entry tests through DC, AC and three-phase theory
+to the installation calculations in the final licensing assessment (voltage
+drop, longest cable run, earth fault-loop impedance).
+
+- **Practice**: pick a topic for a short lesson and its formulas, then answer
+  questions with new numbers every time. Answers are marked in code and show
+  the full working, so the answer is always right. **Explain it to me** asks
+  the AI to explain in plain words; it is given the right answer and working
+  and is told not to change them. Each topic shows how you are going, and
+  **Next** suggests what to practise.
+- **Practice test**: ten questions from one stage (or everything), marked at
+  the end with the working for anything missed.
+- **Ask the tutor**: any maths question about electrical work, answered by the
+  AI with its working (labelled as the AI's: check it).
+- **Licence path**: apprenticeship, the Certificate III in Electrotechnology
+  Electrician (UEE30820), the final assessment, and the Qualified Supervisor
+  Certificate from NSW Fair Trading, with links to the NSW Government and
+  TAFE NSW pages to check the current rules.
+
+Values from Australian Standards tables (AS/NZS 3008 cable voltage drops, for
+example) are given in the questions, never quoted from the tables.
+
+</details>
+
+<details>
+<summary><strong>Agents that search the web and build sites</strong></summary>
+
+An agent is a name, a model, a set of tools, its own memory, and optionally its
+own tune pack. Agents call `web_search`, `web_fetch`, `write_file`,
+`read_file`, `list_files`, `remember`, `recall`, and `finish`; web tools reuse
+FCC's existing local `web_search`/`web_fetch` implementation and its SSRF
+guard.
+
+Give an agent a goal on the **Agents** tab and it runs a bounded tool loop —
+`STUDIO_AGENT_MAX_STEPS` caps it — inside a **project**: a folder that can hold
+a whole website or app (HTML, CSS, JavaScript/TypeScript, Python, configs, and
+more), previewed live and downloadable as a zip. Writes are sandboxed: no path
+traversal, text source files only, a 512 KB per-file cap, and a file-count cap;
+`node_modules`, `.git`, virtualenvs, and caches are never listed or zipped.
+
+**Download a finished app.** When an agent builds or changes an app, the
+chat hands it over like a file: a **Download** card with the app's name, file
+count, and size, under the agent's last message. **Download** saves the whole
+project as one `.zip`, **Open** runs a web app in a new tab, and **Files**
+opens its project page. The card also shows up in every chat that asked
+for the work, so when Jarvis has the Builder or Coder make something, it
+lands in Jarvis's chat on the HUD too. A new card comes only when the files
+change. FCC Phone does the same on the phone.
+
+**Commands.** With `STUDIO_AGENT_COMMANDS` set to `ask` or `auto`, agents also
+get `run_command` to install packages, build, and run tests or scripts inside
+the project folder. In `ask` mode every command appears in the chat (and on
+Home) with **Run it** and **Deny**, and the agent waits for your answer. Commands
+run on this computer with your permissions, but with any environment variable
+that looks like a credential removed, a time limit (`STUDIO_COMMAND_TIMEOUT`),
+and the whole process tree stopped when it expires. It is off by default.
+Rooms can be given a project too, so a team of agents builds in one folder.
+
+**Giving Jarvis orders.** When you tell Jarvis to have an agent do something,
+Studio hands the job out the moment you say it, before Jarvis even answers, so
+an order never depends on the model choosing to call a tool. It understands
+"have Builder make a timer app", "tell the Researcher to look into cheap GPUs",
+"ask Helper to plan my week", "I need Builder to fix the menu", "@Researcher
+compare phones", "Builder, fix the menu", "let the Researcher know I like short
+answers", and "get an agent to …" (Jarvis picks who: the Builder for making
+things, the Researcher for finding out, the Helper for plans). Several orders
+in one message all start, each agent works in the background and reports back
+in Jarvis's conversation, and Jarvis just confirms who is doing what. "Stop
+Builder" (or "tell the Builder to stop") stops its background work. Jarvis
+won't hand the same job out twice.
+
+Jarvis also has `team_status` (what every agent is doing and last finished,
+with results) and `stop_agent`, and plans bigger goals by splitting them into
+parts for the right agents, running independent parts at the same time. Ask
+"what is everyone doing?" any time.
+
+**Jarvis's own tools.** Besides running the team, Jarvis has:
+
+- `todo`: your to-do list and reminders. "Add milk to my list", "remind me to
+  call Sam in 20 minutes", "what's on my list?", "tick off milk". Reminder
+  times can be "in 20 minutes", "tomorrow 9am", "at 17:30", "tonight", or
+  "2026-10-01 14:00". A due reminder is announced on the HUD (spoken when his
+  voice is on). **Knowledge & Memory → To-dos and reminders** shows the list,
+  adds items with an optional reminder, and ticks them off.
+- `calculate`: exact arithmetic (+ - * / // % **, brackets, "15% of 80",
+  sqrt, round, min, max, log), so sums are never guessed. Only plain maths is
+  evaluated.
+- `list_projects`: finds your projects with their file counts, when they
+  changed, and preview links.
+- `system_status`: CPU, memory, and disk use, whether LM Studio is running and
+  what it serves, the internet connection, and the voice.
+- `weather`: now and the next few days anywhere. "What's the weather in
+  Sydney tomorrow?" is fetched before he answers: temperature, feels-like,
+  wind, humidity, and each day's high, low, and chance of rain. It uses
+  Open-Meteo (no key; only the place name is sent) and is off when Web Access
+  is off. Asking him to *build* a weather app still goes to the Builder.
+- The date and time ride on every message, so "remind me at 5" and "what day
+  is it?" work.
+
+**Attach files.** The 📎 button beside the message box (on the HUD and in
+every chat) attaches one or more files. Studio reads their text: text and code
+as they are, Word, Excel (every sheet, tab-separated), and PowerPoint (slide by
+slide) files, and PDFs with real text (scanned pictures of text can't be read).
+Each file shows as a chip (✕ removes it) and its text goes with your next
+message. Files up to 25 MB; a very long one sends its first 40,000 characters
+and says so.
+
+**The Helper** plans in a fixed shape: *Best approach*, numbered *Steps*,
+*Check* (what to test and how to tell it worked), and *Backup*. Ask it to
+review work and it reads the files, runs `check_project`, and lists what to
+fix, most important first. It plans your own things too (a week, a trip, a
+budget) with `calculate` for every sum, and adds items to your to-do list when
+you ask. Starter Helpers whose instructions were never edited are upgraded in
+place.
+
+The first run creates the main AI (**Jarvis**) and seven starter agents:
+**Guide**, **Builder**, **Researcher**, **Helper**, **Tester**, **Teacher**,
+and **Student**.
+
+The **Tester** checks what the team built, like a careful user and a code
+reviewer at once: it reads the code, runs `check_project` and `polish_check`,
+runs the project and its tests when commands are allowed, tries what real
+users do (empty and very long input, double clicks, a phone-sized screen,
+reloads, going offline), and reports a *Verdict*, numbered *Bugs* (file and
+line, steps to reproduce, exact fix), and *Polish*. It fixes small bugs
+itself with `edit_file` and hands bigger ones to the Builder or the Coder. Say "have Tester check the snake game"; a project
+named in a task is found by name. Jarvis has the Tester check bigger builds
+and hands its fixes back to the Builder.
+
+**Trying a page like a user (`try_page`).** Reading code can't prove a page
+works: a local model once built a Tip Calculator whose custom-tip box changed
+nothing until you touched another box, and the Tester read the code and said
+it worked. Now the Tester, the Coder, and the Builder use the page itself.
+`try_page` opens a page of the project in a hidden phone-sized browser, types
+into boxes, picks options, clicks buttons, and reads what the page shows
+against the answer the agent worked out (*"#tip should show $9.00"*). It
+reports each step, any value that wasn't what was expected, pop-up boxes,
+script errors, missing files, and a page wider than the phone screen. The
+Tester only says *works* when it passed. It uses the same browser part as the
+desktop browser (Playwright's Chromium, or the Edge or Chrome on your PC).
+
+</details>
+
+<details>
+<summary><strong>The Guide: ask anything about the app</strong></summary>
+
+Open the Guide with **ASK THE GUIDE** on the HUD, the **?** button at the top,
+the **?** key, or by tapping **SYSTEM STATUS** when it is not OPTIMAL. It
+knows every page and button: what each feature does and exactly where to tap,
+from setting up LM Studio to teaching an agent a skill.
+
+- **What is wrong right now.** The sheet opens with a live check of this
+  install: LM Studio unreachable or with no model loaded, a model with no API
+  key, a failed reply, commands waiting for approval, the PC offline, a search
+  key problem, or the voice not downloaded. Each has its fix and an **Open**
+  button for the right page.
+- **Answers that take you there.** Every answer ends with **Open** buttons for
+  the pages it mentions and a few follow-up questions to tap. **Where
+  everything is** lists every feature with its location.
+- **Uses the model already running.** The Guide answers in its own words with
+  its small guide model, or, when that is not downloaded, with the model LM
+  Studio has loaded. With no model at all it answers from built-in help. It
+  gets only the notes that match the question plus a one-line index of the
+  whole app, so a small local model reads it quickly.
+- **Jarvis knows too.** Jarvis has an `app_help` tool that returns the same
+  notes and live problems, so "how do I…" and "why isn't … working" questions
+  asked on the HUD get the real button and page names.
+
+</details>
+
+<details>
+<summary><strong>Internet access for every agent</strong></summary>
+
+Every agent can search the web and read pages, including agents running on
+local models: Studio does the browsing and gives the model the results.
+`STUDIO_WEB_ACCESS` sets who may: `all` (the default), `listed` (only agents
+with `web_search`/`web_fetch` in their tools), or `off`.
+
+Web tools follow the connection of the PC running Studio (your phone is only
+the screen). Studio checks for internet about once a minute. While the PC is
+offline, agents don't get `web_search`, `web_fetch`, or `research`, and they
+are told to work from memory and the project files instead. If a web tool
+fails to connect partway through, the tools are paused straight away. They come
+back on their own within about 15 seconds of the connection returning. The HUD
+shows **WEB OFFLINE** while this is happening.
+
+Without a key, searches go to DuckDuckGo. It often blocks automated searches,
+so Studio retries once and then falls back to Wikipedia's search. For reliable
+full-web search, add a key in **admin → Studio → Web Search API Key**:
+
+| Service | Key looks like | Notes |
+| --- | --- | --- |
+| [Brave Search API](https://brave.com/search/api/) | `BSA…` | Free tier, independent index |
+| [Tavily](https://tavily.com/) | `tvly-…` | Free tier, returns page extracts built for AI research |
+| [Serper](https://serper.dev/) | 40 hex characters | Google results, free trial credits |
+| [SearXNG](https://docs.searxng.org/) | no key | Self-hosted and free: set `STUDIO_SEARCH_BASE_URL` and enable its `json` format |
+
+`STUDIO_SEARCH_PROVIDER=auto` (the default) picks the service from the key.
+**Web Search Order** (`STUDIO_SEARCH_ORDER`) puts your API key first (free
+search takes over when it runs out) or free search first (the key is used only
+when free search finds too little). A key that runs out or is refused is skipped
+for the rest of the day, **Daily API Search Limit** (`STUDIO_SEARCH_DAILY_LIMIT`)
+caps paid searches per day, and the same search within six hours reuses its
+results. **More → Internet access** shows today's API use.
+**Backup Web Search API Key** (`STUDIO_SEARCH_BACKUP_API_KEY`) takes a second key,
+for example Tavily beside Brave. If the first service rejects its key or runs
+out of quota, the backup is used, then DuckDuckGo, and the agent is told why. **More → Internet access** shows the setup
+and has a **Test search** button. The HUD shows the service as a `WEB` pill.
+
+A **Researcher** agent is created for deep research: it searches, reads the
+best sources, answers with links, and saves what it finds to shared memory.
+Ask the main AI to send it, or write `@Researcher` in a room.
+
+**More platforms.** `web_fetch` reads Reddit threads (post plus top comments)
+and YouTube videos (title, description, and transcript when the video has
+captions). Two optional credentials make these reliable:
+
+- **YouTube API Key** (`STUDIO_YOUTUBE_API_KEY`, from Google Cloud, YouTube
+  Data API v3) is optional: research searches YouTube through the API with it,
+  and through YouTube's own search page without it. Transcripts come from the
+  video page, or from YouTube's player API when the page is behind a consent
+  or bot check.
+- **Reddit App ID and Secret** (`STUDIO_REDDIT_CLIENT_ID`,
+  `STUDIO_REDDIT_CLIENT_SECRET`): create a free *script* app at
+  reddit.com/prefs/apps. Research then reads Reddit through its official API,
+  since Reddit often blocks unauthenticated requests.
+
+For Google results, use a Serper key as the Web Search API Key.
+
+</details>
+
+<details>
+<summary><strong>Deep research, testing what it finds, and the Builder asking for help</strong></summary>
+
+The `research` tool answers a question from at least ten sources
+(`STUDIO_RESEARCH_SOURCES`, 3 to 25), and every run brings back a fixed mix
+with links:
+
+| Kind | Default | Setting | What counts |
+| --- | --- | --- | --- |
+| Web pages | 3 | `STUDIO_RESEARCH_WEB` | The most on-topic results, read in full |
+| Reddit threads | 2 | `STUDIO_RESEARCH_REDDIT` | On topic (at least half the question's key words), with real replies or votes; NSFW, removed, and silent threads are skipped, and the most upvoted and discussed come first |
+| YouTube videos | 2 | `STUDIO_RESEARCH_YOUTUBE` | On topic, not Shorts, and only if the transcript could be read |
+
+Ask for a different mix any time ("research this with no YouTube", "get me 4
+Reddit threads") and the agent passes that to the tool for that question. If
+fewer good threads or videos exist, the report says so instead of filling in
+off-topic ones. Coding questions also search Stack Overflow, GitHub, MDN, and
+dev.to; everyday questions don't. The rest of the sources come from each
+platform in turn so no single site dominates, with more angles tried if it is
+still short. The report groups sources under Web, Reddit, and YouTube, with
+each thread's score and comment count and whether a transcript was read, and
+numbers them `[1]`, `[2]`, and so on so the agent can cite them. The
+Researcher answers with a short answer, the findings, what Reddit and the
+videos add, and a list of every link it used.
+
+**Video notes.** Every YouTube video research reads, and every video you give
+Studio, is turned into notes the agents can work from: a summary, key points,
+the steps in order, the tools and names it mentions, and its warnings, written
+by the Researcher's model from the transcript (long videos are read in parts).
+The full transcript is kept with its times. Each video also goes into the
+team's memory as a short entry with its link and notes id, so any agent's
+recall finds it. Agents use two tools:
+
+- `study_video` (Researcher and Jarvis): give it a link (YouTube or any other
+  video site) or a video file's path on this PC and, optionally, what the
+  team should learn from it; `show` also plays it in the desktop browser.
+  Give Jarvis or the Researcher a video in chat and they watch it.
+- `video_notes` (every starter agent): search the studied videos; it returns
+  the best match's notes and the exact transcript parts about the question,
+  each with a link that starts the video at that moment.
+
+In the app, **Knowledge & Memory → Video notes** has a box to paste a link
+(plus an optional focus) and lists every studied video; open one to read its
+notes, search the transcript, jump to any moment, or forget it. Research
+studies its videos in the background, one at a time, so it never waits on
+them; with no model running, notes are built from the transcript's most
+telling sentences instead.
+
+**Claw Code.** FCC keeps the full source of
+[Claw Code](https://github.com/ultraworkers/claw-code) (MIT; `vendor/claw-code`),
+an open coding agent for the terminal, so it works even if its repo is
+deleted. **Knowledge & Memory → Claw Code** builds it on this PC with one
+click (Rust needed, from https://rustup.rs; the first build takes a few
+minutes) and **Open Claw Code** starts it in a terminal connected to FCC, so
+it thinks with your models, local ones included. `fcc-claw` does the same
+from any terminal. Building and opening only work from the PC itself.
+
+**Watching videos on this PC.** A video with no captions (or on another site,
+or a file on this PC) is listened to here: `yt-dlp` fetches only its sound and
+Whisper (the same speech recognition as Jarvis's ears) writes down what is
+said, with times. If the sound can't be downloaded (YouTube sometimes asks
+downloaders to sign in), Studio plays the video in the desktop browser at
+double speed and records its sound as it plays instead. The sound is deleted
+once it is heard; nothing leaves the PC. Files must be in your own folders
+(Videos, Downloads, Desktop, …), and only agents that think on this PC watch
+them, so a server AI never hears your recordings. Videos up to
+`STUDIO_WATCH_MAX_MINUTES` (120) are listened to; it takes about a tenth of
+the video's length on a fast PC, plus half its length when it is recorded in
+the browser.
+
+**Desktop browser.** Jarvis and the Researcher have `desktop_browser`: a real
+browser window on your desktop, your own Edge or Chrome (`STUDIO_DESK_BROWSER`:
+auto, edge, chrome, or chromium), that they drive while you watch. Its actions
+are search (the web or YouTube), open, read (long pages in parts), links,
+click (a link by its number), scroll, back, play, pause, watch (play the
+page's video and turn it into video notes), buttons, press, and close. It has
+its own Studio profile, so it never sees your passwords, cookies, or tabs.
+Agents only read and follow links: they never type, sign in, buy, or download,
+press only harmless buttons (accept, close, show more, next, play), and never
+open this PC or your home network. Ask in chat, for example *"open YouTube,
+find a video on sourdough and watch it with me"*. **Knowledge & Memory →
+Desktop browser** shows what it has open and closes it; `STUDIO_DESK_VISIBLE`
+off keeps it out of sight. It needs the `studio_desk` extra (Playwright and
+yt-dlp), which the Windows installer adds.
+
+**Learn mode.** Jarvis can teach himself a subject. Say *"Jarvis, learn
+electrical engineering"* (or *study*, *teach yourself*, *master*, *become an
+expert in*), or use **Knowledge & Memory → Learning**, or the **Learn** quick
+command on the HUD. He plans a short course (4 lessons for *quickly* / *the
+basics*, 7 by default, 10 for *in depth* / *everything*), then for each lesson
+he researches the web, Reddit, and YouTube, writes his own lesson notes
+(explanation, key concepts, formulas with units, numbered steps, a worked
+example, mistakes and safety, sources), and quizzes himself to check he
+understood. A gold bar under **MISSION TIMELINE** on the HUD fills as he goes,
+moving with every source he reads, and shows the current step and his
+self-check score. Each lesson goes into the team's shared memory, so every
+agent's recall finds it, and every agent has a `knowledge` tool to search the
+lessons and read one in full; the Builder uses it when you ask for a blueprint
+or a build in that subject. When he finishes he writes a study guide and tells
+you in chat. Say *"stop learning"* to stop; the finished lessons are kept. One
+subject is learned at a time. In **Learning**, open a study to read the guide,
+every lesson's notes, quiz, and sources, or to forget it.
+
+The **Researcher** tests code before recommending it: `test_code` saves a
+snippet in its **Research lab** project and runs it (Python or JavaScript), then
+reports PASSED or FAILED. Findings go into team memory tagged `verified` or
+`unverified`. Running code follows `STUDIO_AGENT_COMMANDS`: with `ask`, each
+run waits for your **Run it**.
+
+The **Builder** builds websites, apps, and games on its own, with coding tools
+like a coding assistant's: `read_file` with line numbers and ranges,
+`edit_file` to change exact text without rewriting the file, `search_files` to
+find text across the project (regular expressions, file patterns), `list_files`
+with patterns such as `src/**/*.js`, `run_command` and `test_code` to run and
+test, `update_plan` to keep a checklist of its steps, and `check_project` to
+check the whole project without running it: links, images, scripts, and
+stylesheets that point at missing files, `#anchors` with no matching id,
+unbalanced brackets in JavaScript and CSS, Python syntax errors, invalid JSON,
+and pages missing a title, a mobile viewport, or image alt text. When the
+Builder says it is finished after changing files, Studio runs the check first
+and sends it back once to fix anything found. The tools are the
+same whether the Builder runs on a local model or a server one; only the
+internet tools need a connection. When it hits an error it can't fix quickly,
+it calls `ask_researcher` with the exact error. The Researcher looks it up,
+tests the fix, and answers, and the Builder applies the fix and tests again.
+Both conversations are visible as linked chats.
+
+**Builder on small local models.** Local models write tool calls as JSON, and
+small ones often break it with the quotes in HTML or get cut off part way
+through a page. Studio reads what they meant: raw line breaks are accepted, a
+`write_file` may leave `content` out and put the file in a fenced code block
+right after the JSON (no escaping), and a complete call with unescaped quotes
+is recovered. A call it still can't read, or a reply cut off at the length
+limit, is sent back once or twice with how to fix it (write big files in parts
+with `append`) instead of ending the job with nothing written. Reading the
+same file again with no change in between is answered "you already have this,
+write now", four steps without writing get a nudge to write, older file text
+in the conversation shrinks so it never overflows the model's context (and a
+context-full error is retried once after shrinking harder), and the check
+before finishing also runs when the Builder ends in plain words. Pages missing
+a doctype, charset, or mobile viewport get them added as they are written, and
+`check_project` flags template placeholder text still on the page. New
+projects start with a stylesheet that makes plain HTML look designed: a warm
+header band, sections as cards, lists as tiles, buttons and forms, dark mode.
+When the Builder writes its own `styles.css`, that base stays underneath in a
+CSS cascade layer, so every rule it writes wins and whatever it leaves out
+still looks finished.
+
+**Builder upgrades.**
+
+- **Multi-page business sites.** The `business` template is a professional
+  five-page site for a café, shop, salon, restaurant, trade, or studio:
+  Home (full-bleed photo hero with a dark fade, opening hours, address, and
+  phone), About, Services (tabs with prices, keyboard friendly), Gallery (tap
+  a picture to open it large, then step through), and Contact (a form that
+  checks each field, hours, and a map link). Every page shares a header that
+  sits over the photo and turns solid as you scroll, a full-screen phone
+  menu, and a footer with pages, hours, contact, and social links. Headings
+  use Playfair Display and text Inter, colours are variables at the top of
+  `styles.css`, and sections fade in as you scroll (not for people who turn
+  motion off). Its pictures start as drawn placeholders marked
+  `data-placeholder`; `check_project` asks the Builder to swap them for real
+  photos. To receive form messages, put a form service address (such as
+  Formspree) in the form's `data-endpoint`.
+- **Starter templates.** `start_project` begins a new project from a tested,
+  mobile-first starter instead of a blank page: `business` (above), `website` (sections, phone
+  menu, contact form), `landing` (hero, features, testimonial, pricing,
+  signup), `webapp` (single-page app with saved state), `game` (canvas game
+  loop, score, best score, touch controls), `3d-landing`, `3d-dashboard`
+  and `3d-shop` (below), `lessons` (a classes or lessons site, starting as a
+  surf school: live canvas waves in the hero, lesson cards with prices, a
+  conditions table, coaches, safety notes, and a booking form that works out
+  the price and goes to a form service or the school's email), `portfolio` (a
+  studio or practice, starting as an architecture firm: big type hero, a
+  filterable project grid with a detail view per project, each project drawn
+  from its own numbers in the page's light or dark colours, principles and
+  contact), `python-tool` (command line with a test), `python-web` (FastAPI
+  API with a page), and `node-api` (Node server with no dependencies). Every
+  template passes `check_project`. It only replaces a new project's
+  placeholder files, never real work, unless told to.
+- **UI library.** The `ui_library` tool gives the Builder, Coder and Designer
+  3,802 ready-made web design pieces from Uiverse (MIT): buttons, cards,
+  forms, inputs, toggles, checkboxes, radios, loaders, tooltips,
+  notifications and backgrounds. `search` finds pieces by words ("glass
+  card", "dark login form"; plain CSS first), `get` gives one piece's HTML
+  and CSS to copy into the site and restyle with its own colours and fonts,
+  keeping the designer's credit comment. The library ships with FCC
+  (`vendor/uiverse/`), so nothing is downloaded.
+- **Website layouts.** The `site_layouts` tool copies one of 26 whole-site
+  layouts from Start Bootstrap (MIT, Bootstrap 5) into a project: agency,
+  landing pages, portfolios, blogs, shops, a CV, a multi-page business site,
+  an admin dashboard and more. Bootstrap, its icons and Font Awesome come
+  with it in `vendor/`, so the site works offline; the business's name goes
+  in the title and logo, and `check_project` flags the sample words, photos
+  and grey placeholder boxes until they are replaced (`vendor/startbootstrap/`).
+- **Game library.** The `phaser-game` starter is a working Phaser 3
+  platformer with Kenney's art and sound, keyboard and touch controls. The
+  `game_assets` tool searches Kenney's 217 free (CC0) packs by words
+  (sprites, tile sheets, UI, particles, fonts, sound effects, jingles):
+  49 ship with FCC (sounds as mp3), the rest download once from kenney.nl,
+  are checked against their recorded SHA-256 and kept in the PC's game
+  vault. It also finds and shows Phaser's 2,298 example programs (the code
+  only; their art isn't free). The `game-dev` skill holds the recipes for
+  movement, animation, juice, enemies, levels and phone controls, and comes
+  with any game job (`vendor/kenney/`, `vendor/phaser/`).
+- **Godot games.** Game jobs are made in Godot 4.7.2 (MIT) on the PC
+  unless you ask for a browser or phone game (those use Phaser). The
+  `godot` tool starts a project from `platformer-2d`, `rpg-topdown` or
+  `third-person-3d`, checks it with Godot headless after every change
+  (every script error and missing file, with file and line), records a
+  frame to `screenshots/frame.png`, and exports a Windows game. Godot
+  downloads once, is checked against Godot's SHA-512 list and kept in the
+  Repo vault; export templates (about 1 GB) download only for an export. It
+  also searches and reads Godot's 133 official demo projects, and `use`
+  copies a whole demo into the project with all its art, sound, models and
+  skies (2,159 files shipped in FCC, each checked against its SHA-256), ready
+  to change into your game. The
+  `godot-dev` skill holds the genre book (18 genres) and the guide to art
+  styles, animation, physics, worlds and story (`vendor/godot/`).
+- **App kit.** The `ui_kit` tool brings Tabler (MIT, Bootstrap 5, light and
+  dark) for app and game screens: dashboards, menus, settings, leaderboards,
+  forms, tables, pricing and sign-in, plus 5,184 Tabler icons found by words
+  and copied as SVG files. `app` starts home, leaderboard and settings
+  screens on it (`vendor/tabler/`).
+- **Bug-fix library.** The Changer, its Planner and reviewers have
+  `bug_library`: 490 real bugs from big Python projects (Django, pytest,
+  sympy, Sphinx, matplotlib and more), each with its issue, the fix the
+  project merged and the test that proves it, from SWE-bench Verified. Its
+  debugging skill looks up a similar bug before fixing one
+  (`vendor/swe-bench/`).
+- **Adding a library.** Ask the Changer to add another library and it
+  gets the `add-a-library` skill: find it, check the licence, show you a
+  preview and wait for your yes, keep a copy inside FCC with its licence
+  and checksums, give agents a tool, test it and ship it.
+- **3D starters and the FCC web kit.** `3d-landing` is a landing page whose
+  hero is a slowly turning constellation of linked points that leans toward
+  the pointer, with features, counting numbers, and a contact form.
+  `3d-shop` is a shop or bakery site with a 3D look that moves: a baker's
+  peel you turn by hand with products built from shapes (tap one for its name
+  and price), product cards whose photos are rendered from the same models
+  and tilt and float, a step-by-step process, hours, and an order form that
+  goes to a form service or the shop's email; the `interactive-3d-site` skill
+  tells the Builder how to adapt it. `3d-dashboard` is a live dashboard: key numbers, a 3D view of services
+  (bars for load, light running along their links), and an activity log,
+  read every few seconds from JSON at the address in `data-source` (or sent
+  in with `window.dashboard.push()`); its sample data drifts gently until
+  you connect real data and remove `data-demo`. Both sit on the FCC web kit:
+  `fcc-kit.css` (design tokens with light and dark, type scale, grid, cards,
+  a sticky nav that folds into a phone menu, forms, page transitions) and
+  `fcc-kit.js` (scroll reveals, `data-count` numbers, `data-tilt` cards, the
+  menu, a light/dark switch), all still with reduced motion. three.js is
+  copied into the project's `vendor/three/` (with its MIT licence) so the
+  site works offline and downloads whole; the 3D pauses off-screen and falls
+  back to a glow or plain bars without WebGL.
+- **Undo.** Every write, edit, and delete keeps the file's last ten versions
+  (in a hidden `.studio-history` folder that is never listed or zipped).
+  `restore_file` lists them or puts one back, and the replaced version is kept
+  too. Say "Builder, undo your last change to index.html".
+- **Better edits.** `edit_file` takes several changes to one file at once
+  (`edits`), saves nothing if any of them fails, and still applies a change
+  whose `old_text` only differs in indentation, re-indented to match the file.
+- **Real photos.** `find_images` searches [Openverse](https://openverse.org)
+  (free, no key) for photos cleared for commercial use and gives each one's
+  size and credit line; `save_image` downloads the chosen one into the
+  project (for example `images/hero.jpg`, JPEG/PNG/WebP/GIF, up to 5 MB) so
+  the site loads fast and works offline, and says the `width`/`height` to use
+  and the credit to put in the footer. Downloads only go to public https
+  addresses (redirects included), and follow Web Access like the other
+  internet tools. Saved pictures keep earlier versions for `restore_file`,
+  and `check_project` counts them as present.
+- **Designed, not just working.** The Builder picks a Google Font pair, a
+  small palette in `:root` variables, generous spacing, real photos, and
+  inline SVG icons.
+- **Polish.** `polish_check` gives a designer's once-over once the pages
+  work: text contrast (WCAG 4.5:1), phone layouts, hover and focus states,
+  font sizes, a chosen font, a consistent palette in CSS variables, content
+  width, line height, page structure, transitions, image sizes and alt text,
+  pictures on content pages, a meta description, a favicon, and colours of
+  the project's own (it says when a site still has the starter's dark slate
+  and sky blue). The Builder runs it after `check_project` and makes the
+  fixes that fit; every web template passes it apart from the colours and
+  photos, which depend on the job.
+- **Knows the project.** At the start of every job the Builder sees the
+  project's files and the start of its README, so it builds on what is there.
+- **Real JavaScript checks.** When Node is installed, `check_project` has Node
+  parse each script (without running it) and reports the exact line of a
+  syntax error.
+- **More room.** Builders get `STUDIO_BUILDER_MAX_STEPS` steps per job (40 by
+  default) instead of the general 12, so whole apps fit in one job.
+- **No going in circles.** When the same tool call fails twice, the agent is
+  told to stop repeating it and try another way or ask the Researcher.
+- New instructions: start from a template, finished code only, graphics with
+  inline SVG, CSS, or emoji, several edits at once, undo when a change makes
+  things worse. Starter Builders whose instructions were never edited are
+  upgraded in place.
+
+The **Helper** supports the other agents. When the Researcher finishes, the
+Helper reads what it found alongside what the asking agent is working on, drops
+what doesn't matter, and turns the rest into a short plan: the best idea to try
+first, a backup, and what to test. The asking agent gets both the findings and
+the plan (`STUDIO_HELPER_PIPELINE` turns this off). Any agent can also call
+`ask_helper` directly to brainstorm or get unstuck, and the main AI can send
+the Helper work like any other agent.
+
+The main AI can hand work off with `background: true`, so the Builder keeps
+working while you talk. When it finishes, the main AI's conversation gets a
+note saying how it went.
+
+</details>
+
+<details>
+<summary><strong>Adding agents and teaching them skills</strong></summary>
+
+Tap **+** on the Agents tab, or in the HUD's Active agents panel, to add an
+agent. Start from a preset (Builder, Researcher, Helper, Designer, Tester,
+Assistant, or Custom), then set its name, role, and model, and choose its
+tools: Internet, Code and files, Run and test code, Ask teammates, and Memory.
+
+**Choose who gets every tool.** The tool list rides on every message an agent
+sends: about 4,000 tokens with every tool, often under half that with an
+agent's own tools. **Agents → Who gets every tool** has a switch per agent
+showing what each costs; the same **Every tool** switch is on each agent's
+page, the new-agent sheet asks, and Jarvis can do it (*"give the Tester only
+its own tools"*). With **Every tool** off, the **Tools** card on the agent's
+page (**Choose tools** in the list) has a box for every tool, grouped and with
+its token cost: tick or untick any one and it saves at once (**Tick all** and
+**Untick all** do the lot), and the total updates as you go. Boxes explain the
+tools an agent can't turn off or on: web search and fetch when Web Access is
+"all agents", `run_command` until Agent Commands is on, and memory tools on a
+server AI. Jarvis can add or remove one (*"give the Helper weather"*). Existing agents start with every tool. **Every Agent Gets
+Every Tool** (`STUDIO_ALL_TOOLS`, on by default) is the master switch: off, and
+nobody gets every tool. An agent with every tool (every agent but the Guide)
+can use all of Studio's tools, whatever is ticked on its page: files and code, `run_command`
+(still only when Agent Commands allows it, and with your approval),
+web search and deep research, videos, memory and knowledge, `todo`,
+`calculate`, `weather`, `list_projects`, `system_status`, `learn`,
+`agent_model`, and the team tools (`ask_agent`, `team_task`, `team_status`,
+`stop_agent`). An agent hands a part of its job to a teammate with `ask_agent`;
+a job is passed on at most twice (Jarvis to the Builder to the Researcher),
+never back to whoever gave it, and agents in a room hand over with `@Name`
+instead, so work never goes in circles. Agents on a server or cloud AI still
+get no memory tools. Each agent's page lists the tools it really has. The
+Guide keeps its own few because it runs on the smallest model.
+
+**Jarvis controls the team.** Only Jarvis has `manage_agent`: he shows the
+team (models, this PC or server, tools and their token cost), shows what one
+agent remembers, gives an agent every tool or only its own, and adds to or
+clears any agent's memory, a server agent's own memory area included, where he
+saves only what its job needs.
+
+To delete an agent, press 🗑 beside it on the Agents tab (or **Delete this
+agent** on its page) and confirm. It stops any work it is doing; its chats,
+classes, waiting commands, and memories go, and it leaves any rooms it was in
+(a room left with nobody in it goes too). Projects it built stay, and so does
+what it saved to the team's shared memory. Jarvis and the Guide can't be
+deleted.
+
+Each agent's page has **Teach a skill**. Paste a link (a docs page, a Reddit
+thread, or a YouTube video) or write notes about a tool, command, or code
+pattern. The agent reads it, keeps a short how-to, and sees your skills in
+every prompt, so the Builder follows the tools and patterns you taught it.
+
+</details>
+
+<details>
+<summary><strong>Agent rooms: agents talking to each other</strong></summary>
+
+A room is a group chat between you and several agents — mix server and local
+models freely. Write to the room and everyone answers in turn; write `@Name`
+to address one agent. Agents hand work to each other the same way: an agent
+that mentions `@Scout` passes the turn to Scout.
+
+**Start task** gives the room a goal. The first member leads: it plans, hands
+parts off, and the room keeps going until an agent replies `TASK COMPLETE:`
+with a summary. A room pauses after eight turns so agents cannot loop forever
+(press **Continue** to let them carry on) and **Stop** halts it after the turn
+in progress. Every agent keeps working notes of what it said, and a finished
+task goes into the team's shared memory (or into each member's long-term memory
+when shared memory is off).
+
+</details>
+
+<details>
+<summary><strong>Team plans: one job, split between the agents</strong></summary>
+
+Say "get the team to make a bakery website with a price list", "team up on
+…", or "make a team plan to …" (or type the goal into **Team plans → Plan it**
+in the HQ). The main AI writes a short plan: two to eight steps, each for the
+agent whose job it is, with which steps must finish first. Then the team works
+it:
+
+- Steps that don't wait on each other run side by side (two at a time), and
+  an agent never gets two steps at once. An agent busy with something else is
+  waited for, not interrupted.
+- Each step gets the results of the steps it waited on, so the Builder
+  builds from the Researcher's findings, not from a guess.
+- A failed step skips the steps that needed it; the rest carry on.
+- **Stop** ends the plan and the step in progress; **Resume** runs it again
+  from where it stopped. A plan cut off by a restart is marked stopped, so
+  it can be resumed too.
+- The HQ shows each plan with every step's agent and state, and the agent at
+  work shows "Plan step s2: …" as its task. When the plan ends, the main AI
+  posts what was done in the main chat.
+
+Small jobs are still one `ask_agent` call; a plan is for work that needs more
+than one agent.
+
+</details>
+
+<details>
+<summary><strong>The relay: one job through the repos' trained agents, one after another</strong></summary>
+
+With the relay on (it is by default), a new website, app, or game goes
+through LCC first and then through the repos' agents trained for that kind of
+job, one at a time. Only repos with agents (or skills) trained for the job
+take part, and each gives every one of them, so a website gets web designers
+and developers, never a finance or security agent. For "make a website for my
+bakery":
+
+1. LCC's own agent for the job builds it (the Builder; the Coder for apps and
+   games, the Lab agent for lab work, the Researcher for research).
+2. awesome-claude-code-subagents: `ui-designer`, `frontend-developer`,
+   `seo-specialist`, and `accessibility-tester`, one turn each.
+3. OpenHands: the OpenHands engineer checks and fixes it.
+4. MetaGPT: the QA Engineer tests it.
+5. crewAI: the Content Writer improves the words.
+6. taste-skill's `high-end-visual-design` rules, OpenHands'
+   `frontend-development` skill, and paperclip's `design-critique`, each
+   applied by the Builder.
+7. Last, LCC's agent checks the finished project (`check_project`,
+   `polish_check`) and fixes what the stages broke: links that go nowhere,
+   stray text, parts the stylesheet doesn't style.
+
+An app gets `ui-designer`, `fullstack-developer`, `qa-expert`, and
+`accessibility-tester`, then MetaGPT's Architect, Engineer, and QA Engineer; a
+game gets `game-developer`; lab work ("relay: make shampoo in the lab") starts
+with LCC's Lab agent and gets `scientific-literature-researcher`,
+`data-scientist`, and the scientific skills' `experimental-design`; a blog post
+gets the content agents and crewAI's planner, writer, and editor. A repo's
+agent joins the team only when its stage starts, after LCC's own agent has had
+the job, and goes back on the shelf (archived, with its memory) when the relay
+ends.
+
+Each stage works in the same project, reads what the stage before left,
+keeps what works, and says what it changed; the next stage is told. Every
+stage is held to a business-level bar: polished, consistent, ready for a real
+business. Studio also compares the project's files before and after each
+stage and adds a line such as "Files changed: index.html (edited)" or "No
+project files changed", so a stage that only repeats the last report shows up
+as doing nothing, in the HQ and in the final result. Only one runs at a time,
+and the final result (every stage's note and the project) comes back to the
+main chat. A stage that fails doesn't stop the rest: the next one carries on
+from the work so far.
+
+Every repo has a place in the order (the five you put first lead). Change any
+of it in the HQ's **Relay** card: turn it off, reorder repos, set a repo to
+every job, when it fits (the default), or off, pin one of its agents, or pick
+which LCC agent starts. **+ agent** adds more agents from the same repo, each
+taking its own turn in order. The final check can be switched off there too.
+Repos you add from GitHub join the end of the relay and take part when the
+names of their agents fit the job.
+
+Later stages are told to change files with `edit_file` rather than rewrite
+whole pages, and to keep the class names the stylesheet styles, so one
+stage's rewrite doesn't undo the design. Agents written for a Claude Code team
+with a "context-manager" (most of awesome-claude-code-subagents) are told LCC
+has none, so they read the project's files instead of asking it.
+
+Start one any time with "relay: make a landing page for my gym", "run it
+through all the repos: …", "… through the relay", the **Run the relay** box
+in the HQ, Jarvis's `team_plan` tool with `relay: true`, or `lcc_relay` from
+another AI tool. Stop and Resume work as for team plans; a resumed relay runs
+the stages that didn't finish one at a time, in order.
+
+A repo agent that changes files gets the Builder's room (40 steps), but that
+room is for writing: it reads and searches for the usual 12 steps, and if it
+has changed nothing by then, only `edit_file`, `write_file`, and `finish` stay
+open until it does. A write or edit that leaves a file exactly as it was is
+refused as "nothing changed", so it doesn't count as work.
+
+On a PC running a small local model, each stage takes minutes, so a relay of
+a dozen stages can take hours; models on this PC stream their replies, so a
+slow PC writing a long page isn't cut off.
+
+</details>
+
+<details>
+<summary><strong>Ideas board: your references for the team</strong></summary>
+
+The **Ideas board** (in the side menu) is where you show the team what you're
+after: a website or app UI you like, a layout, colours, a logo, a competitor's
+site, a video of how something should feel, or just a note. Give each one a
+title, say what you like about it, and add tags and the project it is for;
+then **Add note or link**, or **Add photos or videos** (JPEG, PNG, WebP, or
+GIF photos up to 25 MB; MP4, MOV, or WebM videos up to 200 MB). Files stay on
+this PC.
+
+Each idea goes in a category: **Websites**, **Apps**, **Games**, **Lab**, or
+**General** (for everything). **Games** is your own game library: photos and
+videos of games you like, or your own art; the Builder and Coder (the game
+makers) read it too. The buttons above the board show one category at a time,
+with how many ideas each has. LCC's agents look in their own category and
+General: the Builder in Websites, the Coder and Tester in Apps, the Lab agent
+in Lab, so a website's references never steer lab work. Repo agents see every
+category and can narrow a search with `category`.
+
+The Builder, Coder, Lab, Helper, and every repo agent get the `ideas` tool.
+When the board has anything on it, they are told so before they start, then
+search it (`ideas` with `search`), read an idea in full (`read`), and can put
+a reference photo into the project (`use`). They go in the direction your
+references point and make their own work at a business level, not a copy.
+
+**Photos and videos into code.** The Builder, Coder and their presets also
+get `look_reference`: an ideas-board photo or video, a business photo, or a
+picture or video in the project goes to the Vision Model (Settings, Studio).
+A video is sent as 9 frames taken evenly through it, in time order, so the
+model can tell how things move and animate. It writes a build brief: for a
+game the genre, camera, player, moves and animations, enemies, level (as a
+text map), HUD, physics feel, art style, palette and how to build it in
+Godot 4 (with the closest Godot demos); for a site or app the sections,
+layout, colours, type and parts. The brief is saved in the project's
+`reference-notes/` (with the video's frame sheet), and the agent builds from
+it. Every brief ends with **MAKE IT OURS**: a few concrete changes (a new
+name and words, redrawn characters and logo, shifted colours, parts moved)
+so the game or site is like your reference but your own, not a copy; your
+own art is used as it is. Attach a photo or a video to any chat: photos go
+to Business photos and videos to the Ideas board, and the agent is told to
+build from them with `look_reference`. Send the web designer (Builder) a
+photo of a site to re-engineer it, the app makers (Coder) a photo or video
+of a game to make one like it, or the Changer a photo of a screen you want
+FCC itself to have. ffmpeg (the `studio_video` extra the Windows installer adds)
+shrinks photos and takes the frames. Without a Vision Model, agents go by
+what you write about each reference, so say what you like.
+
+</details>
+
+<details>
+<summary><strong>Connectors: Gmail, GitHub, Discord, and more for the team</strong></summary>
+
+The **Connectors** page gives the team outside services. Each takes a token
+from that service; agents then use it with the `mcp` tool ("check my inbox",
+"post in Discord when the site is done", "list the open issues on my repo").
+
+| Connector | What agents can do | What you give it |
+|---|---|---|
+| Zapier | Gmail, Google Sheets, Calendar, Slack, Notion, and 8,000+ apps: the actions you pick in Zapier | A token from mcp.zapier.com |
+| GitHub | Repositories, issues, pull requests, code search | A personal access token |
+| Hugging Face | Models, datasets, papers, Spaces | A read token |
+| Stripe | Customers, payments, invoices, payment links | A restricted key (only the rights agents need) |
+| Supabase | A project's tables, logs, and docs, read only | A personal access token |
+| Context7 | Up-to-date docs for programming libraries | Nothing (a free key gives more) |
+| DeepWiki | How any public GitHub repo works | Nothing |
+| Apify | Find and run ready-made scrapers (Actors) for Google Maps, Instagram, TikTok, Amazon, any website; results come back as data. Each run uses your Apify credit (the free plan gives $5 a month and pauses when it runs out, with no charge) | An API token from console.apify.com → Settings → API & Integrations |
+| Email (built in) | Read the inbox; write emails | Your address and an app password (Gmail, iCloud, Yahoo, or any IMAP/SMTP server) |
+| Webhook (built in) | Post to a Discord or Slack channel, or any web address | The webhook address |
+
+Name the service in your message ("ask DeepWiki how this repo works", "list
+my GitHub issues", "tell my Discord the site is live") and Studio shows the
+main AI that service's real tools first, so even a small local model calls
+the right one instead of guessing, and the job isn't handed to the
+Researcher. The web connectors are MCP servers each service runs itself, so
+nothing is downloaded. **Email never goes out on its own**: an agent's email becomes a
+draft that waits on the Connectors page (and in the HQ approvals count) until
+you press **Send**, unless you set "Agents may send without asking" to yes.
+Reading mail doesn't mark it read. Outlook.com no longer allows app passwords,
+so connect Outlook through Zapier.
+
+Tokens are kept in `connectors.json` next to Studio's data, readable only by
+you, and are never sent back to the page: a saved token shows as dots, and
+leaving the dots in place keeps it. **Test** tries a connection (signs in, or
+lists the service's tools); **Disconnect** forgets the token.
+
+</details>
+
+<details>
+<summary><strong>Use LCC from any AI tool: OpenAI API and MCP server</strong></summary>
+
+Other AI apps and coding agents can use LCC two ways. The **Connectors** page
+shows the snippets with your address filled in.
+
+**As a model.** FCC speaks the OpenAI Chat Completions API at
+`http://127.0.0.1:8082/v1/chat/completions` (with streaming, tool calls,
+images, and JSON mode), beside the Anthropic Messages and OpenAI Responses
+APIs it already had. Point any OpenAI-compatible app at
+`http://127.0.0.1:8082/v1` with any API key (or your proxy token, if you set
+one). The model name picks the model: a provider/model name like
+`llamacpp/qwen3-4b` uses that one, and any other name uses your default model.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:8082/v1", api_key="any")
+reply = client.chat.completions.create(
+    model="llamacpp/qwen3-4b",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(reply.choices[0].message.content)
+```
+
+That covers Open WebUI, LibreChat, Continue, Cline's "OpenAI Compatible"
+provider, Aider (`--openai-api-base http://127.0.0.1:8082/v1 --model
+openai/llamacpp/qwen3-4b`), LangChain, and anything else built on the OpenAI
+API.
+
+**As a team.** `http://127.0.0.1:8082/mcp` is an MCP server (Streamable HTTP)
+whose tools are your Studio team:
+
+| Tool | What it does |
+|---|---|
+| `lcc_team` | The agents, what each is for, and what they are doing |
+| `lcc_chat` | Talk to the main AI, which can hand work out itself |
+| `lcc_ask` | Give one agent a job; wait for the result or get a task id |
+| `lcc_plan` | Start a team plan for a bigger job |
+| `lcc_relay` | Pass a job through LCC's agent and then each repo, one after another |
+| `lcc_status` | How a task or plan is going, or what everyone is doing |
+| `lcc_stop` | Stop a plan, or everything one agent is doing |
+| `lcc_projects`, `lcc_files`, `lcc_read` | The projects the team made and their files |
+
+Add it to your tool:
+
+```bash
+# Claude Code
+claude mcp add --transport http lcc http://127.0.0.1:8082/mcp
+```
+
+```toml
+# Codex: ~/.codex/config.toml
+[mcp_servers.lcc]
+url = "http://127.0.0.1:8082/mcp"
+```
+
+```json
+// Cursor: ~/.cursor/mcp.json (Gemini CLI uses "httpUrl" in ~/.gemini/settings.json;
+// VS Code uses {"servers": {"lcc": {"type": "http", "url": ...}}} in .vscode/mcp.json)
+{ "mcpServers": { "lcc": { "url": "http://127.0.0.1:8082/mcp" } } }
+```
+
+Web pages in a browser can't use it (requests from other sites are refused),
+the proxy token is needed when one is set, and **Settings → Other AI Tools Can
+Use Your Team (MCP)** turns it off.
+
+</details>
+
+<details>
+<summary><strong>Local models you download and own</strong></summary>
+
+The **Models** tab lists curated small models (0.36B to 7B GGUF builds) and
+accepts any direct `http(s)` URL. Downloads resume from a partial file, report
+live progress, verify an optional SHA-256, and unpack `.zip`/`.tar*` archives —
+refusing archive members that escape the destination. **Scan folder** adopts
+model files you copied in by hand.
+
+Point `STUDIO_LOCAL_BASE_URL` at whatever serves those files (LM Studio,
+`llama-server`, Ollama's OpenAI endpoint), then write an agent's model as
+`local/<model id>`. Every other model reference goes through the FCC proxy, so
+Studio agents can use all of FCC's providers and its fallback chain. Small
+local models that cannot call tools natively are driven through a text tool
+protocol instead.
+
+</details>
+
+<details>
+<summary><strong>The built-in guide</strong></summary>
+
+The **?** button opens the guide: a small preloaded model instructed on how
+this app works. It answers from a knowledge base of what Studio actually does
+and points at the right tab. Before you have downloaded anything it still
+answers, from that same knowledge base, so the app explains itself on a fresh
+install. `STUDIO_GUIDE_MODEL` selects the model and
+`STUDIO_GUIDE_CATALOG_ID` the file fetched when it is missing.
+
+</details>
+
+<details>
+<summary><strong>Tuning: local or on the server</strong></summary>
+
+Every tune pack has two buttons, and you pick per run.
+
+**Tune locally** is deliberately small: it searches for the shortest
+instruction pack — a preamble, up to five rules, and the clearest few
+exemplars — and scores each candidate with token-F1 against held-out pairs your
+examples are split into. That is a handful of short calls per run
+(`STUDIO_TUNING_ROUNDS`, default 3), and it reports its baseline score, its
+tuned score, and live progress. It changes no weights, so it works for any
+model, including local ones. Give the pack a **coach model** and a server model
+writes the candidate packs while your local model is the one scored — the
+server teaching the local model.
+
+**Tune on server** sends the same examples to an OpenAI-compatible fine-tuning
+API (`STUDIO_CLOUD_TUNING_BASE_URL`, `STUDIO_CLOUD_TUNING_API_KEY`) for real
+weight training, polls until it finishes, and — when
+`STUDIO_CLOUD_TUNING_PROVIDER` names the FCC provider that serves the result —
+switches the agent to the tuned model. Server tuning trains server models; an
+agent on a local model gets a clear refusal pointing it at local tuning.
+
+Local tuning is off until `STUDIO_LIGHT_TUNING_ENABLED` is on, or until you
+turn it on for one agent: a chat's settings sheet has a **Very light tuning**
+toggle, and switching it on opens a fresh chat bound to that agent's tune pack
+and allows that pack to run.
+
+</details>
+
+<details>
+<summary><strong>LoRA: training the weights</strong></summary>
+
+**LoRA training** on the Tuning tab changes a student model's real weights.
+Pick the student, a Hugging Face model to train (curated choices, from Qwen2.5
+Coder 7B down to a 0.5B model that trains on a plain CPU, each paired with the
+Ollama build of the same weights), and what to learn from:
+
+- **Topics** — a server teacher writes realistic requests on each topic and
+  the ideal answer to each, so the student learns from the teacher's output.
+- **Tool-use lessons** — the teacher writes requests and the exact tool call
+  for each, in the format Studio's local models use.
+- **Classes** and **tune-pack examples** the student already has.
+
+Then choose where to train:
+
+- **This computer** runs the trainer as a child process: with a GPU it's fast,
+  with 4-bit loading when `bitsandbytes` is installed. Install the libraries
+  with the `lora` extra (`uv sync --extra lora`, or `-WithTraining` on Windows),
+  or point `STUDIO_LORA_PYTHON` at any Python that has them.
+- **Rented GPU or VPS**: the job page shows a few commands to paste on that
+  machine. They download a single standalone script from Studio, which pulls the
+  training set with a per-job token, reports every step, and uploads the result.
+  The GPU machine must reach Studio — Tailscale on both is easiest, or set
+  `STUDIO_LORA_PUBLIC_URL`. You can train on a rented GPU while Studio and the
+  model you chat with stay on your own PC.
+
+The job page shows live progress, the loss per step as a chart, and held-out
+loss before and after.
+
+**What you get back.** Choose under **What to make**:
+
+- **A full model with the new weights** (the default). After training, the
+  worker merges the LoRA into the base model's weights, converts the result to
+  GGUF with llama.cpp, and quantizes it: `Q4_K_M` (about 4.7 GB for a 7B model,
+  fits an 8 GB GPU such as an RX 580), `Q5_K_M`, or `Q8_0`. That one
+  `model.gguf` is uploaded to Studio. Studio puts it in LM Studio's models
+  folder (`~/.lmstudio/models/fcc-studio/…`, or `STUDIO_LMSTUDIO_MODELS_DIR`),
+  creates it in Ollama if Ollama is installed, and switches the student to it
+  as soon as the local model server offers it. In LM Studio, turn on
+  Just-in-Time model loading, or load the model once from My Models, then press
+  **Switch** on the job page. It is an ordinary GGUF file: download it from the
+  job page and use it anywhere.
+- **A small adapter** on top of the base model. It needs Ollama and
+  `STUDIO_LORA_LLAMA_CPP`; Studio runs `ollama create` with `FROM base` and
+  `ADAPTER`.
+
+Either way Studio remembers the student's old model, so **Switch back** undoes
+it.
+
+**Training on a rented GPU, step by step:**
+
+1. Install Tailscale on the PC running Studio and note its address (100.x.y.z).
+   In admin settings, set **Address For Remote Trainers**
+   (`STUDIO_LORA_PUBLIC_URL`) to `http://100.x.y.z:8082`.
+2. Rent a 24 GB GPU (an RTX 4090 or A5000 on RunPod or Vast.ai) with a
+   PyTorch template. Merging a 7B model also needs about 16 GB of RAM and
+   40 GB of disk on that machine.
+3. Start the job in Studio with **Where to train: Rented GPU**. The job page
+   shows three command blocks. On a container host like RunPod, first run the
+   **Tailscale for containers** block, after setting `TS_AUTHKEY` to an
+   ephemeral auth key from the Tailscale admin console. Then run the Linux
+   block: it downloads the worker, installs the libraries, builds
+   `llama-quantize`, and trains.
+4. Watch the loss here. When it ends, the new model arrives on your PC and is
+   installed, and the student switches to it. Stop the rented machine.
+
+</details>
+
+<details>
+<summary><strong>Bug scanner</strong></summary>
+
+**Bug scanner** (in the menu) looks for things in FCC that are broken or not
+working. It only reads, and never changes your data. Each round uses one way
+of scanning, with a fresh random sample:
+
+- **routes**: calls FCC's read-only routes and catches crashes, broken
+  answers and slow ones;
+- **records**: calls each page's routes with real ids and with ids that
+  don't exist;
+- **odd inputs**: sends empty, huge, emoji and negative values;
+- **pages**: opens Studio's pages in a hidden browser (phone or PC size)
+  and catches script errors;
+- **logs**: reads the server log for errors and crashes;
+- **data**: checks saved records for broken links and jobs stuck as
+  running;
+- **files**: checks that FCC's code loads, that page scripts parse, and that
+  its shipped libraries match their recorded checksums.
+
+**Scan once** runs each way you ticked; **Scan endlessly** keeps going a
+round at a time (every 1 to 60 minutes) until you press Stop. A problem is
+listed once and counted each time it comes back. Open one to read it, then
+**Send to the Changer** (it plans the fix in its copy first), or mark it
+seen, fixed or not a problem. Content Farm is left out, and so is anything
+that would download, sync, stream or reach a broker.
+
+</details>
+
+<details>
+<summary><strong>AI teacher and AI student</strong></summary>
+
+Open a class on any topic and the teacher agent plans the lessons, teaches them
+one at a time, and hears the student agent back — all in one classroom chat you
+can read as it happens. After the last lesson the teacher writes a test, the
+student answers each question without the lesson transcript, and the teacher
+grades every answer against its own rubric. Pass or fail is decided by
+`STUDIO_CLASS_PASS_MARK`.
+
+Pick any two agents as teacher and student when you open the class. The point
+is a server model teaching a local one: the teacher's calls go through FCC to
+your provider, the student's go straight to your local runtime, and the Models
+tab shows which local models that runtime is serving right now.
+
+What the teacher marks as worth remembering goes into the student's long-term
+memory, and a pass with light tuning enabled queues a tune built from the
+class — coached by the teacher's model and scored on the student's.
+`STUDIO_TEACHER_MODEL` and `STUDIO_STUDENT_MODEL` set the default Teacher and
+Student agents' models.
+
+**The classroom page** looks like the PocketPal AI app. The classroom is for
+watching: the teacher and the student talk, the teacher leaves the room to
+read up (a lesson's research, or facts for marking the test), a student's
+test question waits until the teacher is back, and every answer is graded.
+**Talk to the teacher** (the pencil, or the bar at the bottom) opens the
+teacher chat: say what the student should learn, change the plan the teacher
+writes, and **Confirm plan and start**. While the class runs you can still ask
+the teacher how the student is doing, or send it out to look something up.
+
+After a pass, **Train the student** trains its weights (LoRA) on the class,
+with extra worked examples the teacher writes for each lesson: on **This PC**
+(Qwen3 4B, 4-bit, fits a 6 GB card), or on **Kaggle** or **Google Colab**'s
+free T4 (Qwen3 8B) with a notebook FCC downloads for you (it reaches FCC over
+Tailscale, like the remote trainer). When training ends, **Give the student
+its trained model** in the teacher chat.
+
+Every teacher call carries short class notes (about 400 tokens: the goal, the
+plan, what the student learned, the grades, the training), so when an API that
+rotates models (FreeLLMAPI, NVIDIA) gives the teacher a new model mid-class,
+the new one carries on, and the classroom shows the switch.
+
+**A teacher on Kaggle or Colab**: the settings (⚙ in the teacher chat)
+download a notebook that serves a model (Qwen3 14B by default) with
+llama.cpp behind a key the notebook makes, over a free Cloudflare tunnel.
+Paste the address and key it prints into Settings, Providers, **Cloud notebook
+(Kaggle, Colab)**, then set the teacher's model to `notebook/teacher`. The
+notebook downloads llama.cpp's wheel and cloudflared from GitHub and the model
+from Hugging Face on the notebook machine, so those can't be kept in FCC's
+Repo vault.
+
+</details>
+
+<details>
+<summary><strong>Memory and Obsidian</strong></summary>
+
+Every agent keeps working notes for the thread it is in and long-term memories
+it recalls by keyword, ranked by overlap, recall count, and recency. Agents
+write memories themselves with the `remember` tool; you can read, add, promote,
+or delete any of them.
+
+Set `STUDIO_OBSIDIAN_VAULT` to your vault folder and Studio writes chats,
+classes, and agent memories as markdown notes with YAML frontmatter under
+`STUDIO_OBSIDIAN_FOLDER`. On iOS that vault usually lives in iCloud Drive
+under `iCloud~md~obsidian`; Studio lists the vaults it can see on the device.
+Notes you drop in the vault's `Inbox` folder import into an agent's memory, and
+`STUDIO_OBSIDIAN_AUTO_SYNC` writes a note after every chat turn.
+
+**Sync memory** mirrors the memory structure itself: a `Memory index` note,
+a hub note per agent, and one note per memory under that agent's
+`Working memory` or `Long-term memory` folder, all wikilinked. It works both
+ways — edit a memory note in Obsidian, or drag it between the two folders to
+change its scope, and the next sync brings the change into Studio. Studio only
+ever deletes notes it wrote itself, and never overwrites a memory note you
+edited since its last pull. `STUDIO_OBSIDIAN_MEMORY_SYNC` keeps the mirror
+current after every chat turn, room conversation, and class.
+
+</details>
+
+<details>
+<summary><strong>FCC Phone: the Studio app for your iPhone</strong></summary>
+
+FCC Phone is Studio for your phone, separate from the PC app: the same Jarvis
+command center, the same team, and AI models that run on the iPhone itself.
+Everything is stored on the phone and it works with the PC switched off. It is
+a web app installed to the Home Screen, so it needs no App Store, no developer
+account, and costs nothing.
+
+**What it has**
+
+- **Home**: the Jarvis command center, as on the PC: the gold AI core, status
+  chips, a talk bar with 🎤, the AI core overview, Agents at work, quick
+  commands, a live feed, and a progress bar while Jarvis is learning.
+- **The team**: Jarvis, Builder, Researcher, Helper, and Tester, and any you
+  add (Coach and Custom templates). Jarvis hands jobs to them with
+  `ask_agent` (passed on at most twice, never back to whoever gave it), or give
+  one a job yourself (Chat, **Job…**). **Agents → Edit** sets each agent's
+  brain and tools: the **Every tool** switch, or a box per tool with its token
+  cost. **Team brains** sets every agent's brain on one page.
+- **Tools**: `remember`, `recall`, `calculate`, `weather`, `wikipedia`,
+  `read_page`, `web_search` (through your PC when paired), `todo`, `learn`,
+  `ask_agent`, `team_status`, and the Builder's `start_project`, `write_file`,
+  `read_file`, `edit_file`, `list_files`, `delete_file`, `check_project`,
+  `restore_file`, `find_images`, `polish_check`, and `look_at_site`.
+- **The phone Builder's website tools**: `start_project` starts from the same
+  `business` (five pages), `website`, `landing`, `webapp`, and `game`
+  templates as the PC;
+  `find_images` finds free photos with credit lines (used by their https
+  address); `polish_check` is the PC's designer once-over, word for word;
+  `restore_file` undoes a change (the last five versions of each file are
+  kept); and `look_at_site` opens every page like a visitor (scrolling
+  through it first), on a phone (390px) and the front page on a computer
+  (1280px) too, and reports what shows first and what's wrong: sideways
+  scrolling and the element causing it, broken or stretched pictures, script
+  errors, tiny text, hard-to-read colours (judged against what is really
+  behind the text), and buttons too small to tap.
+- **Multi-page previews**: links between pages work in the preview and full
+  screen, a **Page** picker jumps to any page, and **Save all files (.zip)**
+  saves the whole site, pictures included. The Tester gets `look_at_site`, `polish_check`, and `restore_file`
+  too. Agents from an earlier version get the new tools once; a tool you
+  turn off afterwards stays off.
+- **Projects**: websites the Builder makes, with a live preview, **Open full
+  screen**, file editing, **Ask the Builder** for changes, **Have the Tester
+  check it**, and **Save as one HTML file**. Previews run sandboxed, so a page
+  can't read the app's keys or memory.
+- **Agent rooms** (@Name for one agent, or a goal they work through),
+  **Learn** (lessons read up on Wikipedia, notes kept in memory), **To-dos and
+  reminders** (shown and spoken while the app is open), **Memory**, and
+  **Settings** with backups.
+
+**Models on the phone (Models tab).** The same engine as Model Control on the
+PC, llama.cpp's server, runs inside Safari ([wllama](https://github.com/ngxson/wllama),
+using the iPhone's graphics chip through WebGPU). **Download a model** offers
+free models that fit an iPhone: Qwen3 0.6B (fastest, 0.4 GB), Qwen2.5 1.5B,
+Qwen2.5 Coder 1.5B (for the Builder), Qwen3 1.7B, Llama 3.2 1B, and Gemma 3 1B.
+**Add a model from Files** takes any `.gguf` from the Files app or iCloud Drive
+(under 2 GB; a 0.5–3B model at Q4_K_M suits an iPhone 12 Pro) and copies it
+into the app, so it works offline. Each model shows its size, context, and
+**Tools** / **Reasoning** badges read from the file, and how much memory it
+needs; **Load**, **Unload**, **Make default**, **Test speed**, **Settings**
+(context 2,048–8,192 tokens, graphics chip on or off), and **Delete**. The
+engine's files (about 15 MB) download from jsDelivr the first time a model
+loads, then stay on the phone. Fewer tools per agent means less to read before
+each reply, which matters most for phone models.
+
+**Cloud and PC brains.** In **Settings** a free key makes agents think in the
+cloud instead (faster and smarter on long jobs): **Google Gemini** (free key
+from [Google AI Studio](https://aistudio.google.com/apikey), the most generous),
+**Groq** ([console.groq.com](https://console.groq.com/keys)), **OpenRouter**
+free models ([openrouter.ai](https://openrouter.ai/keys), about 50 messages a
+day), or any OpenAI-style service. Keys stay on the phone. Once paired, **My
+PC** thinks with your PC's main AI.
+
+**Put it on the phone (once).** GitHub Pages hosts it for free from this
+repository's `docs/` folder:
+
+1. On GitHub, open the repository, then **Settings → Pages**. Under **Build and
+   deployment**, set **Source** to **Deploy from a branch**, pick the branch
+   with FCC Phone and the **/docs** folder, and press **Save**. After a minute
+   the page shows the address, `https://<you>.github.io/<repo>/`.
+2. On the iPhone, open `https://<you>.github.io/<repo>/phone/` in **Safari**,
+   tap **Share → Add to Home Screen → Add**.
+3. Open FCC Phone from its icon, go to **Models**, and download Qwen3 0.6B (or
+   add a `.gguf` from Files). Tick **Use a model on this phone as every
+   agent's default brain**, then talk to Jarvis on **Home**.
+
+(Studio on the PC also serves it at `/phone/`, for example
+`https://<your-pc>.ts.net/phone/` over Tailscale.)
+
+**Link it to your PC (optional).** Pairing shares memories both ways, lets
+phone agents think with your PC's AI, and gives the Researcher web search
+through the PC's search setup. The phone app is on https, so it reaches the PC
+over HTTPS, which Tailscale gives you for free:
+
+1. Install [Tailscale](https://tailscale.com/download) on the PC and the
+   iPhone, signed in to the same account.
+2. On the PC, run `tailscale serve --bg 8082` once. Studio's **More → FCC
+   Phone** card then shows the PC's `https://….ts.net` address.
+3. Press **Make a pairing code** there (it works once, for 10 minutes).
+4. In FCC Phone, **More → Settings → Connect to my PC**: type the address and
+   the code, then **Pair**.
+
+The phone syncs when it opens and a few seconds after it learns something: its
+new memories go into the PC's team memory (tagged `phone`, written by "Jarvis
+(phone)" and so on), and the PC's team memory and main-AI memories come back to
+**Memory → From my PC**. The PC's memories reach only brains that keep them
+private (a model on the phone, or My PC when the PC's AI runs on the PC) unless
+you tick **Let cloud brains read memories from my PC**. Forgetting a memory on
+one side does not remove it from the other. Studio lists paired phones on the
+same card, with **Unlink**; the PC keeps only a hash of each phone's secret, and
+only the `/studio/api/phone/` paths accept the phone app's requests.
+
+</details>
+
+<details>
+<summary><strong>Installing it on an iPhone</strong></summary>
+
+Studio is served wherever the proxy is bound, so a phone on the same network
+can reach it. Open **More → Install on your iPhone** on the computer running
+the server: it lists every address the server answers on — loopback, the
+Bonjour `<hostname>.local` name, and each LAN address — with the live port and,
+when proxy auth is on, the token already attached. Copy one, open it in Safari
+on the phone, then **Share → Add to Home Screen**.
+
+Installed, Studio runs standalone with a 180×180 touch icon, safe-area padding,
+and 44pt targets. If the server is asleep or off the network, the app says so
+plainly instead of failing blank, and nothing is lost — all state lives on the
+computer. A service worker precaches the shell for instant launches, but
+browsers only register one on a secure origin, so over plain HTTP on a LAN it
+is skipped; put the server behind HTTPS or a tunnel to get it.
+
+With `PROXY_AUTH_ENABLED` on, Studio requires the same token as the proxy.
+Without it, anyone on the network who reaches the port can use Studio and your
+models. Note that `/admin` stays local-only either way, so settings are changed
+from the computer, not the phone.
+
+</details>
+
 <a id="connect-your-client"></a>
 
 ## Connect Your Client
@@ -374,6 +2804,11 @@ starts; reload or restart the client when FCC reports updated settings. Use
 
 Run FCC on the same computer and in the same user environment as the client you
 are configuring.
+
+Any other app that speaks the OpenAI API can use `http://127.0.0.1:8082/v1`
+(Chat Completions, Responses, and Models), and any tool that speaks MCP can
+add `http://127.0.0.1:8082/mcp` to use the Studio team. See
+[Use LCC from any AI tool](#studio).
 
 <a id="optional-integrations"></a>
 

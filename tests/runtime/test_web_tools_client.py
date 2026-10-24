@@ -116,7 +116,7 @@ async def test_fetch_cancellation_closes_response_session_and_connector(monkeypa
                 status=200,
                 url=url,
                 headers={},
-                get_encoding=lambda: "utf-8",
+                charset="utf-8",
                 raise_for_status=lambda: None,
                 content=SimpleNamespace(iter_chunked=chunks),
             )
@@ -151,3 +151,42 @@ async def test_fetch_cancellation_closes_response_session_and_connector(monkeypa
         if not task.done():
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_fetch_decodes_pages_that_declare_no_charset(monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from free_claude_code.application.web_tools.ports import WebFetchEgressPolicy
+
+    async def chunks(_size):
+        yield "<html><title>Grid</title><p>caf\u00e9 grid</p></html>".encode()
+
+    def unread_encoding():
+        raise RuntimeError("Cannot compute fallback encoding of a not yet read body")
+
+    @asynccontextmanager
+    async def response(url, *, allow_redirects):
+        yield SimpleNamespace(
+            status=200,
+            url=url,
+            headers={"content-type": "text/html"},
+            charset=None,
+            get_encoding=unread_encoding,
+            raise_for_status=lambda: None,
+            content=SimpleNamespace(iter_chunked=chunks),
+        )
+
+    @asynccontextmanager
+    async def session(**kwargs):
+        yield SimpleNamespace(get=response)
+
+    monkeypatch.setattr(web_client, "ClientSession", session)
+    result = await web_client.HTTPWebToolsClient().fetch(
+        "https://8.8.8.8/",
+        egress=WebFetchEgressPolicy(False, frozenset({"https"})),
+    )
+
+    assert result.title == "Grid"
+    assert "caf\u00e9 grid" in result.data

@@ -7,7 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from free_claude_code.application.errors import InvalidRequestError
-from free_claude_code.application.execution import ProviderExecutor
+from free_claude_code.application.execution import (
+    LOCAL_PROGRESS_SECONDS,
+    ProviderExecutor,
+)
 from free_claude_code.application.model_metadata import ProviderModelInfo
 from free_claude_code.application.routing import (
     ProviderModelTarget,
@@ -1274,3 +1277,15 @@ async def test_cancelling_progress_wait_remains_cancellation() -> None:
 
     assert provider.stream_close_calls == 1
     assert resolved_ids == ["provider"]
+
+
+def test_a_model_on_this_pc_gets_longer_to_read_a_long_prompt() -> None:
+    # It reads the whole prompt before its first word; on a CPU that takes
+    # many minutes for a long agent prompt.
+    executor = ProviderExecutor(AsyncMock(), progress_timeout_seconds=600.0)
+    for local in ("llamacpp", "lmstudio", "ollama"):
+        assert executor._progress_seconds(local) == LOCAL_PROGRESS_SECONDS
+    assert executor._progress_seconds("nvidia_nim") == 600.0
+    assert executor._progress_seconds("provider") == 600.0
+    longer = ProviderExecutor(AsyncMock(), progress_timeout_seconds=7200.0)
+    assert longer._progress_seconds("llamacpp") == 7200.0

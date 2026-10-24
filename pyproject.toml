@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.2.57"
+version = "6.98.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -27,11 +27,13 @@ dependencies = [
     "json5>=0.15.0",
     "tomlkit>=0.13.3",
     "google-auth[requests]>=2.56.3",
+    "cryptography>=46.0.0",
     "requests[socks]>=2.34.2",
     "pystray>=0.19.5; sys_platform == 'win32' or sys_platform == 'darwin'",
     "Pillow>=12.0.0; sys_platform == 'win32' or sys_platform == 'darwin'",
     "github-copilot-sdk==1.0.13",
     "simplejson>=4.1.2",
+    "pypdf>=6.0",
 ]
 
 [project.scripts]
@@ -46,6 +48,7 @@ fcc-dsh = "free_claude_code.cli.launchers.dsh:launch"
 fcc-grok = "free_claude_code.cli.launchers.grok:launch"
 fcc-muse = "free_claude_code.cli.launchers.muse:launch"
 fcc-aider = "free_claude_code.cli.launchers.aider:launch"
+fcc-claw = "free_claude_code.cli.launchers.claw:launch"
 
 [project.gui-scripts]
 fcc-desktop = "free_claude_code.cli.desktop_entrypoint:launch"
@@ -61,6 +64,32 @@ voice_local = [
     "transformers>=5.17.0",
     "accelerate>=1.15.0",
     "librosa>=1.0.0",
+]
+# The Studio main AI's built-in voice and speech recognition, offline on CPU.
+studio_voice = [
+    "kokoro-onnx>=0.4.9",
+    "faster-whisper>=1.1.0",
+]
+# The Content Farm's video maker: Pillow draws the frames, ffmpeg encodes them.
+studio_video = [
+    "pillow>=12.0.0",
+    "imageio-ffmpeg>=0.6.0",
+    "numpy>=2.0.0",
+]
+# The desktop browser (drives the user's own Edge or Chrome) and listening to
+# web videos that have no captions (yt-dlp fetches only their sound).
+studio_desk = [
+    "playwright>=1.55.0",
+    "yt-dlp>=2026.1.0",
+]
+# LoRA weight training on this computer (Studio). A GPU is strongly advised.
+lora = [
+    "torch>=2.14.0",
+    "transformers>=5.17.0",
+    "accelerate>=1.15.0",
+    "peft>=0.21.0",
+    "safetensors>=0.4.0",
+    "sentencepiece>=0.2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -115,6 +144,10 @@ ignore = [
     "RUF006",  # fire-and-forget tasks intentionally not awaited
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# The maths tutor writes real maths signs (×, −, α, ρ, µ) for people to read.
+"src/free_claude_code/studio/tutor/*.py" = ["RUF001", "RUF002"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["free_claude_code", "smoke"]
 
@@ -159,4 +192,16 @@ allowed-unresolved-imports = [
     "riva.client",
     "pystray",
     "PIL",
+    # Optional Studio voice: Kokoro speech and Whisper recognition.
+    "kokoro_onnx",
+    "faster_whisper",
+    "numpy",
+    # Optional Content Farm video maker (studio_video extra).
+    "imageio_ffmpeg",
+    # Optional desktop browser and video listening (studio_desk extra).
+    "yt_dlp",
+    "yt_dlp.utils",
+    # Optional LoRA trainer, run with whatever Python has these installed.
+    "peft",
+    "huggingface_hub",
 ]

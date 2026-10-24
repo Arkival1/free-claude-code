@@ -1,6 +1,8 @@
 """Isolated browser-test composition for the local Admin UI."""
 
 import asyncio
+import json
+import re
 import socket
 import sys
 import threading
@@ -8,6 +10,7 @@ import time
 from collections.abc import AsyncIterator, Iterator, Mapping
 from pathlib import Path
 
+import httpx
 import pytest
 import uvicorn
 from playwright.sync_api import Page
@@ -16,6 +19,7 @@ from e2e.code_support import CodeControl
 from free_claude_code.api.app import create_app
 from free_claude_code.api.ports import ApiServices
 from free_claude_code.application.model_metadata import ProviderModelInfo
+from free_claude_code.application.web_tools.ports import WebFetchEgressPolicy
 from free_claude_code.config import env_migrations, paths
 from free_claude_code.config.env_migrations import recognized_env_keys
 from free_claude_code.config.loader import (
@@ -26,6 +30,7 @@ from free_claude_code.config.loader import (
 from free_claude_code.core.anthropic.models import MessagesRequest
 from free_claude_code.core.openai_responses import OpenAIResponsesRequest
 from free_claude_code.core.reasoning import DEFAULT_REASONING_POLICY, ReasoningPolicy
+from free_claude_code.core.web_tools import WebFetchResult, WebSearchResult
 from free_claude_code.harnesses import (
     claude_desktop_integration,
     claude_integration,
@@ -39,7 +44,119 @@ from free_claude_code.runtime.asgi import RuntimeASGIApp
 from free_claude_code.runtime.configuration import ConfigurationService
 from free_claude_code.runtime.folder_picker import NativeFolderPicker
 from free_claude_code.runtime.provider_manager import ProviderRuntimeManager
+from free_claude_code.studio import StudioService, StudioStore
+from free_claude_code.studio.llm import LLMReply, StudioModelRouter
 from tests.web_tools_support import StubWebToolsClient
+
+
+def _classroom_reply(system: str, prompt: str) -> str | None:
+    """A teacher and student who stay in their roles, for the classroom page."""
+    if "two-agent classroom" not in system:
+        return None
+    if "Plan the class for them to confirm" in system:
+        return json.dumps(
+            {
+                "note": "Here's a two-lesson plan on Ohm's law for an apprentice.",
+                "lessons": [
+                    {
+                        "topic": "Volts, amps and ohms",
+                        "objective": "Name each unit and what it measures",
+                        "research": "",
+                    },
+                    {
+                        "topic": "Using V = I x R",
+                        "objective": "Solve for any one of the three",
+                        "research": "ohm's law worked examples",
+                    },
+                ],
+            }
+        )
+    if "Write the end-of-class test" in system:
+        return json.dumps(
+            {
+                "questions": [
+                    {"prompt": "What is the unit of current?", "rubric": "Amps"},
+                    {
+                        "prompt": "What is V if I = 2 A and R = 5 ohms?",
+                        "rubric": "10 V",
+                    },
+                ]
+            }
+        )
+    if "Grade one student answer" in system:
+        return json.dumps({"score": 0.9, "feedback": "Right, and well explained."})
+    if "owner of this classroom is talking" in system:
+        return (
+            "The student is doing well: it named all three units and solved "
+            "V = I x R. It mixed up multiply and divide once in the test, so the "
+            "next class should practise rearranging the formula."
+        )
+    if "Correct any mistake" in prompt:
+        return "Spot on. REMEMBER: voltage equals current times resistance."
+    if "your student asks" in prompt:
+        return "Multiply: V = I x R, so 2 A times 5 ohms."
+    if "You are the student" in system:
+        if "Your teacher answered your question" in prompt:
+            return "Then V = 2 x 5 = 10 V."
+        if "V if I = 2" in prompt:
+            return "QUESTION FOR TEACHER: do I multiply or divide here?\nMaybe 2.5 V."
+        if "unit of current" in prompt:
+            return "Amps (A)."
+        return "Volts push the charge, amps are how much flows, ohms resist it. I took away V = I x R."
+    return (
+        "Voltage is the push, current is the flow, resistance slows it down. "
+        "Example: a 10 ohm heater on 230 V draws 23 A. Question: what is "
+        "the unit of resistance?"
+    )
+
+
+class _ClassroomWebTools(StubWebToolsClient):
+    """Canned reading for the classroom's teacher when it steps out."""
+
+    async def search(self, query: str) -> list[WebSearchResult]:
+        if "ohm" not in query.casefold():
+            return await super().search(query)
+        return [
+            WebSearchResult(
+                title="Ohm's law worked examples",
+                url="https://example.edu/ohms-law",
+            )
+        ]
+
+    async def fetch(self, url: str, *, egress: WebFetchEgressPolicy) -> WebFetchResult:
+        if url != "https://example.edu/ohms-law":
+            return await super().fetch(url, egress=egress)
+        return WebFetchResult(
+            url=url,
+            title="Ohm's law worked examples",
+            media_type="text/plain",
+            data="V = I x R. 2 A through 5 ohms gives 10 V.",
+        )
+
+
+class _StudioEchoModel:
+    """Answer as whichever Studio agent is speaking, without any network."""
+
+    async def complete(
+        self,
+        messages,
+        *,
+        system="",
+        tools=(),
+        temperature=0.2,
+        max_tokens=1024,
+        model=None,
+    ) -> LLMReply:
+        del tools, temperature, max_tokens
+        prompt = str(messages[-1].content) if messages else ""
+        lesson = _classroom_reply(system, prompt)
+        if lesson is not None:
+            return LLMReply(text=lesson, model=model or "")
+        match = re.search(
+            r"You are (\w+), (?:one of several AI agents|the user's main AI)", system
+        )
+        name = match.group(1) if match else "Agent"
+        return LLMReply(text=f"{name} ({model}) is on it.")
 
 
 class _ModelListingProvider(BaseProvider):
@@ -131,12 +248,20 @@ def admin_client_files():
 
 
 @pytest.fixture
+def studio_starter_repos() -> Path | None:
+    """The starter repo pack Studio installs; a test module that needs the
+    repos returns the real bundle, the rest stay fast without them."""
+    return None
+
+
+@pytest.fixture
 def admin_base_url(
     request: pytest.FixtureRequest,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     code_control: CodeControl,
     admin_client_files,
+    studio_starter_repos: Path | None,
 ) -> Iterator[str]:
     """Serve one fully isolated Admin application on an OS-assigned port."""
 
@@ -240,14 +365,28 @@ def admin_base_url(
         "_select",
         lambda _picker, initial, stop: code_control.folder_picker.select(initial, stop),
     )
+    web_tools = _ClassroomWebTools()
+    studio = StudioService(
+        store=StudioStore(tmp_path / "studio" / "studio.db"),
+        web_tools=web_tools,
+        settings_provider=manager.current_settings,
+        models_dir=tmp_path / "studio" / "models",
+        sites_dir=tmp_path / "studio" / "sites",
+        router=StudioModelRouter(proxy=_StudioEchoModel(), local=_StudioEchoModel()),
+        starter_repos=studio_starter_repos,
+        # Browser tests never download the voice models or search the web.
+        voice_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+        search_transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+    )
     app = RuntimeASGIApp(
         create_app(
             ApiServices(
                 requests=manager,
                 admin=runtime,
                 tasks=runtime,
-                web_tools=StubWebToolsClient(),
+                web_tools=web_tools,
                 code=code_control.service,
+                studio=studio,
             )
         ),
         runtime,

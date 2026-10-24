@@ -1,5 +1,9 @@
 __pycache__
-.claude
+.claude/*
+!.claude/settings.json
+!.claude/agents/
+!.claude/skills/
+.claude-flow/
 .cursor
 .pytest_cache
 .ruff_cache
@@ -16,3 +20,8 @@ llama_cache
 .smoke-results
 /test-results/
 .vscode
+
+# Playwright CLI workspace (browser sessions, snapshots)
+.playwright-cli/
+# Graphify knowledge graph (rebuilt on each PC)
+graphify-out/
