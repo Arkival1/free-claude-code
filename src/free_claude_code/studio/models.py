@@ -814,6 +814,26 @@ class FarmAsset(Record):
     updated_at: int = Field(default_factory=now_ms)
 
 
+class ScanFinding(Record):
+    """Something the bug scanner found broken, kept once by its fingerprint."""
+
+    id: str
+    mode: str
+    """The way of scanning that found it (routes, pages, logs, ...)."""
+    severity: Literal["high", "medium", "low"] = "medium"
+    title: str
+    detail: str = ""
+    place: str = ""
+    """Where it is: a route, a page, a file, a record."""
+    count: int = 1
+    """How many rounds found it."""
+    status: Literal["new", "seen", "sent", "dismissed", "fixed"] = "new"
+    changer_project: str = ""
+    first_seen: int = Field(default_factory=now_ms)
+    last_seen: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)
+
+
 class StudioFlag(Record):
     """A one-time change Studio has made, so it never repeats (by name)."""
 

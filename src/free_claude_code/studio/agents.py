@@ -78,6 +78,7 @@ WRITE_TOOLS = frozenset(
         "use_photo",
         "site_layouts",
         "game_assets",
+        "ui_kit",
     }
 )
 CONTENT_WRITES = frozenset({"write_file", "edit_file"})

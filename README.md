@@ -1962,6 +1962,17 @@ still looks finished.
   only; their art isn't free). The `game-dev` skill holds the recipes for
   movement, animation, juice, enemies, levels and phone controls, and comes
   with any game job (`vendor/kenney/`, `vendor/phaser/`).
+- **App kit.** The `ui_kit` tool brings Tabler (MIT, Bootstrap 5, light and
+  dark) for app and game screens: dashboards, menus, settings, leaderboards,
+  forms, tables, pricing and sign-in, plus 5,184 Tabler icons found by words
+  and copied as SVG files. `app` starts home, leaderboard and settings
+  screens on it (`vendor/tabler/`).
+- **Bug-fix library.** The Changer, its Planner and reviewers have
+  `bug_library`: 490 real bugs from big Python projects (Django, pytest,
+  sympy, Sphinx, matplotlib and more), each with its issue, the fix the
+  project merged and the test that proves it, from SWE-bench Verified. Its
+  debugging skill looks up a similar bug before fixing one
+  (`vendor/swe-bench/`).
 - **Adding a library.** Ask the Changer to add another library and it
   gets the `add-a-library` skill: find it, check the licence, show you a
   preview and wait for your yes, keep a copy inside FCC with its licence
@@ -2478,6 +2489,35 @@ it.
    `llama-quantize`, and trains.
 4. Watch the loss here. When it ends, the new model arrives on your PC and is
    installed, and the student switches to it. Stop the rented machine.
+
+</details>
+
+<details>
+<summary><strong>Bug scanner</strong></summary>
+
+**Bug scanner** (in the menu) looks for things in FCC that are broken or not
+working. It only reads, and never changes your data. Each round uses one way
+of scanning, with a fresh random sample:
+
+- **routes**: calls FCC's read-only routes and catches crashes, broken
+  answers and slow ones;
+- **records**: calls each page's routes with real ids and with ids that
+  don't exist;
+- **odd inputs**: sends empty, huge, emoji and negative values;
+- **pages**: opens Studio's pages in a hidden browser (phone or PC size)
+  and catches script errors;
+- **logs**: reads the server log for errors and crashes;
+- **data**: checks saved records for broken links and jobs stuck as
+  running;
+- **files**: checks that FCC's code loads, that page scripts parse, and that
+  its shipped libraries match their recorded checksums.
+
+**Scan once** runs each way you ticked; **Scan endlessly** keeps going a
+round at a time (every 1 to 60 minutes) until you press Stop. A problem is
+listed once and counted each time it comes back. Open one to read it, then
+**Send to the Changer** (it plans the fix in its copy first), or mark it
+seen, fixed or not a problem. Content Farm is left out, and so is anything
+that would download, sync, stream or reach a broker.
 
 </details>
 

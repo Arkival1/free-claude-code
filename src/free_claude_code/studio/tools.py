@@ -26,6 +26,10 @@ from free_claude_code.application.web_tools.ports import (
 from free_claude_code.core.json_types import JsonObject
 
 from .assistant_tools import calculate
+from .bug_library import BugLibraryError, licence_of
+from .bug_library import bug as library_bug
+from .bug_library import clip as clip_bug
+from .bug_library import find as find_bugs
 from .commands import CommandBroker, CommandError
 from .connectivity import Connectivity
 from .desk import DeskBrowser, DeskError
@@ -84,6 +88,7 @@ from .sites import (
     tidy_html,
 )
 from .templates import template_files, template_libraries
+from .ui_kit import UiKitError, find_icons, icon_file, kit_files, starter_files
 from .ui_library import KINDS as UI_KINDS
 from .ui_library import UiLibraryError
 from .ui_library import credit as ui_credit
@@ -142,6 +147,8 @@ LOOK_PAGE_TOOL = "look_page"
 AIDER_TOOL = "aider"
 UI_LIBRARY_TOOL = "ui_library"
 SITE_LAYOUTS_TOOL = "site_layouts"
+UI_KIT_TOOL = "ui_kit"
+BUG_LIBRARY_TOOL = "bug_library"
 GAME_ASSETS_TOOL = "game_assets"
 MAX_EXAMPLE_CHARS = 12_000
 MAX_KIT_FILES = 300
@@ -1117,6 +1124,74 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
                 "title": {
                     "type": "string",
                     "description": "use: the business's name, put where the layout says 'Start Bootstrap'.",
+                },
+                "overwrite": {"type": "boolean"},
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
+        name=BUG_LIBRARY_TOOL,
+        description=(
+            "FCC's bug-fix library: 490 real bugs from big Python projects "
+            "(Django, pytest, sympy, Sphinx, matplotlib, scikit-learn, requests "
+            "and more), each with its GitHub issue, the fix the project merged, "
+            "and the test that proves the fix. Before fixing a bug, find "
+            "similar ones (describe the bug or paste the error words) and "
+            "read one with get: see what the real cause was, how small the fix "
+            "was, and how its test fails before and passes after. Learn the "
+            "pattern; write FCC's own fix and test."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["find", "get"]},
+                "query": {
+                    "type": "string",
+                    "description": "find: the bug in words, or words from the error.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "find: only bugs from this project, e.g. 'django'.",
+                },
+                "id": {"type": "string", "description": "get: a bug id from find."},
+                "part": {
+                    "type": "string",
+                    "enum": ["all", "issue", "fix", "test"],
+                    "description": "get: one part only (default all).",
+                },
+            },
+            "required": ["action"],
+        },
+    ),
+    ToolSpec(
+        name=UI_KIT_TOOL,
+        description=(
+            "FCC's app kit: Tabler (MIT, Bootstrap 5, light and dark) for app "
+            "and game screens (dashboards, menus, settings, leaderboards, "
+            "forms, tables, pricing, sign-in) plus 5,184 Tabler icons. app "
+            "starts home, leaderboard and settings screens with the kit in "
+            "vendor/tabler; add copies just the kit into a project; icons "
+            "finds icons by words; use_icons copies them to assets/icons/ as "
+            "SVG files. Tabler's classes follow Bootstrap 5 (card, btn, "
+            "navbar, form-control, list-group, progress, badge, avatar)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["app", "add", "icons", "use_icons"],
+                },
+                "title": {"type": "string", "description": "app: the app's name."},
+                "query": {
+                    "type": "string",
+                    "description": "icons: what the icon shows, e.g. 'coin'.",
+                },
+                "names": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "use_icons: icon names from action icons.",
                 },
                 "overwrite": {"type": "boolean"},
             },
@@ -2211,6 +2286,10 @@ class AgentToolbox:
                     return self._ui_library(call)
                 case "site_layouts":
                     return await self._site_layouts(call, context)
+                case "ui_kit":
+                    return await self._ui_kit(call, context)
+                case "bug_library":
+                    return self._bug_library(call)
                 case "game_assets":
                     return await self._game_assets(call, context)
                 case "save_image":
@@ -2962,6 +3041,124 @@ class AgentToolbox:
                 "attached_site": made,
             },
         )
+
+    def _bug_library(self, call: ToolCall) -> ToolOutcome:
+        action = str(call.arguments.get("action") or "find").strip() or "find"
+        data: JsonObject = {"tool": BUG_LIBRARY_TOOL, "action": action}
+        try:
+            if action == "find":
+                found = find_bugs(
+                    str(call.arguments.get("query") or ""),
+                    repo=str(call.arguments.get("project") or ""),
+                    count=_int_arg(call.arguments.get("count")) or 8,
+                )
+                data["bugs"] = [item.id for item in found]
+                lines = [
+                    f"{item.id} ({item.size}; fix touches {', '.join(item.files) or '?'}): "
+                    f"{item.title[:160]}"
+                    for item in found
+                ]
+                lines.append(
+                    "Read one with action get (id)."
+                    if found
+                    else "Nothing alike: try fewer or plainer words."
+                )
+                return ToolOutcome(text="\n".join(lines), data=data)
+            if action != "get":
+                raise BugLibraryError("Use action find or get.")
+            item = library_bug(call.arguments.get("id"))
+        except BugLibraryError as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+        part = str(call.arguments.get("part") or "all")
+        sections = {
+            "issue": f"The issue:\n{clip_bug(item.issue)}",
+            "fix": f"The fix the project merged:\n{clip_bug(item.fix)}",
+            "test": (
+                f"The test that proves it (fails before, passes after: "
+                f"{', '.join(item.fails[:6])}):\n{clip_bug(item.test)}"
+            ),
+        }
+        chosen = [sections[part]] if part in sections else list(sections.values())
+        head = (
+            f"{item.id} from {item.repo} (licence {licence_of(item.repo)}; "
+            f"{item.size}). A real bug from another project, as an example only: "
+            "write FCC's own fix and test."
+        )
+        data.update({"id": item.id, "repo": item.repo})
+        return ToolOutcome(text="\n\n".join([head, *chosen]), data=data)
+
+    async def _ui_kit(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        action = str(call.arguments.get("action") or "icons").strip() or "icons"
+        data: JsonObject = {"tool": UI_KIT_TOOL, "action": action}
+        try:
+            if action == "icons":
+                found = find_icons(
+                    str(call.arguments.get("query") or ""),
+                    _int_arg(call.arguments.get("count")) or 20,
+                )
+                data["icons"] = [name for name, _ in found]
+                lines = [f"{name} ({category})" for name, category in found]
+                lines.append(
+                    "Copy them with action use_icons (names)."
+                    if found
+                    else "No icon matches: try one plain word."
+                )
+                return ToolOutcome(text="\n".join(lines), data=data)
+            if action == "use_icons":
+                raw = call.arguments.get("names")
+                names = [str(item) for item in raw] if isinstance(raw, list) else []
+                if not names:
+                    raise UiKitError("List the icon names to copy (from action icons).")
+                files = {
+                    f"assets/icons/{name.strip()}.svg": icon_file(name)
+                    for name in names[:40]
+                }
+            elif action in {"app", "add"}:
+                files = (
+                    starter_files(str(call.arguments.get("title") or "")[:80])
+                    if action == "app"
+                    else kit_files()
+                )
+            else:
+                raise UiKitError("Use action app, add, icons or use_icons.")
+        except UiKitError as error:
+            return ToolOutcome(text=str(error), data=data, failed=True)
+        made = ""
+        if not context.site_id and self._new_project is not None and action == "app":
+            made = await self._new_project(
+                context, str(call.arguments.get("title") or "") or "App"
+            )
+        site_id = made or self._require_site(context)
+        written, kept = await self._copy_kit(
+            site_id,
+            files,
+            overwrite=call.arguments.get("overwrite") is True,
+            replace_starters=action == "app",
+        )
+        note = {
+            "app": "Started the app screens (index.html, app.js, styles.css) on "
+            "Tabler. Replace the sample names and numbers with the app's own, "
+            "and set --app-accent in styles.css.",
+            "add": "Added Tabler: link vendor/tabler/tabler.min.css in the head "
+            "and vendor/tabler/tabler.min.js before </body>.",
+            "use_icons": 'Copied the icons: use <img src="assets/icons/NAME.svg" '
+            'alt="" width="20" height="20">, or paste the SVG inline so it '
+            "takes the text colour.",
+        }[action]
+        lines = [note, f"Wrote {len(written)} files."]
+        if kept:
+            lines.append(
+                f"Kept your existing {', '.join(kept)} (set overwrite to replace)."
+            )
+        data.update(
+            {
+                "site_id": site_id,
+                "written": written,
+                "kept": kept,
+                "attached_site": made,
+            }
+        )
+        return ToolOutcome(text=" ".join(lines), data=data)
 
     async def _game_assets(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         action = str(call.arguments.get("action") or "find").strip() or "find"

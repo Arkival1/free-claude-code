@@ -559,6 +559,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "ui_library",
             "site_layouts",
             "game_assets",
+            "ui_kit",
             "list_photos",
             "use_photo",
             "ideas",
@@ -575,6 +576,7 @@ TOOL_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "look_page",
             "aider",
             "fcc_changer",
+            "bug_library",
         ),
     ),
     (
@@ -665,6 +667,7 @@ CODER_TOOLS: tuple[str, ...] = (
     "ui_library",
     "site_layouts",
     "game_assets",
+    "ui_kit",
     *_WEB,
     *_MEMORY,
 )
@@ -787,6 +790,7 @@ CHANGER_READER_TOOLS: tuple[str, ...] = (
     "list_files",
     "fcc_changer",
     "skill",
+    "bug_library",
     *_WEB,
 )
 """What the Planner and the reviewers get: reading, the Changer's own tool
@@ -803,6 +807,7 @@ CHANGER_TOOLS: tuple[str, ...] = (
     "fcc_changer",
     "run_command",
     "aider",
+    "bug_library",
     "ask_researcher",
     "skill",
     *_WEB,
@@ -872,6 +877,7 @@ PRESETS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "ui_library",
             "site_layouts",
             "game_assets",
+            "ui_kit",
             *_MEMORY,
         ),
     ),

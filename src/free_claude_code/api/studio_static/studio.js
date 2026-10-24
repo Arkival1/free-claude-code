@@ -6290,6 +6290,7 @@
     ["Content Farm", "farm", "🌾"],
     ["Trading Bank", "trade", "📈"],
     ["Ops (what the PC is doing)", "ops", "◉"],
+    ["Bug scanner", "scan", "⌖"],
     ["Classroom", "learn", "✎"],
     ["Maths tutor (electrician)", "tutor", "∑"],
     ["The Changer (change FCC)", "changer", "⟳"],
@@ -7478,6 +7479,7 @@
         case "tutor": return await renderTutor(generation);
         case "changer": return await renderChanger(generation);
         case "ops": return await renderOps(generation);
+        case "scan": return await renderScanner(generation);
         case "hq": return await renderHQ(generation);
         case "connectors": return await renderConnectors();
         case "ideas": return await renderIdeas();
@@ -7786,6 +7788,20 @@
     });
   }
 
+  // The bug scanner lives in scanner.js.
+  async function renderScanner(generation) {
+    if (!window.FCCScanner) throw new Error("The bug scanner didn't load. Reload the page.");
+    await window.FCCScanner.render({
+      view,
+      el,
+      api,
+      post,
+      notify,
+      go,
+      alive: () => generation === renderGeneration,
+    });
+  }
+
   // Ops (the PC's load, background lanes, busy agents) lives in ops.js.
   async function renderOps(generation) {
     if (!window.FCCOps) throw new Error("The Ops page didn't load. Reload the page.");
@@ -7824,6 +7840,7 @@
         tutor: "Maths tutor",
         changer: "The Changer",
         ops: "Ops",
+        scan: "Bug scanner",
         hq: "HQ",
         connectors: "Connectors",
         ideas: "Ideas board",

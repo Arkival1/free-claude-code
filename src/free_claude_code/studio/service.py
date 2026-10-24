@@ -220,6 +220,7 @@ from .models import (
     PhoneLink,
     Photo,
     PlanStep,
+    ScanFinding,
     SiteProject,
     StudioFlag,
     Study,
@@ -336,6 +337,8 @@ from .relay import (
 )
 from .research import DeepResearch, ResearchMix, ResearchReport, relevance
 from .rooms import RoomError, RoomOutcome, RoomService
+from .scanner import MAX_FINDINGS, MODE_NOTES, Scanner, changer_request
+from .scanner import MODES as SCAN_MODES
 from .school import School, SchoolError
 from .search import SearchBudget, SearchError, StudioSearch
 from .sites import SiteWorkspace, slugify
@@ -507,6 +510,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "ui_library",
         "site_layouts",
         "game_assets",
+        "ui_kit",
         "list_photos",
         "use_photo",
         "ideas",
@@ -518,8 +522,8 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
     LAB_AGENT_NAME: LAB_AGENT_TOOLS,
     FARM_AGENT_NAME: FARM_AGENT_TOOLS,
     # Made from presets, so saved ones get the UI library too.
-    "Designer": ("ui_library", "site_layouts", "game_assets"),
-    "Developer": ("ui_library", "site_layouts", "game_assets"),
+    "Designer": ("ui_library", "site_layouts", "game_assets", "ui_kit"),
+    "Developer": ("ui_library", "site_layouts", "game_assets", "ui_kit"),
 }
 _PRESET_ROLES = {"Designer": "builder", "Developer": "developer"}
 """Agents made from a preset are upgraded only while they keep its role, so
@@ -589,6 +593,11 @@ OWN_MEMORY_TOOLS = ("remember", "recall")
 """A repo agent's own memory (its own area while it thinks on a server)."""
 TOOLSHED_FLAG = "extension_agent_toolshed_v1"
 CHANGER_AIDER_FLAG = "changer_aider_v1"
+CHANGER_NEW_TOOLS = (
+    (CHANGER_AIDER_FLAG, AIDER_TOOL),
+    ("changer_bug_library_v1", "bug_library"),
+)
+"""Tools an existing Changer gets once, each behind its own flag."""
 HELPER_REPO = "https://github.com/wshobson/agents"
 CHANGER_HELPERS: tuple[tuple[str, str], ...] = (
     ("debugging-toolkit-debugger", "debugger"),
@@ -1062,6 +1071,8 @@ class StudioService:
         self._lab_busy = 0
         self._class_busy: set[str] = set()
         """Classes with a step running (one at a time per class)."""
+        # The bug scanner: rounds of read-only checks, kept as findings.
+        self.scanner = Scanner(store)
         self._lab_error: str | None = None
         self._farm = ContentFarm(
             store,
@@ -2769,18 +2780,19 @@ class StudioService:
         ):
             if agent.archived:
                 continue
-            if await self._store.get(StudioFlag, CHANGER_AIDER_FLAG) is None:
-                if AIDER_TOOL not in agent.tools:
+            for flag, tool in CHANGER_NEW_TOOLS:
+                # Given once: a tool the owner later takes away stays away.
+                if await self._store.get(StudioFlag, flag) is not None:
+                    continue
+                if tool not in agent.tools:
                     agent = agent.model_copy(
-                        update={
-                            "tools": (*agent.tools, AIDER_TOOL),
-                            "updated_at": now_ms(),
-                        }
+                        update={"tools": (*agent.tools, tool), "updated_at": now_ms()}
                     )
                     await self._store.put(agent)
-                await self._store.put(StudioFlag(id=CHANGER_AIDER_FLAG, value="1"))
+                await self._store.put(StudioFlag(id=flag, value="1"))
             return await self._upgraded_prompt(agent)
-        await self._store.put(StudioFlag(id=CHANGER_AIDER_FLAG, value="1"))
+        for flag, _ in CHANGER_NEW_TOOLS:
+            await self._store.put(StudioFlag(id=flag, value="1"))
         return await self.create_agent(
             name=CHANGER_AGENT_NAME,
             role="agent",
@@ -11142,6 +11154,64 @@ class StudioService:
         if not course.tune_job_id or not course.tune_job_id.startswith("lora"):
             return None
         return await self._store.get(LoraJob, course.tune_job_id)
+
+    # ------------------------------------------------------------ bug scanner
+
+    async def scan_overview(self) -> JsonObject:
+        """The scanner's state and what it found, worst and newest first."""
+        findings = await self._store.find(
+            ScanFinding, order_by="last_seen DESC", limit=MAX_FINDINGS
+        )
+        rank = {"high": 0, "medium": 1, "low": 2}
+        active = sorted(
+            (item for item in findings if item.status not in {"dismissed", "fixed"}),
+            key=lambda item: (
+                item.status != "new",
+                rank[item.severity],
+                -item.last_seen,
+            ),
+        )
+        state = self.scanner.state
+        return {
+            "running": state.running,
+            "endless": state.endless,
+            "rounds": state.rounds,
+            "mode": state.mode,
+            "message": state.message,
+            "interval_s": state.interval_s,
+            "last_round_at": state.last_round_at,
+            "history": state.history,
+            "modes": [{"id": mode, "about": MODE_NOTES[mode]} for mode in SCAN_MODES],
+            "new": sum(item.status == "new" for item in active),
+            "findings": [item.model_dump() for item in active],
+            "closed": sum(item.status in {"dismissed", "fixed"} for item in findings),
+        }
+
+    async def mark_finding(self, finding_id: str, status: str) -> ScanFinding:
+        """The owner marks a finding seen, dismissed or fixed."""
+        if status not in {"new", "seen", "dismissed", "fixed"}:
+            raise StudioError("Mark it new, seen, dismissed or fixed.")
+        finding = await self._store.require(ScanFinding, finding_id)
+        updated = finding.model_copy(update={"status": status, "updated_at": now_ms()})
+        await self._store.put(updated)
+        return updated
+
+    async def finding_to_changer(self, finding_id: str) -> JsonObject:
+        """The owner sends one finding to the Changer to fix."""
+        finding = await self._store.require(ScanFinding, finding_id)
+        started = await self.changer_start(changer_request(finding))
+        project = started.get("project")
+        project_id = str(project.get("id", "")) if isinstance(project, dict) else ""
+        await self._store.put(
+            finding.model_copy(
+                update={
+                    "status": "sent",
+                    "changer_project": project_id,
+                    "updated_at": now_ms(),
+                }
+            )
+        )
+        return started
 
     async def courses(self) -> tuple[Course, ...]:
         """Return every class, newest first."""

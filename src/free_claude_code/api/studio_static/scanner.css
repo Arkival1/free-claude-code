@@ -1,0 +1,25 @@
+/* The bug scanner page: Studio's own cards, with a severity stripe per finding. */
+.scanner { display: grid; gap: 16px; }
+.scan-head h2 { margin: 0 0 4px; }
+.scan-count { display: grid; justify-items: end; text-align: right; }
+.scan-count strong { font-size: 2rem; line-height: 1; }
+.scan-modes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin: 12px 0; }
+.scan-mode { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line, rgb(128 128 128 / 0.3)); border-radius: 10px; }
+.scan-mode span { display: grid; gap: 2px; min-width: 0; }
+.scan-mode small { opacity: 0.75; }
+.scan-live { font-weight: 600; align-self: center; }
+.scan-list { display: grid; gap: 8px; }
+.scan-item { border: 1px solid var(--line, rgb(128 128 128 / 0.3)); border-left-width: 4px; border-radius: 10px; overflow: hidden; }
+.scan-item.high { border-left-color: #e5484d; }
+.scan-item.medium { border-left-color: #f5a524; }
+.scan-item.low { border-left-color: #8b8d98; }
+.scan-summary { display: flex; gap: 10px; align-items: center; width: 100%; padding: 10px 12px; background: none; border: 0; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.scan-summary .grow { display: grid; gap: 2px; min-width: 0; }
+.scan-summary small { opacity: 0.75; overflow-wrap: anywhere; }
+.scan-high { background: #e5484d; color: #fff; }
+.scan-medium { background: #f5a524; color: #1c1c1c; }
+.scan-low { background: #8b8d98; color: #fff; }
+.scan-detail { margin: 0 12px 10px; padding: 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; border-radius: 8px; background: rgb(128 128 128 / 0.12); }
+.scan-item .row { padding: 0 12px 12px; }
+.scan-history { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.scanner select { width: auto; max-width: 100%; }

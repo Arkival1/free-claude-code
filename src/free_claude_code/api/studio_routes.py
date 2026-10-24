@@ -11,11 +11,13 @@ import secrets
 import socket
 import sys
 import time
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Literal, cast
 from urllib.parse import urlsplit
 
 import anyio
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
@@ -25,9 +27,11 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from free_claude_code.api.admin_security import require_loopback_admin
+from free_claude_code.config.paths import server_log_path
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
@@ -66,9 +70,14 @@ from free_claude_code.studio.notebook import (
     training_notebook,
 )
 from free_claude_code.studio.notebook import dumps as notebook_dumps
+from free_claude_code.studio.page_try import page_try_ready, try_url
 from free_claude_code.studio.phone_link import PhoneAuthError, PhoneLinkError
 from free_claude_code.studio.photos import MAX_PHOTO_BYTES, PhotoError
 from free_claude_code.studio.playbook import PlaybookNote
+from free_claude_code.studio.scanner import Probe as ScanProbe
+from free_claude_code.studio.scanner import Route as ScanRoute
+from free_claude_code.studio.scanner import ScanError
+from free_claude_code.studio.scanner import skipped as scan_skipped
 from free_claude_code.studio.school import SchoolError
 from free_claude_code.studio.sites import SiteError, content_type_for
 from free_claude_code.studio.subagents import HELPER_ROLES
@@ -109,6 +118,8 @@ _ASSET_FILENAMES = frozenset(
         "lab3d.js",
         "ops.css",
         "ops.js",
+        "scanner.css",
+        "scanner.js",
         "ops3d.js",
         "three.module.js",
         "three.core.js",
@@ -2452,6 +2463,158 @@ async def lora_file(
 ) -> FileResponse:
     """Download a job's dataset, adapter, Modelfile, or trainer log."""
     return FileResponse(studio.lora.file_path(job_id, name), filename=name)
+
+
+class ScanStartPayload(BaseModel):
+    modes: list[str] = Field(default_factory=list)
+    endless: bool = False
+    interval_s: int = Field(default=600, ge=60, le=86_400)
+
+
+class FindingPayload(BaseModel):
+    status: Literal["new", "seen", "dismissed", "fixed"]
+
+
+def _api_routes(routes: Sequence[object]) -> Iterator[APIRoute]:
+    """Every API route, inside included routers and mounts too."""
+    for route in routes:
+        if isinstance(route, APIRoute):
+            yield route
+        inner = getattr(route, "original_router", None) or route
+        nested = getattr(inner, "routes", None)
+        if (
+            nested is not None
+            and nested is not routes
+            and not isinstance(route, APIRoute)
+        ):
+            yield from _api_routes(nested)
+
+
+def _scan_routes(request: Request) -> list[ScanRoute]:
+    """FCC's read-only routes the scanner may call (GET, Studio, not skipped)."""
+    found: list[ScanRoute] = []
+    for route in _api_routes(request.app.routes):
+        if "GET" not in (route.methods or set()):
+            continue
+        if scan_skipped(route.path):
+            continue
+        query = tuple(param.name for param in route.dependant.query_params)
+        found.append(ScanRoute(route.path, query))
+    return found
+
+
+def _scan_probe(request: Request, settings: Settings) -> ScanProbe:
+    """How a scan reaches FCC: in-process GET calls, and a hidden browser
+    on this server's own address for the pages."""
+    app = request.app
+    headers = (
+        {"x-api-key": settings.proxy_auth_token} if settings.proxy_auth_enabled else {}
+    )
+    # This server's own loopback address and the port it is bound to (the
+    # socket's, never the Host header's).
+    server = request.scope.get("server") or ("127.0.0.1", 8082)
+    base = f"http://127.0.0.1:{server[1]}"
+
+    async def get(path: str) -> tuple[int, str, float]:
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1", headers=headers
+        ) as client:
+            started = time.monotonic()
+            answer = await client.get(path)
+            return (
+                answer.status_code,
+                answer.text[:5_000_000],
+                time.monotonic() - started,
+            )
+
+    async def page(name: str, phone: bool) -> list[str]:
+        token = settings.proxy_auth_token if settings.proxy_auth_enabled else ""
+        query = f"?token={token}" if token else ""
+
+        def scrub(text: str) -> str:
+            # The token is in the page address; it never goes into a finding.
+            return text.replace(token, "[token]") if token else text
+
+        try:
+            report = await try_url(
+                f"{base}/studio{query}#{name}", (), name=name, phone=phone
+            )
+        except Exception as error:  # the browser itself failed on this page
+            return [scrub(f"The page check couldn't open #{name}: {error}")]
+        return [scrub(problem) for problem in report.problems]
+
+    package = Path(__file__).resolve().parents[1]
+    return ScanProbe(
+        get=get,
+        routes=_scan_routes(request),
+        page=page if page_try_ready() else None,
+        log_path=server_log_path(),
+        package=package,
+        vendor=package.parents[1] / "vendor",
+    )
+
+
+@router.get("/studio/api/scanner")
+async def scanner_overview(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The bug scanner: whether it runs, and what it found."""
+    return await studio.scan_overview()
+
+
+@router.post("/studio/api/scanner/start")
+async def scanner_start(
+    payload: ScanStartPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    settings: Settings = Depends(get_settings),
+    _: None = Access,
+) -> JsonObject:
+    """Scan once in each chosen way, or endlessly, a round at a time."""
+    try:
+        studio.scanner.start(
+            _scan_probe(request, settings),
+            modes=payload.modes,
+            endless=payload.endless,
+            interval_s=payload.interval_s,
+            spawn=studio.spawn,
+        )
+    except ScanError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return await studio.scan_overview()
+
+
+@router.post("/studio/api/scanner/stop")
+async def scanner_stop(
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Stop an endless scan after the round it is on."""
+    studio.scanner.stop()
+    return await studio.scan_overview()
+
+
+@router.post("/studio/api/scanner/findings/{finding_id}")
+async def scanner_mark(
+    finding_id: str,
+    payload: FindingPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Mark a finding seen, dismissed or fixed."""
+    return (await studio.mark_finding(finding_id, payload.status)).model_dump()
+
+
+@router.post("/studio/api/scanner/findings/{finding_id}/changer")
+async def scanner_to_changer(
+    finding_id: str,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Send one finding to the Changer to fix."""
+    return await studio.finding_to_changer(finding_id)
 
 
 class ClassTrainPayload(BaseModel):

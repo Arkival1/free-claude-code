@@ -104,6 +104,7 @@ TOOL_STATION: dict[str, str] = {
             "ui_library",
             "site_layouts",
             "game_assets",
+            "ui_kit",
             "weather",
             "desktop_browser",
         ),

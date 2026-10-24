@@ -68,7 +68,7 @@ src/free_claude_code/
                   team_mcp.py (LCC as MCP server), phone_cors.py
   api/studio_static/  Studio UI: index.html, studio.js (the whole single-page app:
                   router, pages, HUD), studio.css, hq.js/css, lab.js/css,
-                  farm.js/css, trade.js/css (Trading Bank), tutor.js/css (maths tutor), classroom.js/css (the classroom, PocketPal look), changer.js/css (the Changer),
+                  farm.js/css, trade.js/css (Trading Bank), tutor.js/css (maths tutor), classroom.js/css (the classroom, PocketPal look), scanner.js/css (bug scanner), changer.js/css (the Changer),
                   ops.js/css (Ops),
                   fcc3d.js (shared 3D engine), trade3d.js and ops3d.js (3D
                   views, loaded only when shown), three.*.js and three-orbit.js
@@ -103,6 +103,8 @@ docs/             GitHub Pages: index.html and docs/phone (built phone app)
 | `ideas.py`, `photos.py`, `images.py`, `image_engine.py`, `image_cloud.py` | Ideas board, business photos, free photos (Openverse), AI images |
 | `research.py`, `search.py`, `platforms.py`, `videos.py`, `video_ears.py`, `desk.py`, `connectivity.py` | Web research, search, Reddit/YouTube, video notes, desktop browser, online check |
 | `engine*.py`, `downloads.py`, `model_*.py`, `gguf_info.py`, `team_models.py` | Built-in engine, model downloads, model files, Team brains |
+| `scanner.py` | Bug scanner: read-only rounds (routes, records, odd inputs, pages, logs, data, files), findings kept by fingerprint |
+| `ui_kit/`, `bug_library/` | Tabler app kit and icons (`ui_kit` tool); 490 real bug fixes for the Changer (`bug_library` tool) |
 | `tuning.py`, `lora.py`, `lora_worker.py`, `school.py`, `notebook.py`, `learning.py` | Tuning, LoRA, classroom (owner plans and confirms, teacher steps out, class notes for model switches), Kaggle/Colab notebooks, Learn mode |
 | `guide.py` | The in-app Guide's knowledge of every page and setting. Keep it in step with features |
 | `playbook.py`, `call_guard.py`, `presets.py` | Jarvis's tool notes, small-model call guard, agent presets |
