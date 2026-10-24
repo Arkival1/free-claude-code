@@ -394,6 +394,8 @@ from .workers import WorkerPool
 CLASS_TRAIN_PLACES = frozenset({"pc", "kaggle", "colab"})
 CLASS_PC_BASE = "Qwen/Qwen3-4B"
 """Fits the owner's 6 GB card with 4-bit training."""
+CLASS_DOWNLOADS = ("model.gguf", "adapter.gguf", "adapter.zip", "Modelfile")
+"""A trained student's files the teacher chat offers, best first."""
 CLASS_NOTEBOOK_BASE = "Qwen/Qwen3-8B"
 """Fits Kaggle and Colab's free 16 GB T4."""
 
@@ -11105,6 +11107,37 @@ class StudioService:
         )
         return switched
 
+    async def _class_downloads(self, course: Course, job: LoraJob | None) -> list[str]:
+        """The trained student's files, and the teacher saying so once."""
+        if job is None or job.status not in {"succeeded", "failed"}:
+            return []
+        teacher = await self._store.get(Agent, course.teacher_agent_id)
+        name = teacher.name if teacher else "Teacher"
+        if job.status == "failed":
+            await self._school().say_once(
+                course,
+                name,
+                f"Training didn't finish: {job.error or job.message}. Tell me to "
+                "try again, or pick another place to train.",
+                f"training_failed:{job.id}",
+            )
+            return []
+        folder = self.lora.job_dir(job.id)
+        files = [name for name in CLASS_DOWNLOADS if (folder / name).is_file()]
+        await self._school().say_once(
+            course,
+            name,
+            f"Training is done: the student ({job.base_model}) learned this class. "
+            + (
+                "Download the trained model below, or give it to the student "
+                "here so it uses it from now on."
+                if files
+                else "Give it to the student here so it uses it from now on."
+            ),
+            f"training_done:{job.id}",
+        )
+        return files
+
     async def _class_lora(self, course: Course) -> LoraJob | None:
         if not course.tune_job_id or not course.tune_job_id.startswith("lora"):
             return None
@@ -11139,6 +11172,11 @@ class StudioService:
         questions = await self._store.find(
             ExamQuestion, where={"course_id": course_id}, order_by="ordinal ASC"
         )
+        job = await self._class_lora(course)
+        files = await self._class_downloads(course, job)
+        training = _class_training(
+            job, await self._store.get(Agent, course.student_agent_id), files
+        )
         transcript = await self._store.transcript(course.chat_id)
         return {
             "course": course.model_dump(),
@@ -11147,10 +11185,7 @@ class StudioService:
                 "teacher": await self._pal(course.teacher_agent_id),
                 "student": await self._pal(course.student_agent_id),
             },
-            "training": _class_training(
-                await self._class_lora(course),
-                await self._store.get(Agent, course.student_agent_id),
-            ),
+            "training": training,
             "progress": course.progress,
             "lessons": [lesson.model_dump() for lesson in lessons],
             "questions": [question.model_dump() for question in questions],
@@ -11591,7 +11626,9 @@ def photo_view(photo: Photo) -> JsonObject:
     return photo.model_dump() | {"url": f"/studio/api/photos/{photo.id}/file"}
 
 
-def _class_training(job: LoraJob | None, student: Agent | None) -> JsonObject | None:
+def _class_training(
+    job: LoraJob | None, student: Agent | None, files: list[str]
+) -> JsonObject | None:
     """A class's LoRA job as the teacher chat shows it (never its token)."""
     if job is None:
         return None
@@ -11605,6 +11642,7 @@ def _class_training(job: LoraJob | None, student: Agent | None) -> JsonObject | 
         "step": job.step,
         "total_steps": job.total_steps,
         "served_model": job.served_model,
+        "files": files,
         "in_use": bool(
             job.previous_model
             and student is not None

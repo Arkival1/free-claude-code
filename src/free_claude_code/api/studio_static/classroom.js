@@ -20,7 +20,11 @@
     "trained_in_use",
     "class_error",
     "teacher_handover",
+    "training_done",
+    "training_failed",
   ]);
+  // "training_done:<job>" is one message per job; its kind is the part before ":".
+  const kindOf = (message) => (message.data.kind || "").split(":")[0];
   const EVENT_KINDS = new Set([
     "course_opened",
     "teacher_left",
@@ -35,6 +39,12 @@
     "trained_in_use",
     "class_error",
   ]);
+  const FILE_LABELS = {
+    "model.gguf": "Download trained model (.gguf)",
+    "adapter.gguf": "Download adapter (.gguf)",
+    "adapter.zip": "Download adapter (.zip)",
+    Modelfile: "Ollama Modelfile",
+  };
   const PLACES = { local: "This PC", notebook: "Cloud notebook", cloud: "Server AI" };
   const QUESTION_STATES = {
     pending: "Not started",
@@ -180,7 +190,7 @@
   function classroom() {
     const { course, pals, questions } = state.data;
     const messages = state.data.messages.filter(
-      (message) => !TEACHER_CHAT.has(message.data.kind) || EVENT_KINDS.has(message.data.kind)
+      (message) => !TEACHER_CHAT.has(kindOf(message)) || EVENT_KINDS.has(kindOf(message))
     );
     return el("section", { class: "pp-pane" }, [
       el("div", { class: "pp-stage" }, [
@@ -276,7 +286,7 @@
 
   function teacherChat() {
     const { course, lessons } = state.data;
-    const messages = state.data.messages.filter((message) => TEACHER_CHAT.has(message.data.kind));
+    const messages = state.data.messages.filter((message) => TEACHER_CHAT.has(kindOf(message)));
     const box = el("textarea", {
       rows: "1",
       placeholder: course.plan_confirmed
@@ -324,7 +334,7 @@
   }
 
   function chatMessage(message) {
-    const kind = message.data.kind;
+    const kind = kindOf(message);
     if (kind === "owner") {
       return el("article", { class: "pp-msg mine" }, [el("div", { class: "pp-text", text: message.text })]);
     }
@@ -410,6 +420,15 @@
             downloadLink(`/studio/api/lora/jobs/${job.id}/notebook?target=kaggle`, "Kaggle notebook"),
             downloadLink(`/studio/api/lora/jobs/${job.id}/notebook?target=colab`, "Colab notebook"),
           ])
+        : null,
+      done && job.files.length
+        ? el(
+            "div",
+            { class: "pp-row" },
+            job.files.map((name) =>
+              downloadLink(`/studio/api/lora/jobs/${job.id}/files/${name}`, FILE_LABELS[name] || name)
+            )
+          )
         : null,
       done && !job.in_use
         ? el("button", {

@@ -454,6 +454,22 @@ class School:
             await self._store.put(updated)
             return updated
 
+    async def say_once(self, course: Course, author: str, text: str, kind: str) -> bool:
+        """Post one teacher message of this kind in the class chat, only once
+        (the page polls, so two reads mustn't post it twice)."""
+        async with _course_lock(course.id):
+            transcript = await self._store.transcript(course.chat_id)
+            if any(message.data.get("kind") == kind for message in transcript):
+                return False
+            await self._store.append_message(
+                chat_id=course.chat_id,
+                role="assistant",
+                text=text,
+                author=author,
+                data={"kind": kind, "course_id": course.id, "role": "teacher"},
+            )
+            return True
+
     async def _event(self, course: Course, author: str, text: str, kind: str) -> None:
         await self._store.append_message(
             chat_id=course.chat_id,

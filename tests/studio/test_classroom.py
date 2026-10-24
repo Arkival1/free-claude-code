@@ -492,3 +492,38 @@ async def test_two_quick_train_presses_make_one_job(make_studio, monkeypatch):
     )
     assert sum(isinstance(item, StudioError) for item in results) == 1
     assert len(await studio._store.find(LoraJob)) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_teacher_hands_over_the_trained_model_once(make_studio, monkeypatch):
+    studio, _ = make_studio(owners_class_model(), STUDIO_TEACHER_ENABLED=True)
+
+    async def still_preparing(job_id: str) -> None:
+        del job_id
+
+    monkeypatch.setattr(studio.lora, "_prepare", still_preparing)
+    course = await studio.open_class(topic="Ohm's law", lesson_count=2)
+    await studio._store.put(course.model_copy(update={"status": "passed"}))
+    job = await studio.class_train(course.id, "pc")
+    folder = studio.lora.job_dir(job.id)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "model.gguf").write_bytes(b"GGUF")
+    (folder / "train.jsonl").write_text("{}\n")
+    await studio._store.put(job.model_copy(update={"status": "succeeded"}))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_test_app(studio=studio)),
+        base_url="http://127.0.0.1",
+    ) as client:
+        for _ in range(2):  # the page polls; the teacher says it once
+            detail = (
+                await client.get(f"/studio/api/school/courses/{course.id}")
+            ).json()
+        assert detail["training"]["files"] == ["model.gguf"]
+        done = [
+            m
+            for m in detail["messages"]
+            if m["data"].get("kind", "").startswith("training_done")
+        ]
+        assert len(done) == 1 and "Download the trained model" in done[0]["text"]
+        got = await client.get(f"/studio/api/lora/jobs/{job.id}/files/model.gguf")
+        assert got.status_code == 200 and got.content == b"GGUF"
