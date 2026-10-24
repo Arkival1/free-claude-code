@@ -620,6 +620,7 @@ CHANGER_AIDER_FLAG = "changer_aider_v1"
 CHANGER_NEW_TOOLS = (
     (CHANGER_AIDER_FLAG, AIDER_TOOL),
     ("changer_bug_library_v1", "bug_library"),
+    ("changer_look_reference_v1", "look_reference"),
 )
 """Tools an existing Changer gets once, each behind its own flag."""
 HELPER_REPO = "https://github.com/wshobson/agents"
@@ -4434,7 +4435,9 @@ class StudioService:
                 "Build it section by section, then look_page and compare with "
                 "the brief."
             )
-        if context.site_id:
+        copy = await self._changer_copy()
+        # The Changer's copy becomes an update zip: its notes stay out of it.
+        if context.site_id and (copy is None or copy.id != context.site_id):
             name = reference_look.slug(title)
             if source_id:
                 name = f"{name}-{source_id[-6:].lower()}"

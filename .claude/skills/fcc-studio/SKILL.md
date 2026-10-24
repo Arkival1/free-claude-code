@@ -147,8 +147,9 @@ Settings and keys live in `~/.fcc/.env` (`%USERPROFILE%\.fcc` on Windows);
    `free-claude-code` entry in `uv.lock` (same number).
 7. Commit with a clear message, push to the owner's branch.
 8. To hand the owner a build: `scripts/release_zips.sh <scratchpad dir>`
-   makes `FCC-Studio-<version>.zip` plus `-partN` zips (each under 25 MB);
-   send them all. The owner unzips every one into the same folder.
+   makes one `FCC-Studio-<version>.zip` with everything; send that one file
+   (the owner's rule: one big zip every time). `--parts` still makes the
+   app zip plus `-partN` zips under 25 MB, only if the owner asks.
 
 Rules that bite: no `# type: ignore` (CI bans suppressions); outside repos
 follow CLAUDE.md's vendoring rules; connector tokens stay owner-only and

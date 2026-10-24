@@ -181,7 +181,13 @@ _COMMON = (
     "codes. If it shows another company's characters, logos, names or "
     "artwork, say so in a line starting 'BELONGS TO SOMEONE ELSE:' and "
     "describe original replacements with the same feel (unless the owner's "
-    "notes say the art is theirs: then it can be used as it is)."
+    "notes say the art is theirs: then it can be used as it is). End with "
+    "MAKE IT OURS: 4 to 6 concrete changes that keep everything the owner "
+    "likes (the feel, the mechanics, the layout) but make the result an "
+    "original and not a copy: a new name and words, redrawn characters and "
+    "logo, colours shifted, a few parts moved or added. For the owner's own "
+    "work (their notes say it's theirs, or it is FCC itself), say 'none "
+    "needed'."
 )
 PROMPTS: dict[Make, str] = {
     "game": _COMMON

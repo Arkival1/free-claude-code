@@ -95,4 +95,4 @@ export function describe(photo) {
 }
 
 /** The line added to a message that carries photos. */
-export const photoLine = (photo) => `[Business photo: ${photo.name} (${photo.width}x${photo.height}), kept in Business photos with the note in this message. Builders put it on a site with use_photo.]`;
+export const photoLine = (photo) => `[Business photo: ${photo.name} (${photo.width}x${photo.height}${photo.id ? `, id ${photo.id}` : ""}), kept in Business photos with the note in this message. Builders put it on a site with use_photo. To build or rebuild something like it (a site, an app, a game, an FCC page), use look_reference with photo ${photo.id || photo.name}.]`;

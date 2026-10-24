@@ -2279,9 +2279,15 @@ text map), HUD, physics feel, art style, palette and how to build it in
 Godot 4 (with the closest Godot demos); for a site or app the sections,
 layout, colours, type and parts. The brief is saved in the project's
 `reference-notes/` (with the video's frame sheet), and the agent builds from
-it. Mechanics and style are copied freely; your own art is used as it is;
-another game's characters, logos and names are flagged and drawn as
-originals. ffmpeg (the `studio_video` extra the Windows installer adds)
+it. Every brief ends with **MAKE IT OURS**: a few concrete changes (a new
+name and words, redrawn characters and logo, shifted colours, parts moved)
+so the game or site is like your reference but your own, not a copy; your
+own art is used as it is. Attach a photo or a video to any chat: photos go
+to Business photos and videos to the Ideas board, and the agent is told to
+build from them with `look_reference`. Send the web designer (Builder) a
+photo of a site to re-engineer it, the app makers (Coder) a photo or video
+of a game to make one like it, or the Changer a photo of a screen you want
+FCC itself to have. ffmpeg (the `studio_video` extra the Windows installer adds)
 shrinks photos and takes the frames. Without a Vision Model, agents go by
 what you write about each reference, so say what you like.
 

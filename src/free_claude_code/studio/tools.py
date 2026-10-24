@@ -1741,9 +1741,10 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "ideas-board photos and videos (category game holds the owner's "
             "game references), business photos, or a picture or video in the "
             "project, before you build from it. The brief is saved in "
-            "reference-notes/. Copy mechanics and style freely; the owner's "
-            "own art may be used as it is; draw original versions of anything "
-            "that belongs to another game or brand."
+            "reference-notes/. Build it like the reference with the small "
+            "differences its MAKE IT OURS list gives (new names, redrawn "
+            "characters and logo, shifted colours), so it is the owner's own "
+            "and not a copy; the owner's own art may be used as it is."
         ),
         parameters={
             "type": "object",

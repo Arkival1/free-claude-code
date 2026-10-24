@@ -257,3 +257,53 @@ async def test_looking_is_not_counted_as_writing():
     from free_claude_code.studio.agents import WRITE_TOOLS
 
     assert "look_reference" not in WRITE_TOOLS
+
+
+def test_every_brief_ends_with_changes_that_make_it_ours():
+    for make in reference_look.MAKES:
+        system, _ = reference_look.brief_prompt(make, title="x", notes="", focus="")
+        assert "MAKE IT OURS" in system and "not a copy" in system
+
+
+@pytest.mark.asyncio
+async def test_the_changer_gets_look_reference_once_and_keeps_notes_out_of_updates(
+    make_studio, tmp_path
+):
+    from free_claude_code.studio.models import StudioFlag
+    from free_claude_code.studio.presets import CHANGER_PROMPT, CHANGER_TOOLS
+    from free_claude_code.studio.tools import ToolContext
+
+    assert "look_reference" in CHANGER_TOOLS and "look_reference" in CHANGER_PROMPT
+    studio, _ = make_studio(
+        lambda system, prompt: LLMReply(text="SCREENS AND PARTS: a list."),
+        STUDIO_VISION_MODEL=VISION,
+    )
+    changer = await studio._changer_agent()
+    await studio._store.put(
+        changer.model_copy(
+            update={"tools": tuple(t for t in changer.tools if t != "look_reference")}
+        )
+    )
+    await studio._store.delete(StudioFlag, "changer_look_reference_v1")
+    assert "look_reference" in (await studio._changer_agent()).tools
+    copy = await studio.create_site(name="FCC copy")
+    monkey = pytest.MonkeyPatch()
+
+    async def changer_copy():
+        return copy
+
+    monkey.setattr(studio, "_changer_copy", changer_copy)
+    try:
+        if not FFMPEG:
+            pytest.skip("the look itself needs ffmpeg on PATH")
+        await studio._ideas.add(title="Menu", name="m.png", data=picture(tmp_path))
+        context = ToolContext(
+            agent_id=changer.id, chat_id="c", site_id=copy.id, agent_role="agent"
+        )
+        looked = await run(studio, context, "look_reference", idea="Menu")
+        assert not looked.failed, looked.text
+        assert looked.data["make"] == "app" and "note" not in looked.data
+        paths = {item.path for item in await studio.workspace.files(copy.id)}
+        assert not any(path.startswith("reference-notes/") for path in paths)
+    finally:
+        monkey.undo()

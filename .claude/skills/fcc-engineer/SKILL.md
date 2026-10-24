@@ -47,7 +47,8 @@ Read `CLAUDE.md` for the owner's rules; this page doesn't repeat them.
    out of turns with no report.
 8. **Commit, push** to the owner's branch; a release also bumps
    `pyproject.toml` + `uv.lock` + the version in CLAUDE.md, then
-   `scripts/release_zips.sh <scratchpad>/release-<ver>` and send every part.
+   `scripts/release_zips.sh <scratchpad>/release-<ver>` and send the one zip
+   (the owner wants one big file every time, never parts).
 
 ## Token rules
 

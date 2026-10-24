@@ -3,10 +3,14 @@ may direct whom, and whose memory is whose, on the phone."""
 
 import io
 import re
+import shutil
 import struct
+import subprocess
 import zipfile
 import zlib
+from pathlib import Path
 
+import pytest
 from playwright.sync_api import FilePayload, Page, expect
 
 from e2e.test_fcc_phone import fake_gemini, go, open_phone, say, tool_call, use_gemini
@@ -105,7 +109,7 @@ def test_the_phone_builder_uses_photos_sent_in_a_chat(
     )
 
     first = seen[0]["messages"][-1]["content"]
-    assert "[Business photo: shop-front.png (64x48)" in first
+    assert "[Business photo: shop-front.png (64x48, id " in first
     results = [
         m["content"] for call in seen for m in call["messages"] if m["role"] == "tool"
     ]
@@ -237,3 +241,55 @@ def test_a_photo_attached_in_a_pc_chat_keeps_the_message_as_its_note(
     )
     said = [m["text"] for m in transcript["messages"] if m["role"] == "user"]
     assert "[Business photo: shop-front.png (64x48" in said[0]
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg to make a clip")
+def test_a_video_attached_in_a_pc_chat_goes_to_the_ideas_board(
+    page: Page, admin_base_url: str, tmp_path: Path
+) -> None:
+    clip = tmp_path / "boss-fight.webm"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=1:size=160x120:rate=10",
+            "-c:v",
+            "libvpx",
+            str(clip),
+        ],
+        check=True,
+    )
+    page.goto(f"{admin_base_url}/studio#agents")
+    chat_id = page.evaluate(
+        """async () => {
+            await fetch('/studio/api/bootstrap', {method: 'POST',
+                headers: {'content-type': 'application/json'}, body: '{}'});
+            const {agents} = await fetch('/studio/api/agents').then(r => r.json());
+            const coder = agents.find(a => a.name === 'Coder');
+            const chat = await fetch('/studio/api/chats', {method: 'POST',
+                headers: {'content-type': 'application/json'},
+                body: JSON.stringify({agent_id: coder.id})}).then(r => r.json());
+            return chat.id || chat.chat.id;
+        }"""
+    )
+    page.goto(f"{admin_base_url}/studio#chat/{chat_id}")
+    page.get_by_label("Attach files or photos").set_input_files([str(clip)])
+    expect(page.locator(".attach-chips")).to_contain_text("🎬 boss-fight.webm")
+    page.get_by_placeholder("Message").fill("Make a game like this boss fight.")
+    page.get_by_role("button", name="Send").click()
+    expect(page.locator(".bubble.user").last).to_contain_text("boss fight")
+    page.wait_for_function(
+        """() => fetch('/studio/api/ideas').then(r => r.json()).then(
+            data => data.ideas.some(i => i.kind === 'video'
+                && i.text === 'Make a game like this boss fight.'))"""
+    )
+    transcript = page.evaluate(
+        f"() => fetch('/studio/api/chats/{chat_id}').then(r => r.json())"
+    )
+    said = [m["text"] for m in transcript["messages"] if m["role"] == "user"]
+    assert "[Video: boss-fight (id ida_" in said[0]
+    assert "look_reference with idea ida_" in said[0]

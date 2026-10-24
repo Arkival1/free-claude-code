@@ -64,7 +64,8 @@ or starts another subagent. Don't create separate reviewer subagents.
    below), browser `uv run pytest e2e/test_<page>.py` or Playwright CLI
    (`playwright-cli`) for real browser flows; all at once with
    `./scripts/ci.sh --skip playwright`. The "build" is
-   `scripts/release_zips.sh <dir>`.
+   `scripts/release_zips.sh <dir>` (one zip with everything: the owner
+   wants one big file every time, never parts).
 4. After a meaningful feature or milestone (never after every line, never in
    parallel with another subagent), start one `previewer` with only the
    requirements, the diff, the directly related files and short failure
@@ -167,7 +168,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.96.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.97.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup

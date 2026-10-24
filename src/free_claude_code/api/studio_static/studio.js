@@ -2412,6 +2412,7 @@
   // then kept on this PC with the user's note for the agents.
   const PHOTO_FILE = /\.(jpe?g|png|webp|gif|heic|heif)$/i;
   const isPhoto = (file) => (file.type || "").startsWith("image/") || PHOTO_FILE.test(file.name);
+  const isVideo = (file) => (file.type || "").startsWith("video/") || /\.(mp4|m4v|mov|webm)$/i.test(file.name);
 
   async function shrinkPhoto(file) {
     let bitmap;
@@ -2441,7 +2442,17 @@
   }
 
   function photoLine(photo) {
-    return `[Business photo: ${photo.name} (${photo.width}x${photo.height}, id ${photo.id}), kept in Business photos with the note in this message. Builders put it on a site with use_photo.]`;
+    return `[Business photo: ${photo.name} (${photo.width}x${photo.height}, id ${photo.id}), kept in Business photos with the note in this message. Builders put it on a site with use_photo. To build or rebuild something like it (a site, an app, a game, an FCC page), use look_reference with photo ${photo.id}.]`;
+  }
+
+  // Videos sent in a chat go to the Ideas board, where look_reference sees them.
+  async function uploadVideo(file) {
+    const query = new URLSearchParams({ name: file.name, title: file.name.replace(/\.[^.]+$/, ""), category: "general" });
+    return await sendFile(`/studio/api/ideas/upload?${query}`, file);
+  }
+
+  function videoLine(idea) {
+    return `[Video: ${idea.title} (id ${idea.id}), kept on the Ideas board with the note in this message. To build something like it (a game, a site, an app), use look_reference with idea ${idea.id}: it sees 9 frames taken through the video.]`;
   }
 
   // Attach files to a message: Studio reads them and the agent gets the text.
@@ -2462,7 +2473,7 @@
       chips.replaceChildren(
         ...files.map((file, index) =>
           el("span", { class: "pill attach" }, [
-            file.photo ? `🖼 ${file.name}` : `📎 ${file.name}${file.truncated ? " (first part)" : ""}`,
+            file.photo ? `🖼 ${file.name}` : file.video ? `🎬 ${file.name}` : `📎 ${file.name}${file.truncated ? " (first part)" : ""}`,
             el("button", {
               type: "button",
               class: "attach-remove",
@@ -2482,6 +2493,11 @@
           if (isPhoto(file)) {
             const photo = await uploadPhoto(file);
             files.push({ name: photo.name, photo });
+            continue;
+          }
+          if (isVideo(file)) {
+            const video = await uploadVideo(file);
+            files.push({ name: file.name, video });
             continue;
           }
           const read = await sendFile(`/studio/api/files/read?name=${encodeURIComponent(file.name)}`, file);
@@ -2509,17 +2525,23 @@
         for (const file of photos) {
           if (typed) api(`/studio/api/photos/${file.photo.id}`, { method: "PATCH", body: JSON.stringify({ note: typed }) }).catch(() => {});
         }
+        for (const file of files.filter((item) => item.video)) {
+          if (typed) api(`/studio/api/ideas/${file.video.id}`, { method: "PATCH", body: JSON.stringify({ text: typed }) }).catch(() => {});
+        }
         const block = files
           .map((file) =>
             file.photo
               ? photoLine(file.photo)
+              : file.video
+              ? videoLine(file.video)
               : `[Attached file: ${file.name}${file.truncated ? " (first part)" : ""}]\n\`\`\`\n${file.text}\n\`\`\``
           )
           .join("\n\n");
         const onlyPhotos = photos.length === files.length;
+        const onlyPictures = files.every((file) => file.photo || file.video);
         files.length = 0;
         redraw();
-        const opening = typed || (onlyPhotos ? "Here are photos of my business." : "Here is a file for you.");
+        const opening = typed || (onlyPhotos ? "Here are photos of my business." : onlyPictures ? "Here is what I'd like." : "Here is a file for you.");
         return `${opening}\n\n${block}`;
       },
     };
