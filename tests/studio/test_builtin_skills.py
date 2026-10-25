@@ -9,7 +9,7 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun
 from free_claude_code.studio.polish import polish_notes
 
-SKILL_COUNT = 19
+SKILL_COUNT = 20
 DESIGN_SKILLS = {
     "design-taste-frontend",
     "impeccable",
@@ -42,6 +42,7 @@ async def test_the_skills_install_refresh_and_keep_the_owners_switch(make_studio
             "interactive-3d-site",
             "game-dev",
             "godot-dev",
+            "specialist-roles",
             "add-a-library",
         }
         | DESIGN_SKILLS
@@ -412,3 +413,18 @@ async def test_a_game_job_brings_the_game_recipes(
     prompt = await task_prompt(make_studio, role, goal)
     assert ("# Game development" in prompt) is browser
     assert ("# Godot 4 games" in prompt) is godot
+
+
+@pytest.mark.asyncio
+async def test_specialist_roles_lists_open_whole_with_the_skill_tool(make_studio):
+    studio, _ = make_studio([])
+    library = studio._extensions
+    built = await library.install_builtin()
+    assert built is not None
+    roles = next(s for s in built.skills if s.name == "specialist-roles")
+    text = await library.skill_text(built, roles)
+    assert "[Cut here" not in text and "game-development.md" in text
+    games = await library.read_file(
+        "FCC skills", "specialist-roles/reference/game-development.md"
+    )
+    assert "Godot Gameplay Scripter" in games and "Read on with line" not in games

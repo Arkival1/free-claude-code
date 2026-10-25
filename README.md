@@ -1457,6 +1457,14 @@ hand parts to. Each agent asks for a light, everyday or strong model; FCC gives
 it the **Light Model** or **Strong Model** (Settings, Studio) or the default, so
 simple jobs don't spend a strong model's tokens.
 
+**Specialist roles.** The Agency (msitarzewski/agency-agents, 283
+specialists, MIT) also comes with FCC: engineering, design, game development
+(Godot, Unity, Blender, Roblox, level and narrative design), marketing,
+product, testing, sales, security, finance and more. Every agent can read one
+role when a job needs it through the built-in **specialist-roles** skill (an
+index of all 283); nothing joins the team unless you click **Add to team** on
+a role in Repos.
+
 **Aider helper.** If you install [Aider](https://aider.chat) (once:
 `uv tool install aider-chat`), the Changer, Builder, Coder and Developer can
 hand it a focused coding job with the **aider** tool. FCC doesn't bundle

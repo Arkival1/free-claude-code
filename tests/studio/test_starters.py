@@ -345,7 +345,7 @@ async def test_agents_search_every_repo_and_read_the_part_they_need(
     assert "Open-Meteo" in part and "Filler 70" in part and "Filler 150" not in part
 
     listed = await skill(action="list")
-    assert "111 skills in 4 repos" in listed and "- owner/many: 90 skills" in listed
+    assert "112 skills in 4 repos" in listed and "- owner/many: 90 skills" in listed
     one_repo = await skill(action="list", repo="security")
     assert one_repo.startswith("Skills:") and "auditing-kubernetes-rbac" in one_repo
     with pytest.raises(ValueError, match="no file"):
@@ -580,3 +580,37 @@ def test_agency_agents_ships_with_its_division_agents(tmp_path):
     assert len(found.agents) >= 280
     names = {agent.name for agent in found.agents}
     assert {"Godot Gameplay Scripter", "Game Designer"} <= names
+
+
+@pytest.mark.asyncio
+async def test_every_specialist_role_in_the_index_opens_from_the_installed_repo(
+    tmp_path,
+):
+    import re
+
+    [starter] = [s for s in load_starters(BUNDLE) if s.repo == "agency-agents"]
+    library = ExtensionLibrary(tmp_path / "ext")
+    added = await library.add_archive(
+        owner=starter.owner,
+        repo=starter.repo,
+        data=bundled_bytes(BUNDLE, starter),
+        origin="bundled",
+        ref=starter.commit,
+        source=starter.source,
+    )
+    assert len(added.agents) == 283
+    folder = (
+        Path(__file__).resolve().parents[2]
+        / "src/free_claude_code/studio/builtin_skills/specialist-roles"
+    )
+    lists = sorted((folder / "reference").glob("*.md"))
+    skill = (folder / "SKILL.md").read_text(encoding="utf-8")
+    for division in lists:
+        assert f"specialist-roles/reference/{division.name}" in skill
+        assert len(division.read_text(encoding="utf-8")) < 16_000  # one skill read
+    index = "\n".join(path.read_text(encoding="utf-8") for path in lists)
+    files = re.findall(r"\| `([^`]+\.md)` \|", index)
+    assert len(files) == 283
+    for file in files[:: max(1, len(files) // 25)]:
+        text = await library.read_file("msitarzewski/agency-agents", file)
+        assert text.startswith("---\nname:"), file
