@@ -456,6 +456,16 @@
       "file": "alexgreensh__token-optimizer.zip",
       "sha256": "331fa4af46d98422e5b95ffae60bc65701b14b78728eca9a52eb3d6b31efed39",
       "size": 604238
+    },
+    {
+      "owner": "msitarzewski",
+      "repo": "agency-agents",
+      "commit": "b37b5bb33b78f2c1d6567d98e25ca818e3259219",
+      "licence": "MIT",
+      "about": "The Agency: 283 specialist agents by division: engineering, design, game development (Godot, Unity, Blender, Roblox), marketing, product, testing, sales, security and more.",
+      "file": "msitarzewski__agency-agents.zip",
+      "sha256": "7d3ba17f77104529b90f453d7959d7603781b286a9918417b3100dacfd3ad871",
+      "size": 1857809
     }
   ]
 }

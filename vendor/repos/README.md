@@ -67,6 +67,7 @@ adds it back.
 | [crewAIInc/crewAI](https://github.com/crewAIInc/crewAI) | `6b93fa0e25` | MIT | `crewAIInc__crewAI.zip` (0.69 MB) | crewAI: role-playing agent crews (researcher, analyst, planner, writer, editor) and its docs. |
 | [OpenHands/software-agent-sdk](https://github.com/OpenHands/software-agent-sdk) | `1cfba2117e` | MIT | `OpenHands__software-agent-sdk.zip` (0.04 MB) | OpenHands agent: the SDK where the OpenHands engineer's own prompt lives now. |
 | [wshobson/agents](https://github.com/wshobson/agents) | `0874a27b17` | MIT | `wshobson__agents.zip` (2.51 MB) | 202 coding agents with model tiers and 185 skills: debugging, review, tests, security, Python, JavaScript, UI. The Changer's helper team comes from here. |
+| [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents) | `b37b5bb33b` | MIT | `msitarzewski__agency-agents.zip` (1.86 MB) | The Agency: 283 specialist agents by division (engineering, design, game development with Godot, Unity, Blender and Roblox, marketing, product, testing, sales, security). Its agents sit in division folders, so FCC wrote a `.claude-plugin/plugin.json` listing them; its install and convert scripts are left out. |
 | [Panniantong/agent-reach](https://github.com/Panniantong/agent-reach) | `94f06c1969` | MIT | `Panniantong__agent-reach.zip` (0.07 MB) | Agent Reach: give agents the internet (web, social, video sites) with a setup and health-check skill. |
 | [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) | `063bee94c3` | MIT (stated in its README and each SKILL.md) | `vercel-labs__agent-skills.zip` (0.58 MB) | Vercel's agent skills: web design guidelines, React and Next.js performance, composition patterns. |
 | [VoltAgent/awesome-design-md](https://github.com/VoltAgent/awesome-design-md) | `3b60532924` | MIT | `VoltAgent__awesome-design-md.zip` (0.79 MB) | DESIGN.md files analysed from real sites: copy one and say 'build a page that looks like this'. |
@@ -138,6 +139,11 @@ in Python or YAML, so FCC wrote one card per agent in
 `fcc-agents/agents/`, with a `fcc-agents/README.md` in each zip saying which
 files it quotes:
 
+- **agency-agents**: its 283 agent files are unchanged, but they sit in
+  division folders (`engineering/`, `game-development/godot/`, ...) rather
+  than `agents/`, so FCC added one file, `.claude-plugin/plugin.json`, that
+  lists those 23 folders. Its `scripts/` (install, convert, lint) are left
+  out.
 - **MetaGPT**: Product Manager, Architect, Project Manager, Engineer and QA
   Engineer, quoting each role's profile, goal and constraints and its
   action's instructions (`metagpt/roles/`, `metagpt/actions/`, kept in the

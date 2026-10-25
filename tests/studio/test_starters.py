@@ -559,3 +559,24 @@ async def test_repos_switched_off_before_come_on_once_and_the_owners_choice_stic
     await studio.ensure_starters()
     (security,) = await repos(studio)
     assert not security.enabled
+
+
+def test_agency_agents_ships_with_its_division_agents(tmp_path):
+    import zipfile as _zip
+
+    from free_claude_code.studio.extensions import scan
+    from free_claude_code.studio.starter import BUNDLE, bundled_bytes, load_starters
+
+    starter = next(s for s in load_starters(BUNDLE) if s.repo == "agency-agents")
+    assert starter.licence == "MIT" and starter.bundled
+    data = bundled_bytes(BUNDLE, starter)  # checks the SHA-256
+    target = tmp_path / "agency"
+    with _zip.ZipFile(io.BytesIO(data)) as bundle:
+        names = bundle.namelist()
+        assert not any("/scripts/" in name for name in names)
+        bundle.extractall(target)
+    root = next(target.iterdir())
+    found = scan(root, base=target, name="agency-agents")
+    assert len(found.agents) >= 280
+    names = {agent.name for agent in found.agents}
+    assert {"Godot Gameplay Scripter", "Game Designer"} <= names
