@@ -382,13 +382,24 @@ async def test_a_student_failing_mid_test_stops_the_teacher_too(
 
 
 @pytest.mark.asyncio
-async def test_a_class_trains_its_student_once_at_a_time(make_studio):
+async def test_a_class_trains_its_student_once_at_a_time(make_studio, monkeypatch):
     studio, _ = make_studio(owners_class_model(), STUDIO_TEACHER_ENABLED=True)
     course = await studio.open_class(topic="Ohm's law", lesson_count=2)
     await studio._store.put(course.model_copy(update={"status": "passed"}))
-    await studio.class_train(course.id, "colab")
+
+    async def stays_queued(job_id: str) -> None:
+        """Preparation does nothing, so the job stays queued (the real one
+        failed at once for want of examples, and the test raced it)."""
+
+    monkeypatch.setattr(studio.lora, "_prepare", stays_queued)
+    first = await studio.class_train(course.id, "colab")
+    assert first.status == "queued"
     with pytest.raises(StudioError, match="already being trained"):
         await studio.class_train(course.id, "kaggle")
+    # A job that ended (failed or done) doesn't block training again.
+    await studio._store.put(first.model_copy(update={"status": "failed"}))
+    again = await studio.class_train(course.id, "kaggle")
+    assert again.id != first.id
 
 
 def test_the_notebooks_are_valid_python_and_refuse_odd_names():

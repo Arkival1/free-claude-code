@@ -93,7 +93,9 @@ recorded in `vendor/agent-skills`):
   for a site's look, `impeccable` or `design-taste-frontend` (taste-skill)
   plus one style skill (`minimalist-ui`, `high-end-visual-design`,
   `industrial-brutalist-ui`, `redesign-existing-projects`); the same design
-  skills are FCC built-ins for the Builder (`studio/builtin_skills/`)
+  skills are FCC built-ins for the Builder (`studio/builtin_skills/`), and so
+  are nine coding skills (TDD, slices, API design, security, performance,
+  source-driven, verification, fastapi, pytest) for every FCC agent
 - auth, permissions, uploads, user data, keys, integrations, the Trading
   Bank: `security-and-hardening`
 - framework/library decision: `source-driven-development`
@@ -173,7 +175,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.101.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.102.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup

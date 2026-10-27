@@ -23,6 +23,14 @@ came from, and checksums, so they keep working if the upstream repos go away.
 | python-testing-patterns (installed with `npx skills add wshobson/agents --skill python-testing-patterns -a claude-code`; also in FCC's bundled wshobson/agents copy) | https://github.com/wshobson/agents | 0874a27b17a22e2b7c2e2bcd725768e0803cad06 | MIT (`LICENSE-wshobson-agents`) |
 | playwright-cli (written by `playwright-cli install --skills`, @playwright/cli 0.1.22) | https://github.com/microsoft/playwright-cli | b1a5903c5b633b8c9f843ad7b629c2a78437040c | Apache 2.0 (`LICENSE-microsoft-playwright-cli`) |
 
+FCC's agents get copies of nine of these as built-in skills (6.102, in
+`src/free_claude_code/studio/builtin_skills/`, each with its licence and an
+"In FCC" note that maps Claude Code terms to FCC's tools; the text below the
+note is unchanged): test-driven-development, incremental-implementation,
+api-and-interface-design, security-and-hardening, performance-optimization,
+source-driven-development, verification-before-completion, fastapi and
+python-testing-patterns.
+
 Not installed for Claude Code (owner's call, 6.84): the rest of superpowers
 (its always-on and multi-agent skills clash with the owner's lean,
 one-previewer rules), strix, agent-reach, flick, rea and the Vercel deploy

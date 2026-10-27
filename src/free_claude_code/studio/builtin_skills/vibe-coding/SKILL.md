@@ -32,3 +32,5 @@ description: How to turn a loose idea into working software quickly without brea
 
 For careful edits to existing code, also follow `karpathy-guidelines`
 (think first, simplest change, touch only what you must, verify).
+
+More skills when needed (skill tool, read by name): test-driven-development, incremental-implementation, verification-before-completion.

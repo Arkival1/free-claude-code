@@ -46,6 +46,7 @@ Work in this order. Each step has a rule you can check.
     totals and empty state after every change.
 11. **Minimum code, surgical edits** (`karpathy-guidelines`): nothing
     unasked, edit only the lines the task needs, turn the task into checks.
+    Also read test-driven-development, security-and-hardening.
 12. **Spend steps on writing:** write files whole, keep a third of the
     steps for tests and fixes.
 13. **Before finishing.** Run `check_project`, run the tests and the app

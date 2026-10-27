@@ -32,3 +32,5 @@ description: How to find and fix the real cause of a bug - reproduce it, read th
    fix those too, or list them.
 9. **Report.** The cause in one sentence, the fix, the test, and the runs
    that show it works.
+
+More skills when needed (skill tool, read by name): test-driven-development, python-testing-patterns.

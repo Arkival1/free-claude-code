@@ -29,3 +29,5 @@ description: How to review someone else's change - read the diff and the code ar
 5. **Report.** Verdict pass or fail. Each finding: the problem, where (file
    and line), the evidence, and the fix. Short and concrete; no style
    opinions as failures.
+
+More skills when needed (skill tool, read by name): security-and-hardening, performance-optimization.

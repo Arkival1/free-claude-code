@@ -1457,6 +1457,14 @@ hand parts to. Each agent asks for a light, everyday or strong model; FCC gives
 it the **Light Model** or **Strong Model** (Settings, Studio) or the default, so
 simple jobs don't spend a strong model's tokens.
 
+**Coding skills for every agent.** FCC's own skills now include nine
+coding skills the agents read when a job needs one (skill tool, by name):
+test-driven-development, incremental-implementation, api-and-interface-design,
+security-and-hardening, performance-optimization, source-driven-development,
+verification-before-completion, fastapi and python-testing-patterns (MIT,
+each with its licence; `vendor/agent-skills/`). The vibe coding, app
+developer, debugging and code review skills point to them.
+
 **Specialist roles.** The Agency (msitarzewski/agency-agents, 283
 specialists, MIT) also comes with FCC: engineering, design, game development
 (Godot, Unity, Blender, Roblox, level and narrative design), marketing,

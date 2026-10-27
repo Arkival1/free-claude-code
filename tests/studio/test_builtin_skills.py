@@ -9,7 +9,7 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun
 from free_claude_code.studio.polish import polish_notes
 
-SKILL_COUNT = 20
+SKILL_COUNT = 29
 DESIGN_SKILLS = {
     "design-taste-frontend",
     "impeccable",
@@ -43,6 +43,15 @@ async def test_the_skills_install_refresh_and_keep_the_owners_switch(make_studio
             "game-dev",
             "godot-dev",
             "specialist-roles",
+            "test-driven-development",
+            "incremental-implementation",
+            "api-and-interface-design",
+            "security-and-hardening",
+            "performance-optimization",
+            "source-driven-development",
+            "verification-before-completion",
+            "fastapi",
+            "python-testing-patterns",
             "add-a-library",
         }
         | DESIGN_SKILLS
@@ -428,3 +437,37 @@ async def test_specialist_roles_lists_open_whole_with_the_skill_tool(make_studio
         "FCC skills", "specialist-roles/reference/game-development.md"
     )
     assert "Godot Gameplay Scripter" in games and "Read on with line" not in games
+
+
+CODING_SKILLS = (
+    "test-driven-development",
+    "incremental-implementation",
+    "api-and-interface-design",
+    "security-and-hardening",
+    "performance-optimization",
+    "source-driven-development",
+    "verification-before-completion",
+    "fastapi",
+    "python-testing-patterns",
+)
+
+
+@pytest.mark.asyncio
+async def test_every_agent_can_read_the_coding_skills_with_their_licences(
+    make_studio,
+):
+    studio, _ = make_studio([])
+    library = studio._extensions
+    built = await library.install_builtin()
+    assert built is not None
+    by_name = {skill.name: skill for skill in built.skills}
+    for name in CODING_SKILLS:
+        text = await library.skill_text(built, by_name[name])
+        assert "In FCC (added)" in text, name
+        licence = await library.read_file("FCC skills", f"{name}/LICENSE")
+        assert "Permission is hereby granted" in licence, name
+    for routed in ("vibe-coding", "app-developer-engineer", "debugging", "code-review"):
+        text = await library.skill_text(built, by_name[routed])
+        assert "test-driven-development" in text or "security-and-hardening" in text, (
+            routed
+        )
