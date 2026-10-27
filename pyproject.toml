@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.100.0"
+version = "6.101.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -124,6 +124,9 @@ dev = [
 [tool.ruff]
 target-version = "py314"
 line-length = 88
+# Skill text from other repos stays exactly as shipped (vendor/agent-skills/SHA256SUMS);
+# FCC's own scripts in .claude/skills are still checked.
+extend-exclude = [".claude/skills/**/*.md"]
 
 [tool.ruff.lint]
 select = [

@@ -1990,6 +1990,10 @@ still looks finished.
   to change into your game. The
   `godot-dev` skill holds the genre book (18 genres) and the guide to art
   styles, animation, physics, worlds and story (`vendor/godot/`).
+  For depth on one part, the game makers also read 15 Godot 4.7 skills
+  (gamedev-skills/awesome-gamedev-agent-skills, Apache-2.0, comes with FCC):
+  physics, tilemaps, animation, shaders, UI, audio, multiplayer, export and
+  headless testing, one at a time when a job needs it.
 - **App kit.** The `ui_kit` tool brings Tabler (MIT, Bootstrap 5, light and
   dark) for app and game screens: dashboards, menus, settings, leaderboards,
   forms, tables, pricing and sign-in, plus 5,184 Tabler icons found by words

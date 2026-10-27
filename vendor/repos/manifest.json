@@ -466,6 +466,16 @@
       "file": "msitarzewski__agency-agents.zip",
       "sha256": "7d3ba17f77104529b90f453d7959d7603781b286a9918417b3100dacfd3ad871",
       "size": 1857809
+    },
+    {
+      "owner": "gamedev-skills",
+      "repo": "awesome-gamedev-agent-skills",
+      "commit": "184b72be02884f782a0058f2eeae2ce4277453e4",
+      "licence": "Apache-2.0",
+      "about": "15 Godot 4.7 skills for GDScript games: GDScript, nodes and scenes, signals, resources, 2D movement, 3D, physics, animation, tilemaps, shaders, UI, audio, multiplayer, export, headless testing.",
+      "file": "gamedev-skills__awesome-gamedev-agent-skills.zip",
+      "sha256": "db23bc9ab7cd154c18fa9bdb801cf80b0d1ef04e50b34315274fd466cd3bb3dc",
+      "size": 91679
     }
   ]
 }

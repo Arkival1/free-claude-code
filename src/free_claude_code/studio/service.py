@@ -11499,7 +11499,11 @@ class StudioService:
     async def memories(
         self, agent_id: str, *, scope: str | None = None
     ) -> tuple[MemoryEntry, ...]:
-        """Return one agent's memories."""
+        """Return one agent's memories (the team memory, or an agent's own
+        or server area); an agent that doesn't exist is an error, not an
+        empty list."""
+        if agent_id != SHARED_MEMORY_ID:
+            await self._store.require(Agent, agent_id.removeprefix(SERVER_AREA_PREFIX))
         return await self._memory().entries(agent_id, scope=scope)
 
     async def clear_memory_area(self, agent_id: str) -> int:

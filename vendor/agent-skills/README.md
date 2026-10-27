@@ -19,6 +19,8 @@ came from, and checksums, so they keep working if the upstream repos go away.
 | karpathy-guidelines (also an FCC built-in skill, with a note for agents that can't stop to ask) | https://github.com/multica-ai/andrej-karpathy-skills | 2c606141936f1eeef17fa3043a72095b4765b9c2 | MIT (stated in its README, plugin.json and SKILL.md; `LICENSE-multica-ai-andrej-karpathy-skills.md`) |
 | find-skills | https://github.com/vercel-labs/skills | a80e4c9d12d607631249d4d7d059f835d4b2f13a | MIT (`LICENSE-vercel-labs-skills`) |
 | agency-agents (an FCC-written SKILL.md and an INDEX.md of the 283 roles; the role texts stay in `vendor/repos/msitarzewski__agency-agents.zip` and are read one at a time with `unzip -p`) | https://github.com/msitarzewski/agency-agents | b37b5bb33b78f2c1d6567d98e25ca818e3259219 | MIT (`LICENSE` inside the zip) |
+| fastapi (installed with `npx skills add fastapi/fastapi --skill fastapi -a claude-code`; FCC's Studio API is FastAPI) | https://github.com/fastapi/fastapi | 79cab5b | MIT (`LICENSE-fastapi`) |
+| python-testing-patterns (installed with `npx skills add wshobson/agents --skill python-testing-patterns -a claude-code`; also in FCC's bundled wshobson/agents copy) | https://github.com/wshobson/agents | 0874a27b17a22e2b7c2e2bcd725768e0803cad06 | MIT (`LICENSE-wshobson-agents`) |
 | playwright-cli (written by `playwright-cli install --skills`, @playwright/cli 0.1.22) | https://github.com/microsoft/playwright-cli | b1a5903c5b633b8c9f843ad7b629c2a78437040c | Apache 2.0 (`LICENSE-microsoft-playwright-cli`) |
 
 Not installed for Claude Code (owner's call, 6.84): the rest of superpowers

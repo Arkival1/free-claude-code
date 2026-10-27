@@ -25,6 +25,15 @@ description: How to make real Godot 4 games in FCC (Godot 4.7.2, GDScript) on th
    a demo is close to the game asked for, `use` copies the whole demo (code,
    art, sound, models, skies) into the project to build on; keep its licence
    files and credits.
+7. Need depth on one part? The skill tool has Godot 4.7 skills for each
+   (gamedev-skills/awesome-gamedev-agent-skills): read the one that fits,
+   e.g. `godot-physics`, `godot-tilemap`, `godot-animation`, `godot-shaders`,
+   `godot-ui-control`, `godot-signals-groups`, `godot-resources`,
+   `godot-2d-movement`, `godot-3d-essentials`, `godot-audio`,
+   `godot-multiplayer`, `godot-export`, `godot-gdscript`,
+   `godot-nodes-scenes`, `godot-gdscript-headless-testing`. Where one says
+   to run a script, use `godot` action `check` instead. If the owner turned
+   that repo off, the demos and this skill are enough.
 
 ## 2. GDScript 2 (Godot 4), the rules that trip models up
 - Typed variables: `var speed := 120.0`. When `:=` can't infer (a value

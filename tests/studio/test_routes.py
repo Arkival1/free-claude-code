@@ -391,6 +391,11 @@ async def test_the_hud_talks_to_the_main_ai_in_the_background(make_studio):
                 "The user likes dark mode"
             ]
             assert (await client.get("/studio/api/main")).json()["memory"]["count"] == 1
+            # The bug scanner's find: a missing agent was answered as empty.
+            missing = await client.get("/studio/api/memory/agt_missing")
+            assert missing.status_code == 404
+            gone = await client.get("/studio/api/memory/server:agt_missing")
+            assert gone.status_code == 404
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()

@@ -614,3 +614,34 @@ async def test_every_specialist_role_in_the_index_opens_from_the_installed_repo(
     for file in files[:: max(1, len(files) // 25)]:
         text = await library.read_file("msitarzewski/agency-agents", file)
         assert text.startswith("---\nname:"), file
+
+
+@pytest.mark.asyncio
+async def test_the_godot_skills_install_without_scripts_or_csharp(tmp_path):
+    [starter] = [
+        s for s in load_starters(BUNDLE) if s.repo == "awesome-gamedev-agent-skills"
+    ]
+    assert starter.licence == "Apache-2.0"
+    data = bundled_bytes(BUNDLE, starter)
+    with zipfile.ZipFile(io.BytesIO(data)) as bundle:
+        names = bundle.namelist()
+    assert any(name.endswith("/NOTICE") for name in names)
+    assert not any("/scripts/" in name or "csharp" in name for name in names)
+    library = ExtensionLibrary(tmp_path / "ext")
+    added = await library.add_archive(
+        owner=starter.owner,
+        repo=starter.repo,
+        data=data,
+        origin="bundled",
+        ref=starter.commit,
+        source=starter.source,
+    )
+    found = {skill.name for skill in added.skills}
+    assert len(found & {s for s in found if s.startswith("godot-")}) == 15
+    assert {"godot-physics", "godot-tilemap", "godot-export"} <= found
+    godot_dev = (
+        Path(__file__).resolve().parents[2]
+        / "src/free_claude_code/studio/builtin_skills/godot-dev/SKILL.md"
+    ).read_text(encoding="utf-8")
+    for name in ("godot-physics", "godot-tilemap", "godot-gdscript-headless-testing"):
+        assert name in found and name in godot_dev
