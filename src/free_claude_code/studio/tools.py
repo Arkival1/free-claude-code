@@ -87,7 +87,6 @@ from .project_check import (
 from .research import PLATFORMS, DeepResearch, ResearchMix
 from .search import SearchError, StudioSearch
 from .site_layouts import KINDS as LAYOUT_KINDS
-from .site_layouts import SAMPLE_NOTE as LAYOUT_SAMPLE_NOTE
 from .site_layouts import LayoutError, layout_files, name_layout
 from .site_layouts import find as find_layouts
 from .site_layouts import layout as find_layout
@@ -1117,13 +1116,15 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name=SITE_LAYOUTS_TOOL,
         description=(
-            "FCC's 26 whole-website layouts from Start Bootstrap (MIT, Bootstrap "
-            "5, phone-ready): agency, landing pages, portfolios, blogs, shops, a "
-            "CV, a multi-page business site, an admin dashboard and more. list "
-            "shows them (optionally one kind); use copies one into the project "
-            "with Bootstrap and its icons in vendor/, so it works offline. Then "
-            "replace every sample word, photo and form address with the "
-            "business's own, and restyle it; add pieces with ui_library."
+            "Whole-website layouts: 8 of FCC's own designs, one per style "
+            "(minimal studio, bold brutalist, soft SaaS, warm cafe, boutique "
+            "shop, trade business, game launch, creator links; plain HTML/CSS, "
+            "no outside files), and 26 from Start Bootstrap (MIT, Bootstrap 5): "
+            "agency, landing pages, portfolios, blogs, shops, a CV, a multi-page "
+            "business site, an admin dashboard and more. list shows them "
+            "(optionally one kind); use copies one into the project so it works "
+            "offline. Then replace every sample word, photo and form address "
+            "with the business's own, and restyle it; add pieces with ui_library."
         ),
         parameters={
             "type": "object",
@@ -3184,7 +3185,7 @@ class AgentToolbox:
         lines = [
             f"Copied the {chosen.name} layout ({len(written)} files; pages: "
             f"{', '.join(chosen.pages)}).",
-            LAYOUT_SAMPLE_NOTE,
+            chosen.note,
         ]
         if kept:
             lines.append(

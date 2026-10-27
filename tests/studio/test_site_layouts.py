@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_all_26_layouts_ship_with_their_libraries_and_checksum():
     found = site_layouts.layouts()
-    assert len(found) == 26
+    assert len([item for item in found if item.source == "startbootstrap"]) == 26
     assert {item.kind for item in found} <= set(site_layouts.KINDS)
     sums = (ROOT / "vendor" / "startbootstrap" / "SHA256SUMS").read_text()
     digest = hashlib.sha256(site_layouts.DATA.read_bytes()).hexdigest()
@@ -37,7 +37,11 @@ def test_all_26_layouts_ship_with_their_libraries_and_checksum():
 
 def test_layouts_are_found_by_kind_and_name():
     shops = site_layouts.find("shop")
-    assert {item.id for item in shops} == {"shop-homepage", "shop-item"}
+    assert {item.id for item in shops} == {
+        "boutique-shop",
+        "shop-homepage",
+        "shop-item",
+    }
     assert site_layouts.layout("Modern Business").id == "modern-business"
     with pytest.raises(site_layouts.LayoutError, match="No layout"):
         site_layouts.layout("myspace")
@@ -107,4 +111,41 @@ async def test_website_agents_get_the_layouts(make_studio):
     await studio.ensure_defaults()
     upgraded = await studio._store.get(Agent, builder.id)
     assert upgraded is not None and "site_layouts" in upgraded.tools
-    assert "26 whole-website layouts" in TOOL_SPEC_BY_NAME["site_layouts"].description
+    description = TOOL_SPEC_BY_NAME["site_layouts"].description
+    assert (
+        "8 of FCC's own designs" in description
+        and "26 from Start Bootstrap" in description
+    )
+
+
+def test_fccs_own_designs_are_whole_offline_pages():
+    ours = [item for item in site_layouts.layouts() if item.source == "fcc"]
+    assert len(ours) == 8
+    ids = [item.id for item in site_layouts.layouts()]
+    assert len(ids) == len(set(ids))  # no FCC design shadows a Start Bootstrap one
+    for item in ours:
+        assert item.kind in site_layouts.KINDS and item.style
+        assert item.note == site_layouts.FCC_NOTE
+        files = site_layouts.layout_files(item)
+        assert set(files) == {"index.html", "styles.css", "app.js"}
+        page = files["index.html"].decode()
+        # Offline: no outside scripts, styles, fonts or pictures.
+        assert "http://" not in page and "https://" not in page, item.id
+        assert 'href="styles.css"' in page and 'src="app.js"' in page
+        assert '<meta name="viewport"' in page and 'lang="en"' in page
+        css = files["styles.css"].decode()
+        assert ":root" in css and "@media" in css and "url(http" not in css
+        # Every field is labelled and every form names where it goes.
+        assert page.count("<input") + page.count("<textarea") <= page.count("<label")
+        assert "data-email=" in page
+
+
+def test_a_fcc_design_takes_the_business_name_everywhere():
+    for item in (layout for layout in site_layouts.layouts() if layout.source == "fcc"):
+        page = site_layouts.layout_files(item)["index.html"]
+        named = site_layouts.name_layout(page, "Sparky & Co").decode()
+        assert "<title>Sparky &amp; Co</title>" in named, item.id
+        assert named.count("Sparky &amp; Co") >= 3, item.id  # title, logo, footer
+        # Decorations inside the logo (an icon span) stay.
+        if 'class="bolt"' in page.decode():
+            assert 'class="bolt"' in named

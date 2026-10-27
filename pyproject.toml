@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.103.0"
+version = "6.104.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -201,6 +201,8 @@ allowed-unresolved-imports = [
     # Optional Studio voice: Kokoro speech and Whisper recognition.
     "kokoro_onnx",
     "faster_whisper",
+    # vendor/swe-bench/pack.py: only run by hand to rebuild the bug library.
+    "pyarrow.parquet",
     "numpy",
     # Optional Content Farm video maker (studio_video extra).
     "imageio_ffmpeg",

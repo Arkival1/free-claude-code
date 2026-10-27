@@ -1465,6 +1465,12 @@ verification-before-completion, fastapi and python-testing-patterns (MIT,
 each with its licence; `vendor/agent-skills/`). The vibe coding, app
 developer, debugging and code review skills point to them.
 
+**Design skills (6.104).** Three more built-in skills, read when a job needs
+one: **frontend-design** (Anthropic, Apache-2.0: a bold, intentional look
+instead of a template), **stitch-design-taste** (taste-skill, MIT: write a
+`DESIGN.md` of colours, type and spacing before the site) and
+**game-design** (FCC-written, with eight agency-agents guides, MIT).
+
 **Specialist roles.** The Agency (msitarzewski/agency-agents, 283
 specialists, MIT) also comes with FCC: engineering, design, game development
 (Godot, Unity, Blender, Roblox, level and narrative design), marketing,
@@ -1967,8 +1973,13 @@ still looks finished.
   and CSS to copy into the site and restyle with its own colours and fonts,
   keeping the designer's credit comment. The library ships with FCC
   (`vendor/uiverse/`), so nothing is downloaded.
-- **Website layouts.** The `site_layouts` tool copies one of 26 whole-site
-  layouts from Start Bootstrap (MIT, Bootstrap 5) into a project: agency,
+- **Website layouts.** The `site_layouts` tool copies one of 34 whole-site
+  layouts into a project. Eight are FCC's own designs, one per style: studio
+  minimal, bold brutalist, soft SaaS, warm cafe (tabbed menu, booking),
+  boutique shop (filters, cart count), trade business (emergency bar, quote
+  form), game launch and creator links (link page and CV). They are plain
+  HTML/CSS/JS with no outside files, work on phones, and their forms open an
+  email to the business. The other 26 are from Start Bootstrap (MIT, Bootstrap 5): agency,
   landing pages, portfolios, blogs, shops, a CV, a multi-page business site,
   an admin dashboard and more. Bootstrap, its icons and Font Awesome come
   with it in `vendor/`, so the site works offline; the business's name goes
@@ -1998,6 +2009,11 @@ still looks finished.
   to change into your game. The
   `godot-dev` skill holds the genre book (18 genres) and the guide to art
   styles, animation, physics, worlds and story (`vendor/godot/`).
+  The `game-design` skill covers the design side before building: core
+  loop, balance, levels and pacing, feedback, story, rewards, art and sound
+  direction, and eight specialist guides (game, level, narrative and economy
+  design, technical art, game audio, Godot scripting and shaders) from
+  agency-agents (MIT).
   For depth on one part, the game makers also read 15 Godot 4.7 skills
   (gamedev-skills/awesome-gamedev-agent-skills, Apache-2.0, comes with FCC):
   physics, tilemaps, animation, shaders, UI, audio, multiplayer, export and

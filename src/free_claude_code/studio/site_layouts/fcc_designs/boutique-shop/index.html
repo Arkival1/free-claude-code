@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shop Name</title>
+  <meta name="description" content="Small-batch homewares, made by hand and shipped plastic-free.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#shop">Skip to the products</a>
+  <header class="top" id="top">
+    <a class="brand" data-brand href="#top">Shop Name</a>
+    <button class="menu" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav id="nav" aria-label="Main">
+      <a href="#shop">Shop</a>
+      <a href="#story">Our story</a>
+      <a href="#help">Help</a>
+    </nav>
+    <a class="cart" href="#shop" aria-label="Cart">Cart <span class="count" data-cart aria-live="polite">0</span></a>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <p class="kicker">The autumn collection</p>
+        <h1 id="hero-title">Made slowly.<br>Kept for years.</h1>
+        <a class="btn" href="#shop">Shop the collection</a>
+      </div>
+      <div class="hero-shape" aria-hidden="true"></div>
+    </section>
+
+    <section id="shop" class="shop" aria-labelledby="shop-title">
+      <div class="shop-head">
+        <h2 id="shop-title">Shop</h2>
+        <div class="filters" data-filters role="group" aria-label="Filter products">
+          <button data-filter="all" aria-pressed="true">All</button>
+          <button data-filter="ceramics" aria-pressed="false">Ceramics</button>
+          <button data-filter="textiles" aria-pressed="false">Textiles</button>
+          <button data-filter="lighting" aria-pressed="false">Lighting</button>
+        </div>
+      </div>
+      <div class="grid">
+        <article class="product" data-kind="ceramics">
+          <div class="pic p1" aria-hidden="true"></div>
+          <h3>Speckled mug</h3><p class="price">$34</p>
+          <button class="add" data-add>Add to cart</button>
+        </article>
+        <article class="product" data-kind="textiles">
+          <div class="pic p2" aria-hidden="true"></div>
+          <h3>Linen throw</h3><p class="price">$120</p>
+          <button class="add" data-add>Add to cart</button>
+        </article>
+        <article class="product" data-kind="lighting">
+          <div class="pic p3" aria-hidden="true"></div>
+          <h3>Paper lamp</h3><p class="price">$89</p>
+          <button class="add" data-add>Add to cart</button>
+        </article>
+        <article class="product" data-kind="ceramics">
+          <div class="pic p4" aria-hidden="true"></div>
+          <h3>Stoneware bowl</h3><p class="price">$42</p>
+          <button class="add" data-add>Add to cart</button>
+        </article>
+        <article class="product" data-kind="textiles">
+          <div class="pic p5" aria-hidden="true"></div>
+          <h3>Cotton napkins (4)</h3><p class="price">$38</p>
+          <button class="add" data-add>Add to cart</button>
+        </article>
+        <article class="product" data-kind="lighting">
+          <div class="pic p6" aria-hidden="true"></div>
+          <h3>Brass candle holder</h3><p class="price">$56</p>
+          <button class="add" data-add>Add to cart</button>
+        </article>
+      </div>
+    </section>
+
+    <section id="story" class="story" aria-labelledby="story-title">
+      <h2 id="story-title">Our story</h2>
+      <p>Two friends, one kiln and a shed. Everything is made in small batches, so each piece is a little different.</p>
+      <ul class="promises">
+        <li><strong>Plastic-free</strong> shipping</li>
+        <li><strong>30-day</strong> returns</li>
+        <li><strong>Hand-made</strong> locally</li>
+      </ul>
+    </section>
+
+    <section id="help" class="help" aria-labelledby="help-title">
+      <h2 id="help-title">Questions?</h2>
+      <form class="form" data-email="hello@example.com" novalidate>
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <label>Message<textarea name="message" rows="3" required></textarea></label>
+        <button class="btn" type="submit">Send</button>
+        <p class="note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>&copy; <span data-year></span> <span data-brand-text>Shop Name</span></p>
+    <a href="#top">Back to top</a>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

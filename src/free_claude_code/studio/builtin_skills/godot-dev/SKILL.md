@@ -34,6 +34,8 @@ description: How to make real Godot 4 games in FCC (Godot 4.7.2, GDScript) on th
    `godot-nodes-scenes`, `godot-gdscript-headless-testing`. Where one says
    to run a script, use `godot` action `check` instead. If the owner turned
    that repo off, the demos and this skill are enough.
+8. Design before you build: the `game-design` skill (loop, balance, levels,
+   story, rewards, art and sound direction, and eight specialist guides).
 
 ## 2. GDScript 2 (Godot 4), the rules that trip models up
 - Typed variables: `var speed := 120.0`. When `:=` can't infer (a value

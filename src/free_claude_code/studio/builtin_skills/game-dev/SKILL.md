@@ -73,3 +73,4 @@ description: How to make a real browser game in FCC - start from the phaser-game
 - A title or start screen, a clear goal, a score or lives, a win and a lose
   screen, and a way to play again.
 - Say what the game is, how to play, and which packs it uses.
+- Design questions (loop, balance, levels, story, rewards): `game-design`.

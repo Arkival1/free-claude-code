@@ -2,6 +2,7 @@
 findings for the owner."""
 
 import asyncio
+import dataclasses
 import hashlib
 
 import httpx
@@ -22,18 +23,17 @@ def fake_probe(**overrides) -> Probe:
             return 500, "UnicodeError", 0.1
         return 200, "{}", 0.01
 
-    values = {
-        "get": get,
-        "routes": [
+    probe = Probe(
+        get=get,
+        routes=[
             Route("/studio/api/broken"),
             Route("/studio/api/slow"),
             Route("/studio/api/fine"),
             Route("/studio/api/odd", ("q",)),
             Route("/studio/api/agents/{agent_id}"),
         ],
-    }
-    values.update(overrides)
-    return Probe(**values)
+    )
+    return dataclasses.replace(probe, **overrides)
 
 
 def test_the_scanner_never_calls_risky_routes():

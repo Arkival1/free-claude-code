@@ -9,7 +9,7 @@ from free_claude_code.studio.llm import LLMReply
 from free_claude_code.studio.models import AgentRun
 from free_claude_code.studio.polish import polish_notes
 
-SKILL_COUNT = 30
+SKILL_COUNT = 33
 DESIGN_SKILLS = {
     "design-taste-frontend",
     "impeccable",
@@ -53,6 +53,9 @@ async def test_the_skills_install_refresh_and_keep_the_owners_switch(make_studio
             "fastapi",
             "python-testing-patterns",
             "frontend-ui-engineering",
+            "frontend-design",
+            "stitch-design-taste",
+            "game-design",
             "add-a-library",
         }
         | DESIGN_SKILLS

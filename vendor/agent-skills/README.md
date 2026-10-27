@@ -31,6 +31,15 @@ api-and-interface-design, security-and-hardening, performance-optimization,
 source-driven-development, verification-before-completion, fastapi and
 python-testing-patterns.
 
+6.104 adds three more built-ins: frontend-design (from `.claude/skills`,
+Apache 2.0, its LICENSE.txt beside it), stitch-design-taste (from
+stitch-skill, MIT, `LICENSE` from taste-skill) and game-design (FCC-written
+SKILL.md; its `reference/` holds eight agency-agents roles unchanged: game,
+level, narrative and economy designer, technical artist, game audio
+engineer, Godot gameplay scripter and shader developer; MIT, `LICENSE` from
+the agency-agents zip). Each has an "In FCC" note mapping Claude Code terms
+to FCC's tools.
+
 Not installed for Claude Code (owner's call, 6.84): the rest of superpowers
 (its always-on and multi-agent skills clash with the owner's lean,
 one-previewer rules), strix, agent-reach, flick, rea and the Vercel deploy

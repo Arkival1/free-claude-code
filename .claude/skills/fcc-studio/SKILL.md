@@ -106,6 +106,8 @@ docs/             GitHub Pages: index.html and docs/phone (built phone app)
 | `engine*.py`, `downloads.py`, `model_*.py`, `gguf_info.py`, `team_models.py` | Built-in engine, model downloads, model files, Team brains |
 | `scanner.py` | Bug scanner: read-only rounds (routes, records, odd inputs, pages, logs, data, duplicates, files), findings kept by fingerprint |
 | `godot/` | Godot 4.7.2: `engine.py` (download once, SHA-512, Repo vault, headless check, frames, export), demo library with all its art in `art/` (12 checked parts; `use` copies a whole demo), starters (`godot` tool, `godot-dev` skill) |
+| `site_layouts/` | `site_layouts` tool: 8 FCC designs in `fcc_designs/` (`catalogue.json`, plain HTML/CSS/JS) and 26 Start Bootstrap layouts; `name_layout` puts the business name in |
+| `builtin_skills/` | FCC's own skills (the "FCC skills" repo, 33): routed ones go into jobs, the rest are read with the skill tool; count in `tests/studio/test_builtin_skills.py` |
 | `ui_kit/`, `bug_library/` | Tabler app kit and icons (`ui_kit` tool); 490 real bug fixes for the Changer (`bug_library` tool) |
 | `tuning.py`, `lora.py`, `lora_worker.py`, `school.py`, `notebook.py`, `learning.py` | Tuning, LoRA, classroom (owner plans and confirms, teacher steps out, class notes for model switches), Kaggle/Colab notebooks, Learn mode |
 | `guide.py` | The in-app Guide's knowledge of every page and setting. Keep it in step with features |

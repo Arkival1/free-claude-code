@@ -409,12 +409,15 @@ def test_the_notebooks_are_valid_python_and_refuse_odd_names():
 
     for target in notebook.TARGETS:
         book = notebook.teacher_notebook(target)
-        for cell in book["cells"]:
+        cells = book["cells"]
+        assert isinstance(cells, list)
+        for cell in cells:
+            assert isinstance(cell, dict)
+            text = cell["source"]
             if cell["cell_type"] == "code":
+                assert isinstance(text, str)
                 source = "\n".join(
-                    line
-                    for line in cell["source"].splitlines()
-                    if not line.startswith("!")
+                    line for line in text.splitlines() if not line.startswith("!")
                 )
                 ast.parse(source)
     for bad in ('x"; import os; os.system("rm -rf /") #', "a$b", "two\nlines"):

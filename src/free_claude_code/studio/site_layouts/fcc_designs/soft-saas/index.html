@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Product Name</title>
+  <meta name="description" content="The calm way to plan your team's week. Free for small teams.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#features">Skip to features</a>
+  <header class="top" id="top">
+    <a class="brand" data-brand href="#top"><span class="dot" aria-hidden="true"></span>Product Name</a>
+    <button class="menu" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav id="nav" aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+      <a class="pill" href="#pricing">Start free</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <p class="badge">New: shared calendars</p>
+      <h1 id="hero-title">Plan the week.<br><em>Skip the meeting.</em></h1>
+      <p class="lede">One calm place for your team's tasks, time and notes. Set up in two minutes, loved for years.</p>
+      <div class="actions">
+        <a class="pill big" href="#pricing">Start free</a>
+        <a class="ghost" href="#features">See how it works</a>
+      </div>
+      <div class="window" aria-hidden="true">
+        <div class="win-bar"><i></i><i></i><i></i></div>
+        <div class="win-body">
+          <div class="col"><b></b><b></b><b class="short"></b></div>
+          <div class="col"><b class="tall"></b><b></b></div>
+          <div class="col"><b></b><b class="short"></b><b></b></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="features" aria-labelledby="features-title">
+      <h2 id="features-title">Everything in its place</h2>
+      <div class="cards">
+        <article class="card"><span class="icon" aria-hidden="true">&#9719;</span><h3>Week view</h3><p>See every task and meeting on one board.</p></article>
+        <article class="card"><span class="icon" aria-hidden="true">&#9993;</span><h3>Quiet updates</h3><p>One daily summary instead of a hundred pings.</p></article>
+        <article class="card"><span class="icon" aria-hidden="true">&#9881;</span><h3>Plays well</h3><p>Works with the calendar and chat you already use.</p></article>
+      </div>
+    </section>
+
+    <section id="pricing" class="pricing" aria-labelledby="pricing-title">
+      <h2 id="pricing-title">Simple pricing</h2>
+      <div class="plans">
+        <article class="plan">
+          <h3>Starter</h3><p class="price">$0</p><p>Up to 5 people.</p>
+          <ul><li>Week board</li><li>Daily summary</li><li>2 integrations</li></ul>
+          <a class="ghost" href="#contact">Start free</a>
+        </article>
+        <article class="plan featured">
+          <h3>Team</h3><p class="price">$8<span>/person/month</span></p><p>For growing teams.</p>
+          <ul><li>Everything in Starter</li><li>Shared calendars</li><li>Unlimited integrations</li></ul>
+          <a class="pill" href="#contact">Try 14 days free</a>
+        </article>
+      </div>
+    </section>
+
+    <section id="faq" class="faq" aria-labelledby="faq-title">
+      <h2 id="faq-title">Questions</h2>
+      <details><summary>Is there really a free plan?</summary><p>Yes. Up to five people, forever, no card needed.</p></details>
+      <details><summary>Can I bring my data?</summary><p>Import from a spreadsheet or most task apps in a few clicks.</p></details>
+      <details><summary>Where is my data kept?</summary><p>Encrypted, backed up daily, and yours to export any time.</p></details>
+    </section>
+
+    <section id="contact" class="contact" aria-labelledby="contact-title">
+      <h2 id="contact-title">Get started</h2>
+      <form class="form" data-email="hello@example.com" novalidate>
+        <label>Work email<input name="email" type="email" autocomplete="email" required></label>
+        <button class="pill big" type="submit">Create my account</button>
+        <p class="note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>&copy; <span data-year></span> <span data-brand-text>Product Name</span></p>
+    <a href="#top">Back to top</a>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>
