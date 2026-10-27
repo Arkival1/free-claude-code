@@ -416,3 +416,11 @@ def test_older_changer_team_instructions_are_upgraded():
     )
     assert "15 steps" in presets.CHANGER_PLANNER_PROMPT
     assert "run the real code" in presets.CHANGER_REVIEWER_PROMPT
+    # The Changer points at the FCC built-in skills that fit editing FCC,
+    # and an older Changer prompt is upgraded to the one that does.
+    for name in ("fastapi", "security-and-hardening", "verification-before-completion"):
+        assert name in presets.CHANGER_PROMPT
+    assert (
+        presets.PROMPT_UPGRADES[presets._OLD_CHANGER_PROMPT_V4]
+        == presets.CHANGER_PROMPT
+    )

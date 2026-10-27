@@ -112,7 +112,7 @@ async def test_the_main_ai_is_created_with_the_team(make_studio):
     assert again == ()
     builder = await studio.agent_by_name("Builder")
     assert builder is not None
-    assert ASK_AGENT_TOOL not in builder.tools
+    assert ASK_AGENT_TOOL in builder.tools  # can hand a part to a specialist
     assert (await studio.main_agent()).id == main.id
 
 
@@ -212,21 +212,48 @@ async def test_main_ai_runs_a_team_task_in_a_room(make_studio):
 
 
 @pytest.mark.asyncio
-async def test_only_the_main_ai_can_hand_off_work(make_studio):
+async def test_an_agent_with_ask_agent_can_hand_off(make_studio):
+    # An agent given ask_agent on its card hands a part to a teammate
+    # (Every Tool off, so the card alone decides).
     studio, _ = make_studio(
-        [tool_reply(ASK_AGENT_TOOL, {"agent": "Builder", "task": "x"}), "fine"]
+        [
+            tool_reply(
+                ASK_AGENT_TOOL, {"agent": "Builder", "task": "x", "background": True}
+            ),
+            "fine",
+        ],
+        STUDIO_ALL_TOOLS=False,
     )
     await studio.ensure_defaults()
-    rogue = await studio.create_agent(
-        name="Rogue", tools=[ASK_AGENT_TOOL, "web_search"]
+    helper = await studio.create_agent(
+        name="Lead", tools=[ASK_AGENT_TOOL, "web_search"]
     )
+    chat = await studio.create_chat(agent_id=helper.id)
+
+    await studio.send(chat.id, "hand the build to the Builder")
+
+    tool = next(m for m in await studio.transcript(chat.id) if m.role == "tool")
+    assert tool.data.get("failed") is not True
+    assert tool.data["agent"] == "Builder"
+    assert await studio.runs() != ()
+
+
+@pytest.mark.asyncio
+async def test_an_agent_without_ask_agent_cannot_hand_off(make_studio):
+    studio, _ = make_studio(
+        [tool_reply(ASK_AGENT_TOOL, {"agent": "Builder", "task": "x"}), "fine"],
+        STUDIO_ALL_TOOLS=False,
+    )
+    await studio.ensure_defaults()
+    rogue = await studio.create_agent(name="Rogue", tools=["web_search"])
     chat = await studio.create_chat(agent_id=rogue.id)
 
     await studio.send(chat.id, "delegate please")
 
-    tool = next(m for m in await studio.transcript(chat.id) if m.role == "tool")
-    assert tool.data["failed"] is True
-    assert "Only the main AI" in tool.text
+    tools = [m for m in await studio.transcript(chat.id) if m.role == "tool"]
+    # ask_agent isn't on its card, so the call is refused, not run.
+    assert len(tools) == 1 and tools[0].data.get("failed") is True
+    assert "ask_agent" not in await studio.tools_in_use(rogue)
     assert await studio.runs() == ()
 
 

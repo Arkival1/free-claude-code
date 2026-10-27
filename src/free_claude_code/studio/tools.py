@@ -1604,9 +1604,13 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name=ASK_AGENT_TOOL,
         description=(
-            "Hand one task to another agent on your team and wait for its report. "
-            "Use it for work that needs that agent's tools or model, like "
-            "researching or building a website or app."
+            "Hand one task to another agent and wait for its report (set "
+            "background to let it work while you carry on). Use it when a part "
+            "needs another agent's tools, model, or know-how: a teammate, one "
+            "of your subagents, or a repo agent (a specialist from an added "
+            "repo). Name the agent; calling it makes it work and report back. "
+            "For example a Coder building an app hands the UI to a design "
+            "specialist, or research to the Researcher."
         ),
         parameters={
             "type": "object",
@@ -2343,7 +2347,9 @@ class AgentToolbox:
         while agents may have every tool."""
         if self._delegate is None or role == "guide":
             return False
-        return role == MAIN_ROLE or (self._all_tools and ASK_AGENT_TOOL in names)
+        # Any agent given ask_agent on its card may hand work to a teammate,
+        # a subagent, or a repo agent, whether or not Every Tool is on.
+        return role == MAIN_ROLE or ASK_AGENT_TOOL in names
 
     async def run(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         """Execute one tool call, converting every failure into tool output."""

@@ -42,7 +42,16 @@ from .models import (
 )
 from .store import StudioStore
 
-MODES = ("routes", "records", "odd_inputs", "pages", "logs", "data", "files")
+MODES = (
+    "routes",
+    "records",
+    "odd_inputs",
+    "pages",
+    "logs",
+    "data",
+    "duplicates",
+    "files",
+)
 """The ways of scanning, in the order an endless scan takes them."""
 MODE_NOTES = {
     "routes": "Calls FCC's read-only routes and looks for crashes and slow answers.",
@@ -51,6 +60,7 @@ MODE_NOTES = {
     "pages": "Opens Studio's pages in a hidden browser and catches script errors.",
     "logs": "Reads the server log for errors and crashes.",
     "data": "Checks the saved records for broken links and stuck jobs.",
+    "duplicates": "Looks for two agents, projects or classes sharing a name, which makes a hand-off or a link point at the wrong one.",
     "files": "Checks FCC's own files: code that won't load, data that won't read, libraries that changed.",
 }
 SKIP_WORDS = (
@@ -177,10 +187,14 @@ class Found:
     title: str
     detail: str
     where: str
+    exact: bool = False
+    """When set, the key keeps digits (a name like 'bot1' is its own finding);
+    otherwise digits are folded so the same route with different ids is one."""
 
     @property
     def key(self) -> str:
-        normal = re.sub(r"\d+", "#", f"{self.mode}|{self.where}|{self.title}")
+        base = f"{self.mode}|{self.where}|{self.title}"
+        normal = base if self.exact else re.sub(r"\d+", "#", base)
         return hashlib.sha1(normal.encode()).hexdigest()[:16]
 
 
@@ -554,6 +568,54 @@ class Scanner:
             for label, job in running
             if now - job.updated_at > STUCK_MS
         )
+        return found
+
+    async def _scan_duplicates(self, probe: Probe, rng: random.Random) -> list[Found]:
+        del probe, rng
+        found: list[Found] = []
+        agents = [a for a in await self._store.find(Agent) if not a.archived]
+        by_name: dict[str, list[Agent]] = {}
+        for agent in agents:
+            by_name.setdefault(agent.name.casefold(), []).append(agent)
+        for name, group in by_name.items():
+            if len(group) < 2:
+                continue
+            ids = ", ".join(sorted(a.id for a in group))
+            # ask_agent and the team resolve an agent by name, so two with the
+            # same name make a hand-off land on whichever is found first. The
+            # title uses the folded name (not the store order) so the finding
+            # keeps one key round to round.
+            found.append(
+                Found(
+                    "duplicates",
+                    "medium",
+                    f"{len(group)} agents share the name {name!r}",
+                    f"A hand-off by name is ambiguous. Agents: {ids}.",
+                    f"agent.name:{name}",
+                    exact=True,
+                )
+            )
+        for model, label, attr in (
+            (SiteProject, "projects", "name"),
+            (Course, "classes", "topic"),
+        ):
+            seen: dict[str, list[str]] = {}
+            for record in await self._store.find(model):
+                key = str(getattr(record, attr) or "").strip().casefold()
+                if key:
+                    seen.setdefault(key, []).append(record.id)
+            found.extend(
+                Found(
+                    "duplicates",
+                    "low",
+                    f"{len(ids)} {label} share the name {key!r}",
+                    f"Ids: {', '.join(ids)}.",
+                    f"{label}.{attr}:{key}",
+                    exact=True,
+                )
+                for key, ids in seen.items()
+                if len(ids) > 1
+            )
         return found
 
     async def _scan_files(self, probe: Probe, rng: random.Random) -> list[Found]:

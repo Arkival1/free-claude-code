@@ -2571,6 +2571,8 @@ of scanning, with a fresh random sample:
 - **logs**: reads the server log for errors and crashes;
 - **data**: checks saved records for broken links and jobs stuck as
   running;
+- **duplicates**: finds two agents, projects or classes sharing a name, so
+  a hand-off or a link can't land on the wrong one;
 - **files**: checks that FCC's code loads, that page scripts parse, and that
   its shipped libraries match their recorded checksums.
 

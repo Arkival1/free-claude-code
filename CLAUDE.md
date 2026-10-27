@@ -195,8 +195,12 @@ Notes carried over from the long session that built FCC Studio (LCC).
   them and put a used skill away (`agents.put_away_skills`); their MCP
   servers stay off; repos FCC switched on join the relay "off" until the
   owner switches them; a repo the owner turns off stays off.
-- The ideas board sorts ideas into website, app, lab and general; each
-  agent reads its own category (builder: website, coder/tester: app).
+- The ideas board sorts ideas into website, app, game, lab and general;
+  each agent reads its own category (builder: website, coder/tester: app).
+- The Builder, Coder, Developer, Designer and Tester carry `ask_agent`, so
+  they can hand a part to a teammate, a subagent, or a repo agent; any agent
+  with `ask_agent` on its card may delegate (not only the main AI). The
+  called agent runs and reports back.
 - Agents that write files get the Builder's step budget (40); relays run
   one stage at a time.
 - The Trading Bank starts in paper mode; going live, saving broker keys and

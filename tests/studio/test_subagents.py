@@ -190,3 +190,35 @@ async def test_any_agent_can_become_a_subagent_with_its_own_model(make_studio):
     main = await studio.main_agent()
     with pytest.raises(StudioError, match="runs the team"):
         await studio.set_subagent(main.id, True)
+
+
+@pytest.mark.asyncio
+async def test_a_coder_can_hand_a_part_to_a_subagent(make_studio):
+    """The owner's case: a main worker (Coder) building an app pulls in a
+    subagent through ask_agent, and that subagent's run starts."""
+    studio, _ = make_studio(
+        [
+            tool_reply(
+                "ask_agent",
+                {
+                    "agent": "Aria",
+                    "task": "Design the settings screen",
+                    "background": True,
+                },
+            ),
+            "Handed the UI to Aria.",
+        ],
+        STUDIO_ALL_TOOLS=False,
+    )
+    await studio.ensure_defaults()
+    await studio.create_subagent(name="Aria", role="developer")
+    coder = next(a for a in await studio.agents() if a.name == "Coder")
+    assert "ask_agent" in coder.tools
+    chat = await studio.create_chat(agent_id=coder.id)
+
+    await studio.send(chat.id, "build an app; hand the screen design to Aria")
+
+    tool = next(m for m in await studio.transcript(chat.id) if m.role == "tool")
+    assert tool.data.get("failed") is not True and tool.data["agent"] == "Aria"
+    runs = await studio.runs()
+    assert any(r.agent_id != coder.id for r in runs)  # Aria is working

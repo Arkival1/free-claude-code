@@ -499,6 +499,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "research",
         "test_code",
         "ask_researcher",
+        "ask_agent",
         "edit_file",
         "search_files",
         "update_plan",
@@ -539,6 +540,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "ui_kit",
         "godot",
         "look_reference",
+        "ask_agent",
     ),
     "Developer": (
         "ui_library",
@@ -547,6 +549,7 @@ _DEFAULT_UPGRADES: dict[str, tuple[str, ...]] = {
         "ui_kit",
         "godot",
         "look_reference",
+        "ask_agent",
     ),
 }
 _PRESET_ROLES = {"Designer": "builder", "Developer": "developer"}

@@ -250,3 +250,60 @@ async def test_a_round_that_cant_save_doesnt_end_the_scan(store, monkeypatch):
     monkeypatch.setattr(store, "put", broken)
     assert await scanner.run_round("routes") == []
     assert "Couldn't save" in scanner.state.message and scanner.state.rounds == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicates_mode_flags_two_agents_sharing_a_name(store):
+    scanner = Scanner(store)
+    scanner._probe = fake_probe()
+    await store.put(Agent(name="Aria", model="local/x"))
+    await store.put(Agent(name="aria", model="local/y"))  # same name, different case
+    await store.put(Agent(name="Solo", model="local/z"))
+
+    found = await scanner.run_round("duplicates")
+    titles = [item.title for item in found]
+    assert any("share the name 'aria'" in t for t in titles)
+    assert all("Solo" not in t for t in titles)  # a unique name is not flagged
+    # the title uses the folded name, so the finding keeps one key, not the
+    # store's order, and doesn't re-appear as new.
+    assert any("share the name 'aria'" in item.title for item in found)
+    again = await scanner.run_round("duplicates")
+    assert again == []  # not news twice
+
+
+@pytest.mark.asyncio
+async def test_duplicates_mode_keeps_digit_names_and_kinds_apart(store):
+    from free_claude_code.studio.models import Course, SiteProject
+
+    scanner = Scanner(store)
+    scanner._probe = fake_probe()
+    # Names that differ only by a digit must be separate findings, not merged.
+    for name in ("bot1", "bot1", "bot2", "bot2"):
+        await store.put(Agent(name=name, model="local/x"))
+    await store.put(SiteProject(name="Shop", slug="shop-1"))
+    await store.put(SiteProject(name="Shop", slug="shop-2"))
+    await store.put(
+        Course(topic="Ohm", chat_id="c1", teacher_agent_id="t", student_agent_id="s")
+    )
+    await store.put(
+        Course(topic="Ohm", chat_id="c2", teacher_agent_id="t", student_agent_id="s")
+    )
+
+    found = await scanner.run_round("duplicates")
+    keys = {item.id for item in found}
+    assert len(keys) == len(found)  # no two findings share a key
+    titles = " ".join(item.title for item in found)
+    assert "'bot1'" in titles and "'bot2'" in titles  # digit names kept apart
+    assert any("projects share the name 'shop'" in i.title for i in found)
+    assert any("classes share the name 'ohm'" in i.title for i in found)
+
+
+@pytest.mark.asyncio
+async def test_duplicates_mode_ignores_archived_agents(store):
+    scanner = Scanner(store)
+    scanner._probe = fake_probe()
+    await store.put(Agent(name="Twin", model="local/x"))
+    await store.put(Agent(name="Twin", model="local/y", archived=True))
+
+    found = await scanner.run_round("duplicates")
+    assert not any("Twin" in i.title or "twin" in i.title for i in found)
