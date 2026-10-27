@@ -475,3 +475,21 @@ async def test_every_agent_can_read_the_coding_skills_with_their_licences(
         assert "test-driven-development" in text or "security-and-hardening" in text, (
             routed
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "goal",
+    ["make me a snake game", "design a frontend for my cafe website"],
+)
+async def test_the_skills_agents_read_themselves_never_become_a_relay_stage(
+    make_studio, goal
+):
+    from free_claude_code.studio.relay import RelayStage, choose, job_kinds
+
+    studio, _ = make_studio([])
+    built = await studio._extensions.install_builtin()
+    assert built is not None
+    leg = choose(built, RelayStage(repo=built.name), goal, job_kinds(goal))
+    picked = leg.skill.name if leg is not None and leg.skill is not None else ""
+    assert picked not in {"game-design", "frontend-design", "stitch-design-taste"}

@@ -1,6 +1,7 @@
 """Website layouts: 26 Start Bootstrap sites the Builder starts from."""
 
 import hashlib
+import re
 from pathlib import Path
 
 import pytest
@@ -138,6 +139,9 @@ def test_fccs_own_designs_are_whole_offline_pages():
         # Every field is labelled and every form names where it goes.
         assert page.count("<input") + page.count("<textarea") <= page.count("<label")
         assert "data-email=" in page
+        # Every local file the page links to ships with it (anchors and mail aside).
+        for link in re.findall(r'(?:src|href)="([^"#:]+)"', page):
+            assert link in files, (item.id, link)
 
 
 def test_a_fcc_design_takes_the_business_name_everywhere():

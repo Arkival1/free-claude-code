@@ -38,6 +38,16 @@
     };
     for (const button of buttons) {
       button.addEventListener("click", () => show(button.dataset.tab));
+      // Left/Right arrows (and Home/End) move between tabs, as screen readers expect.
+      button.addEventListener("keydown", (event) => {
+        const at = buttons.indexOf(button);
+        const moves = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: buttons.length - 1 };
+        if (event.altKey || event.ctrlKey || event.metaKey || !Object.hasOwn(moves, event.key)) return;
+        event.preventDefault();
+        const next = buttons[(moves[event.key] + buttons.length) % buttons.length];
+        show(next.dataset.tab);
+        next.focus();
+      });
     }
     if (buttons[0]) show(buttons[0].dataset.tab);
   }

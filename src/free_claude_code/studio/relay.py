@@ -545,10 +545,20 @@ def fit(name: str, goal: str, kinds: Iterable[str]) -> float:
     return score + best
 
 
-BRIEFED_SKILLS = frozenset({"game-dev", "godot-dev", "add-a-library"})
+BRIEFED_SKILLS = frozenset(
+    {
+        "game-dev",
+        "godot-dev",
+        "add-a-library",
+        "game-design",
+        "frontend-design",
+        "stitch-design-taste",
+    }
+)
 """FCC's own skills that come with every job they fit (game jobs, the
-Changer adding a library), so a relay never makes a stage of them: a game
-job stays with the Coder and the Tester."""
+Changer adding a library) or that an agent reads itself when it needs one
+(game-design, frontend-design, stitch-design-taste), so a relay never makes
+a stage of them: a game job stays with the Coder and the Tester."""
 
 
 def choose(
