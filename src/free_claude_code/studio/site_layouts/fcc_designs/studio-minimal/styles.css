@@ -106,3 +106,6 @@ textarea { resize: vertical; }
   html { scroll-behavior: auto; }
   * { transition: none !important; }
 }
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }

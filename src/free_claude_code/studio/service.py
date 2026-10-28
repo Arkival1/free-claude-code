@@ -377,6 +377,7 @@ from .tools import (
     MAIN_ROLE,
     MAIN_TOOL_NAMES,
     MCP_TOOL,
+    SKILL_TOOL,
     TOOL_SPEC_BY_NAME,
     TOOLSHED_TOOL,
     AgentToolbox,
@@ -398,6 +399,8 @@ from .weather import WeatherError, forecast, weather_request
 from .workers import WorkerPool
 
 CLASS_TRAIN_PLACES = frozenset({"pc", "kaggle", "colab"})
+MAX_PHONE_SKILL_CHARS = 24_000
+"""The most of one skill read that goes to the phone (its models are small)."""
 CLASS_PC_BASE = "Qwen/Qwen3-4B"
 """Fits the owner's 6 GB card with 4-bit training."""
 CLASS_DOWNLOADS = ("model.gguf", "adapter.gguf", "adapter.zip", "Modelfile")
@@ -7181,6 +7184,42 @@ class StudioService:
                 for hit in report.hits
             ],
         }
+
+    async def phone_plugins(self, link: PhoneLink) -> JsonObject:
+        """The repos (skills, plugin agents, MCP servers) added on the PC, for
+        FCC Phone's Plugins list. Read only: switches stay on the PC."""
+        del link
+        return {
+            "repos": [
+                {
+                    "name": extension.name,
+                    "description": extension.description[:300],
+                    "enabled": extension.enabled,
+                    "origin": extension.origin,
+                    "skills": len(extension.skills),
+                    "agents": len(extension.agents),
+                    "servers": len(extension.servers),
+                }
+                for extension in await self._extensions.all()
+            ]
+        }
+
+    async def phone_skill(self, link: PhoneLink, payload: JsonObject) -> JsonObject:
+        """The skill tool for a phone agent: search, list or read the skills
+        of the repos switched on on the PC (read only)."""
+        del link
+        arguments: JsonObject = {
+            key: payload[key]
+            for key in ("action", "query", "name", "repo", "file", "line")
+            if key in payload and isinstance(payload[key], str | int)
+        }
+        try:
+            outcome = await self._skill_tool(
+                ToolCall(id="phone", name=SKILL_TOOL, arguments=arguments)
+            )
+        except (ExtensionError, ValueError) as error:
+            raise PhoneLinkError(str(error)) from error
+        return {"text": outcome.text[:MAX_PHONE_SKILL_CHARS]}
 
     async def phone_complete(self, link: PhoneLink, payload: JsonObject) -> JsonObject:
         """Think with the main AI's model on this PC, for the phone."""

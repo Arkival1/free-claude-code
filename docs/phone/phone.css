@@ -1145,3 +1145,23 @@ pre.notes {
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Trading: banners that must not be missed (real money, kill switch). */
+.banner {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+}
+
+.banner.danger {
+  color: #fff;
+  background: rgba(255, 92, 92, 0.22);
+  border-color: var(--bad);
+}
+
+.banner.warn {
+  background: rgba(255, 200, 97, 0.12);
+  border-color: var(--accent);
+}

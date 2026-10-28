@@ -84,3 +84,6 @@ input:focus, textarea:focus { border-color: var(--yellow); }
 }
 
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }

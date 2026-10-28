@@ -101,3 +101,6 @@ input { min-height: 48px; min-width: min(320px, 80vw); padding: 10px 16px; borde
   html { scroll-behavior: auto; }
   * { transition: none !important; }
 }
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }

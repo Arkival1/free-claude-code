@@ -106,6 +106,11 @@ function providerCard(id) {
   ]);
 }
 
+// Pairing takes a moment: draw Settings again only if it is still on screen.
+function redraw() {
+  if (state.route === "settings") render(document.getElementById("view"));
+}
+
 function pcCard() {
   const pc = state.settings.pc;
   if (pc) {
@@ -127,7 +132,7 @@ function pcCard() {
         button("Unpair", async () => {
           if (!confirm("Unpair from your PC? Memories stay on both.")) return;
           await unpair();
-          render(document.getElementById("view"));
+          redraw();
         }, { class: "danger" }),
       ]),
     ]);
@@ -149,7 +154,7 @@ function pcCard() {
       try {
         await pair(address.value, code.value);
         notify("Paired with your PC.");
-        render(document.getElementById("view"));
+        redraw();
       } catch (error) {
         status.textContent = error.message;
       }

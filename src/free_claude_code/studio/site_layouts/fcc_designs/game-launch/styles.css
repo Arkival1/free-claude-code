@@ -47,7 +47,7 @@ h1 { position: relative; font: 400 clamp(3.4rem, 13vw, 9rem)/0.95 var(--display)
 .platforms { position: relative; color: var(--muted); font-size: 0.9rem; margin-top: 20px; }
 
 .neon, .ghost { display: inline-flex; align-items: center; justify-content: center; min-height: 50px; padding: 12px 28px; border-radius: 999px; font: 700 1rem var(--font); text-decoration: none; cursor: pointer; }
-.neon { background: var(--magenta); color: #fff; border: 0; box-shadow: 0 0 24px rgb(255 62 165 / 0.6); transition: box-shadow 0.2s, transform 0.2s; }
+.neon { background: var(--magenta); color: var(--night); border: 0; box-shadow: 0 0 24px rgb(255 62 165 / 0.6); transition: box-shadow 0.2s, transform 0.2s; }
 .neon:hover { transform: translateY(-2px); box-shadow: 0 0 40px rgb(255 62 165 / 0.85); }
 .ghost { border: 2px solid var(--cyan); color: var(--cyan); background: transparent; }
 
@@ -91,3 +91,6 @@ input { min-height: 50px; min-width: min(320px, 80vw); padding: 10px 18px; borde
   .stars { animation: none; }
   * { transition: none !important; }
 }
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }

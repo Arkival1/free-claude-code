@@ -23,6 +23,8 @@ import * as todos from "./views/todos.js";
 import * as memory from "./views/memory.js";
 import * as settings from "./views/settings.js";
 import * as more from "./views/more.js";
+import * as trade from "./views/trade.js";
+import * as plugins from "./views/plugins.js";
 
 const view = $("view");
 const TITLES = {
@@ -38,6 +40,8 @@ const TITLES = {
   memory: "Memory",
   settings: "Settings",
   help: "Help",
+  trade: "Trading",
+  plugins: "Plugins",
 };
 const TAB_OF = { home: "home", chats: "chats", chat: "chats", agents: "agents", models: "models" };
 let cleanup = null;
@@ -75,6 +79,8 @@ async function render() {
     memory: () => memory.render(view),
     settings: () => settings.render(view),
     help: () => more.renderHelp(view),
+    trade: () => trade.render(view),
+    plugins: () => plugins.render(view),
   };
   try {
     const result = await screens[route]();

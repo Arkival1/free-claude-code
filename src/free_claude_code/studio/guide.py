@@ -1126,7 +1126,13 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "type the code and the PC's https address into FCC Phone. Then "
             "memories sync both ways, phone agents can think with this PC's AI, "
             "and the Researcher gets web search. Your PC's memories stay away "
-            "from cloud brains on the phone unless you allow it there."
+            "from cloud brains on the phone unless you allow it there. Paired, "
+            "the phone's More page also has Trading (watch this PC's Trading "
+            "Bank, start practice, stop, deny orders, approve practice orders, "
+            "and the kill switch; real money stays on this PC) and Plugins "
+            "(the repos switched on here, whose skills the phone's Builder and "
+            "Jarvis read with the skill tool). The phone Builder also starts "
+            "sites from FCC's 8 designs."
         ),
         asks=("Who can see my memory?", "How do I install Studio on my iPhone?"),
     ),

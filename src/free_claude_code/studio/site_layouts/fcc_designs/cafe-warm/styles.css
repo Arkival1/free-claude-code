@@ -3,7 +3,7 @@
   --cream: #fbf4e9;
   --espresso: #3a2a20;
   --muted: #7a6656;
-  --terracotta: #c4572f;
+  --terracotta: #a84a26;
   --sage: #8fa58a;
   --line: #ead9c3;
   --radius: 14px;
@@ -83,3 +83,6 @@ input, select { min-height: 48px; padding: 10px 14px; border-radius: var(--radiu
   html { scroll-behavior: auto; }
   .steam { animation: none; }
 }
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }

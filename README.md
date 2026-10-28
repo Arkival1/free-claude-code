@@ -2726,6 +2726,21 @@ account, and costs nothing.
   screen**, file editing, **Ask the Builder** for changes, **Have the Tester
   check it**, and **Save as one HTML file**. Previews run sandboxed, so a page
   can't read the app's keys or memory.
+- **Trading (paired with your PC)**: your PC's Trading Bank on the phone:
+  running or stopped, mode, account totals, profit and win rate, open
+  positions with their stops and targets, the orders waiting for you, and the
+  live feed (it refreshes every 10 seconds). **Start practice**, **Stop**,
+  **Deny** any waiting order, **Approve** a practice order, and the **Kill
+  switch** (closing every position too needs you to type CLOSE EVERYTHING).
+  Real money is switched on, and real-money orders approved, on the PC only;
+  account numbers and keys never reach the phone.
+- **Plugins (paired)**: the repos switched on on your PC. The Builder and
+  Jarvis get the `skill` tool and read one of those skills only when a job
+  needs it (game-design for games, frontend-design for a site's look).
+- **FCC's designs on the phone**: the Builder can also start a site from
+  FCC's 8 designs (studio minimal, bold brutalist, soft SaaS, warm cafe,
+  boutique shop, trade business, game launch, creator links), the same as
+  the PC's website library, offline.
 - **Agent rooms** (@Name for one agent, or a goal they work through),
   **Learn** (lessons read up on Wikipedia, notes kept in memory), **To-dos and
   reminders** (shown and spoken while the app is open), **Memory**, and

@@ -2,7 +2,7 @@
 import { state, save, feed, changed, toolsOf, agentByName } from "./state.js";
 import { uid, words } from "./ui.js";
 import { isPrivate } from "./brains.js";
-import { syncSoon, pcSearch } from "./sync.js";
+import { syncSoon, pcSearch, pcSkill } from "./sync.js";
 import * as projects from "./projects.js";
 import { PICTURE_SUFFIXES, polishNotes } from "./polish.js";
 import { lookAtSite, describeLook } from "./inspect.js";
@@ -43,6 +43,19 @@ export const SPECS = {
   web_search: {
     description: "Search the web (through the user's PC) and get titles, links, and snippets.",
     parameters: { type: "object", properties: { query: text("What to search for.") }, required: ["query"] },
+  },
+  skill: {
+    description: "Skills from the plugins switched on on the user's PC (needs the PC link): action search with a query finds the right skill, read with its name gives the full instructions, list shows them. Read one only when the job needs it, then follow it.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["search", "list", "read"] },
+        query: text("search: what you need, e.g. 'game level design'."),
+        name: text("read: the skill's name."),
+        repo: text("list or read: one repo."),
+      },
+      required: ["action"],
+    },
   },
   todo: {
     description: "The user's to-do list and reminders. action 'add' with text (and optional due like 'in 20 minutes', 'tomorrow 9am', '17:30'), 'list', or 'done' with the item's text or id.",
@@ -170,6 +183,11 @@ export async function runTool(agent, call, ctx) {
       case "web_search": {
         const results = await pcSearch(String(args.query || ""));
         return results.length ? results.map((hit, i) => `${i + 1}. ${hit.title}\n   ${hit.url}\n   ${hit.snippet || ""}`).join("\n") : "No results.";
+      }
+      case "skill": {
+        const wanted = {};
+        for (const key of ["action", "query", "name", "repo"]) if (typeof args[key] === "string" && args[key]) wanted[key] = args[key].slice(0, 300);
+        return (await pcSkill(wanted)) || "Nothing found.";
       }
       case "todo":
         return await todo(agent, args);

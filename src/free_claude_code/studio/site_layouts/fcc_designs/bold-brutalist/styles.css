@@ -2,7 +2,7 @@
 :root {
   --bg: #efeee9;
   --ink: #0d0d0d;
-  --hot: #ff4f00;
+  --hot: #b83600;
   --rule: 3px solid var(--ink);
   --mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
   --display: "Arial Black", "Helvetica Neue", Arial, sans-serif;
@@ -69,3 +69,6 @@ input, textarea { font: 1rem var(--mono); border: 0; border-bottom: 2px solid va
   .list li, .stat, .form label { border-right: 0; }
   .stat { border-bottom: 3px solid var(--bg); }
 }
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }

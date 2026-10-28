@@ -161,8 +161,10 @@ Notes carried over from the long session that built FCC Studio (LCC).
   delegating, pass the same level as the subagent's effort (the previewer
   stays at medium, as set above, unless the owner says otherwise).
 - Only low, medium and high effort (owner's call): never xhigh, max or
-  ultra, and never start a multi-agent workflow (ultracode) unless the owner
-  asks for it in their own words. When delegating, pass low, medium or high.
+  ultra unless the owner sets another level themselves, or a high-stakes new
+  feature truly needs it (owner, 6.105: "only if you really need it"); never
+  start a multi-agent workflow (ultracode) unless the owner asks for it in
+  their own words. When delegating, pass low, medium or high.
 - Low-effort mode (chat, questions, writing): answer in a few plain lines
   from what's already known; no tools, searches, file reads, task lists or
   subagents unless the answer truly needs one; one tool call at most when it
@@ -175,7 +177,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.104.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.105.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -213,6 +215,11 @@ Notes carried over from the long session that built FCC Studio (LCC).
   Trading keys live encrypted in `trading-keys.vault` (Windows DPAPI); with
   no such protection FCC stays in practice. Hyperliquid (Invo) trades at 1x,
   isolated, long only, and FCC signs only orders, cancels and leverage.
+- FCC Phone's Trading card (6.105, through the PC link, `studio/phone_desk.py`):
+  the phone reads the desk (totals only, no account numbers) and may start
+  practice, stop, use the kill switch (closing everything needs the typed
+  phrase), deny any waiting order and approve practice orders only. Real
+  money, real-money approvals, keys, accounts and settings stay on the PC.
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper
@@ -234,5 +241,3 @@ Build these only when the owner says yes:
   Builder steps for multi-page sites.
 - The professional-website relay test was stopped before the site was
   finished.
-- A Trading Bank card on FCC Phone (desk numbers, approve/deny orders):
-  started, then parked by the owner ("don't worry about the phone for now").

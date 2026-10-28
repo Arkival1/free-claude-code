@@ -1,6 +1,6 @@
 /* FCC Phone service worker: the app, and the on-phone engine once fetched,
    open with no connection. AI, weather, and PC calls are never cached. */
-const VERSION = "2.4.0";
+const VERSION = "2.5.0";
 const CACHE = `fcc-phone-${VERSION}`;
 const ENGINE_CACHE = "fcc-phone-engine-3.6.1";
 const SHELL = [
@@ -38,10 +38,12 @@ const SHELL = [
   "js/views/memory.js",
   "js/views/models.js",
   "js/views/more.js",
+  "js/views/plugins.js",
   "js/views/projects.js",
   "js/views/rooms.js",
   "js/views/settings.js",
   "js/views/todos.js",
+  "js/views/trade.js",
 ];
 // The engine's large files come from jsDelivr once, then stay on the phone.
 const ENGINE_PREFIX = "https://cdn.jsdelivr.net/npm/@wllama/";

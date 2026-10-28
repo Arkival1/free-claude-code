@@ -35,7 +35,12 @@ from free_claude_code.config.paths import server_log_path
 from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.version import package_version
-from free_claude_code.studio import StudioError, StudioNotFoundError, StudioService
+from free_claude_code.studio import (
+    StudioError,
+    StudioNotFoundError,
+    StudioService,
+    phone_desk,
+)
 from free_claude_code.studio.connectors import ConnectorError
 from free_claude_code.studio.downloads import DownloadError
 from free_claude_code.studio.extensions import MAX_ZIP_BYTES as MAX_REPO_ZIP_BYTES
@@ -3487,6 +3492,105 @@ async def phone_complete(
         return await studio.phone_complete(link, body)
     except PhoneLinkError as error:
         raise _phone_failed(error) from error
+
+
+@router.get("/studio/api/phone/plugins")
+async def phone_plugins(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """The repos added on the PC, for FCC Phone's Plugins list (read only)."""
+    return await studio.phone_plugins(await _phone(request, studio))
+
+
+@router.post("/studio/api/phone/skill")
+async def phone_skill(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """The skill tool for a phone agent: the PC's switched-on skills."""
+    link = await _phone(request, studio)
+    body = await _json_body(request)
+    try:
+        return await studio.phone_skill(link, body)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+# The Trading Bank on the phone: a read of the desk and the actions that keep
+# money safe or stay in practice (see studio/phone_desk.py). Live trading,
+# keys, accounts and settings stay on the PC.
+
+
+class PhoneKillPayload(BaseModel):
+    flatten: bool = False
+    confirm: str = Field(default="", max_length=100)
+
+
+@router.get("/studio/api/phone/trading")
+async def phone_trading(
+    request: Request, after: int = 0, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    await _phone(request, studio)
+    return await phone_desk.desk_card(studio.trading, max(0, after))
+
+
+@router.post("/studio/api/phone/trading/start")
+async def phone_trading_start(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    await _phone(request, studio)
+    try:
+        return await phone_desk.start_practice(studio.trading)
+    except TradingError as error:
+        raise _phone_trading_failed(error) from error
+
+
+@router.post("/studio/api/phone/trading/stop")
+async def phone_trading_stop(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    await _phone(request, studio)
+    return await studio.trading.stop()
+
+
+@router.post("/studio/api/phone/trading/kill")
+async def phone_trading_kill(
+    payload: PhoneKillPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    await _phone(request, studio)
+    try:
+        return await phone_desk.kill(
+            studio.trading, flatten=payload.flatten, confirm=payload.confirm
+        )
+    except TradingError as error:
+        raise _phone_trading_failed(error) from error
+
+
+@router.post("/studio/api/phone/trading/orders/{order_id}/approve")
+async def phone_trading_approve(
+    order_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    await _phone(request, studio)
+    try:
+        return await phone_desk.approve_practice(studio.trading, order_id)
+    except TradingError as error:
+        raise _phone_trading_failed(error) from error
+
+
+@router.post("/studio/api/phone/trading/orders/{order_id}/deny")
+async def phone_trading_deny(
+    order_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    await _phone(request, studio)
+    try:
+        return await studio.trading.deny(order_id)
+    except TradingError as error:
+        raise _phone_trading_failed(error) from error
+
+
+def _phone_trading_failed(error: TradingError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(error))
 
 
 async def _json_body(request: Request) -> JsonObject:

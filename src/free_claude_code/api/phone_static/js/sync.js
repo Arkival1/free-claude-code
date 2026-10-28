@@ -140,6 +140,12 @@ export function syncSoon() {
   timer = setTimeout(() => sync({ quiet: true }).catch(() => {}), 4000);
 }
 
+/** The skill tool, read on the PC: its switched-on repos' skills. */
+export async function pcSkill(args) {
+  const result = await pcCall("/studio/api/phone/skill", args, "POST", 60000);
+  return result.text || "";
+}
+
 export async function pcSearch(query) {
   const result = await pcCall("/studio/api/phone/search", { query }, "POST", 60000);
   return result.results || [];

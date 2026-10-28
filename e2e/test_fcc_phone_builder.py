@@ -15,8 +15,11 @@ from e2e.test_fcc_phone import (
     tool_call,
     use_gemini,
 )
+from free_claude_code.studio import site_layouts
 from free_claude_code.studio.polish import polish_notes
 from free_claude_code.studio.templates import template_files
+
+FCC_DESIGNS = [item.id for item in site_layouts.layouts() if item.source == "fcc"]
 
 PHOTO = "https://live.staticflickr.com/1/cafe_b.jpg"
 PIXEL = bytes.fromhex(
@@ -137,7 +140,7 @@ def test_look_at_site_sees_what_a_visitor_would(
     assert 'heading "Bad page"' in phone
 
     # Starter templates look right, including a game that saves its best score.
-    for name in ("landing", "game", "business"):
+    for name in ("landing", "game", "business", *FCC_DESIGNS):
         clean = page.evaluate(
             """async ([name]) => window.fccPhone.describeLook(
                 await window.fccPhone.lookAtSite({name: 'Cafe', files: window.fccPhone.templateFiles(name, 'Cafe')}))""",
@@ -242,6 +245,7 @@ def test_the_builder_builds_with_templates_photos_and_a_look(
         "landing",
         "webapp",
         "game",
+        *FCC_DESIGNS,
     ]
     results = [
         m["content"] for call in seen for m in call["messages"] if m["role"] == "tool"
@@ -301,16 +305,19 @@ def test_older_phone_agents_get_the_new_tools_once(
         "look_at_site",
         "list_photos",
         "use_photo",
+        "skill",
     ]
     assert "find_images" in upgraded["instructions"]
     assert "list_photos" in upgraded["instructions"]
-    assert upgraded["toolsVersion"] == 3
+    assert "cafe-warm" in upgraded["instructions"]
+    assert "skill tool" in upgraded["instructions"]
+    assert upgraded["toolsVersion"] == 4
 
     # A tool the user turned off afterwards stays off; an edited prompt stays.
     again = page.evaluate(
         """() => window.fccPhone.upgradeAgent({
             id: 'b', name: 'B', role: 'builder', instructions: 'Mine',
-            tools: ['write_file'], toolsVersion: 3})"""
+            tools: ['write_file'], toolsVersion: 4})"""
     )
     assert again["tools"] == ["write_file"] and again["instructions"] == "Mine"
     builder = page.evaluate(

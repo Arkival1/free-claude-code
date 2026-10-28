@@ -4039,6 +4039,9 @@ class TradingDesk:
     async def events(self, after: int = 0) -> list[JsonObject]:
         return [event_view(event) for event in await self.feed.since(after)]
 
+    async def order(self, order_id: str) -> TradeOrder | None:
+        return await self._store.get(TradeOrder, order_id)
+
     async def orders(self, limit: int = 100) -> list[JsonObject]:
         return [
             order_view(order)

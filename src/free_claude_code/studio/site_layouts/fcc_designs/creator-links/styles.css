@@ -5,7 +5,7 @@
   --card: #fffdfa;
   --ink: #2b1d16;
   --muted: #7d665a;
-  --accent: #e0553f;
+  --accent: #b03b28;
   --line: #f1e2d8;
   --radius: 20px;
   --font: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -60,3 +60,6 @@ input, textarea { min-height: 48px; padding: 10px 14px; border-radius: 14px; bor
   html { scroll-behavior: auto; }
   * { transition: none !important; }
 }
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }
