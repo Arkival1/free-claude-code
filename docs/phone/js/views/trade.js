@@ -12,6 +12,9 @@ const FLATTEN_PHRASE = "CLOSE EVERYTHING";
 const money = (value, currency) =>
   typeof value === "number" ? `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}${currency ? ` ${currency}` : ""}` : "–";
 const pct = (value) => (typeof value === "number" ? `${value >= 0 ? "+" : ""}${value.toFixed(2)}%` : "–");
+// The same rule as the PC: practice only when made in practice AND sent to the
+// practice account (a sell of a real holding stays real money).
+const practice = (order) => order.mode === "paper" && order.broker === "paper";
 
 export function render(view) {
   if (!state.settings.pc) {
@@ -60,10 +63,10 @@ export function render(view) {
       el("div", { class: "grow" }, [
         el("strong", { text: `${order.side} ${order.qty} ${order.symbol}` }),
         el("small", {
-          text: `${order.status.replaceAll("_", " ")} · ${order.mode === "paper" ? "practice" : "REAL MONEY"}${order.seconds_left != null ? ` · ${order.seconds_left}s left` : ""}${order.reason ? ` · ${order.reason}` : ""}`,
+          text: `${order.status.replaceAll("_", " ")} · ${practice(order) ? "practice" : "REAL MONEY"}${order.seconds_left != null ? ` · ${order.seconds_left}s left` : ""}${order.reason ? ` · ${order.reason}` : ""}`,
         }),
       ]),
-      order.status === "awaiting_approval" && order.mode === "paper"
+      order.status === "awaiting_approval" && practice(order)
         ? button("Approve", () => act(`/orders/${encodeURIComponent(order.id)}/approve`, {}, "Approved."), { class: "primary", "aria-label": `Approve ${order.side} ${order.symbol}` })
         : null,
       order.status === "awaiting_approval"
@@ -128,8 +131,10 @@ export function render(view) {
     try {
       const fresh = await pcCall(`/studio/api/phone/trading?after=${last}`, undefined, "GET", 30000);
       desk = fresh;
-      feed = feed.concat(fresh.events || []).slice(-60);
-      last = fresh.last || last;
+      // An action's refresh can cross the timer's: keep each line once.
+      const seen = new Set(feed.map((event) => event.seq));
+      feed = feed.concat((fresh.events || []).filter((event) => !seen.has(event.seq))).slice(-60);
+      last = Math.max(last, fresh.last || 0);
       problem = "";
     } catch (error) {
       problem = error.message;

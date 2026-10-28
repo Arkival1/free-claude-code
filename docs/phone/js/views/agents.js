@@ -1,5 +1,5 @@
 // Agents: the phone's team, each agent's brain and tools, and Team brains.
-import { state, save, changed, newAgent, ROLE_TOOLS, ROLE_PROMPTS, PHONE_TOOLS, MAIN_ONLY, MEMORY_TOOLS, ALL_TOOLS, toolsOf } from "../state.js";
+import { state, save, changed, newAgent, ROLE_TOOLS, ROLE_PROMPTS, PHONE_TOOLS, MAIN_ONLY, MEMORY_TOOLS, ALL_TOOLS, PC_ONLY, toolsOf } from "../state.js";
 import { el, button, card, go, notify, openSheet, closeSheet, uid } from "../ui.js";
 import { PROVIDERS, brainOf, brainReady, isPrivate, modelOf } from "../brains.js";
 import { SPECS } from "../tools.js";
@@ -88,7 +88,7 @@ function toolPicker(agent) {
     if (MAIN_ONLY.has(name) && agent.role !== "main") continue;
     (groups[group] = groups[group] || []).push(name);
   }
-  const blocked = (name) => name === "web_search" && !state.settings.pc;
+  const blocked = (name) => PC_ONLY.has(name) && !state.settings.pc;
   const draw = () => {
     for (const [name, box] of boxes) {
       box.disabled = every.checked || blocked(name);

@@ -12,6 +12,7 @@ from free_claude_code.core.json_types import JsonObject, JsonValue
 from .resilience import ServiceError
 from .trading.data import MarketDataError
 from .trading.desk import TradingDesk, TradingError
+from .trading.records import TradeOrder
 
 FEED_LINES = 40
 """How many of the newest feed lines one read sends the phone."""
@@ -95,11 +96,18 @@ async def approve_practice(desk: TradingDesk, order_id: str) -> JsonObject:
     order = await desk.order(order_id)
     if order is None:
         raise TradingError("That order is gone.")
-    if order.mode != "paper":
+    if not is_practice(order):
         raise TradingError(
             "Real-money orders are approved on the PC. You can deny it from here."
         )
     return await desk.approve(order_id)
+
+
+def is_practice(order: TradeOrder) -> bool:
+    """Practice through and through: made in practice mode AND sent to the
+    practice account. An order routes by its own account, so a sell of a
+    real holding made while the desk was in practice still counts as real."""
+    return order.mode == "paper" and order.broker == "paper"
 
 
 async def kill(desk: TradingDesk, *, flatten: bool, confirm: str) -> JsonObject:

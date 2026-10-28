@@ -32,6 +32,8 @@ export const PHONE_TOOLS = {
 };
 export const ALL_TOOLS = Object.keys(PHONE_TOOLS);
 export const MAIN_ONLY = new Set(["team_status"]);
+/** Tools that work only while the phone is paired with the PC. */
+export const PC_ONLY = new Set(["web_search", "skill"]);
 /** Tools that read the user's memory, kept from cloud brains on the phone too. */
 export const MEMORY_TOOLS = new Set(["recall", "learn"]);
 
@@ -213,7 +215,7 @@ export function agentByName(name) {
 /** The tools an agent really has: its own, or every tool when chosen. */
 export function toolsOf(agent) {
   const names = agent.allTools ? ALL_TOOLS.filter((name) => agent.role === "main" || !MAIN_ONLY.has(name)) : agent.tools || [];
-  return names.filter((name) => name !== "web_search" || state.settings.pc);
+  return names.filter((name) => !PC_ONLY.has(name) || state.settings.pc);
 }
 
 // Live events for the HUD feed and the agents-at-work panel.

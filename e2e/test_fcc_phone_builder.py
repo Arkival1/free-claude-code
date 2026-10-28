@@ -320,6 +320,14 @@ def test_older_phone_agents_get_the_new_tools_once(
             tools: ['write_file'], toolsVersion: 4})"""
     )
     assert again["tools"] == ["write_file"] and again["instructions"] == "Mine"
+    # Agents saved before plugins came get the skill tool once, prompt kept.
+    plugins = page.evaluate(
+        """() => window.fccPhone.upgradeAgent({
+            id: 'b3', name: 'B3', role: 'builder', instructions: 'Mine',
+            tools: ['write_file'], toolsVersion: 3})"""
+    )
+    assert plugins["tools"] == ["write_file", "skill"]
+    assert plugins["instructions"] == "Mine" and plugins["toolsVersion"] == 4
     builder = page.evaluate(
         "() => window.fccPhone.state.agents.find((a) => a.id === 'builder')"
     )

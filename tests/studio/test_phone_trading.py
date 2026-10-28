@@ -2,10 +2,12 @@
 reads the desk and can stop it, deny, use the kill switch and work in
 practice; real money stays on the PC."""
 
+import dataclasses
 from typing import Any
 
 import pytest
 
+from free_claude_code.studio.extensions import BUILTIN_ID
 from free_claude_code.studio.models import now_ms
 from free_claude_code.studio.trading.records import TradeOrder
 from tests.api.support import create_test_app
@@ -31,10 +33,10 @@ def data(value: object) -> Any:
     return value
 
 
-async def waiting_order(studio, mode: str) -> TradeOrder:
+async def waiting_order(studio, mode: str, broker: str = "") -> TradeOrder:
     order = TradeOrder(
-        client_id=f"fcc-test-{mode}",
-        broker="paper" if mode == "paper" else "fake",
+        client_id=f"fcc-test-{mode}-{broker}",
+        broker=broker or ("paper" if mode == "paper" else "fake"),
         mode=mode,
         symbol="BHP.AX",
         qty=5,
@@ -102,7 +104,9 @@ async def test_the_phone_watches_and_runs_the_practice_desk(make_studio):
         )
         assert careless.status_code == 400 and "CLOSE EVERYTHING" in careless.text
         killed = await client.post(
-            "/studio/api/phone/trading/kill", json={}, headers=phone
+            "/studio/api/phone/trading/kill",
+            json={"flatten": True, "confirm": "CLOSE EVERYTHING"},
+            headers=phone,
         )
         assert killed.status_code == 200, killed.text
         card = data(
@@ -124,7 +128,21 @@ async def test_the_phone_watches_and_runs_the_practice_desk(make_studio):
 
 
 @pytest.mark.asyncio
-async def test_the_phone_approves_practice_orders_only(make_studio, monkeypatch):
+@pytest.mark.parametrize(
+    ("mode", "broker", "allowed"),
+    [
+        ("paper", "paper", True),
+        # A sell of a real holding made while the desk is in practice keeps
+        # its real account: it routes there, so it is real money.
+        ("paper", "fake", False),
+        ("live_approve", "paper", False),
+        ("live_approve", "fake", False),
+        ("alert_only", "paper", False),
+    ],
+)
+async def test_the_phone_approves_practice_orders_only(
+    make_studio, monkeypatch, mode, broker, allowed
+):
     studio, _ = make_studio([])
     app = create_test_app(studio=studio)
     approved: list[str] = []
@@ -136,22 +154,24 @@ async def test_the_phone_approves_practice_orders_only(make_studio, monkeypatch)
     monkeypatch.setattr(studio.trading, "approve", approve)
     async with client_for(app) as client:
         _, phone = await paired(client)
-        practice = await waiting_order(studio, "paper")
-        ok = await client.post(
-            f"/studio/api/phone/trading/orders/{practice.id}/approve", headers=phone
+        order = await waiting_order(studio, mode, broker)
+        answer = await client.post(
+            f"/studio/api/phone/trading/orders/{order.id}/approve", headers=phone
         )
-        assert ok.status_code == 200, ok.text
-        assert approved == [practice.id]
-
-        real = await waiting_order(studio, "live_approve")
-        refused = await client.post(
-            f"/studio/api/phone/trading/orders/{real.id}/approve", headers=phone
-        )
-        assert refused.status_code == 400 and "on the PC" in refused.text
-        assert approved == [practice.id]
-        assert (await studio._store.get(TradeOrder, real.id)).status == (
-            "awaiting_approval"
-        )
+        if allowed:
+            assert answer.status_code == 200, answer.text
+            assert approved == [order.id]
+        else:
+            assert answer.status_code == 400 and "on the PC" in answer.text
+            assert approved == []
+            assert (await studio._store.get(TradeOrder, order.id)).status == (
+                "awaiting_approval"
+            )
+            # Saying no is always allowed from the phone.
+            denied = await client.post(
+                f"/studio/api/phone/trading/orders/{order.id}/deny", headers=phone
+            )
+            assert denied.status_code == 200, denied.text
         gone = await client.post(
             "/studio/api/phone/trading/orders/nope/approve", headers=phone
         )
@@ -224,4 +244,34 @@ async def test_phone_agents_read_the_pcs_switched_on_skills(make_studio):
             headers=phone,
         )
         assert missing.status_code == 400
+        outside = await client.post(
+            "/studio/api/phone/skill",
+            json={
+                "action": "read",
+                "repo": fcc["name"],
+                "file": "../../../../etc/passwd",
+            },
+            headers=phone,
+        )
+        assert outside.status_code == 400 and "root:" not in outside.text
+
+        # A repo switched off on the PC can't be read from the phone.
+        builtin = await studio._extensions.get(BUILTIN_ID)
+        await studio._extensions.save(dataclasses.replace(builtin, enabled=False))
+        off = await client.post(
+            "/studio/api/phone/skill",
+            json={
+                "action": "read",
+                "repo": fcc["name"],
+                "file": "game-design/SKILL.md",
+            },
+            headers=phone,
+        )
+        assert off.status_code == 400 and "turned off" in off.text
+        hidden = await client.post(
+            "/studio/api/phone/skill",
+            json={"action": "read", "name": "game-design"},
+            headers=phone,
+        )
+        assert hidden.status_code == 400
     await studio.shutdown()
