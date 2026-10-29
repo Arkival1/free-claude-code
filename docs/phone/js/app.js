@@ -26,6 +26,7 @@ import * as more from "./views/more.js";
 import * as trade from "./views/trade.js";
 import * as plugins from "./views/plugins.js";
 import * as tasks from "./views/tasks.js";
+import * as hq from "./views/hq.js";
 
 const view = $("view");
 const TITLES = {
@@ -44,6 +45,7 @@ const TITLES = {
   trade: "Trading",
   plugins: "Plugins",
   tasks: "Tasks",
+  hq: "HQ",
 };
 const TAB_OF = { home: "home", chats: "chats", chat: "chats", agents: "agents", models: "models" };
 let cleanup = null;
@@ -84,6 +86,7 @@ async function render() {
     trade: () => trade.render(view),
     plugins: () => plugins.render(view),
     tasks: () => tasks.render(view, param),
+    hq: () => hq.render(view),
   };
   try {
     const result = await screens[route]();

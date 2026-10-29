@@ -4,6 +4,7 @@ import { el, card, go } from "../ui.js";
 
 const ITEMS = [
   ["tasks", "▶", "Tasks", "Give your PC's team a whole job and watch it work"],
+  ["hq", "▦", "HQ", "Your PC's team at work, station by station"],
   ["projects", "⚒", "Projects", "Websites and apps the Builder makes"],
   ["trade", "₿", "Trading", "Your PC's Trading Bank: watch, approve, stop"],
   ["plugins", "⧉", "Plugins and subagents", "Add, switch on and off: they run on your PC"],

@@ -1138,7 +1138,9 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "step live, and the files it made open in the phone's Projects. "
             "Plugins and subagents can be added and switched on or off from "
             "the phone too (MCP servers stay off until switched on here). With "
-            "no model on the phone, its agents think with this PC instead."
+            "no model on the phone, its agents think with this PC instead. "
+            "The phone's HQ shows this PC's team at its stations, live, and "
+            "lets you tell one agent something."
         ),
         asks=("Who can see my memory?", "How do I install Studio on my iPhone?"),
     ),

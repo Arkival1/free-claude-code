@@ -1,7 +1,7 @@
 // Agents: the phone's team, each agent's brain and tools, and Team brains.
 import { state, save, changed, newAgent, ROLE_TOOLS, ROLE_PROMPTS, PHONE_TOOLS, MAIN_ONLY, MEMORY_TOOLS, ALL_TOOLS, PC_ONLY, toolsOf } from "../state.js";
 import { el, button, card, go, notify, openSheet, closeSheet, uid } from "../ui.js";
-import { PROVIDERS, brainOf, brainReady, isPrivate, modelOf } from "../brains.js";
+import { PROVIDERS, brainOf, brainReady, chosenBrain, isPrivate, modelOf } from "../brains.js";
 import { SPECS } from "../tools.js";
 import { isBusy } from "../agents.js";
 
@@ -48,7 +48,10 @@ function brainLabel(agent) {
   const brain = brainOf(agent);
   if (!brain) return "no brain yet";
   const label = agent.brain === "default" ? `default (${PROVIDERS[brain].label})` : PROVIDERS[brain].label;
-  return modelOf(agent) ? `${label} · ${modelOf(agent)}` : label;
+  const chosen = chosenBrain(agent);
+  // Say so when the agent is standing in on another brain.
+  const standIn = chosen && chosen !== brain ? ` (instead of ${PROVIDERS[chosen].label}, not set up yet)` : "";
+  return `${modelOf(agent) ? `${label} · ${modelOf(agent)}` : label}${standIn}`;
 }
 
 function brainPicker(agent) {

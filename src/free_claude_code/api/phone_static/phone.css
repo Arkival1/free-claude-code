@@ -1165,3 +1165,72 @@ pre.notes {
   background: rgba(255, 200, 97, 0.12);
   border-color: var(--accent);
 }
+
+/* HQ: the PC's team as a little office of stations. */
+.hq-map {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hq-station {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  min-height: 110px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.hq-station small {
+  color: var(--muted);
+}
+
+.hq-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.hq-person {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px;
+  background: transparent;
+  border: 0;
+}
+
+.hq-face {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  font-weight: 800;
+  image-rendering: pixelated;
+}
+
+.hq-person.busy .hq-face {
+  border-color: var(--good);
+  box-shadow: 0 0 10px var(--good);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hq-person.busy .hq-face {
+    animation: hq-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes hq-pulse {
+  50% {
+    box-shadow: 0 0 2px var(--good);
+  }
+}

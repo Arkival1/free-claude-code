@@ -113,6 +113,7 @@ SCREENS = (
     "trade",
     "plugins",
     "tasks",
+    "hq",
 )
 
 
@@ -148,5 +149,21 @@ def test_tasks_start_on_the_pc(page: Page, admin_base_url: str) -> None:
     expect(page.get_by_role("heading", name="Steps")).to_be_visible()
     plans = page.request.get(f"{admin_base_url}/studio/api/plans").json()["plans"]
     assert plans[0]["goal"] == "Research three tradie websites"
+    no_sideways_scroll(page)
+    assert errors == []
+
+
+def test_the_hq_shows_the_pc_team(page: Page, admin_base_url: str) -> None:
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    pair(page, admin_base_url)
+    go(page, "more")
+    page.get_by_role("button", name="HQ: Your PC's team at work").click()
+    expect(page.get_by_role("heading", name="The office")).to_be_visible()
+    page.get_by_role("button", name="Jarvis:").first.click()
+    expect(page.get_by_label("Message for Jarvis")).to_be_visible()
+    page.get_by_label("Message for Jarvis").fill("hello from the phone HQ")
+    page.get_by_role("button", name="Send", exact=True).click()
+    expect(page.get_by_text("Jarvis is on it, on your PC.")).to_be_visible()
     no_sideways_scroll(page)
     assert errors == []

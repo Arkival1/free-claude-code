@@ -22,7 +22,8 @@ function unpaired(view) {
 async function openFiles(task) {
   try {
     const found = await pcCall(`/studio/api/phone/tasks/${encodeURIComponent(task.id)}/files`, undefined, "GET", 60000);
-    const project = await createProject(`${found.name} (from PC)`, "your PC");
+    // One phone project per job: opening it again brings it up to date.
+    const project = await createProject(`${found.name} (PC job ${String(task.id).slice(-4)})`, "your PC");
     let written = 0;
     for (const [path, text] of Object.entries(found.files || {})) {
       try {
@@ -102,7 +103,8 @@ function renderList(view) {
     // Keep what's typed: redraw the list only, never the box being typed in.
     const typing = document.activeElement === goal;
     if (!typing) draw();
-    if (tasks && tasks.some((task) => task.running)) timer = setTimeout(loop, REFRESH_MS);
+    // Keep following while a job runs, and try again after a failed read.
+    if (problem || (tasks && tasks.some((task) => task.running))) timer = setTimeout(loop, REFRESH_MS);
   };
   draw();
   loop();

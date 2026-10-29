@@ -1580,7 +1580,14 @@ class AgentRunner:
                     history = compact_history(history, budget=HISTORY_BUDGET // 3)
                     continue
                 logger.warning("Studio agent call failed: {}", error)
-                if fallback_model and fallback_model != model:
+                # A turn that may hold the user's memory never moves to a
+                # server model halfway: only a sealed turn, or a model on
+                # this PC, takes over.
+                if (
+                    fallback_model
+                    and fallback_model != model
+                    and (sealed or self._local_model(fallback_model))
+                ):
                     # The job still gets done: on the model that just worked
                     # for the main AI, with a note saying so.
                     await self._store.append_message(

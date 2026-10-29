@@ -4,6 +4,9 @@ memory never reaches the server (owner, 6.106)."""
 
 import pytest
 
+from free_claude_code.studio.llm import LLMReply, StudioLLMError
+
+from .conftest import ScriptedLLM, tool_reply
 from .test_private_memory import everything_sent, is_sealed, team
 
 OFF = {"reachable": False, "models": []}
@@ -64,4 +67,67 @@ async def test_no_backup_without_the_switch_or_a_key(
 ):
     studio, call = await builder_on_this_pc(make_studio, monkeypatch, OFF, **settings)
     assert "qwen2.5-coder-7b" in str(call["model"])
+    await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_local_agent_off_pc_counts_as_a_server_agent(make_studio, monkeypatch):
+    """While LM Studio is off, the briefing, the delegation lists and the seal
+    all treat the stand-in agent as the server agent it is for now."""
+    studio, _, agents = await team(
+        make_studio,
+        **{"STUDIO_LOCAL_BACKUP": True, "NVIDIA_NIM_API_KEY": "test-only-key"},
+    )
+    (builder,) = await studio.assign_models(
+        {agents["Builder"].id: "local/qwen2.5-coder-7b"}
+    )
+    status = dict(ON)
+
+    async def local_status():
+        return status
+
+    monkeypatch.setattr(studio, "_local_status", local_status)
+    assert not await studio.is_private_from(builder)
+    status.update(OFF)
+    assert await studio.is_private_from(builder)
+    await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_a_failing_pc_model_never_hands_memory_to_a_server_model(
+    make_studio, monkeypatch
+):
+    """Mid-job, a local agent's conversation can hold the user's memory (it
+    recalled it); if its model then fails, the job is not moved to the main
+    AI's server model."""
+    holder: list[ScriptedLLM] = []
+    local_calls: list[int] = []
+
+    def answer(system: str, prompt: str):
+        if "qwen2.5-coder-7b" not in str(holder[0].calls[-1]["model"]):
+            return LLMReply(text="Done.")
+        local_calls.append(1)
+        if len(local_calls) == 1:
+            return tool_reply("recall", {"query": "bakery colours dog"})
+        raise StudioLLMError("LM Studio crashed")
+
+    studio, model, agents = await team(
+        make_studio, answer, STUDIO_MAIN_AGENT_MODEL="nvidia_nim/test-model"
+    )
+    holder.append(model)
+
+    async def local_status():
+        return ON
+
+    monkeypatch.setattr(studio, "_local_status", local_status)
+    (builder,) = await studio.assign_models(
+        {agents["Builder"].id: "local/qwen2.5-coder-7b"}
+    )
+    assert not await studio.is_private_from(builder)
+    await studio.run_agent_task(
+        builder, "What colours does the bakery use?", site_id=None, parent_chat_id=None
+    )
+    assert len(local_calls) >= 2, "the PC model recalled, then failed"
+    to_server = [c for c in model.calls if "test-model" in str(c["model"])]
+    assert all("Biscuit" not in everything_sent(c) for c in to_server)
     await studio.shutdown()

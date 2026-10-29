@@ -3532,6 +3532,33 @@ class PhoneSubagentPayload(BaseModel):
     role: str = Field(min_length=1, max_length=40)
 
 
+class PhoneSayPayload(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@router.get("/studio/api/phone/hq")
+async def phone_hq(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """The HQ for FCC Phone: the team at its stations, steps and jobs."""
+    return await studio.phone_hq(await _phone(request, studio))
+
+
+@router.post("/studio/api/phone/hq/agents/{agent_id}/say", status_code=202)
+async def phone_hq_say(
+    agent_id: str,
+    payload: PhoneSayPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    """Talk to one agent from the phone's HQ; it answers on the PC."""
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_hq_say(link, agent_id, payload.text)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
 @router.get("/studio/api/phone/tasks")
 async def phone_tasks(
     request: Request, studio: StudioService = Depends(get_studio)

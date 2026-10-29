@@ -32,6 +32,8 @@ PATHS = (
     ("GET", "/studio/api/phone/subagents", None),
     ("POST", "/studio/api/phone/subagents", {"name": "A", "role": "tester"}),
     ("POST", "/studio/api/phone/subagents/x/switch", {"on": True}),
+    ("GET", "/studio/api/phone/hq", None),
+    ("POST", "/studio/api/phone/hq/agents/x/say", {"text": "hello"}),
 )
 
 
@@ -230,4 +232,33 @@ async def test_plugins_and_subagents_from_the_phone(make_studio, monkeypatch):
             headers=phone,
         )
         assert twice.status_code == 400
+    await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_the_phone_hq_shows_the_team_and_talks_to_an_agent(make_studio):
+    studio, _ = make_studio(["On it."])
+    await studio.ensure_defaults()
+    app = create_test_app(studio=studio)
+    async with client_for(app) as client:
+        _, phone = await paired(client)
+        hq = data((await client.get("/studio/api/phone/hq", headers=phone)).json())
+        names = {agent["name"] for agent in hq["agents"]}
+        assert {"Jarvis", "Builder", "Researcher"} <= names
+        jarvis = next(agent for agent in hq["agents"] if agent["main"])
+        assert jarvis["station"] and "chat_id" not in jarvis
+        assert {station["id"] for station in hq["stations"]} >= {"desk", "lounge"}
+        assert "pending" not in hq, "approvals are answered on the PC"
+
+        said = await client.post(
+            f"/studio/api/phone/hq/agents/{jarvis['id']}/say",
+            json={"text": "how is the team?"},
+            headers=phone,
+        )
+        assert said.status_code == 202, said.text
+        await asyncio.wait_for(studio.wait_for_background(), timeout=20)
+        missing = await client.post(
+            "/studio/api/phone/hq/agents/nope/say", json={"text": "hi"}, headers=phone
+        )
+        assert missing.status_code == 400
     await studio.shutdown()

@@ -34,6 +34,7 @@ const SHELL = [
   "js/views/agents.js",
   "js/views/chat.js",
   "js/views/hud.js",
+  "js/views/hq.js",
   "js/views/learn.js",
   "js/views/memory.js",
   "js/views/models.js",

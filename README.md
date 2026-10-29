@@ -2750,6 +2750,12 @@ account, and costs nothing.
   **Open the files on this phone** brings what it made (pages, code, small
   pictures) into Projects to preview. Jarvis can start one too: say "have my
   PC build ..." (his `pc_task` tool).
+- **HQ (paired)**: your PC's team as a little office, as on the PC: each
+  agent stands at the station of the tool it is using (glowing while it
+  works) or in the break room, with the newest steps and the running jobs.
+  Tap an agent to see its model and what it's writing, and tell it
+  something; it does it on the PC. Commands waiting for your yes are answered
+  on the PC.
 - **Plugins and subagents (paired)**: add a plugin from a GitHub link (your
   PC downloads it, keeps a copy, and reads its skills and agents; its MCP
   servers stay off until you switch them on on the PC), switch any repo on

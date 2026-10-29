@@ -7052,7 +7052,10 @@ class StudioService:
         """True when the agent thinks on a server, so memory stays away from it."""
         if not self.settings.studio_private_memory:
             return False
-        model = await self.effective_model(agent.model or self.default_model)
+        own = agent.model or self.default_model
+        # While LM Studio is off a local agent's turns run on the server
+        # model (the runner pins it), so it counts as a server agent too.
+        model = await self._local_backup(own) or await self.effective_model(own)
         return not self.runs_on_this_pc(model)
 
     async def _briefed(
@@ -7222,6 +7225,63 @@ class StudioService:
             ],
         }
 
+    async def phone_hq(self, link: PhoneLink) -> JsonObject:
+        """The HQ for FCC Phone: who is at which station doing what, the
+        newest steps, and the team's running jobs. Approvals waiting on the
+        PC are only counted here; they are answered on the PC."""
+        del link
+        hq = await self.hq()
+        agents = hq.get("agents")
+        plans = hq.get("plans")
+        changer = hq.get("changer")
+        return {
+            "agents": [
+                {
+                    key: person.get(key)
+                    for key in (
+                        "id",
+                        "name",
+                        "role",
+                        "main",
+                        "subagent",
+                        "active",
+                        "local",
+                        "busy",
+                        "tool",
+                        "station",
+                        "live",
+                        "task",
+                    )
+                }
+                | {"model": model_label(str(person.get("model") or ""))}
+                for person in (agents if isinstance(agents, list) else [])
+                if isinstance(person, dict)
+            ],
+            "stations": hq.get("stations"),
+            "feed": hq.get("feed"),
+            "plans": [
+                phone_tasks.task_view(plan)
+                for plan in (plans if isinstance(plans, list) else [])
+                if isinstance(plan, dict)
+            ],
+            "changer": {
+                "request": changer.get("request"),
+                "status": changer.get("status"),
+            }
+            if isinstance(changer, dict)
+            else None,
+        }
+
+    async def phone_hq_say(
+        self, link: PhoneLink, agent_id: str, text: str
+    ) -> JsonObject:
+        """Talk to one agent from the phone's HQ; it answers on the PC."""
+        del link
+        try:
+            return await self.hq_say(agent_id, text[:4000])
+        except (StudioError, StudioNotFoundError) as error:
+            raise PhoneLinkError(str(error)) from error
+
     async def phone_tasks(self, link: PhoneLink) -> JsonObject:
         """The team's jobs, newest first, for FCC Phone's Tasks screen."""
         del link
@@ -7250,12 +7310,20 @@ class StudioService:
     async def phone_task_stop(self, link: PhoneLink, plan_id: str) -> JsonObject:
         del link
         await self._phone_plan(plan_id)
-        return phone_tasks.task_view(self.plan_view(await self.stop_plan(plan_id)))
+        try:
+            plan = await self.stop_plan(plan_id)
+        except (StudioError, StudioNotFoundError) as error:
+            raise PhoneLinkError(str(error)) from error
+        return phone_tasks.task_view(self.plan_view(plan))
 
     async def phone_task_resume(self, link: PhoneLink, plan_id: str) -> JsonObject:
         del link
         await self._phone_plan(plan_id)
-        return phone_tasks.task_view(self.plan_view(await self.resume_plan(plan_id)))
+        try:
+            plan = await self.resume_plan(plan_id)
+        except (StudioError, StudioNotFoundError) as error:
+            raise PhoneLinkError(str(error)) from error
+        return phone_tasks.task_view(self.plan_view(plan))
 
     async def phone_task_files(self, link: PhoneLink, plan_id: str) -> JsonObject:
         """The text files a job made, to open in the phone's Projects."""
