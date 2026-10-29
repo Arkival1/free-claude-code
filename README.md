@@ -2763,9 +2763,9 @@ account, and costs nothing.
   the PC. The Builder and Jarvis read a plugin's skills with the `skill` tool
   only when a job needs one.
 - **No download needed**: when an agent's brain isn't set up (no model on the
-  phone yet), it uses the next one that is: this phone, then your PC, then a
-  cloud key (Settings, on by default). Memory rules follow the brain really
-  used.
+  phone yet), it thinks with your PC's FCC model instead (Settings, on by
+  default). A cloud key is only used by agents you set to that cloud brain,
+  never as a stand-in. Memory rules follow the brain really used.
 - **FCC's designs on the phone**: the Builder can also start a site from
   FCC's 8 designs (studio minimal, bold brutalist, soft SaaS, warm cafe,
   boutique shop, trade business, game launch, creator links), the same as

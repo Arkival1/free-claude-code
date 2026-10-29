@@ -37,7 +37,7 @@ export function render(view) {
           await save.settings();
           changed("settings");
         } }),
-        el("span", { text: "If an agent's brain isn't set up (no model on this phone yet), use the next one that is: this phone, then your PC, then a cloud key. No download needed." }),
+        el("span", { text: "If an agent's brain isn't set up (no model on this phone yet), it thinks with your PC's FCC model instead. No download needed. Cloud keys are only used by agents you set to them." }),
       ]),
       button("Test the brain", async () => {
         notify("Asking…");

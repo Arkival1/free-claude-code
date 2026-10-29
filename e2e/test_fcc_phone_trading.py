@@ -70,6 +70,22 @@ def test_plugins_and_the_design_templates(page: Page, admin_base_url: str) -> No
 
     # With no model on the phone, agents think with the PC: nothing to download.
     assert page.evaluate("() => window.fccPhone.brainOf({brain: 'default'})") == "pc"
+    # A saved cloud key is never a stand-in: only agents set to it use it.
+    brains = page.evaluate(
+        """() => {
+            const phone = window.fccPhone;
+            phone.state.settings.keys.gemini = "test-only-key";
+            const local = phone.brainOf({brain: "local"});
+            const cloud = phone.brainOf({brain: "gemini"});
+            const pc = phone.state.settings.pc;
+            phone.state.settings.pc = null;
+            const unpaired = phone.brainOf({brain: "local"});
+            phone.state.settings.pc = pc;
+            phone.state.settings.keys.gemini = "";
+            return [local, cloud, unpaired];
+        }"""
+    )
+    assert brains == ["pc", "gemini", "local"]
 
     files = page.evaluate(
         "() => window.fccPhone.templateFiles('cafe-warm', 'Bean There')"
