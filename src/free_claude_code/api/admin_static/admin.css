@@ -540,6 +540,18 @@ button.startup-busy::before,
   color: var(--text-strong);
 }
 
+.field-saved {
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+}
+
 .field-source {
   color: var(--accent);
   font-size: 11px;
@@ -977,4 +989,100 @@ button.startup-busy, .startup-spinner { display: inline-flex; align-items: cente
 .startup-spinner[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) {
   button.startup-busy::before, .startup-spinner::before { animation: none; }
+}
+
+.studio-open {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.studio-open a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Settings search: one box that looks through every settings page. */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+
+.settings-search {
+  flex: 1 1 280px;
+  max-width: 460px;
+}
+
+.settings-search input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--input);
+  color: inherit;
+  font: inherit;
+}
+
+.settings-search input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.search-summary {
+  margin: 6px 2px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.field.search-miss,
+.settings-section.search-empty,
+body.settings-searching #providerGroups,
+body.settings-searching .advanced-toggle {
+  display: none;
+}
+
+.settings-section .field.advanced-field.search-hit {
+  display: flex;
+}
+
+/* Shown inside the Studio app: match its dark console look. */
+html.embedded {
+  --bg: #02070d;
+  --panel: #05121c;
+  --panel-strong: #071a28;
+  --card: #071722;
+  --card-hover: #0c2231;
+  --input: #02101a;
+  --input-focus: #041826;
+  --text: #d9f6ff;
+  --muted: #7fa9ba;
+  --line: rgba(64, 214, 255, 0.14);
+  --line-strong: rgba(64, 214, 255, 0.3);
+  --accent: #ffc861;
+  --accent-dark: #e8a93c;
+  --accent-muted: rgba(255, 200, 97, 0.1);
+  --accent-border: rgba(255, 200, 97, 0.4);
+  --glow-accent: 0 0 14px rgba(255, 200, 97, 0.2);
+}
+
+html.embedded body {
+  background:
+    linear-gradient(rgba(64, 214, 255, 0.03) 1px, transparent 1px) 0 0 / 100% 28px,
+    linear-gradient(90deg, rgba(64, 214, 255, 0.025) 1px, transparent 1px) 0 0 / 28px 100%,
+    var(--bg);
+}
+
+html.embedded .topbar h2 {
+  color: #40d6ff;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 22px;
+}
+
+html.embedded .studio-open {
+  display: none;
 }

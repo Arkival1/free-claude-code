@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>$title</title>
+  <meta name="description" content="$title: a game you play in the browser, on a computer or a phone.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>$initial</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/phaser/phaser.min.js" defer></script>
+  <script src="game.js" defer></script>
+</head>
+<body>
+  <main class="cabinet">
+    <header class="bar">
+      <h1>$title</h1>
+      <p class="hud" id="hud" aria-live="polite"></p>
+    </header>
+    <div class="screen" id="screen">
+      <div class="cover" id="cover">
+        <p>Run, jump on the crawlers, grab the coins and reach the flag.</p>
+        <button class="btn" type="button" id="play">Play</button>
+      </div>
+      <p class="msg" id="msg" role="status"></p>
+    </div>
+    <div class="pad" id="pad" aria-label="Touch controls">
+      <div class="group">
+        <button type="button" data-key="left" aria-label="Left">◀</button>
+        <button type="button" data-key="right" aria-label="Right">▶</button>
+      </div>
+      <button type="button" data-key="jump" aria-label="Jump">Jump</button>
+    </div>
+    <p class="keys">Keyboard: arrows or A and D to move, Space or W to jump.</p>
+  </main>
+</body>
+</html>

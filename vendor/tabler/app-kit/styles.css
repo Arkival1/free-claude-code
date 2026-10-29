@@ -1,0 +1,12 @@
+/* The app's own look on top of Tabler: change these to restyle every screen. */
+:root {
+  --app-accent: #7c3aed;
+  --tblr-primary: var(--app-accent);
+  --tblr-primary-rgb: 124, 58, 237;
+}
+.icon { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; margin-right: 6px; vertical-align: -4px; }
+.hero-card { background: linear-gradient(160deg, #1b2a4a, #2b1b4a); color: #fff; }
+.hero-card .text-secondary { color: #c3cbe3 !important; }
+.navbar-nav .nav-link.active { color: var(--app-accent); }
+@media (max-width: 575px) { .navbar-nav .nav-link span { display: none; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

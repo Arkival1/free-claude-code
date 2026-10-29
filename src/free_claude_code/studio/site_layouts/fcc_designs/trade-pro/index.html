@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trade Business Name</title>
+  <meta name="description" content="Licensed electricians: homes, shops and emergency call-outs.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#services">Skip to services</a>
+  <div class="alert"><strong>24/7 emergency call-outs:</strong> <a href="tel:0400000000">0400 000 000</a></div>
+  <header class="top" id="top">
+    <a class="brand" data-brand href="#top"><span class="bolt" aria-hidden="true">&#9889;</span>Trade Business Name</a>
+    <button class="menu" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav id="nav" aria-label="Main">
+      <a href="#services">Services</a>
+      <a href="#why">Why us</a>
+      <a href="#reviews">Reviews</a>
+      <a class="quote-link" href="#quote">Free quote</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="badge">Licensed &amp; insured &middot; Lic. No. 000000C</p>
+        <h1 id="hero-title">Power done right,<br>the first time.</h1>
+        <p>Local electricians for homes and businesses. Upfront prices, tidy work, and we turn up when we say.</p>
+        <div class="hero-actions">
+          <a class="btn" href="#quote">Get a free quote</a>
+          <a class="btn-line" href="tel:0400000000">Call now</a>
+        </div>
+      </div>
+      <ul class="hero-points">
+        <li><strong>Same-day</strong> jobs</li>
+        <li><strong>Fixed</strong> prices</li>
+        <li><strong>5-year</strong> work guarantee</li>
+      </ul>
+    </section>
+
+    <section id="services" class="services" aria-labelledby="services-title">
+      <h2 id="services-title">What we do</h2>
+      <div class="cards">
+        <article><h3>Lights &amp; power points</h3><p>New circuits, downlights, outdoor lighting.</p></article>
+        <article><h3>Switchboards</h3><p>Upgrades, safety switches, RCD testing.</p></article>
+        <article><h3>Fault finding</h3><p>Tripping power or dead circuits, found and fixed.</p></article>
+        <article><h3>Smoke alarms</h3><p>Compliant, interconnected alarms installed.</p></article>
+        <article><h3>EV chargers</h3><p>Home charger supply and installation.</p></article>
+        <article><h3>Commercial</h3><p>Fit-outs, maintenance and test &amp; tag.</p></article>
+      </div>
+    </section>
+
+    <section id="why" class="why" aria-labelledby="why-title">
+      <h2 id="why-title">Why people call us back</h2>
+      <ol class="steps">
+        <li><b>1</b><h3>You call or book</h3><p>We answer, or call back within the hour.</p></li>
+        <li><b>2</b><h3>Fixed quote</h3><p>The price is agreed before any work starts.</p></li>
+        <li><b>3</b><h3>Done and tested</h3><p>Every job is tested and the site left clean.</p></li>
+      </ol>
+    </section>
+
+    <section id="reviews" class="reviews" aria-labelledby="reviews-title">
+      <h2 id="reviews-title">What customers say</h2>
+      <div class="quotes">
+        <blockquote><p>"On time, explained everything, and the price matched the quote."</p><footer>Sample review: replace with real ones</footer></blockquote>
+        <blockquote><p>"Found the fault our last sparky missed. Highly recommend."</p><footer>Sample review: replace with real ones</footer></blockquote>
+      </div>
+    </section>
+
+    <section id="quote" class="quote" aria-labelledby="quote-title">
+      <h2 id="quote-title">Get a free quote</h2>
+      <form class="form" data-email="jobs@example.com" novalidate>
+        <label>Name<input name="name" autocomplete="name" required></label>
+        <label>Phone<input name="phone" type="tel" autocomplete="tel" required></label>
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <label>Suburb<input name="suburb" autocomplete="address-level2" required></label>
+        <label class="wide">The job<textarea name="job" rows="4" required></textarea></label>
+        <button class="btn" type="submit">Send my request</button>
+        <p class="note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>&copy; <span data-year></span> <span data-brand-text>Trade Business Name</span> &middot; Lic. No. 000000C</p>
+    <a href="#top">Back to top</a>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Your Name</title>
+  <meta name="description" content="Links, work and contact for Your Name.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#links">Skip to links</a>
+  <main class="card" id="top">
+    <header class="me">
+      <div class="avatar" role="img" aria-label="Photo placeholder: replace with your photo"><span aria-hidden="true">YN</span></div>
+      <h1 data-brand>Your Name</h1>
+      <p class="role">Maker &middot; Designer &middot; Apprentice electrician</p>
+      <p class="bio">I build things for the web, fix things at home, and write about both. Based in your city.</p>
+    </header>
+
+    <nav id="links" class="links" aria-label="My links">
+      <a href="#work"><span aria-hidden="true">&#9670;</span> Latest project</a>
+      <a href="#cv"><span aria-hidden="true">&#9679;</span> My CV</a>
+      <a href="mailto:you@example.com"><span aria-hidden="true">&#9993;</span> Email me</a>
+      <a href="#contact"><span aria-hidden="true">&#10148;</span> Book a chat</a>
+    </nav>
+
+    <section id="work" class="block" aria-labelledby="work-title">
+      <h2 id="work-title">Latest project</h2>
+      <div class="project">
+        <div class="thumb" aria-hidden="true"></div>
+        <div><h3>Project name</h3><p>A short line about what it is and why it matters.</p></div>
+      </div>
+    </section>
+
+    <section id="cv" class="block" aria-labelledby="cv-title">
+      <h2 id="cv-title">Experience</h2>
+      <ol class="timeline">
+        <li><time>2025 to now</time><h3>Apprentice electrician</h3><p>Company name. Residential and commercial work.</p></li>
+        <li><time>2022 to 2025</time><h3>Freelance web designer</h3><p>Sites for local businesses.</p></li>
+        <li><time>2020 to 2022</time><h3>Retail team lead</h3><p>Ran a team of six.</p></li>
+      </ol>
+      <h2>Skills</h2>
+      <ul class="chips">
+        <li>HTML &amp; CSS</li><li>JavaScript</li><li>Wiring</li><li>Fault finding</li><li>Customer service</li>
+      </ul>
+    </section>
+
+    <section id="contact" class="block" aria-labelledby="contact-title">
+      <h2 id="contact-title">Say hello</h2>
+      <form class="form" data-email="you@example.com" novalidate>
+        <label>Your email<input name="email" type="email" autocomplete="email" required></label>
+        <label>Message<textarea name="message" rows="3" required></textarea></label>
+        <button class="send" type="submit">Send</button>
+        <p class="note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <footer class="foot"><p>&copy; <span data-year></span> <span data-brand-text>Your Name</span></p></footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

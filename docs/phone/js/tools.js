@@ -1,0 +1,746 @@
+// The tools phone agents use, described once for every brain and run here.
+import { state, save, feed, changed, toolsOf, agentByName } from "./state.js";
+import { uid, words } from "./ui.js";
+import { isPrivate } from "./brains.js";
+import { syncSoon, pcSearch, pcSkill, pcCall } from "./sync.js";
+import * as projects from "./projects.js";
+import { PICTURE_SUFFIXES, polishNotes } from "./polish.js";
+import { lookAtSite, describeLook } from "./inspect.js";
+import { TEMPLATES, templateFiles } from "./templates.js";
+import { usePlugin } from "./plugins.js";
+import { SKILLS } from "./skills.js";
+import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
+
+const hooks = { delegate: null, learn: null, teamStatus: null };
+export function setHooks(next) {
+  Object.assign(hooks, next);
+}
+
+const text = (description) => ({ type: "string", description });
+export const SPECS = {
+  remember: {
+    description: "Save one fact worth keeping: something about the user, a plan, a preference, or a result. Shared by every agent on the phone (and with the PC when paired).",
+    parameters: { type: "object", properties: { text: text("The fact, in one clear sentence.") }, required: ["text"] },
+  },
+  recall: {
+    description: "Search memory for what is known about something before answering.",
+    parameters: { type: "object", properties: { query: text("What to look for.") }, required: ["query"] },
+  },
+  calculate: {
+    description: "Exact arithmetic: + - * / % ^, brackets, sqrt, round, min, max, '15% of 80'. Use it for every sum.",
+    parameters: { type: "object", properties: { expression: text("The sum.") }, required: ["expression"] },
+  },
+  weather: {
+    description: "The weather now and for the next days in any town or city.",
+    parameters: { type: "object", properties: { place: text("Town or city."), days: { type: "integer", description: "1 to 7, default 3" } }, required: ["place"] },
+  },
+  wikipedia: {
+    description: "Look up a fact, person, place, or topic on Wikipedia and read the summary.",
+    parameters: { type: "object", properties: { query: text("What to look up.") }, required: ["query"] },
+  },
+  read_page: {
+    description: "Read a web page as plain text, from its https:// address.",
+    parameters: { type: "object", properties: { url: text("The page's address.") }, required: ["url"] },
+  },
+  web_search: {
+    description: "Search the web (through the user's PC) and get titles, links, and snippets.",
+    parameters: { type: "object", properties: { query: text("What to search for.") }, required: ["query"] },
+  },
+  use_plugin: {
+    description: "Free APIs (plugins) the phone can call itself, from a catalog of over 1,500: action find with need returns the plugins that fit best, with whether each is switched on and needs a key; pick the best one, read its docs with read_page, then action call with plugin and the https:// url to call (write {key} where its API key goes; FCC fills it in). Only switched-on plugins can be called.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["find", "call"] },
+        need: text("find: what you need, e.g. 'live AFL scores' or 'currency rates'."),
+        plugin: text("call: the plugin's name, as find showed it."),
+        url: text("call: the full https:// address, with {key} where the key goes."),
+        headers: { type: "object", description: "call: extra headers, e.g. {\"X-Api-Key\": \"{key}\"}." },
+      },
+      required: ["action"],
+    },
+  },
+  start_task: {
+    description: "Start a big job on this phone, like Manus: you (Jarvis) plan it into steps, each agent does its part with its tools and the plugin you pick for it, and the user follows it on Tasks. Use it when a job has several parts; give the whole job in the user's words.",
+    parameters: { type: "object", properties: { goal: text("The whole job.") }, required: ["goal"] },
+  },
+  pc_task: {
+    description: "Hand a whole job to the user's PC team (needs the PC link), like Manus: action start with goal plans it into steps that the PC's agents do with all their tools, plugins and subagents (websites, apps, games, research, files); action status with id says how far it is. The user follows it live on Tasks. Use it for big jobs; answer small questions yourself.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["start", "status"] },
+        goal: text("start: the whole job, in the user's words plus anything they told you."),
+        id: text("status: the job's id."),
+      },
+      required: ["action"],
+    },
+  },
+  skill: {
+    description: "FCC's skills, on this phone: step-by-step know-how for game design, web design and engineering, apps, debugging, testing, security and more (plus your PC's plugins' skills when paired). action search with a query finds the right one, read with its name (and file for a skill's extra guide) gives the full instructions, list shows them all. Read one only when the job needs it, then follow it.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["search", "list", "read"] },
+        query: text("search: what you need, e.g. 'game level design' or 'landing page look'."),
+        name: text("read: the skill's name."),
+        file: text("read: one of the skill's extra guides, e.g. reference/level-designer.md."),
+        repo: text("On the PC: one repo."),
+      },
+      required: ["action"],
+    },
+  },
+  todo: {
+    description: "The user's to-do list and reminders. action 'add' with text (and optional due like 'in 20 minutes', 'tomorrow 9am', '17:30'), 'list', or 'done' with the item's text or id.",
+    parameters: {
+      type: "object",
+      properties: { action: { type: "string", enum: ["add", "list", "done"] }, text: text("The to-do, or which one."), due: text("When to remind, if at all.") },
+      required: ["action"],
+    },
+  },
+  start_project: {
+    description: `Start (or switch to) a project, a folder of files for a website or app. For a new one, pick the closest starter template (${Object.entries(TEMPLATES).map(([name, t]) => `${name}: ${t.about}`).join("; ")}), then make it the user's.`,
+    parameters: {
+      type: "object",
+      properties: { name: text("The project's name."), template: { type: "string", enum: Object.keys(TEMPLATES), description: "A starter template for a new project." } },
+      required: ["name"],
+    },
+  },
+  write_file: {
+    description: "Write one whole file in the current project (index.html, style.css, script.js, …). Always the complete file.",
+    parameters: { type: "object", properties: { path: text("File name, like index.html."), content: text("The complete file.") }, required: ["path", "content"] },
+  },
+  read_file: {
+    description: "Read one file of the current project.",
+    parameters: { type: "object", properties: { path: text("File name.") }, required: ["path"] },
+  },
+  edit_file: {
+    description: "Change part of a file: replace the exact text 'find' with 'replace'.",
+    parameters: { type: "object", properties: { path: text("File name."), find: text("Exact text now in the file."), replace: text("What it becomes.") }, required: ["path", "find", "replace"] },
+  },
+  list_files: {
+    description: "List the current project's files and their sizes.",
+    parameters: { type: "object", properties: {} },
+  },
+  delete_file: {
+    description: "Delete one file from the current project.",
+    parameters: { type: "object", properties: { path: text("File name.") }, required: ["path"] },
+  },
+  list_photos: {
+    description: "The user's own photos of their business (the shop, team, food, work) with what they said about each: what it shows, prices, hours, anything. Use these before stock photos, and the notes as facts for the site.",
+    parameters: { type: "object", properties: { query: text("Words to narrow the list, if any.") } },
+  },
+  use_photo: {
+    description: "Put one of the user's business photos into the current project (e.g. images/shopfront.jpg), then use it in <img> with its width and height. Their own photos need no credit.",
+    parameters: { type: "object", properties: { photo: text("Its name."), path: text("Where to put it, e.g. images/shopfront.jpg.") }, required: ["photo"] },
+  },
+  restore_file: {
+    description: "Undo changes to a file: put back an earlier version (1 = before the last change). Without versions_back, lists the saved versions.",
+    parameters: { type: "object", properties: { path: text("File name."), versions_back: { type: "integer" } }, required: ["path"] },
+  },
+  find_images: {
+    description: "Find real photos a website may use for free (Creative Commons, fine for business use), with sizes and credit lines. Use the https address straight in <img src>, with alt, width, and height, and put the credit in the footer.",
+    parameters: {
+      type: "object",
+      properties: { query: text("What the photo shows, e.g. 'coffee shop interior'."), count: { type: "integer", description: "1 to 10, default 5" }, orientation: { type: "string", enum: ["wide", "tall", "square"] } },
+      required: ["query"],
+    },
+  },
+  polish_check: {
+    description: "A designer's once-over of the pages: contrast, phone layout, fonts, hover and focus states, pictures, structure. Make the changes that fit.",
+    parameters: { type: "object", properties: {} },
+  },
+  look_at_site: {
+    description: "Open the site like a visitor, on a phone (390px) and a computer (1280px), and report what shows first and what's wrong: sideways scrolling, broken pictures, script errors, tiny text, hard-to-read colours, small buttons.",
+    parameters: { type: "object", properties: {} },
+  },
+  check_project: {
+    description: "Check the current project for problems: missing pages, broken links, placeholder text, missing viewport or titles.",
+    parameters: { type: "object", properties: {} },
+  },
+  ask_agent: {
+    description: "Hand a job to a teammate (Builder, Researcher, Helper, Tester, …) and get their report. Give a clear, complete task.",
+    parameters: { type: "object", properties: { agent: text("The teammate's name."), task: text("What they should do."), project: text("A project name, for building work.") }, required: ["agent", "task"] },
+  },
+  team_status: {
+    description: "What every agent is doing right now and what they last finished.",
+    parameters: { type: "object", properties: {} },
+  },
+  learn: {
+    description: "Start studying a subject: plans lessons, reads up on each, writes notes, and shows a progress bar.",
+    parameters: { type: "object", properties: { topic: text("The subject."), depth: { type: "string", enum: ["quick", "normal", "deep"] } }, required: ["topic"] },
+  },
+};
+
+// The main AI keeps its own memory, so its remember can share or not.
+const MAIN_SPECS = {
+  remember: {
+    description: "Save one fact into your own memory, which only you read. Set share to true to put it where every agent reads it instead.",
+    parameters: { type: "object", properties: { text: text("The fact, in one clear sentence."), share: { type: "boolean" } }, required: ["text"] },
+  },
+  recall: {
+    description: "Search your own memory, the team's, and every agent's; each result says whose it is.",
+    parameters: SPECS.recall.parameters,
+  },
+};
+
+export function specsFor(agent) {
+  return toolsOf(agent)
+    .filter((name) => SPECS[name])
+    .map((name) => {
+      const spec = (agent.role === "main" && MAIN_SPECS[name]) || SPECS[name];
+      return { type: "function", function: { name, description: spec.description, parameters: spec.parameters } };
+    });
+}
+
+/** Run one tool call for an agent. ctx: {project, depth, chain}. Returns text. */
+export async function runTool(agent, call, ctx) {
+  const args = call.arguments || {};
+  if (!toolsOf(agent).includes(call.name)) return `${agent.name} doesn't have the ${call.name} tool. Its tools: ${toolsOf(agent).join(", ")}.`;
+  try {
+    switch (call.name) {
+      case "remember":
+        return await remember(agent, String(args.text || ""), { share: args.share === true });
+      case "recall": {
+        const found = recall(agent, String(args.query || ""), 8);
+        return found.length ? found.map((row) => `- ${row.text}${row.from ? ` (${row.from})` : ""}`).join("\n") : "Nothing in memory about that.";
+      }
+      case "calculate":
+        return `${args.expression} = ${formatNumber(calculate(String(args.expression || "")))}`;
+      case "weather":
+        return await weather(String(args.place || ""), Number(args.days) || 3);
+      case "wikipedia":
+        return await wikipedia(String(args.query || ""));
+      case "read_page":
+        return await readPage(String(args.url || ""));
+      case "web_search": {
+        const results = await pcSearch(String(args.query || ""));
+        return results.length ? results.map((hit, i) => `${i + 1}. ${hit.title}\n   ${hit.url}\n   ${hit.snippet || ""}`).join("\n") : "No results.";
+      }
+      case "use_plugin":
+        return await usePlugin(args);
+      case "start_task": {
+        const { startTask } = await import("./tasks.js");
+        const task = await startTask(String(args.goal || ""), agent.name);
+        return `Started the job on this phone (${task.id}): planning the steps now. The user can follow it on More, Tasks.`;
+      }
+      case "pc_task": {
+        if (args.action === "status") {
+          const job = await pcCall(`/studio/api/phone/tasks/${encodeURIComponent(String(args.id || ""))}`, undefined, "GET", 30000);
+          return `${job.goal}: ${job.running ? "working" : job.status}, ${job.done_steps} of ${job.steps.length} steps done.${job.summary ? `\n${job.summary}` : ""}`;
+        }
+        const job = await pcCall("/studio/api/phone/tasks", { goal: String(args.goal || "").slice(0, 4000) });
+        return `Started on the PC (job ${job.id}): ${job.steps.length ? `${job.steps.length} steps` : "planning the steps"}. The user can follow it on More, Tasks.`;
+      }
+      case "skill":
+        return await skill(args);
+      case "todo":
+        return await todo(agent, args);
+      case "start_project": {
+        const project = await projects.createProject(String(args.name || ""), agent.name);
+        ctx.project = project;
+        const template = String(args.template || "");
+        if (template && TEMPLATES[template]) {
+          if (Object.keys(project.files).length) {
+            return `${project.name} already has files (${Object.keys(project.files).join(", ")}), so the template wasn't used. Build on them.`;
+          }
+          for (const [path, body] of Object.entries(templateFiles(template, project.name))) {
+            await projects.writeFile(project, path, body, agent.name);
+          }
+          return `Started ${project.name} from the ${template} template: ${Object.keys(project.files).join(", ")}. Now make it the user's: rewrite index.html with real content for this job (keep the structure and class names), set the colours at the top of styles.css, and replace every placeholder line.`;
+        }
+        return `Working in the project ${project.name}. Files: ${Object.keys(project.files).join(", ") || "none yet"}.`;
+      }
+      case "write_file": {
+        const project = await needProject(agent, ctx);
+        const same = projects.cleanPath(args.path);
+        if (project.files[same] !== undefined && project.files[same] === String(args.content ?? "")) {
+          return `${same} already holds exactly that, so nothing changed. Make a real improvement (edit_file changes one part), or finish if the work is done.`;
+        }
+        const name = await projects.writeFile(project, args.path, args.content, agent.name);
+        return `Wrote ${name} in ${project.name} (${String(args.content || "").length.toLocaleString()} characters).`;
+      }
+      case "read_file": {
+        const project = await needProject(agent, ctx);
+        const name = projects.cleanPath(args.path);
+        const body = project.files[name];
+        if (projects.isPicture(project.files[String(args.path || "").replace(/^\.?\/+/, "")])) return `${args.path} is a picture; use it with <img src="${args.path}">.`;
+        return body === undefined ? `There is no ${name} in ${project.name}. Files: ${Object.keys(project.files).join(", ") || "none"}.` : body.slice(0, 24000);
+      }
+      case "edit_file": {
+        const project = await needProject(agent, ctx);
+        if (String(args.find || "") === String(args.replace ?? "")) {
+          return `These edits leave ${args.path} exactly as it was, so nothing changed. Make a real improvement, or finish if the work is done.`;
+        }
+        const page = project.files[projects.cleanPath(args.path)];
+        if (/\.html?$/i.test(String(args.path || "")) && typeof page === "string") {
+          const copied = projects.copiedLines(page, String(args.find || ""), String(args.replace ?? ""));
+          if (copied.length >= projects.COPIED_LINES) {
+            return `That edit repeats ${copied.length} lines already in ${args.path} (like "${copied[0].slice(0, 80)}"), so that part would be on the page twice. To change text that is there, put it in find; to add something, add only what is new. Nothing was changed.`;
+          }
+        }
+        await projects.editFile(project, args.path, String(args.find || ""), String(args.replace ?? ""), agent.name);
+        return `Changed ${args.path} in ${project.name}.`;
+      }
+      case "list_files": {
+        const project = await needProject(agent, ctx);
+        const names = Object.keys(project.files);
+        return names.length ? names.map((name) => (projects.isPicture(project.files[name]) ? `${name} (picture)` : `${name} (${project.files[name].length.toLocaleString()} characters)`)).join("\n") : `${project.name} has no files yet.`;
+      }
+      case "delete_file": {
+        const project = await needProject(agent, ctx);
+        await projects.deleteFile(project, args.path, agent.name);
+        return `Deleted ${args.path}.`;
+      }
+      case "restore_file": {
+        const project = await needProject(agent, ctx);
+        const kept = projects.versions(project, args.path);
+        const back = Number(args.versions_back);
+        if (!back) {
+          return kept.length
+            ? `${projects.cleanPath(args.path)} has ${kept.length} earlier version(s): ${kept.map((row, i) => `${i + 1} (${Math.max(0, Math.round((Date.now() - row.at) / 60000))} min ago)`).join(", ")}.`
+            : `${projects.cleanPath(args.path)} has no earlier versions.`;
+        }
+        const name = await projects.restoreFile(project, args.path, back, agent.name);
+        return `Restored ${name} to the version from ${back} change(s) ago. The version it replaced is kept, so this can be undone too.`;
+      }
+      case "list_photos": {
+        const found = searchPhotos(String(args.query || ""));
+        if (!found.length) return args.query ? `No business photos match "${args.query}".` : "The user hasn't sent any business photos yet; they can attach them in a chat or add them on Projects. Use find_images meanwhile.";
+        return [...found.slice(0, 30).map((photo, i) => `${i + 1}. ${describePhoto(photo)}`), "Put one on the site with use_photo."].join("\n");
+      }
+      case "use_photo": {
+        const photo = findPhoto(args.photo);
+        if (!photo) return `No business photo called ${args.photo}; list_photos shows them.`;
+        const project = await needProject(agent, ctx);
+        const extension = photo.name.slice(photo.name.lastIndexOf("."));
+        let path = String(args.path || `images/${photo.name}`).trim().replace(/^\/+/, "");
+        path = path.replace(/\.[a-z0-9]+$/i, "") + extension;
+        const name = await projects.putPicture(project, path, await photoData(photo), agent.name);
+        return `Put ${photo.name} in ${project.name} as ${name}. It is ${photo.width}x${photo.height}: use width="${photo.width}" height="${photo.height}" on the <img>.${photo.note ? ` The user says about it: ${photo.note}` : ""}`;
+      }
+      case "find_images":
+        return await findImagesText(String(args.query || ""), Number(args.count) || 5, String(args.orientation || ""));
+      case "polish_check": {
+        const project = await needProject(agent, ctx);
+        const pictures = Object.keys(project.files).filter((name) =>
+          PICTURE_SUFFIXES.some((suffix) => name.toLowerCase().endsWith(suffix)),
+        );
+        const notes = polishNotes(project.files, pictures);
+        feed(agent.name, `Polish check on ${project.name}: ${notes.length ? `${notes.length} suggestions` : "looks finished"}.`);
+        if (!Object.keys(project.files).some((name) => /\.html?$/i.test(name))) return "There are no web pages to polish in this project.";
+        return notes.length ? `${notes.length} polish suggestion(s):\n${notes.map((note) => `- ${note}`).join("\n")}` : "The pages look finished: nothing to polish.";
+      }
+      case "look_at_site": {
+        const project = await needProject(agent, ctx);
+        const looks = await lookAtSite(project);
+        if (!looks) return `${project.name} has no web page to look at yet. Write index.html first.`;
+        const report = describeLook(looks);
+        feed(agent.name, report.split("\n")[0]);
+        return report;
+      }
+      case "check_project": {
+        const project = await needProject(agent, ctx);
+        const problems = projects.checkProject(project);
+        feed(agent.name, `Checked ${project.name}: ${problems.length ? `${problems.length} problems` : "all good"}.`);
+        return problems.length ? `Problems in ${project.name}:\n${problems.map((p) => `- ${p}`).join("\n")}` : `${project.name} passed every check.`;
+      }
+      case "ask_agent":
+        if (!hooks.delegate) return "Teammates can't be reached right now.";
+        return await hooks.delegate(agent, String(args.agent || ""), String(args.task || ""), String(args.project || ""), ctx);
+      case "team_status":
+        return hooks.teamStatus ? hooks.teamStatus() : "Nobody is working.";
+      case "learn":
+        if (!hooks.learn) return "Learning isn't available.";
+        return await hooks.learn(String(args.topic || ""), String(args.depth || "normal"), agent.name);
+      default:
+        return `There is no tool called ${call.name}.`;
+    }
+  } catch (error) {
+    return `${call.name} failed: ${error.message}`;
+  }
+}
+
+async function needProject(agent, ctx) {
+  if (ctx.project) return ctx.project;
+  const latest = state.projects[0];
+  if (latest) {
+    ctx.project = latest;
+    return latest;
+  }
+  ctx.project = await projects.createProject(`${agent.name}'s project`, agent.name);
+  return ctx.project;
+}
+
+// ------------------------------------------------------------------ memory
+
+/** Save a fact. Jarvis keeps his to himself unless he shares it; every other
+ * agent's go where the whole team reads them. */
+// ------------------------------------------------------------------- skills
+
+const SKILL_CHARS = 14000;
+
+/** FCC's skills, bundled into the app; the PC's plugins' skills when paired. */
+export async function skill(args) {
+  const action = String(args.action || "list");
+  const fromPc = async () => {
+    if (!state.settings.pc) return "";
+    const wanted = {};
+    for (const key of ["action", "query", "name", "repo", "file"]) if (typeof args[key] === "string" && args[key]) wanted[key] = args[key].slice(0, 300);
+    if (Number.isInteger(args.line)) wanted.line = args.line;
+    try {
+      return await pcSkill(wanted);
+    } catch {
+      return "";
+    }
+  };
+  if (action === "read") {
+    const wanted = String(args.name || "").trim().toLowerCase();
+    const name = Object.keys(SKILLS).find((key) => key === wanted) || Object.keys(SKILLS).find((key) => wanted && key.includes(wanted));
+    if (name) {
+      const found = SKILLS[name];
+      const file = String(args.file || "").trim();
+      if (file) {
+        const text = found.files[file] || found.files[`reference/${file.replace(/^reference\//, "")}`];
+        if (!text) return `${name} has no file ${file}. Its files: ${Object.keys(found.files).join(", ") || "none"}.`;
+        return `${name}/${file}:\n${text.slice(0, SKILL_CHARS)}`;
+      }
+      const extra = Object.keys(found.files).length ? `\n\n[Extra guides, read with file: ${Object.keys(found.files).join(", ")}]` : "";
+      const cut = found.text.length > SKILL_CHARS ? `\n\n[Cut at ${SKILL_CHARS.toLocaleString()} of ${found.text.length.toLocaleString()} characters.]` : "";
+      return `Skill ${name}:\n${found.text.slice(0, SKILL_CHARS)}${cut}${extra}`;
+    }
+    return (await fromPc()) || `No skill is called ${args.name}. Use action search or list.`;
+  }
+  if (action === "search") {
+    const wanted = words(String(args.query || args.name || ""));
+    if (!wanted.length) throw new Error("search needs a query, like 'game levels'.");
+    const scored = Object.entries(SKILLS)
+      .map(([name, found]) => [wanted.reduce((sum, word) => sum + (name.includes(word) ? 3 : 0) + (found.about.toLowerCase().includes(word) ? 1 : 0), 0), name, found])
+      .filter(([score]) => score > 0)
+      .sort((a, b) => b[0] - a[0])
+      .slice(0, 8);
+    const here = scored.length ? `Skills on this phone (read one with action read and its name):\n${scored.map(([, name, found]) => `- ${name}: ${found.about.slice(0, 200)}`).join("\n")}` : "";
+    const pc = await fromPc();
+    return [here, pc ? `On your PC:\n${pc}` : ""].filter(Boolean).join("\n\n") || "No skill matches that.";
+  }
+  return `Skills on this phone:\n${Object.entries(SKILLS).map(([name, found]) => `- ${name}: ${found.about.slice(0, 120)}`).join("\n")}${state.settings.pc ? "\n(Your PC's plugins have more: use action search.)" : ""}`;
+}
+
+export async function remember(agent, raw, { share = false } = {}) {
+  const clean = raw.trim();
+  if (!clean) return "Nothing to remember.";
+  const own = agent.role === "main" && !share;
+  const same = state.memories.find((memory) => memory.text.toLowerCase() === clean.toLowerCase() && canRead(agent, memory));
+  if (same) return `Already remembered: ${same.text}`;
+  state.memories.unshift({ id: uid(), agent_id: agent.id, text: clean.slice(0, 2000), created_at: Date.now(), synced: own, own });
+  await save.memories();
+  changed("memory");
+  feed(agent.name, `Remembered: ${clean.slice(0, 90)}`);
+  if (!own) syncSoon();
+  return own ? `Saved to your own memory: ${clean}` : `Saved to memory: ${clean}`;
+}
+
+/** A memory Jarvis kept to himself is his alone; he reads everyone's. */
+export function canRead(agent, memory) {
+  return !memory.own || memory.agent_id === agent.id || agent.role === "main";
+}
+
+function whose(agent, memory) {
+  if (agent.role !== "main") return "";
+  if (memory.own && memory.agent_id === agent.id) return "yours";
+  const author = state.agents.find((item) => item.id === memory.agent_id);
+  return author && author.id !== agent.id ? `from ${author.name}` : "";
+}
+
+/** Memories from the PC reach only brains that keep them private, unless allowed. */
+export function pcMemoryAllowed(agent) {
+  if (!state.settings.pc || !state.pcMemories.length) return false;
+  return isPrivate(agent) || Boolean(state.settings.cloudSeesPc);
+}
+
+export function recall(agent, query, limit) {
+  const terms = new Set(words(query));
+  const score = (value) => words(value).reduce((sum, word) => sum + (terms.has(word) ? 1 : 0), 0);
+  const rows = state.memories
+    .filter((memory) => canRead(agent, memory))
+    .map((memory) => ({ text: memory.text, at: memory.created_at, score: score(memory.text), from: whose(agent, memory) }));
+  if (pcMemoryAllowed(agent)) {
+    for (const memory of state.pcMemories) rows.push({ text: memory.text, at: memory.created_at, score: score(memory.text), from: "from your PC" });
+  }
+  return rows
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || b.at - a.at)
+    .slice(0, limit);
+}
+
+// -------------------------------------------------------------------- maths
+
+export function formatNumber(value) {
+  if (!Number.isFinite(value)) throw new Error("that isn't a number");
+  return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(12)));
+}
+
+/** A small, safe maths reader: numbers, + - * / % ^, brackets, and a few functions. */
+export function calculate(source) {
+  const expression = source
+    .toLowerCase()
+    .replace(/×/g, "*")
+    .replace(/÷/g, "/")
+    .replace(/,/g, "")
+    .replace(/(\d+(?:\.\d+)?)\s*%\s*of\s*/g, "($1/100)*");
+  const tokens = expression.match(/\d+(?:\.\d+)?(?:e[+-]?\d+)?|[a-z]+|\*\*|[-+*/%^(),]|\S/g) || [];
+  let index = 0;
+  const peek = () => tokens[index];
+  const take = (expected) => {
+    const token = tokens[index++];
+    if (expected && token !== expected) throw new Error(`expected ${expected}`);
+    return token;
+  };
+  const FUNCTIONS = { sqrt: Math.sqrt, abs: Math.abs, round: Math.round, floor: Math.floor, ceil: Math.ceil, log: Math.log10, ln: Math.log, sin: Math.sin, cos: Math.cos, tan: Math.tan, min: Math.min, max: Math.max };
+  const CONSTANTS = { pi: Math.PI, e: Math.E };
+  const sum = () => {
+    let value = product();
+    while (peek() === "+" || peek() === "-") value = take() === "+" ? value + product() : value - product();
+    return value;
+  };
+  const product = () => {
+    let value = power();
+    while (peek() === "*" || peek() === "/" || peek() === "%") {
+      const op = take();
+      const right = power();
+      value = op === "*" ? value * right : op === "/" ? value / right : value % right;
+    }
+    return value;
+  };
+  const power = () => {
+    const base = unary();
+    if (peek() === "^" || peek() === "**") {
+      take();
+      return base ** power();
+    }
+    return base;
+  };
+  const unary = () => {
+    if (peek() === "-") {
+      take();
+      return -unary();
+    }
+    if (peek() === "+") {
+      take();
+      return unary();
+    }
+    return atom();
+  };
+  const atom = () => {
+    const token = take();
+    if (token === undefined) throw new Error("the sum ended early");
+    if (token === "(") {
+      const value = sum();
+      take(")");
+      return value;
+    }
+    if (/^\d/.test(token)) return parseFloat(token);
+    if (token in CONSTANTS) return CONSTANTS[token];
+    if (token in FUNCTIONS) {
+      take("(");
+      const args = [sum()];
+      while (peek() === ",") {
+        take();
+        args.push(sum());
+      }
+      take(")");
+      return FUNCTIONS[token](...args);
+    }
+    throw new Error(`can't read "${token}"`);
+  };
+  const value = sum();
+  if (index < tokens.length) throw new Error(`can't read "${tokens[index]}"`);
+  return value;
+}
+
+// ------------------------------------------------------------------ the web
+
+async function getJson(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`the service answered ${response.status}`);
+    return await response.json();
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("it took too long");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const WEATHER = {
+  0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast", 45: "fog", 48: "icy fog",
+  51: "light drizzle", 53: "drizzle", 55: "heavy drizzle", 61: "light rain", 63: "rain", 65: "heavy rain",
+  66: "freezing rain", 67: "heavy freezing rain", 71: "light snow", 73: "snow", 75: "heavy snow", 77: "snow grains",
+  80: "light showers", 81: "showers", 82: "violent showers", 85: "snow showers", 86: "heavy snow showers",
+  95: "thunderstorms", 96: "thunderstorms with hail", 99: "severe thunderstorms with hail",
+};
+
+export async function weather(place, days) {
+  if (!place.trim()) throw new Error("say which town or city");
+  const found = await getJson(`https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=${encodeURIComponent(place)}`);
+  const spot = found.results && found.results[0];
+  if (!spot) return `No place called ${place} was found.`;
+  const count = Math.max(1, Math.min(7, days));
+  const data = await getJson(
+    `https://api.open-meteo.com/v1/forecast?latitude=${spot.latitude}&longitude=${spot.longitude}&timezone=auto&forecast_days=${count}` +
+      "&current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m" +
+      "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+  );
+  const now = data.current || {};
+  const where = [spot.name, spot.admin1, spot.country].filter(Boolean).join(", ");
+  const lines = [
+    `Weather in ${where}: now ${Math.round(now.temperature_2m)}°C (feels like ${Math.round(now.apparent_temperature)}°C), ${WEATHER[now.weather_code] || "mixed weather"}, wind ${Math.round(now.wind_speed_10m)} km/h, humidity ${Math.round(now.relative_humidity_2m)}%.`,
+  ];
+  const daily = data.daily || {};
+  (daily.time || []).forEach((day, i) => {
+    const label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : new Date(`${day}T12:00`).toLocaleDateString("en", { weekday: "long" });
+    const rain = (daily.precipitation_probability_max || [])[i];
+    lines.push(
+      `${label}: ${WEATHER[(daily.weather_code || [])[i]] || "mixed weather"}, ${Math.round(daily.temperature_2m_max[i])}°C high, ${Math.round(daily.temperature_2m_min[i])}°C low${rain === null || rain === undefined ? "" : `, ${rain}% chance of rain`}.`
+    );
+  });
+  return lines.join("\n");
+}
+
+export async function wikipedia(query) {
+  if (!query.trim()) throw new Error("say what to look up");
+  const found = await getJson(`https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&origin=*&srlimit=3&srsearch=${encodeURIComponent(query)}`);
+  const hits = (found.query && found.query.search) || [];
+  if (!hits.length) return `Wikipedia has nothing on ${query}.`;
+  const title = hits[0].title;
+  const page = await getJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
+  const link = (page.content_urls && page.content_urls.mobile && page.content_urls.mobile.page) || "";
+  const others = hits.slice(1).map((hit) => hit.title);
+  return `${page.title}: ${page.extract || "(no summary)"}${link ? `\nSource: ${link}` : ""}${others.length ? `\nAlso: ${others.join(", ")}` : ""}`;
+}
+
+export async function readPage(url) {
+  if (!/^https?:\/\//i.test(url)) throw new Error("give a full https:// address");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    // A free reader service turns any page into plain text a phone can fetch.
+    const response = await fetch(`https://r.jina.ai/${url}`, { signal: controller.signal, headers: { Accept: "text/plain" } });
+    if (!response.ok) throw new Error(`the page couldn't be read (${response.status})`);
+    const body = await response.text();
+    return body.slice(0, 12000);
+  } catch (error) {
+    if (error.name === "AbortError") throw new Error("the page took too long");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ------------------------------------------------------------------- photos
+
+const OPENVERSE = "https://api.openverse.org/v1/images/";
+
+/** Free photos from Openverse that a website may use, with credit lines. */
+export async function findImages(query, count = 5, orientation = "") {
+  const clean = query.trim().replace(/\s+/g, " ").slice(0, 120);
+  if (!clean) throw new Error("say what the pictures should show");
+  const params = new URLSearchParams({ q: clean, page_size: String(Math.max(1, Math.min(10, count))), license_type: "commercial", mature: "false" });
+  if (["wide", "tall", "square"].includes(orientation)) params.set("aspect_ratio", orientation);
+  let data;
+  try {
+    data = await getJson(`${OPENVERSE}?${params}`);
+  } catch (error) {
+    if (/429/.test(error.message)) throw new Error("the free photo search is busy; try again in a minute");
+    throw error;
+  }
+  return (data.results || [])
+    .filter((item) => item && /^https:\/\//.test(String(item.url || "")))
+    .map((item) => {
+      const licence = String(item.license || "").toUpperCase();
+      const creator = item.creator || "unknown";
+      return {
+        url: item.url,
+        width: Number(item.width) || 0,
+        height: Number(item.height) || 0,
+        title: String(item.title || "Photo").slice(0, 80),
+        credit: ["CC0", "PDM"].includes(licence) ? `Photo by ${creator} (public domain)` : `Photo by ${creator}, CC ${licence} ${item.license_version || ""}`.trim(),
+      };
+    });
+}
+
+async function findImagesText(query, count, orientation) {
+  const found = await findImages(query, count, orientation);
+  if (!found.length) return `No free photos for "${query}". Try fewer or plainer words.`;
+  return [
+    ...found.map((image, i) => `${i + 1}. ${image.title} (${image.width}x${image.height}) ${image.url}\n   Credit: ${image.credit}`),
+    'Use one with <img src="its address" alt="what it shows" width="…" height="…">, and put its credit in the footer.',
+  ].join("\n");
+}
+
+// -------------------------------------------------------------------- to-dos
+
+export function parseDue(raw, now = new Date()) {
+  const text = String(raw || "").trim().toLowerCase();
+  if (!text) return 0;
+  let match = text.match(/^in\s+(\d+)\s*(minute|min|hour|hr|day)s?$/);
+  if (match) {
+    const unit = match[2].startsWith("h") ? 3600000 : match[2].startsWith("d") ? 86400000 : 60000;
+    return now.getTime() + Number(match[1]) * unit;
+  }
+  const day = new Date(now);
+  if (/tomorrow/.test(text)) day.setDate(day.getDate() + 1);
+  if (/tonight/.test(text) && !/\d/.test(text)) {
+    day.setHours(20, 0, 0, 0);
+    return day.getTime();
+  }
+  match = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (match) {
+    let hour = Number(match[1]);
+    if (match[3] === "pm" && hour < 12) hour += 12;
+    if (match[3] === "am" && hour === 12) hour = 0;
+    day.setHours(hour, Number(match[2] || 0), 0, 0);
+    if (!/tomorrow/.test(text) && day.getTime() < now.getTime()) day.setDate(day.getDate() + 1);
+    return day.getTime();
+  }
+  if (/tomorrow/.test(text)) {
+    day.setHours(9, 0, 0, 0);
+    return day.getTime();
+  }
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export async function addTodo(textValue, due, by) {
+  const item = { id: uid().slice(0, 6), text: textValue.trim().slice(0, 300), due_at: parseDue(due), done: false, notified: false, by, created_at: Date.now() };
+  if (!item.text) throw new Error("say what to add");
+  state.todos.unshift(item);
+  await save.todos();
+  changed("todos");
+  return item;
+}
+
+async function todo(agent, args) {
+  const action = String(args.action || "list").toLowerCase();
+  if (action === "add") {
+    const item = await addTodo(String(args.text || ""), String(args.due || ""), agent.name);
+    feed(agent.name, `Added to your list: ${item.text}`);
+    return `Added: ${item.text}${item.due_at ? ` (reminder ${new Date(item.due_at).toLocaleString()})` : ""} [id ${item.id}]`;
+  }
+  if (action === "done") {
+    const wanted = String(args.text || "").toLowerCase();
+    const item = state.todos.find((row) => !row.done && (row.id === wanted || row.text.toLowerCase().includes(wanted)));
+    if (!item) return `Nothing open matches "${args.text}".`;
+    item.done = true;
+    await save.todos();
+    changed("todos");
+    return `Ticked off: ${item.text}`;
+  }
+  const open = state.todos.filter((row) => !row.done);
+  return open.length ? open.map((row) => `- ${row.text}${row.due_at ? ` (due ${new Date(row.due_at).toLocaleString()})` : ""} [id ${row.id}]`).join("\n") : "The to-do list is empty.";
+}
+
+export { agentByName };

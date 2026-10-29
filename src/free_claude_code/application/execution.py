@@ -10,6 +10,7 @@ from typing import Literal
 
 from loguru import logger
 
+from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.core.anthropic import (
     Message,
     SystemContent,
@@ -43,6 +44,9 @@ TokenCounter = Callable[
 ]
 ResponsesTokenCounter = Callable[[OpenAIResponsesRequest], int]
 WireApi = Literal["messages", "responses"]
+LOCAL_PROGRESS_SECONDS = 1800.0
+"""How long a model on this PC may go without a word: it reads the whole
+prompt first, and a long agent prompt on a CPU takes many minutes."""
 CandidateStreamOpener = Callable[
     [int, ProviderModelTarget], Awaitable[AsyncIterator[str]]
 ]
@@ -74,21 +78,30 @@ class ProviderExecutor:
         self._request_headers = MappingProxyType(dict(request_headers or {}))
         self._progress_timeout_seconds = float(progress_timeout_seconds)
 
+    def _progress_seconds(self, provider_id: str) -> float:
+        """The longest wait for a provider's next piece of output: longer for a
+        model on this PC, which reads a long prompt before its first word."""
+        descriptor = PROVIDER_CATALOG.get(provider_id)
+        if descriptor is not None and descriptor.local:
+            return max(self._progress_timeout_seconds, LOCAL_PROGRESS_SECONDS)
+        return self._progress_timeout_seconds
+
     def _progress_timeout_failure(
         self,
         *,
         request_id: str,
         provider_id: str,
     ) -> ExecutionFailure:
+        seconds = self._progress_seconds(provider_id)
         trace_event(
             stage="execution",
             event="free_claude_code.provider.progress_timeout",
             source="application",
             request_id=request_id,
             provider_id=provider_id,
-            timeout_seconds=self._progress_timeout_seconds,
+            timeout_seconds=seconds,
         )
-        timeout_text = f"{self._progress_timeout_seconds:g}"
+        timeout_text = f"{seconds:g}"
         return ExecutionFailure(
             kind=FailureKind.TIMEOUT,
             status_code=504,
@@ -336,8 +349,11 @@ class ProviderExecutor:
 
         async def provider_body() -> AsyncIterator[str]:
             loop = asyncio.get_running_loop()
-            progress_deadline = loop.time() + self._progress_timeout_seconds
+            progress_deadline = loop.time() + self._progress_seconds(
+                candidates[0].provider_id
+            )
             for index, target in enumerate(candidates):
+                wait = self._progress_seconds(target.provider_id)
                 provider_stream: AsyncIterator[str] | None = None
                 candidate_committed = False
                 candidate_failure: ExecutionFailure | None = None
@@ -401,7 +417,7 @@ class ProviderExecutor:
                                     candidate_count=len(candidates),
                                 )
                         yield chunk
-                        progress_deadline = loop.time() + self._progress_timeout_seconds
+                        progress_deadline = loop.time() + wait
                 finally:
                     if provider_stream is not None:
                         active_error = sys.exception()

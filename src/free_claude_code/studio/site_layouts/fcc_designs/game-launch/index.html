@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Game Title</title>
+  <meta name="description" content="A hand-made action adventure. Wishlist now.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#about">Skip to the game</a>
+  <header class="top" id="top">
+    <a class="brand" data-brand href="#top">Game Title</a>
+    <button class="menu" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav id="nav" aria-label="Main">
+      <a href="#about">The game</a>
+      <a href="#features">Features</a>
+      <a href="#press">Press kit</a>
+      <a class="wish-link" href="#wishlist">Wishlist</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="stars" aria-hidden="true"></div>
+      <p class="studio">An indie game by Studio Name</p>
+      <h1 id="hero-title" class="glow">GAME TITLE</h1>
+      <p class="tagline">Climb the broken tower. Outrun the storm. Remember who you were.</p>
+      <div class="hero-actions">
+        <a class="neon" href="#wishlist">Wishlist now</a>
+        <a class="ghost" href="#trailer">Watch the trailer</a>
+      </div>
+      <p class="platforms">PC &middot; Coming next spring</p>
+    </section>
+
+    <section id="trailer" class="trailer" aria-labelledby="trailer-title">
+      <h2 id="trailer-title" class="visually-hidden">Trailer</h2>
+      <div class="screen" role="img" aria-label="Trailer placeholder: replace with the game's trailer or a screenshot">
+        <span class="play" aria-hidden="true">&#9654;</span>
+      </div>
+    </section>
+
+    <section id="about" class="about" aria-labelledby="about-title">
+      <h2 id="about-title">The game</h2>
+      <p>A fast, hand-made action adventure about a courier who wakes at the bottom of a tower that wasn't there yesterday. Every floor is built by hand, every boss has a story, and the storm is always rising.</p>
+    </section>
+
+    <section id="features" class="features" aria-labelledby="features-title">
+      <h2 id="features-title">Features</h2>
+      <div class="grid">
+        <article><span aria-hidden="true">&#9876;</span><h3>Tight combat</h3><p>Parry, dash and chain combos that reward timing.</p></article>
+        <article><span aria-hidden="true">&#9733;</span><h3>40 hand-built floors</h3><p>No two the same, each with its own secret.</p></article>
+        <article><span aria-hidden="true">&#9835;</span><h3>Original soundtrack</h3><p>A score that rises with the storm.</p></article>
+        <article><span aria-hidden="true">&#9201;</span><h3>Speedrun mode</h3><p>A timer, ghosts and a leaderboard.</p></article>
+      </div>
+    </section>
+
+    <section id="press" class="press" aria-labelledby="press-title">
+      <h2 id="press-title">Press kit</h2>
+      <dl class="facts">
+        <div><dt>Developer</dt><dd>Studio Name</dd></div>
+        <div><dt>Release</dt><dd>Next spring</dd></div>
+        <div><dt>Platform</dt><dd>PC (Windows)</dd></div>
+        <div><dt>Engine</dt><dd>Godot 4</dd></div>
+      </dl>
+    </section>
+
+    <section id="wishlist" class="wishlist" aria-labelledby="wishlist-title">
+      <h2 id="wishlist-title" class="glow">Be first to play</h2>
+      <form class="form" data-email="news@example.com" novalidate>
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <button class="neon" type="submit">Join the list</button>
+        <p class="note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>&copy; <span data-year></span> <span data-brand-text>Game Title</span></p>
+    <a href="#top">Back to top</a>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

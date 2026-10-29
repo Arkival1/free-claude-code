@@ -1,0 +1,237 @@
+/* The maths tutor: progress strip, tabs, topics with mastery bars, the
+   question card, practice tests and the licence path. */
+body[data-page="tutor"] .view {
+  max-width: 1200px;
+}
+
+.tutor,
+.tutor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tutor .good { color: var(--good); }
+.tutor .warn { color: var(--warn); }
+.tutor .bad { color: var(--bad); }
+
+.tutor-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 22px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.tutor-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.tutor-stat strong {
+  font-size: 20px;
+}
+
+.tutor-stat span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tutor-summary button.primary {
+  margin-left: auto;
+}
+
+.tutor-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.tutor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tutor-tab.on {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.tutor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tutor-practice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (min-width: 900px) {
+  .tutor-practice {
+    grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.tutor-topics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tutor-topic {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tutor-topic.on {
+  border-color: var(--accent);
+}
+
+.tutor-topic .muted {
+  font-size: 13px;
+}
+
+.tutor-meter {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.tutor-meter i {
+  display: block;
+  height: 100%;
+  background: var(--good);
+}
+
+.tutor-work {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tutor-formulas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tutor-formulas code {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 15px;
+}
+
+.tutor-prompt {
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.tutor .row input[type="text"] {
+  flex: 1 1 140px;
+  min-width: 0;
+  min-height: var(--tap);
+  font-size: 18px;
+}
+
+.tutor-unit {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.tutor-verdict {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.tutor-steps {
+  margin: 0;
+  padding-left: 22px;
+  line-height: 1.5;
+}
+
+.tutor-ai-label {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tutor-ai {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: 0 10px 10px 0;
+}
+
+.tutor-test {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-left: 22px;
+}
+
+.tutor-test li.wrong {
+  border-left: 3px solid var(--bad);
+  padding-left: 10px;
+}
+
+.tutor-test li.right {
+  border-left: 3px solid var(--good);
+  padding-left: 10px;
+}
+
+.tutor-path {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-left: 22px;
+}
+
+.tutor-path p {
+  margin: 4px 0 6px;
+}
+
+.tutor-sources a {
+  color: var(--accent);
+}
+
+.tutor button.ghost {
+  min-height: var(--tap);
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}

@@ -8,6 +8,7 @@ from free_claude_code.config.settings import Settings
 from free_claude_code.core.anthropic import ReasoningReplayMode
 from free_claude_code.core.failures import ExecutionFailure, FailureKind
 from free_claude_code.core.reasoning import ReasoningPolicy
+from free_claude_code.core.version import package_version
 from free_claude_code.providers.nvidia_nim import NvidiaNimProvider
 from free_claude_code.providers.openai_chat import (
     NO_REASONING,
@@ -117,6 +118,8 @@ def test_health(client: TestClient):
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+    # The desktop app restarts a server left running from an older version.
+    assert response.json()["version"] == package_version()
     assert response.headers["request-id"].startswith("req_")
 
 

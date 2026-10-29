@@ -59,6 +59,7 @@ from free_claude_code.providers.credential_validation import (
     CredentialStatus,
     check_credentials,
 )
+from free_claude_code.studio import StudioService
 
 if TYPE_CHECKING:
     import free_claude_code.cli.managed as cli_managed
@@ -181,6 +182,7 @@ class ApplicationRuntime:
         configuration: ConfigurationService,
         transcriber: Transcriber | None,
         code_service: CodeService | None = None,
+        studio_service: StudioService | None = None,
         transcriber_factory: Callable[[Settings], Awaitable[Transcriber | None]]
         | None = None,
         restart_callback: RestartCallback | None = None,
@@ -189,6 +191,7 @@ class ApplicationRuntime:
         self.provider_manager = provider_manager
         self._configuration = configuration
         self._code_service = code_service
+        self._studio_service = studio_service
         self._folder_picker = NativeFolderPicker()
         self._transcriber = transcriber
         self._transcriber_factory = transcriber_factory
@@ -272,6 +275,18 @@ class ApplicationRuntime:
                         name="fcc-messaging-startup",
                     )
                 )
+                if self._studio_service is not None:
+                    # The starter team is filled in (agents an update added
+                    # join a team made before it), and the outside repos that
+                    # come with FCC are ready on load.
+                    self._studio_service.spawn(self._studio_service.ensure_defaults())
+                    # Tasks cut off when FCC last closed stop showing as working.
+                    self._studio_service.spawn(
+                        self._studio_service.end_interrupted_runs()
+                    )
+                    self._studio_service.spawn(self._studio_service.ensure_starters())
+                    # Paper trading carries on after a restart; live waits.
+                    self._studio_service.spawn(self._studio_service.resume_trading())
                 self._started = True
         except asyncio.CancelledError:
             await self.close()
@@ -1017,6 +1032,12 @@ class ApplicationRuntime:
         if self._code_service is not None and not await best_effort(
             "code_service.close",
             self._code_service.close(),
+            log_verbose_errors=verbose,
+        ):
+            return False
+        if self._studio_service is not None and not await best_effort(
+            "studio_service.shutdown",
+            self._studio_service.shutdown(),
             log_verbose_errors=verbose,
         ):
             return False

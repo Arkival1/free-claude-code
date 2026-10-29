@@ -1,0 +1,2754 @@
+"""The guide that explains this app, knows where everything is, and spots problems."""
+
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from .llm import ChatMessage, StudioLLMError, StudioModelRouter
+
+
+@dataclass(frozen=True, slots=True)
+class GuideTopic:
+    """One thing the guide knows how to explain, and where it lives."""
+
+    title: str
+    route: str
+    terms: tuple[str, ...]
+    body: str
+    where: str = ""
+    asks: tuple[str, ...] = ()
+
+
+GUIDE_TOPICS: tuple[GuideTopic, ...] = (
+    GuideTopic(
+        title="What Studio can do",
+        route="/studio#home",
+        where="Everything starts on the HUD. MENU opens the rest.",
+        terms=(
+            "overview",
+            "features",
+            "everything",
+            "what can",
+            "capabilities",
+            "tour",
+            "begin",
+            "new here",
+            "first time",
+            "get started",
+        ),
+        body=(
+            "Studio is a team of AI agents run by Jarvis, the main AI. You talk to "
+            "Jarvis on the HUD by typing or by voice; he answers, and hands work to "
+            "the team: the Builder writes apps and websites, the Researcher reads "
+            "ten or more sources, and the Helper turns ideas into a plan. Agents "
+            "remember things, work together in rooms, run tasks on their own, and "
+            "can use the internet. Models can run on this PC through LM Studio or on "
+            "a server. You can also teach agents skills, hold classes where one AI "
+            "teaches another, tune them, sync memory to Obsidian, and install "
+            "Studio as a desktop app or on an iPhone."
+        ),
+        asks=(
+            "How do I set up LM Studio?",
+            "How do I talk to Jarvis with my voice?",
+            "How do I get the Builder to make an app?",
+        ),
+    ),
+    GuideTopic(
+        title="The HUD command center",
+        route="/studio#home",
+        where=(
+            "Studio opens on the HUD (Command Center). On a PC the left sidebar "
+            "lists every page: Command Center, Agents, Chats, Classroom, Models, "
+            "Tuning & LoRA, Knowledge & Memory, and Settings. On a phone, MENU "
+            "opens Knowledge & Memory and the tabs at the bottom do the rest."
+        ),
+        terms=(
+            "hud",
+            "home",
+            "orb",
+            "core",
+            "screen",
+            "dashboard",
+            "command center",
+            "layout",
+            "panel",
+            "system status",
+            "feed",
+            "timeline",
+        ),
+        body=(
+            "The gold orb in the middle is Jarvis's AI CORE: it swirls while he "
+            "thinks, and pulses while he listens and speaks. Type below it and "
+            "press SEND, or press TALK for voice. NEW TALK starts a clean "
+            "conversation, CHOOSE BRAIN picks his model, and MENU opens every "
+            "other page. SYSTEM STATUS at the top reads OPTIMAL when all is well; "
+            "tap it when it says ATTENTION or LOCAL MODELS OFFLINE and I explain "
+            "what is wrong. Top right is the AGENT CHAT ROOM, bottom left is "
+            "AGENTS AT WORK, and the side panels show the LIVE INTELLIGENCE FEED, "
+            "MISSION TIMELINE, QUICK COMMANDS, SYSTEM MONITOR, BRAIN STATUS, and "
+            "SHARED MEMORY."
+        ),
+        asks=(
+            "What does ATTENTION mean?",
+            "How do I watch an agent work?",
+            "What are quick commands?",
+        ),
+    ),
+    GuideTopic(
+        title="Talking to Jarvis",
+        route="/studio#home",
+        where="HUD: type in the box under the orb and press SEND.",
+        terms=(
+            "jarvis",
+            "main ai",
+            "message",
+            "type",
+            "send",
+            "new talk",
+            "reset",
+            "conversation",
+            "delegate",
+            "boss",
+            "order",
+            "orders",
+            "forget",
+            "context",
+            "notes",
+            "have builder",
+            "tell agent",
+            "stop agent",
+        ),
+        body=(
+            "Jarvis is the main AI. Type on the HUD and press SEND; his words "
+            "appear as he writes them. Ask for anything: he answers himself, or "
+            "sends the job to the Builder, Researcher, or Helper and reports back. "
+            "Orders are carried out the moment you say them: 'have Builder make a "
+            "timer app', 'tell the Researcher to look into cheap GPUs', '@Helper "
+            "plan my week', 'get an agent to ...' (he picks who), several in one "
+            "message, or 'stop Builder'. Ask 'what is everyone doing?' for a team "
+            "update. Every message is kept word for word: whenever you speak, "
+            "the earlier messages that match (from this conversation and "
+            "earlier ones) are handed to him exactly as said, he can search or "
+            "reread any message with his conversation tool, and running notes "
+            "with a timeline summarise the rest; NOTES on the HUD shows them. "
+            "NEW TALK starts a clean conversation; the old one stays searchable. "
+            "You can rename him with Main Agent Name in Settings, under Studio."
+        ),
+        asks=(
+            "How do I talk to Jarvis with my voice?",
+            "How do I change Jarvis's model?",
+        ),
+    ),
+    GuideTopic(
+        title="Voice and talk mode",
+        route="/studio#more",
+        where=(
+            "HUD: press TALK or tap the orb. Voice setup: Knowledge & Memory (MENU), then the Main AI "
+            "voice card (Hear him, Download the voice)."
+        ),
+        terms=(
+            "voice",
+            "speak",
+            "talk mode",
+            "microphone",
+            "mic",
+            "hear",
+            "listen",
+            "whisper",
+            "kokoro",
+            "audio",
+            "sound",
+            "aloud",
+            "spoken",
+        ),
+        body=(
+            "Press TALK or tap the orb: you speak, Jarvis answers out loud, then "
+            "listens again. He starts speaking before his reply is finished. The "
+            "built-in voice and Whisper speech recognition run offline on this PC "
+            "after a one-time download; Knowledge & Memory (MENU), Main AI voice shows the status, "
+            "Hear him plays a sample, and Download the voice fetches it. The "
+            "microphone works at http://localhost:8082/studio on this PC or in "
+            "the desktop app; on a phone Studio must be opened over HTTPS with "
+            "tailscale serve. Voice name, speed, and quality are in Settings, "
+            "under Studio."
+        ),
+        asks=(
+            "Why is the microphone not working?",
+            "How do I change his voice?",
+        ),
+    ),
+    GuideTopic(
+        title="Choosing Jarvis's brain",
+        route="/studio#home",
+        where=(
+            "HUD: CHOOSE BRAIN under the orb, or QUICK COMMANDS, Choose brain. "
+            "Other agents: QUICK COMMANDS, Team brains, or Agents, Team brains."
+        ),
+        terms=(
+            "brain",
+            "choose",
+            "switch",
+            "change model",
+            "which model",
+            "pick",
+            "use model",
+            "different model",
+            "change",
+            "jarvis model",
+            "his model",
+        ),
+        body=(
+            "CHOOSE BRAIN lists every model LM Studio is serving on this PC, plus "
+            "server models; tap one and Jarvis uses it from his next reply. "
+            "Choose a model from this PC opens a file picker for a .gguf file "
+            "anywhere on your drives, copies it where LM Studio finds it, and "
+            "names it local/<name>. If the chosen model is unreachable, for "
+            "example a server model with no key, Studio uses the model LM Studio "
+            "has loaded instead so Jarvis keeps working. Each agent has its own "
+            "model on its page under Agents."
+        ),
+        asks=(
+            "How do I set up LM Studio?",
+            "Which model should I use?",
+        ),
+    ),
+    GuideTopic(
+        title="Local models",
+        route="/studio#models",
+        where=(
+            "Models in the left sidebar (on a phone: MENU, Local models, Open models). The Models page lists what your "
+            "local runtime serves and has Choose a model from this PC."
+        ),
+        terms=(
+            "local",
+            "model",
+            "gguf",
+            "download",
+            "offline",
+            "install",
+            "file",
+            "qwen",
+            "llama",
+            "curated",
+        ),
+        body=(
+            "Local models run on this PC, free and private. LM Studio serves "
+            "them; Studio calls each one local/<model id>. The Models page shows "
+            "Served by your local runtime, a list of Curated small models, "
+            "Download any model file from a link, and Choose a model from this "
+            "PC for a .gguf file you already have. Any model works: Qwen, Llama, "
+            "Gemma, Mistral, Phi, and others. On an 8 GB graphics card, 3 to 8 "
+            "billion parameter models at Q4 are the sweet spot."
+        ),
+        asks=(
+            "How do I set up LM Studio?",
+            "How do I add a model file from my PC?",
+        ),
+    ),
+    GuideTopic(
+        title="Setting up LM Studio",
+        route="/studio#models",
+        where=(
+            "In LM Studio: the Developer tab, then Start Server. In Studio: the "
+            "Models page shows whether it is reached."
+        ),
+        terms=(
+            "lm studio",
+            "lmstudio",
+            "vulkan",
+            "server",
+            "runtime",
+            "port",
+            "1234",
+            "gpu",
+            "amd",
+            "radeon",
+            "nvidia",
+            "load",
+            "offload",
+            "context",
+        ),
+        body=(
+            "1. Install LM Studio and download a model in its Discover tab. "
+            "2. On an AMD card like the RX 580, pick the Vulkan runtime in LM "
+            "Studio's settings under Runtime. 3. Load the model with GPU Offload "
+            "as high as fits in video memory and a Context Length of 4096 to "
+            "8192. 4. Open the Developer tab and switch Start Server on; it "
+            "serves at http://localhost:1234/v1, the address Studio expects "
+            "(Local Runtime URL in Settings, under Studio). 5. Back in Studio, "
+            "the HUD reads OPTIMAL and CHOOSE BRAIN lists the model. Everything "
+            "stays on this PC; the 'server' only talks to programs on it."
+        ),
+        asks=(
+            "Why does it say LOCAL MODELS OFFLINE?",
+            "How do I make replies faster?",
+        ),
+    ),
+    GuideTopic(
+        title="Making replies faster",
+        route="/studio#settings",
+        where=(
+            "Settings, Studio: Fast Local Replies and Agent Temperature. In LM "
+            "Studio: GPU Offload and Context Length when loading a model."
+        ),
+        terms=(
+            "slow",
+            "fast",
+            "faster",
+            "speed",
+            "lag",
+            "quicker",
+            "performance",
+            "temperature",
+            "wait",
+            "waiting",
+            "takes long",
+        ),
+        body=(
+            "Keep Fast Local Replies on: it skips a thinking model's hidden "
+            "reasoning so the answer starts at once. Studio already streams "
+            "words as they are written, reuses the unchanged start of every "
+            "prompt, and runs web searches and file reads side by side. The "
+            "biggest wins are in LM Studio: offload every layer to the graphics "
+            "card, keep Context Length around 4096 to 8192, and keep only one "
+            "model loaded. With the built-in engine, Model Control does this for "
+            "you: Tune all for my PC fits every model to your graphics card, "
+            "Test speed shows tokens per second, and the Health check warns when "
+            "the card is not being used. A smaller model (3 to 4 billion "
+            "parameters) answers fastest; a 7B Q4_K_M suits an 8 GB card. Agent "
+            "Temperature only changes wording, not speed."
+        ),
+        asks=(
+            "How do I set up LM Studio?",
+            "What does Agent Temperature do?",
+        ),
+    ),
+    GuideTopic(
+        title="Agents at work",
+        route="/studio#home",
+        where="HUD, bottom left: AGENTS AT WORK. Tap an agent to watch it.",
+        terms=(
+            "working",
+            "watch",
+            "process",
+            "steps",
+            "progress",
+            "busy",
+            "doing",
+            "activity",
+            "at work",
+            "see agents",
+        ),
+        body=(
+            "AGENTS AT WORK lists the whole team with a live dot on anyone who is "
+            "busy. Tap an agent to watch its process step by step: what it was "
+            "asked, each tool it used such as writing a file or searching the "
+            "web, and its words as it writes them. Tap All to go back to the "
+            "team, or OPEN to jump to that agent's chat."
+        ),
+        asks=("How do I give the Builder a job?",),
+    ),
+    GuideTopic(
+        title="Team rooms",
+        route="/studio#chats",
+        where=(
+            "HUD, top right: AGENT CHAT ROOM, with START TEAM ROOM and POST. "
+            "Every room is also on the Chats tab."
+        ),
+        terms=(
+            "room",
+            "rooms",
+            "team room",
+            "together",
+            "group",
+            "mention",
+            "collaborate",
+            "post",
+            "chat room",
+        ),
+        body=(
+            "A room puts several agents in one conversation. Start one with "
+            "START TEAM ROOM on the HUD or QUICK COMMANDS, Team room. Post a "
+            "message and the right agents answer; write @Builder or @Researcher "
+            "to ask one directly. Give the room a task and the agents hand work "
+            "to each other until it is done. Past rooms are on the Chats tab."
+        ),
+        asks=("What does each agent do?",),
+    ),
+    GuideTopic(
+        title="Quick commands",
+        route="/studio#home",
+        where="HUD: the QUICK COMMANDS panel.",
+        terms=("quick", "shortcut", "shortcuts", "briefing", "executive"),
+        body=(
+            "QUICK COMMANDS are one-tap jobs: Voice chat starts talk mode, "
+            "Executive briefing has Jarvis sum up what the team is doing, Build "
+            "starts a job for the Builder, Research one for the Researcher, "
+            "Brainstorm asks the Helper for a plan, Team room opens a room with "
+            "every agent, Choose brain switches Jarvis's model, and Team brains "
+            "gives each agent its own model."
+        ),
+    ),
+    GuideTopic(
+        title="The team",
+        route="/studio#agents",
+        where="The Agents tab lists every agent. The HUD shows them in AGENTS AT WORK.",
+        terms=(
+            "builder",
+            "researcher",
+            "helper",
+            "tester",
+            "guide",
+            "team",
+            "who",
+            "roles",
+            "agents",
+            "each agent",
+        ),
+        body=(
+            "Jarvis runs the team. The Builder writes code, websites, and whole "
+            "apps into a project folder, and can read, edit, and search its "
+            "files. The Researcher digs through the web, Reddit, YouTube, and "
+            "code sites and tests code before recommending it. The Helper "
+            "brainstorms and turns messy findings into a clear plan. The Tester "
+            "checks what the team built, like a careful user and a code reviewer, "
+            "and reports bugs with exact fixes for the Builder. I am the "
+            "Guide: I explain the app. Add more with + New agent on the Agents "
+            "tab."
+        ),
+        asks=(
+            "How do I add an agent?",
+            "How do I get the Builder to make an app?",
+        ),
+    ),
+    GuideTopic(
+        title="Adding and changing agents",
+        route="/studio#agents",
+        where=(
+            "Agents tab: + New agent in the Add an agent card. Tap any agent to "
+            "change its model, tools, and memory."
+        ),
+        terms=(
+            "add",
+            "create",
+            "new agent",
+            "make agent",
+            "edit",
+            "delete",
+            "rename",
+            "role",
+            "tools",
+            "customize",
+        ),
+        body=(
+            "On the Agents tab, + New agent asks for a name, a role, a model, "
+            "and the tools it may use: building files, running code, the "
+            "internet, deep research, or asking the Researcher and Helper. Tap "
+            "an agent to open its page: change its model, read and add to its "
+            "memory, Teach a skill, start a chat, or tune it."
+        ),
+        asks=("How do I teach an agent a skill?",),
+    ),
+    GuideTopic(
+        title="Agent tasks",
+        route="/studio#agents",
+        where="Agents tab: the Run an agent task card. Progress shows on the HUD's MISSION TIMELINE.",
+        terms=(
+            "task",
+            "autonomous",
+            "goal",
+            "mission",
+            "job",
+            "background",
+            "on its own",
+        ),
+        body=(
+            "Give an agent a goal and it works on its own in a bounded loop: "
+            "search, fetch pages, write files, check its work, then finish with a "
+            "report. Attach a site and everything it writes lands there, ready "
+            "to preview and download as a zip. Tasks keep running while you do "
+            "other things; the MISSION TIMELINE and AGENTS AT WORK follow them."
+        ),
+    ),
+    GuideTopic(
+        title="Building apps and websites",
+        route="/studio#agents",
+        where=(
+            "Ask on the HUD ('have Builder make ...') or use Agents, Run an agent "
+            "task. When it's done, a Download card appears in the chat (and on "
+            "the HUD): Download saves the app as a .zip, Open runs it, Files "
+            "opens its Site page (Open full screen, Download .zip)."
+        ),
+        terms=(
+            "apps",
+            "an app",
+            "my app",
+            "builder made",
+            "result",
+            "build",
+            "website",
+            "site",
+            "code",
+            "coding",
+            "project",
+            "preview",
+            "zip",
+            "download",
+            "download my app",
+            "html",
+            "python",
+            "game",
+            "template",
+            "undo",
+            "restore",
+        ),
+        body=(
+            "The Builder writes any kind of project: web pages, Python, "
+            "TypeScript, games, configs. New projects start from a solid template "
+            "(website, landing page, web app, canvas game, Python tool, Python "
+            "web API, Node API) that it then shapes to the job. It reads, edits, "
+            "and searches its own files, checks the whole project before it says "
+            "it is done, and asks the Researcher when stuck on an error. Every "
+            "file change keeps the last ten versions, so you can say 'Builder, "
+            "undo your last change to index.html'. Builders get 40 steps per job "
+            "(Builder Max Steps in Settings, under Studio). Once it works, the "
+            "Builder runs a polish check and fixes contrast, spacing, hover and "
+            "focus states, and phone layout so it looks finished; say 'have "
+            "Tester check it' for a second opinion. The finished site has "
+            "a live preview, Open full screen, Edit for any file, and Download "
+            ".zip. With Agent Commands allowed in Settings it can also run npm "
+            "install, builds, and tests."
+        ),
+        asks=(
+            "How do I let agents run commands?",
+            "Where do I see what the Builder made?",
+        ),
+    ),
+    GuideTopic(
+        title="Commands and approvals",
+        route="/studio#settings",
+        where=(
+            "Settings, Studio: Agent Commands (off, ask, or on). Requests to run "
+            "one show in the chat and the HUD with Run it and Deny."
+        ),
+        terms=(
+            "command",
+            "commands",
+            "npm",
+            "terminal",
+            "shell",
+            "approve",
+            "approval",
+            "approvals",
+            "deny",
+            "permission",
+            "allow",
+        ),
+        body=(
+            "Agents can run commands like npm install, builds, and tests only if "
+            "you allow it. Agent Commands off means never, ask means each command "
+            "waits for you to press Run it or Deny, and on runs them in the "
+            "project folder without asking. Waiting requests show on the HUD."
+        ),
+    ),
+    GuideTopic(
+        title="Internet access",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Internet access card (Test search). Keys: Settings, Studio, "
+            "Web Search API Key."
+        ),
+        terms=(
+            "internet",
+            "web",
+            "search",
+            "online",
+            "key",
+            "token",
+            "brave",
+            "tavily",
+            "serper",
+            "searxng",
+            "duckduckgo",
+            "browse",
+        ),
+        body=(
+            "Every agent can search the web and read pages, local models too: "
+            "Studio does the browsing and hands them the results. Searches use "
+            "DuckDuckGo with no key, which often gets blocked, so add a Brave "
+            "Search, Tavily, or Serper key in Settings under Studio, Web Search "
+            "API Key, or point it at your own SearXNG. Knowledge & Memory (MENU), Internet access "
+            "tests it. When this PC goes offline, web tools pause and agents "
+            "work from memory; they come back on their own when the internet "
+            "does. Web Access in Settings can limit or turn off browsing."
+        ),
+        asks=("How does deep research work?",),
+    ),
+    GuideTopic(
+        title="Deep research",
+        route="/studio#agents",
+        where=(
+            "Ask on the HUD ('have Researcher look into ...') or QUICK COMMANDS, "
+            "Research."
+        ),
+        terms=(
+            "research",
+            "sources",
+            "reddit",
+            "youtube",
+            "stack overflow",
+            "github",
+            "investigate",
+            "look into",
+            "find out",
+            "test_code",
+        ),
+        body=(
+            "The research tool reads ten or more sources per question: the web, "
+            "Reddit threads, YouTube transcripts, Stack Overflow, GitHub, MDN, and "
+            "dev.to. The Researcher tests code it finds with test_code in its "
+            "Research lab before recommending it. The Builder calls ask_researcher "
+            "when it is stuck on an error. Reddit and YouTube keys in Settings, "
+            "under Studio, make research more reliable."
+        ),
+    ),
+    GuideTopic(
+        title="Helper and brainstorming",
+        route="/studio#agents",
+        where="QUICK COMMANDS, Brainstorm, or say 'ask Helper for ideas on ...'.",
+        terms=("helper", "ideas", "brainstorm", "plan", "stuck", "organize"),
+        body=(
+            "The Helper brainstorms and filters. When the Researcher brings back "
+            "a pile of findings, the Helper turns them into a short plan that "
+            "fits the job. Any agent can call ask_helper, and you can ask it "
+            "directly from QUICK COMMANDS, Brainstorm."
+        ),
+    ),
+    GuideTopic(
+        title="The Lab",
+        route="/studio#lab",
+        where=(
+            "Lab in the tab bar (or MENU, Lab). Benches along the top: "
+            "Chemistry, Make, Materials, Tech, Design, Elements, Made; the Lab "
+            "chat is on the right."
+        ),
+        terms=(
+            "lab",
+            "chemistry",
+            "chemical",
+            "chemicals",
+            "mix",
+            "beaker",
+            "element",
+            "elements",
+            "periodic table",
+            "shampoo",
+            "soap",
+            "ingredients",
+            "material",
+            "alloy",
+            "circuit",
+            "electronics",
+            "design",
+            "steel",
+            "iron",
+            "circuit board",
+            "physics",
+            "saved parts",
+            "synthesise",
+            "synthesize",
+        ),
+        body=(
+            "The Lab is a science sandbox with real results. Chemistry: tap or "
+            "drag bottles from the shelf into the beaker, set amounts, and press "
+            "Mix; Heat and Flame test are toggles. It shows colour changes, "
+            "bubbles, precipitates, foam, heat, pH, the balanced equations, and "
+            "safety warnings. Any chemical not on the shelf can be looked up "
+            "(from PubChem). Make: type 'shampoo' or tap a chip; it lists every "
+            "ingredient with its molecule, shows each one as a layer inside the "
+            "bottle, and breaks the product down element by element. Materials: "
+            "blend metals, plastics, and more, then run pull, float, heat, and "
+            "electric tests. Tech: put parts on the board and Power on; it works "
+            "out volts, resistors, runtime, and what would burn out. Design: "
+            "build technology from real materials (steel, iron, copper, a "
+            "circuit board, glass, wood...), each drawn in its material; Check "
+            "physics weighs it and checks strength, heat, the electronics, rust "
+            "and floating, and each part says how it works. Keep as a part saves "
+            "a creation to add to other designs; Made can copy anything. Elements: "
+            "all 118, tap one for its facts. Made keeps what you and the agents "
+            "made. In the Lab chat, say 'Hey Jarvis, make a shampoo' and he "
+            "makes it on the bench while you watch. The Lab won't make weapons, "
+            "explosives, drugs, or poisons."
+        ),
+    ),
+    GuideTopic(
+        title="Subagents",
+        route="/studio#agents",
+        where="Agents page, Subagents card: name, role, Add subagent; the On box and the bin.",
+        terms=(
+            "subagent",
+            "subagents",
+            "helper agents",
+            "add helper",
+            "developer",
+            "developer role",
+            "auto help",
+            "agents help each other",
+        ),
+        body=(
+            "Subagents are helpers you add on the Agents page, each with a role: "
+            "Developer, Coder, Builder, Researcher, Tester, or Reviewer. When any "
+            "agent starts a task that fits a subagent's role, it joins by itself "
+            "in the same project: developers, coders, and builders take a "
+            "separate part, researchers report findings, and testers and "
+            "reviewers check the work once the task is done. Up to two join a "
+            "task; their progress shows in that task's chat and they appear in "
+            "the HQ like the rest of the team (marked subagent). Untick On to "
+            "switch one off; the bin deletes it; Back to team keeps it as a "
+            "normal agent. Pick each one's model when you add it (any server or "
+            "PC model), or later on its page. Make subagent turns any agent "
+            "into one, including agents added from GitHub repos (Knowledge & "
+            "Memory, Add from GitHub); those join tasks that fit the skills "
+            "their description names. The Developer role builds "
+            "whole programs, front end to back end, and can also be added as a "
+            "normal agent."
+        ),
+    ),
+    GuideTopic(
+        title="The Changer (change FCC itself)",
+        route="/studio#changer",
+        where=(
+            "MENU (Home), The Changer. Type what to change, press Start the "
+            "change; Watch it work opens its task."
+        ),
+        terms=(
+            "changer",
+            "change fcc",
+            "update fcc",
+            "fix fcc",
+            "fix a bug",
+            "new feature",
+            "update zip",
+            "edit the app",
+            "change the app",
+            "subagents",
+            "subagent",
+        ),
+        body=(
+            "The Changer is an AI on a server model that changes FCC itself. It "
+            "works in a copy of FCC's own files (the FCC (Changer copy) project), "
+            "never the app you're using. It reads the map of the app, edits the "
+            "code, runs checks (every changed file, and the app loading from the "
+            "copy), takes screenshots of the changed copy running on a spare port "
+            "with no keys and no data, and can hand separate parts to helper "
+            "Changers or team members (subagents) that work in the same copy. "
+            "Bigger jobs become update projects: the Changer Planner plans them "
+            "in milestones for you to approve (vague requests get three "
+            "suggestions); each milestone is checkpointed, built, checked, "
+            "reviewed by a different agent (Changer Reviewer, plus Changer "
+            "Security for protected files), fixed, and screenshotted. It tries "
+            "changed Studio pages like a person, runs the tests it names, and "
+            "has the Vision Model (Settings, Studio) look at PC and phone "
+            "screenshots, then fixes what it sees. If Aider is installed (uv "
+            "tool install aider-chat), it and the Builder, Coder and Developer "
+            "can hand Aider a focused coding job (aider tool, after your command "
+            "approval, with no keys). The whole team shares a notebook FCC "
+            "keeps (the goal, the plan, what each one found and did), so a model "
+            "or API switch loses nothing; Use for the whole team switches all four "
+            "Changer agents at once, and Add the helper team brings eight lean "
+            "agents from wshobson/agents. The HQ shows the update as it goes. Pause, "
+            "Resume, Change the plan, Cancel and Roll back are on the page; a "
+            "token budget pauses it with what's left. Make update zip scans the "
+            "new lines first (flagged lines wait for Pack anyway) and makes an "
+            "update zip with a changelog, manifest, checksums and test report, "
+            "plus a rollback zip. "
+            "To install: close FCC, unzip the update into the folder that holds "
+            "your fcc folder, choose Replace, start FCC; unzip the backup the "
+            "rollback the same way to undo. Change its model on its agent page (an API model "
+            "codes best). Start over from a fresh copy drops changes not yet in "
+            "a zip."
+        ),
+    ),
+    GuideTopic(
+        title="Maths tutor (electrician)",
+        route="/studio#tutor",
+        where=(
+            "Learn in the tab bar, Open the maths tutor (or MENU, Maths tutor). "
+            "Tabs: Practice, Practice test, Ask the tutor, Licence path."
+        ),
+        terms=(
+            "maths",
+            "math",
+            "tutor",
+            "electrician",
+            "apprentice",
+            "apprenticeship",
+            "ohm's law",
+            "voltage drop",
+            "three-phase",
+            "power factor",
+            "capstone",
+            "licence",
+            "license",
+            "uee30820",
+        ),
+        body=(
+            "A maths tutor for you on the path to an electrician's licence in "
+            "NSW: entry test maths, formulas, DC (year 1), AC (year 2), "
+            "three-phase and machines (year 3), and installation calculations "
+            "(voltage drop, longest run, fault-loop impedance). Pick a topic to "
+            "read the short lesson and formulas, then answer questions with new "
+            "numbers each time; every answer is marked in code with the full "
+            "working, and Explain it to me asks the AI to explain in plain words "
+            "(it is given the right answer and can't change it). Each topic shows "
+            "how you are going; Next suggests what to practise. Practice test: "
+            "ten questions from a stage, marked at the end. Ask the tutor: any "
+            "maths question, answered by the AI with working (check it). "
+            "Licence path: apprenticeship, the Certificate III (UEE30820), the "
+            "final assessment and the NSW Fair Trading licence, with links to "
+            "check the current rules. Standards values (AS/NZS 3000, 3008) are "
+            "given in questions, not quoted from the tables."
+        ),
+    ),
+    GuideTopic(
+        title="Learn mode",
+        route="/studio#more",
+        where=(
+            "Tell Jarvis 'learn electrical engineering' on the HUD, or use "
+            "Knowledge & Memory (MENU), Learning card. The bar shows at the top "
+            "of MISSION TIMELINE; tap it to read the lessons."
+        ),
+        terms=(
+            "learn",
+            "learning",
+            "study",
+            "studying",
+            "teach himself",
+            "teach yourself",
+            "course",
+            "lesson",
+            "lessons",
+            "knowledge",
+            "progress bar",
+            "engineering",
+            "blueprint",
+        ),
+        body=(
+            "Say 'Jarvis, learn electrical engineering' (add 'in depth' for 10 "
+            "lessons or 'quickly' for 4). He plans a course from the basics to "
+            "hands-on skill, then for each lesson researches the web, Reddit, "
+            "and YouTube, writes his own notes (explanation, key concepts, "
+            "formulas with units, steps, a worked example, mistakes and safety, "
+            "sources), and quizzes himself to check he understood. A gold bar at "
+            "the top of MISSION TIMELINE fills as he reads each source and "
+            "finishes each lesson, with what he is doing and his understanding "
+            "score. Everything goes into the team's memory and the knowledge "
+            "library, so any agent can use it; the Builder can draw blueprints "
+            "and diagrams from it. 'Stop learning' stops it and keeps the "
+            "finished lessons. Knowledge & Memory, Learning lists every study; "
+            "open one to read the study guide, notes, self-checks, and sources."
+        ),
+        asks=("How does deep research work?", "Where is memory?"),
+    ),
+    GuideTopic(
+        title="Team brains",
+        route="/studio#agents",
+        where=(
+            "HUD quick command Team brains, or Agents, Team brains card, or "
+            "Choose brain, then 'Give each agent its own brain'."
+        ),
+        terms=(
+            "team brains",
+            "different model",
+            "different models",
+            "each agent",
+            "per agent",
+            "own model",
+            "own brain",
+            "same ai",
+            "same model",
+            "which model",
+            "agent model",
+            "mix",
+        ),
+        body=(
+            "Every agent can think with its own AI model. Open Team brains: each "
+            "agent has a list of the models in LM Studio (and server models if "
+            "you have a key). Pick one per agent and press Save, or press "
+            "Suggest a mix for a starting point: a coding model for the Builder "
+            "and Tester, the biggest model for the Researcher, a reasoning model "
+            "for the Helper, a quick one for Jarvis, the smallest for the Guide; "
+            "where Model Control can read a model's file, models trained for "
+            "tools go to the agents that use tools most. "
+            "You can also just say 'give the Builder qwen coder' and Jarvis "
+            "switches it. With more than one model on this PC, Local Models Take "
+            "Turns (on by default) lets one work at a time so an 8 GB card is "
+            "not swapping models on every step; models that fit side by side "
+            "still run together. In LM Studio turn on Just-in-Time model loading "
+            "(Developer, Settings) so it loads whichever model an agent asks for. "
+            "If a chosen model is missing, the agent borrows the loaded one and "
+            "the HUD shows which it is really using."
+        ),
+        asks=("How do I set up LM Studio?", "How do I choose Jarvis's brain?"),
+    ),
+    GuideTopic(
+        title="Model Control",
+        route="/studio#engine",
+        where=(
+            "MENU, Model Control, or the HUD quick command Model control. The "
+            "switch and graphics memory are also in Settings, Studio."
+        ),
+        terms=(
+            "model control",
+            "engine",
+            "built-in engine",
+            "llama.cpp",
+            "llama",
+            "load model",
+            "unload",
+            "context",
+            "gpu layers",
+            "vram",
+            "graphics memory",
+            "flash attention",
+            "kv cache",
+            "tokens per second",
+            "speed",
+            "without lm studio",
+            "instead of lm studio",
+            "tune",
+            "tune for my pc",
+            "speed test",
+            "test speed",
+            "health check",
+            "graphics card",
+            "gpu",
+            "rx 580",
+            "vision",
+            "reasoning",
+            "which models",
+            "can see images",
+            "run ai faster",
+            "smoother",
+            "fastest",
+            "make it fastest",
+            "tokens per second",
+            "tokens a second",
+            "too slow",
+            "faster",
+        ),
+        body=(
+            "Model Control is LM Studio inside Studio. Press Install engine once: "
+            "Studio downloads the official llama.cpp server for your graphics "
+            "card (Vulkan works on AMD cards like the RX 580). Tick 'Use the "
+            "built-in engine' and local models run through it instead of LM "
+            "Studio; it starts by itself when an agent needs a model. Every "
+            ".gguf model in Studio's folder, LM Studio's folder, and any Extra "
+            "Model Folders is listed with its size, type, and how much graphics "
+            "memory it needs, with a warning when it will not fit. Badges show "
+            "which models can use Tools, see images (Vision), and think first "
+            "(Reasoning); the buttons above the list filter by them. Load or "
+            "Unload each one, and open Settings on a model to change its "
+            "context (how much it remembers at once), how many layers go on the "
+            "graphics card, flash attention, and memory for context (q8 halves "
+            "it). The last reply's speed shows in tokens per second, and the "
+            "Engine log shows what llama.cpp says. Models Loaded At Once in "
+            "Settings is 1 by default, right for an 8 GB card. The engine finds "
+            "your graphics card itself and fits every new model to it; Tune for "
+            "my PC saves those settings (Tune all does every model), Test speed "
+            "times a short answer, and the Health check at the top says in plain "
+            "words when the card is not being used, the engine crashed, a model "
+            "failed to load or is too big, or LM Studio is holding memory too. "
+            "A driver update is not needed: the speed comes from these settings "
+            "and the model's size. Make it fastest does the tuning by "
+            "measuring: it tries flash attention on and off, bigger reading "
+            "batches, context memory types, and (for a model that doesn't fit "
+            "whole) more layers on the card, times a real reply for each on "
+            "your card, keeps the fastest, and says what else would help, such "
+            "as a Q4_K_M file instead of Q8 or F16. The top speed is set by the "
+            "card: a 4B model at Q4_K_M writes roughly 40 to 60 tokens a second "
+            "on an RX 580 and over 100 on a fast NVIDIA card."
+        ),
+        asks=("How do I give each agent its own model?", "How do I set up LM Studio?"),
+    ),
+    GuideTopic(
+        title="Add a model file",
+        route="/studio#engine",
+        where=(
+            "Model Control, the 'Drop a file here' box at the top of Models on "
+            "this PC, or Find a model on this PC."
+        ),
+        terms=(
+            "upload",
+            "add a model",
+            "add model",
+            "drop a file",
+            "gguf",
+            "model file",
+            "what can it do",
+            "what tools",
+            "can it use tools",
+            "use tools",
+            "model use tools",
+            "safetensors",
+            "which file",
+        ),
+        body=(
+            "Drop any file on Model Control (or tap the box to choose one). "
+            "Studio reads its first bytes and says what it is straight away. A "
+            ".gguf model is added and you get a report: whether it can use tools "
+            "(write_file, web_search, run_command, research), see images, and "
+            "reason step by step, whether it fits your graphics card, the "
+            "settings it will run with, and which agents it suits best. Any "
+            "other file is explained instead, with what to do: a raw "
+            "safetensors or PyTorch model needs its GGUF version from Hugging "
+            "Face, a ZIP needs unzipping, and a document belongs in a chat. On "
+            "the PC running Studio, Find a model on this PC adds a file "
+            "without copying it through the browser. Every model in the list "
+            "has a What can it do? button for the same report."
+        ),
+        asks=("How do I give each agent its own model?",),
+    ),
+    GuideTopic(
+        title="Attach files to a chat",
+        route="/studio#home",
+        where="The 📎 button beside the message box, on the HUD and in every chat.",
+        terms=(
+            "attach",
+            "attachment",
+            "paperclip",
+            "pdf",
+            "word",
+            "excel",
+            "powerpoint",
+            "spreadsheet",
+            "document",
+            "read a file",
+            "send a file",
+        ),
+        body=(
+            "Press 📎 and pick one or more files. Studio reads the text out of "
+            "each one: text and code as they are, Word, Excel, and PowerPoint "
+            "files, and PDFs with real text (not scanned pictures). The file "
+            "shows as a chip above the box (✕ removes it), and its text goes "
+            "with your next message, so the agent can read, summarise, or work "
+            "from it. Files up to 25 MB; very long ones send their first 40,000 "
+            "characters and say so. Pictures need a model with the Vision badge."
+        ),
+        asks=("How do I add a model file?",),
+    ),
+    GuideTopic(
+        title="Every tool for every agent",
+        route="/studio#agents",
+        where=(
+            "Agents, Who gets every tool (a switch per agent), the Every tool "
+            "switch on an agent's page, or ask Jarvis. The master switch is "
+            "Every Agent Gets Every Tool in Settings, Studio."
+        ),
+        terms=(
+            "all tools",
+            "every tool",
+            "which tools",
+            "what tools",
+            "agent tools",
+            "give tools",
+            "more tools",
+            "tool list",
+            "who gets",
+            "tokens",
+            "token usage",
+            "fewer tokens",
+            "choose tools",
+            "turn off a tool",
+            "turn on a tool",
+            "tick",
+            "checkbox",
+        ),
+        body=(
+            "Every agent but the Guide can use every tool Studio has: building "
+            "and editing files, running and testing code, run_command (still "
+            "only with your approval), web search and deep research, videos, "
+            "memory and the knowledge library, to-dos, maths, weather, your "
+            "projects, the PC's status, and handing a part of a job to a "
+            "teammate with ask_agent. A job can be passed on twice at most "
+            "(Jarvis to the Builder to the Researcher), never back to whoever "
+            "gave it, and agents in a room hand over with @Name, so work never "
+            "goes in circles. Agents on a server or cloud AI still get no "
+            "memory tools. Each agent's page lists the tools it really has. "
+            "Every tool costs tokens: the tool list rides on every message "
+            "(about 4,000 tokens for every tool, far fewer for an agent's own), "
+            "so choose who gets every tool in Agents, Who gets every tool, "
+            "where each switch shows its cost, or tell Jarvis ('give the Tester "
+            "only its own tools'). With Every tool off, the Tools card on the "
+            "agent's page (Choose tools) has a box for each tool with its token "
+            "cost: tick or untick any one and it saves at once, or use Tick all "
+            "and Untick all. Jarvis can add or remove one too ('give the Helper "
+            "weather'). New agents ask as you create them. Turn the "
+            "Settings switch off and nobody gets every tool. The Guide keeps "
+            "its few: it runs on the smallest model."
+        ),
+        asks=("How do I add an agent?", "Who can see my memory?"),
+    ),
+    GuideTopic(
+        title="FCC Phone",
+        route="/studio#more",
+        where="More, FCC Phone (on the PC). On the phone: the FCC Phone app, Settings.",
+        terms=(
+            "fcc phone",
+            "phone app",
+            "iphone app",
+            "on my phone",
+            "separate app",
+            "pair",
+            "pairing",
+            "pairing code",
+            "phone memory",
+            "phone agents",
+            "download on iphone",
+            "install on iphone",
+            "iphone models",
+            "model on my phone",
+            "gguf on iphone",
+            "phone jarvis",
+        ),
+        body=(
+            "FCC Phone is Studio for your iPhone, separate from this PC: the "
+            "same Jarvis command center, the team (Jarvis, Builder, Researcher, "
+            "Helper, Tester), projects with previews, rooms, learning, to-dos, "
+            "and memory. Its Models tab runs AI models on the phone itself with "
+            "the same llama.cpp engine as Model Control: download Qwen3 0.6B or "
+            "another free model, or add any .gguf from the Files app, and see "
+            "its Tools and Reasoning badges, speed, and settings. Free cloud "
+            "brains (Gemini, Groq, OpenRouter) work too. Open the app's address "
+            "(More, FCC Phone shows it) in Safari, then Share, Add to Home "
+            "Screen. To link it to this PC: install Tailscale on both, run "
+            "'tailscale serve --bg 8082' here, press Make a pairing code, and "
+            "type the code and the PC's https address into FCC Phone. Then "
+            "memories sync both ways, phone agents can think with this PC's AI, "
+            "and the Researcher gets web search. Your PC's memories stay away "
+            "from cloud brains on the phone unless you allow it there. Paired, "
+            "the phone's More page also has Trading (watch this PC's Trading "
+            "Bank, start practice, stop, deny orders, approve practice orders, "
+            "and the kill switch; real money stays on this PC) and Plugins "
+            "(the repos switched on here, whose skills the phone's Builder and "
+            "Jarvis read with the skill tool). On its own, with no PC, the "
+            "phone is like Manus: Jarvis plans a job (a game, a site, "
+            "research), his agents do it step by step with FCC's skills "
+            "built into the app and over 1,500 free APIs to switch on as "
+            "plugins (keys stay on the phone), and Settings has a search bar. "
+            "The phone Builder also starts "
+            "sites from FCC's 8 designs. Tasks on the phone hand a whole job "
+            "to this PC's team, like Manus: it plans the steps, the agents do "
+            "them with every tool, plugin and subagent, the phone shows each "
+            "step live, and the files it made open in the phone's Projects. "
+            "Plugins and subagents can be added and switched on or off from "
+            "the phone too (MCP servers stay off until switched on here). With "
+            "no model on the phone, its agents think with this PC instead. "
+            "The phone's HQ shows this PC's team at its stations, live, and "
+            "lets you tell one agent something."
+        ),
+        asks=("Who can see my memory?", "How do I install Studio on my iPhone?"),
+    ),
+    GuideTopic(
+        title="Jarvis controls the team",
+        route="/studio#home",
+        where="Ask Jarvis on the HUD: 'show me the team', 'clear the Builder's memory'.",
+        terms=(
+            "control",
+            "manage",
+            "manage agents",
+            "jarvis control",
+            "in charge",
+            "boss",
+        ),
+        body=(
+            "Jarvis runs every agent. With manage_agent he shows the team (each "
+            "agent's model, whether it runs on this PC or a server, its tools, "
+            "and their token cost), shows what one agent remembers, gives an "
+            "agent every tool or only its own, and adds to or clears an agent's "
+            "memory, including a server agent's own memory area (he only puts "
+            "there what its job needs). He also hands out jobs, checks on them "
+            "with team_status, stops them with stop_agent, and switches models "
+            "with agent_model. Only Jarvis has manage_agent."
+        ),
+        asks=("Who gets every tool?", "Who can see my memory?"),
+    ),
+    GuideTopic(
+        title="Delete an agent",
+        route="/studio#agents",
+        where="Agents, the 🗑 beside an agent, or Delete this agent on its page.",
+        terms=(
+            "delete agent",
+            "delete an agent",
+            "remove agent",
+            "remove an agent",
+            "get rid of",
+            "too many agents",
+        ),
+        body=(
+            "Press 🗑 beside the agent in Agents (or Delete this agent on its "
+            "page), then Delete to confirm. It stops any work it is doing and "
+            "its chats, classes, tasks, and memories go; it leaves any rooms "
+            "it was in. Projects it built stay, and so does what it saved to "
+            "the team's shared memory. Jarvis and the Guide can't be deleted: "
+            "give Jarvis another model in Team brains instead."
+        ),
+        asks=("How do I add an agent?",),
+    ),
+    GuideTopic(
+        title="Weather",
+        route="/studio#home",
+        where="Just ask Jarvis: 'what's the weather in Sydney tomorrow?'",
+        terms=("weather", "forecast", "rain", "temperature", "how hot", "how cold"),
+        body=(
+            "Ask Jarvis about the weather anywhere and he fetches it before "
+            "answering: now, feels-like, wind, humidity, and each day's high, "
+            "low, and chance of rain for the next few days. It comes from "
+            "Open-Meteo, which needs no key, and only the place name is sent. "
+            "It is off when Web Access is off in Settings."
+        ),
+        asks=("What else can Jarvis do?",),
+    ),
+    GuideTopic(
+        title="Private memory",
+        route="/studio#agents",
+        where=(
+            "Automatic. Team brains marks server agents; the setting is Keep "
+            "Memory on This PC in Settings, Studio."
+        ),
+        terms=(
+            "private",
+            "privacy",
+            "cloud",
+            "server ai",
+            "server agent",
+            "briefing",
+            "brief",
+            "debrief",
+            "obsidian",
+            "memory bank",
+            "who can see",
+            "share",
+            "memory area",
+            "own memory",
+            "server memory",
+            "server agents",
+            "server agents have memory",
+            "cloud agents",
+        ),
+        body=(
+            "Your memory bank, Obsidian vault, knowledge library, to-dos, and "
+            "earlier conversations stay on this PC. Agents whose AI runs on a "
+            "server or in the cloud cannot read any of it: they get no memory "
+            "notes from it, no knowledge, to-do, or conversation tools, and no "
+            "earlier chats, and Studio blocks them if they try. Instead each "
+            "server agent has its own memory area: remember and recall work "
+            "only there, it only ever holds what that agent saved on a server "
+            "(or what Jarvis or you put there), and nobody else reads it. See "
+            "and clear it on the agent's page. Agents on this PC (LM Studio, "
+            "Ollama, llama.cpp) "
+            "use memory as before. When you give a server agent a job through "
+            "Jarvis, Jarvis (on this PC) writes it a briefing with only what the "
+            "job needs from the conversation and memory, leaving out personal "
+            "details, and shows you the briefing in chat before it goes. Team "
+            "brains and the HUD mark server agents 'no memory'. Turn it off with "
+            "Keep Memory on This PC in Settings."
+        ),
+        asks=("How do I give each agent its own model?", "Where is memory?"),
+    ),
+    GuideTopic(
+        title="To-dos and reminders",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), To-dos and reminders card. Or just tell "
+            "Jarvis: 'remind me to call Sam at 5pm'."
+        ),
+        terms=(
+            "todo",
+            "to-do",
+            "todos",
+            "reminder",
+            "reminders",
+            "remind",
+            "list",
+            "tasks list",
+            "alarm",
+            "schedule",
+        ),
+        body=(
+            "Jarvis and the Helper keep your to-do list with the todo tool: 'add "
+            "milk to my list', 'remind me to call Sam in 20 minutes', 'what's on "
+            "my list?', 'tick off milk'. Reminders understand 'in 20 minutes', "
+            "'tomorrow 9am', 'at 17:30', and dates like '2026-10-01 14:00'. When "
+            "one is due, Jarvis announces it on the HUD (spoken when his voice is "
+            "on). The To-dos and reminders card on Knowledge & Memory shows the "
+            "list, adds items with an optional reminder, and ticks them off. "
+            "Jarvis also has calculate for exact sums, list_projects to find your "
+            "projects with their links, and system_status for how your PC and LM "
+            "Studio are doing, and he always knows the date and time."
+        ),
+        asks=("What can Jarvis do?", "How do I talk to Jarvis with my voice?"),
+    ),
+    GuideTopic(
+        title="Video notes",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Video notes card: paste a video link or "
+            "a video file's path and press Watch it, or Open a studied video."
+        ),
+        terms=(
+            "video",
+            "videos",
+            "youtube",
+            "transcript",
+            "transcribe",
+            "watch",
+            "video notes",
+            "study video",
+            "video file",
+            "no captions",
+        ),
+        body=(
+            "Every YouTube video research reads, and any video you give Studio, "
+            "is turned into video notes: a summary, key points, steps, names, and "
+            "warnings, plus the full transcript with times. YouTube, other video "
+            "sites, and video files on this PC all work (in File Explorer, Shift "
+            "+ right-click a video, Copy as path, and paste it). When a video has "
+            "no captions, Studio listens to it on this PC with speech "
+            "recognition (Whisper), so nothing leaves your computer. The notes "
+            "go into the team's memory with the link, so every agent can use "
+            "them, and agents look back at the exact parts with the video_notes "
+            "tool. Give Jarvis or the Researcher a video, or paste it on the "
+            "Video notes card; tick 'Play it in the desktop browser' to watch "
+            "along. Open a note to read it, search the transcript, jump to a "
+            "moment, or forget the video."
+        ),
+        asks=("What is the desktop browser?", "Where is memory?"),
+    ),
+    GuideTopic(
+        title="Desktop browser",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), the Desktop browser card; Settings, "
+            "Studio: Desktop Browser and Show The Desktop Browser."
+        ),
+        terms=(
+            "desktop browser",
+            "control my desktop",
+            "use my desktop",
+            "my browser",
+            "edge",
+            "chrome",
+            "browse",
+            "watch with me",
+            "play the video",
+            "computer use",
+        ),
+        body=(
+            "Jarvis and the Researcher can drive a real browser window on your "
+            "desktop (your Edge or Chrome) while you watch: they search, read "
+            "pages, click links, scroll, go back, and play and pause videos, and "
+            "their watch action plays a video and turns it into video notes. "
+            "Ask in the chat, for example 'open YouTube, find a video on "
+            "sourdough and watch it'. The window has its own Studio profile, so "
+            "it never sees your passwords, cookies, or tabs; agents never type, "
+            "sign in, buy, or download, and only press harmless buttons (accept, "
+            "show more, next). It opens on first use and stays open; close it on "
+            "the Desktop browser card. The Windows installer adds it; otherwise "
+            "run uv sync --extra studio_desk."
+        ),
+        asks=("How do video notes work?", "What can Jarvis do?"),
+    ),
+    GuideTopic(
+        title="Memory",
+        route="/studio#agents",
+        where=(
+            "HUD: SHARED MEMORY panel (type a note, SAVE). One agent's memory: "
+            "Agents, tap the agent, Memory."
+        ),
+        terms=(
+            "memory",
+            "remember",
+            "forget",
+            "recall",
+            "notes",
+            "shared",
+            "facts",
+            "memories",
+        ),
+        body=(
+            "Each agent keeps working notes for the current conversation and "
+            "long-term memories it recalls when they matter. With shared memory "
+            "on, the whole team reads one common memory, shown in the HUD's "
+            "SHARED MEMORY panel where you can SAVE a note. Agents write memories "
+            "with the remember tool. On an agent's page you can read them, add a "
+            "fact, or delete one. Memory can mirror into Obsidian."
+        ),
+        asks=("How do I sync memory to Obsidian?",),
+    ),
+    GuideTopic(
+        title="Obsidian",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Obsidian card: Sync memory, Pull edits only, Import notes to "
+            "memory. Vault folder: Settings, Studio, Obsidian Vault."
+        ),
+        terms=("obsidian", "vault", "markdown", "icloud", "sync", "inbox"),
+        body=(
+            "Point Studio at your Obsidian vault and chats, classes, and agent "
+            "memories are written as markdown notes with frontmatter. Edits you "
+            "make in Obsidian flow back with Pull edits only. On iOS the vault "
+            "usually lives in iCloud Drive under iCloud~md~obsidian; on a "
+            "computer it is wherever you keep it. Notes you drop in the vault's "
+            "Inbox folder can be imported into an agent's memory."
+        ),
+    ),
+    GuideTopic(
+        title="Add from GitHub (skills, plugins, MCP)",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Add from GitHub card: paste a link, then "
+            "Turn on / Check each MCP server, Add to team for plugin agents. "
+            "'Add an MCP server by hand' takes an npx/uvx command or address."
+        ),
+        terms=(
+            "github",
+            "plugin",
+            "plugins",
+            "skill",
+            "skills",
+            "mcp",
+            "server",
+            "extension",
+        ),
+        body=(
+            "Paste a GitHub link and Studio pulls in SKILL.md skills, Claude Code "
+            "plugin agents and commands, and MCP servers; a plain repo becomes a "
+            "skill from its README. Agents read skills with the skill tool and use "
+            "switched-on MCP servers with the mcp tool. MCP servers start off "
+            "because they run the repo's code: read the command, then Turn on, and "
+            "Check shows its tools. npx servers need Node.js."
+        ),
+    ),
+    GuideTopic(
+        title="Coder, Tester, and Lab agents",
+        route="/studio#agents",
+        where=(
+            "Agents page: Coder, Tester, and Lab. Rounds and steps: Settings, "
+            "Studio, Coder Max Steps and Coder and Tester Rounds."
+        ),
+        terms=(
+            "coder",
+            "tester",
+            "lab agent",
+            "code me",
+            "rounds",
+            "bugs",
+            "hand back",
+        ),
+        body=(
+            "Ask Jarvis to code an app, game, script, tool, bot, or HUD and the "
+            "Coder codes it for as long as it needs, then the Tester tests it, "
+            "fixes small bugs, and hands the rest back, round after round until "
+            "it works (3 rounds by default). Websites still go to the Builder. "
+            "Lab jobs from the main chat ('make soap in the lab') go to the Lab "
+            "agent, which works the Lab and reports back."
+        ),
+    ),
+    GuideTopic(
+        title="HQ",
+        route="/studio#hq",
+        where="HQ in the tab bar (or MENU, HQ).",
+        terms=(
+            "hq",
+            "pixel",
+            "office",
+            "stations",
+            "who is working",
+            "team at work",
+            "watch agents",
+            "workflow",
+        ),
+        body=(
+            "The HQ shows the team as a pixel office. Each station is part of the "
+            "work: command desk (Jarvis), research library, code workshop, test "
+            "bench, Lab, video studio, memory archive, classroom, model room, "
+            "approval desk, toolshed, mailroom, and break room. Agents walk to the "
+            "station of the tool they are using and back to the break room when "
+            "done; the Coder and the Tester wait in the mailroom for their next "
+            "coding job. Click an agent to see its task and steps, send it a message, or "
+            "stop it. Click a station to see who is there and what's waiting; the "
+            "approval desk lets you allow or refuse waiting commands."
+        ),
+    ),
+    GuideTopic(
+        title="Team plans",
+        route="/studio#hq",
+        where="Say 'get the team to ...' to Jarvis, or HQ, Team plans, Plan it.",
+        terms=(
+            "team plan",
+            "plan",
+            "coordinate",
+            "work together",
+            "team up",
+            "whole team",
+            "steps",
+        ),
+        body=(
+            "A team plan splits a bigger job between the agents. Jarvis writes "
+            "two to eight steps, each for the agent whose job it is, and which "
+            "steps must finish first. Steps that don't wait on each other run "
+            "side by side, an agent never gets two at once, and each step is "
+            "handed what the steps before it produced. A failed step skips the "
+            "steps that needed it. The HQ lists each plan and its steps; Stop "
+            "ends it and Resume carries on from where it stopped. When it ends, "
+            "Jarvis posts what was done in the main chat."
+        ),
+    ),
+    GuideTopic(
+        title="Relay",
+        route="/studio#hq",
+        where="HQ, the Relay card; or say 'relay: make ...' to Jarvis.",
+        terms=(
+            "relay",
+            "repos in order",
+            "one after another",
+            "sequential",
+            "through all the repos",
+            "every repo",
+            "subagents",
+            "metagpt",
+            "crewai",
+            "finrobot",
+            "openhands",
+        ),
+        body=(
+            "The relay passes one job through LCC's agent for it (the Builder "
+            "for a website, the Coder for an app, the Lab agent for lab work) "
+            "and then, one at a time, every repo agent trained for that kind "
+            "of job: a website gets awesome-claude-code-subagents' "
+            "ui-designer, frontend-developer, seo-specialist, and "
+            "accessibility-tester, the OpenHands engineer, MetaGPT's QA "
+            "engineer, crewAI's content writer, and design skills, never a "
+            "finance or security agent. A repo's agent joins the team when its "
+            "stage starts and goes back on the shelf when the relay ends. "
+            "While it is on, new websites, apps and games go through it. Start "
+            "one with 'relay: ...' or Run the relay in the HQ. The HQ's Relay "
+            "card turns it off, reorders repos, sets each to every job, when "
+            "it fits, or off, and pins agents (+ agent adds more). For a "
+            "website, app, or game, LCC's agent checks the finished work last. "
+            "Each stage shows which project files it really changed. A failed "
+            "stage doesn't stop the rest; the result comes to the main chat."
+        ),
+    ),
+    GuideTopic(
+        title="Connectors",
+        route="/studio#connectors",
+        where=(
+            "More (MENU), Open connectors; or Connectors in the Command "
+            "Center's side menu."
+        ),
+        terms=(
+            "connector",
+            "connectors",
+            "gmail",
+            "email",
+            "inbox",
+            "zapier",
+            "github token",
+            "discord",
+            "slack",
+            "webhook",
+            "stripe",
+            "google sheets",
+            "calendar",
+        ),
+        body=(
+            "Connectors give the team outside services: Zapier (Gmail, Google "
+            "Sheets, Calendar, Slack, Notion, and thousands more), GitHub, "
+            "Hugging Face, Stripe, Supabase (read only), Context7, DeepWiki, "
+            "Apify (ready-made scrapers; runs use your Apify credit), email, "
+            "and a Discord or Slack webhook. Paste the service's token "
+            "and press Connect, then Test. Agents use them with the mcp tool. "
+            "Emails agents write wait as drafts on the Connectors page until "
+            "you press Send, unless you let agents send. Tokens stay in a file "
+            "only you can read and never come back to the page."
+        ),
+    ),
+    GuideTopic(
+        title="Ideas board",
+        route="/studio#ideas",
+        where="Ideas board in the Command Center's side menu.",
+        terms=(
+            "ideas board",
+            "idea board",
+            "references",
+            "inspiration",
+            "mood board",
+            "moodboard",
+            "reference photos",
+            "ui i like",
+            "design i like",
+            "database of ideas",
+        ),
+        body=(
+            "The ideas board keeps your references for the team: a website or "
+            "app UI you like, a layout, colours, a logo, a video of how "
+            "something should feel, or just a note. Add a title, say what you "
+            "like about it, add tags and the project it is for, then press Add "
+            "note or link, or Add photos or videos (photos up to 25 MB, videos "
+            "up to 200 MB). The Builder, Coder, Lab, Helper, and every repo "
+            "agent search it with the ideas tool before they design or build, "
+            "read your notes, can put a reference photo into the project, and "
+            "go in that direction with their own business-level work, not a "
+            "copy. Pick a category for each idea: Websites, Apps, Lab, or "
+            "General. The Builder looks in Websites, the Coder in Apps, and the "
+            "Lab agent in Lab (and all of them in General). Categories, search, "
+            "and tags narrow the board; notes save as you edit them."
+        ),
+        asks=("How do I show the team a design I like?",),
+    ),
+    GuideTopic(
+        title="Using LCC from other AI tools",
+        route="/studio#connectors",
+        where="Connectors page (More, Open connectors), the last card.",
+        terms=(
+            "claude code",
+            "codex",
+            "cursor",
+            "openai api",
+            "chat completions",
+            "mcp server",
+            "other ai tools",
+            "harness",
+            "open webui",
+            "base url",
+        ),
+        body=(
+            "Any AI app can use LCC's models: point it at "
+            "http://127.0.0.1:8082/v1 (OpenAI Chat Completions, Responses, "
+            "and Models) with any API key, or your proxy token if you set one. "
+            "A provider/model name like llamacpp/qwen3-4b picks that model; any "
+            "other name uses your default. Tools that speak MCP (Claude Code, "
+            "Codex, Cursor, Gemini CLI, VS Code, Cline, ...) add "
+            "http://127.0.0.1:8082/mcp and can give your agents jobs, run team "
+            "plans, check on them, and read their projects. The card has the "
+            "exact lines for each tool."
+        ),
+    ),
+    GuideTopic(
+        title="Repos that come with FCC",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Add from GitHub card: 'Repos that come "
+            "with FCC' lists them (Add again for one you removed); 'Upload a repo "
+            "zip' adds one from this PC."
+        ),
+        terms=(
+            "starter repos",
+            "come with fcc",
+            "openhands",
+            "public apis",
+            "upload a repo",
+            "repo zip",
+            "toolshed",
+            "cybersecurity skills",
+            "scientific skills",
+        ),
+        body=(
+            "FCC ships 33 outside repos ready to use, with a checked copy of each "
+            "(awesome-claude-code-subagents, MetaGPT, FinRobot, crewAI, the "
+            "OpenHands SDK, OpenHands, hindsight, paperclip, OpenMontage, taste-skill, the "
+            "cybersecurity and scientific skill packs, public-apis, app-ideas, "
+            "OSSU, Langflow, Letta, and more). Two whose licences don't allow "
+            "sharing (roadmap.sh, free-for-dev) come from GitHub on first load "
+            "and are kept in the Repo vault. They are added on first load switched "
+            "off: nothing of a repo runs until you press Turn on by its name in "
+            "Repos; then agents search it with the skill tool and it can join "
+            "the relay. Their MCP servers stay off and their "
+            "agents join only when you add them; a repo agent thinks on the "
+            "server AI, so it never sees your memory; it keeps its own memory "
+            "(remember and recall) and gets only the tools it asks for; for "
+            "anything else a job needs it goes to the HQ Toolshed and takes it "
+            "for that job (never your to-dos, photos, or memory). Jarvis "
+            "hands it jobs with a briefing: say 'have <agent> do ...'. You can also upload "
+            "a repo zip; it is kept in the vault."
+        ),
+    ),
+    GuideTopic(
+        title="Claw Code",
+        route="/studio#more",
+        where="Knowledge & Memory (MENU), the Claw Code card; or fcc-claw in a terminal.",
+        terms=(
+            "claw",
+            "claw code",
+            "claw-code",
+            "coding agent",
+            "terminal agent",
+            "fcc-claw",
+            "rust",
+        ),
+        body=(
+            "Claw Code is an open coding agent for the terminal, like Claude "
+            "Code. FCC keeps its full source, so it works even if its GitHub "
+            "repo is deleted. On the Claw Code card press Build Claw Code "
+            "(it needs Rust from rustup.rs once; the first build takes a few "
+            "minutes), then Open Claw Code with the folder to work in: a "
+            "terminal opens with Claw Code connected to FCC, so it thinks with "
+            "your models, local ones included. In any terminal, fcc-claw does "
+            "the same."
+        ),
+    ),
+    GuideTopic(
+        title="Image engine (painted cartoons)",
+        route="/studio#more",
+        where="Knowledge & Memory (MENU), the Image engine card; Settings, Cartoon Art.",
+        terms=(
+            "image engine",
+            "painted",
+            "ai art",
+            "stable diffusion",
+            "stable-diffusion.cpp",
+            "teen titans",
+            "ben 10",
+            "cartoon art",
+            "art style",
+            "lora",
+        ),
+        body=(
+            "Cartoons can be painted instead of drawn: the image engine "
+            "(stable-diffusion.cpp on the graphics card) paints every place "
+            "and character in the early-2000s superhero cartoon style (Teen "
+            "Titans, Ben 10: Alien Force). On the Image engine card press Set "
+            "up the image engine once (it downloads the engine and the style, "
+            "about 5 GB; the smaller style needs about 3.4 GB for 4-6 GB "
+            "cards), then Paint a test to see it. Each character is painted "
+            "once (plus their talking mouth and the feelings a story needs) "
+            "and reused in every video, so they always look the same. With "
+            "Cartoon Art on auto, cartoons are painted as soon as the engine "
+            "is ready. No graphics card? Set Image Engine to the online "
+            "service and add its address and key."
+        ),
+    ),
+    GuideTopic(
+        title="Repo vault",
+        route="/studio#more",
+        where="Knowledge & Memory (MENU), the Repo vault card.",
+        terms=(
+            "vault",
+            "repo vault",
+            "deleted repo",
+            "backup repo",
+            "kept copy",
+            "github copy",
+        ),
+        body=(
+            "Every repo added from GitHub is kept on this PC with its checksum, "
+            "and so are the engine (llama.cpp) and voice files Studio downloads. "
+            "If the original is deleted from GitHub, Studio installs from the "
+            "kept copy automatically, and the Repo vault card can restore or "
+            "download any copy. The 33 starter repos and Claw Code come inside "
+            "FCC itself."
+        ),
+    ),
+    GuideTopic(
+        title="Content Farm",
+        route="/studio#farm",
+        where=(
+            "Farm in the tab bar (or MENU, Content Farm). Tabs: Production "
+            "line, Posting queue, Videos, Media library, Characters, Channel "
+            "settings; the Farm chat is on "
+            "the right. Video size, image maker, and music: Settings, Studio."
+        ),
+        terms=(
+            "content farm",
+            "farm",
+            "reels",
+            "reel",
+            "tiktok",
+            "shorts",
+            "faceless",
+            "video",
+            "videos",
+            "channel",
+            "posting",
+            "caption",
+            "hashtags",
+            "autopilot",
+            "youtube",
+            "sleep",
+            "lore",
+            "fandom",
+            "edit video",
+            "media library",
+            "gameplay",
+            "cartoon",
+            "animated",
+            "animation",
+            "character",
+            "characters",
+            "music edit",
+            "beat",
+            "lyrics",
+            "song",
+        ),
+        body=(
+            "The Content Farm makes YouTube Shorts (and TikToks, Reels) and "
+            "two-hour lore, what-if, or theory videos to fall asleep to, on "
+            "this PC. A channel is one account: a show or niche, a style, a "
+            "caption look, a voice, a length, and posting times. Shorts can "
+            "run over a gameplay background from the Media library; long "
+            "videos are written chapter by chapter from the show's Fandom "
+            "wiki, in 16:9 with chapter titles, a description with chapter "
+            "timestamps, and a thumbnail. Each scene gets your own clips and "
+            "pictures first, then real wiki stills, stock, then AI pictures "
+            "only if 'Allow AI-made pictures' is on. Every video opens in the "
+            "editor: change lines, words on screen, order, or any scene's "
+            "picture or clip, or ask the AI to edit, then Save and render. "
+            "Finished videos wait in the posting queue with the title, "
+            "description, and tags to copy. Autopilot keeps a day ready. Ask "
+            "Jarvis 'make a 2 hour sleep video about the entire lore of "
+            "Breaking Bad'. Animated cartoon stories: add characters on the "
+            "Characters tab (look, face picture, own voice), tick them in a "
+            "channel with the 'Animated cartoon story' style, and say 'make a "
+            "cartoon about ...'; the writer plans each shot and you can change "
+            "the place, camera, and who is in it in the editor. Music edits: "
+            "upload the song (MP3, WAV, M4A, or a video with it) and clips to "
+            "the Media library, pick the song in a 'Music edit' channel, and "
+            "the farm cuts the clips on the beat with the lyrics on screen and "
+            "big words spelled out. Paste timed lyrics ([00:12.34] words) in the "
+            "editor's Song and lyrics box, or let the built-in Whisper hear "
+            "them. Needs the studio_video extra (Pillow, ffmpeg, numpy)."
+        ),
+    ),
+    GuideTopic(
+        title="Trading Bank",
+        route="/studio#trade",
+        where=(
+            "Trade in the tab bar (or MENU, Trading Bank). Tabs: Desk, Debate, "
+            "Risk, Orders, Debriefs, Setup. Mode, platforms, keys, seats, and "
+            "limits are on Setup."
+        ),
+        terms=(
+            "trading",
+            "trading bank",
+            "trade",
+            "stocks",
+            "shares",
+            "crypto",
+            "meme coin",
+            "broker",
+            "alpaca",
+            "kraken",
+            "coinspot",
+            "swyftx",
+            "interactive brokers",
+            "ibkr",
+            "hyperliquid",
+            "invo",
+            "backtest",
+            "circuit breaker",
+            "evidence pack",
+            "audit trail",
+            "asx",
+            "paper trading",
+            "kill switch",
+            "approve order",
+            "tax csv",
+            "webhook",
+        ),
+        body=(
+            "Five seats debate each trade: a Technical Analyst, a Researcher, a "
+            "Macro & Sentiment seat, a Risk Guardian, and a Portfolio Manager who "
+            "decides. Each can use its own model (Setup, Seats). A debate opens "
+            "blind, cross-examines, runs a pre-mortem and rebuttals, then the PM "
+            "decides and the Guardian challenges the order; watch it on Debate "
+            "or in the 3D arena on Desk. Before any order a risk period grades it "
+            "A to F with stress tests and an event check, a cooling-off wait "
+            "re-checks the price, hard limits (Setup) are plain code, and the "
+            "live account is checked to be the one you verified. The data is "
+            "checked first and the seats read a numbered evidence pack; four "
+            "debate rounds with research and simulations between them; an "
+            "information and an investment stress test can only shrink or stop "
+            "a buy. Modes: Practice (fake money on real live prices, the "
+            "default), Alert only, Live: I approve, and Live: automatic (type "
+            "the phrase). Going live, saving keys, and verifying accounts work "
+            "only on the PC: Setup, the platform, Save keys, Test, then Yes, "
+            "this is my account. Keys are encrypted on the PC. The Kill switch "
+            "latches; the circuit breaker pauses new trades when something goes "
+            "wrong. Orders has decision records, the audit trail and the AUD "
+            "tax CSV; Debriefs has learning and the backtest; Desk shows the "
+            "engine's health. Hyperliquid / Invo trades at 1x, long only. No "
+            "system can promise returns: practise first and start live small."
+        ),
+        asks=(
+            "How do I connect my broker?",
+            "How do I approve an order?",
+            "What does the risk grade mean?",
+        ),
+    ),
+    GuideTopic(
+        title="Ops: what the PC is doing",
+        route="/studio#ops",
+        where="MENU, Ops (what the PC is doing). Low-Power Mode: Settings, Studio.",
+        terms=(
+            "ops",
+            "background lanes",
+            "background jobs",
+            "cpu load",
+            "gpu load",
+            "vram",
+            "what is the pc doing",
+            "low power",
+            "low-power mode",
+            "busy processor",
+            "system pulse",
+        ),
+        body=(
+            "Ops shows the PC's load (CPU, memory, each NVIDIA card and its "
+            "memory, disk), the background lanes (web, data, the local model, "
+            "server models, CPU jobs) with what's running and waiting, which "
+            "agents are working, the local model queue, and the trading desk, "
+            "with a 3D pulse on top. One local model turn runs at a time, and "
+            "quiet jobs wait while the processor is busier than Busy-Processor "
+            "Pause. Low-Power Mode (Settings, Studio) halves the lanes and draws "
+            "3D at fewer frames."
+        ),
+    ),
+    GuideTopic(
+        title="3D websites and dashboards",
+        route="/studio#agents",
+        where="Ask the Builder: 'make a 3D landing page' or 'make a live dashboard'.",
+        terms=(
+            "3d",
+            "three.js",
+            "3d website",
+            "3d landing",
+            "3d dashboard",
+            "live dashboard",
+            "web kit",
+            "fcc kit",
+            "animated website",
+        ),
+        body=(
+            "The Builder has two 3D starters: 3d-landing (a hero with a turning "
+            "3D constellation, scroll reveals, counting numbers, a contact form) "
+            "and 3d-dashboard (key numbers, a 3D view of services with load bars "
+            "and moving links, and an activity log, fed by JSON from your API). "
+            "Both use the FCC web kit (fcc-kit.css tokens for colours, light and "
+            "dark; fcc-kit.js for reveals, counters, tilt cards, the menu) and "
+            "bring three.js in the project's vendor folder, so they work offline "
+            "and download whole. The 3D pauses off-screen and shows a flat view "
+            "with reduced motion or without WebGL."
+        ),
+    ),
+    GuideTopic(
+        title="Website layouts (Start Bootstrap)",
+        route="/studio#agents",
+        where="Ask the Builder: 'start my shop from a website layout'.",
+        terms=(
+            "website layouts",
+            "layouts",
+            "start bootstrap",
+            "bootstrap",
+            "website template",
+            "landing page template",
+        ),
+        body=(
+            "The Builder, Coder, Designer and Developer can start a site from "
+            "26 whole-website layouts from Start Bootstrap (MIT): agency, "
+            "landing pages, portfolios, blogs, shops, a CV, a multi-page "
+            "business site, an admin dashboard and more. Bootstrap and its "
+            "icons come with it, so it works offline. They then replace every "
+            "sample word, photo and form address with the business's own."
+        ),
+    ),
+    GuideTopic(
+        title="Game library (Phaser and Kenney)",
+        route="/studio#agents",
+        where="Ask the Coder: 'make a space shooter game I can play on my phone'.",
+        terms=(
+            "game library",
+            "games",
+            "phaser",
+            "kenney",
+            "game art",
+            "sprites",
+            "sound effects",
+            "game assets",
+        ),
+        body=(
+            "Games start from the phaser-game starter (Phaser 3, keyboard and "
+            "touch). The game_assets tool finds art and sound in Kenney's 217 "
+            "free packs: 49 come with FCC, the rest download once and stay on "
+            "your PC. It also shows Phaser's 2,298 example programs for any "
+            "mechanic, and the game-dev skill holds the recipes for movement, "
+            "animation, effects, enemies, levels and phone controls."
+        ),
+    ),
+    GuideTopic(
+        title="UI library (Uiverse)",
+        route="/studio#agents",
+        where="Ask the Builder: 'use a glass card and a neon button from the UI library'.",
+        terms=(
+            "ui library",
+            "uiverse",
+            "web design library",
+            "components",
+            "buttons",
+            "toggle",
+            "loader",
+            "design library",
+        ),
+        body=(
+            "The Builder, Coder and Designer have FCC's UI library: 3,802 "
+            "ready-made web design pieces from Uiverse (MIT), made by its "
+            "designers: buttons, cards, forms, inputs, toggles, checkboxes, "
+            "radios, loaders, tooltips, notifications and backgrounds. They "
+            "search it by words (plain CSS first), copy a piece into the site "
+            "and restyle it with the site's colours and fonts, keeping the "
+            "designer's credit. It comes with FCC, so nothing is downloaded."
+        ),
+    ),
+    GuideTopic(
+        title="Jarvis's playbook",
+        route="/studio#more",
+        where=(
+            "Knowledge & Memory (MENU), Jarvis's playbook card: pick a note, edit "
+            "it, Save note, or Reset to starting note. In Obsidian: the vault's "
+            "FCC Studio/Playbook folder. On or off: Settings, Studio, Jarvis's "
+            "Playbook."
+        ),
+        terms=(
+            "playbook",
+            "teach jarvis",
+            "tool use",
+            "use tools",
+            "wrong tool",
+            "doesn't use",
+            "examples",
+        ),
+        body=(
+            "Jarvis's playbook teaches a small model when and how to use each "
+            "tool without changing models. It is one note per tool: the words "
+            "that call for it, an example call, and tips, plus a Rules note on "
+            "how to read the Studio note, earlier messages, memory, and the "
+            "group chat. Before each reply Studio adds the Rules and the one or "
+            "two notes that match your message. When a tool call works, your "
+            "words and the call go into that note's Learned list (the newest "
+            "five), so he gets better at the way you talk. Edit a note's "
+            "'When the user says:' line or its examples to change what he does; "
+            "delete a learned line you don't want."
+        ),
+    ),
+    GuideTopic(
+        title="Teach an agent a skill",
+        route="/studio#agents",
+        where="Agents, tap the agent, the Teach a skill card.",
+        terms=(
+            "skill",
+            "skills",
+            "how-to",
+            "instructions",
+            "teach it",
+            "teach an agent",
+            "link",
+        ),
+        body=(
+            "Open an agent on the Agents tab and use Teach a skill: paste a link "
+            "or your own notes. The agent reads it and keeps a short how-to it "
+            "follows from then on. It is the quickest way to give an agent a new "
+            "habit without any training."
+        ),
+    ),
+    GuideTopic(
+        title="Teacher and student",
+        route="/studio#learn",
+        where="The Classroom tab (Learn): Open a class, then pick a teacher and a student.",
+        terms=(
+            "teacher",
+            "student",
+            "class",
+            "classroom",
+            "lesson",
+            "exam",
+            "school",
+            "teach another",
+            "another ai",
+            "teach",
+            "learn",
+        ),
+        body=(
+            "Open a class on any topic. The teacher agent plans lessons, teaches "
+            "them one at a time, and the student agent answers in the same "
+            "classroom chat, so you can watch the learning happen. At the end the "
+            "teacher writes a test, the student sits it without the lesson notes, "
+            "and every answer is graded against the teacher's rubric. A pass can "
+            "queue a light tune built from the class. A strong server model makes "
+            "a good teacher for a small local student."
+        ),
+    ),
+    GuideTopic(
+        title="Light tuning",
+        route="/studio#tune",
+        where="Tuning & LoRA in the left sidebar (on a phone: MENU, Tuning, Open tuning): Make a tune pack.",
+        terms=(
+            "tune",
+            "tuning",
+            "finetune",
+            "fine-tune",
+            "light",
+            "phone",
+            "iphone",
+            "profile",
+            "tune pack",
+        ),
+        body=(
+            "Light tuning learns an instruction pack, not weights: it searches for "
+            "the shortest preamble, rules, and examples that best reproduce your "
+            "sample answers, scored on held-out pairs. It is small enough to finish "
+            "on a phone. Turn it on from chat settings and a fresh chat opens using "
+            "the tuned profile. Real weight training is delegated to the cloud "
+            "trainer when you pick the cloud backend."
+        ),
+    ),
+    GuideTopic(
+        title="LoRA weight training",
+        route="/studio#tune",
+        where="Tuning & LoRA in the left sidebar: the LoRA section. Rented GPU steps are on the job page.",
+        terms=(
+            "lora",
+            "weights",
+            "train",
+            "training",
+            "rented",
+            "vps",
+            "finetune",
+            "adapter",
+            "ollama",
+        ),
+        body=(
+            "LoRA training changes a student model's actual weights. Server "
+            "teachers write lessons on the topics you pick, plus tool-use lessons, "
+            "then a trainer learns from them. Train on this computer if it has a "
+            "suitable GPU, or on a rented GPU or VPS by running the worker "
+            "command the job page shows under Run it on a rented GPU or VPS. The "
+            "finished model downloads to this PC, installs into LM Studio and "
+            "Ollama, and the student switches to it; you can switch back any time."
+        ),
+    ),
+    GuideTopic(
+        title="Settings",
+        route="/studio#settings",
+        where=(
+            "Settings in the left sidebar (on a phone: MENU, Settings, Open settings). It has a search bar: type a word "
+            "like voice or key. It opens only on the PC running Studio."
+        ),
+        terms=(
+            "settings",
+            "setting",
+            "config",
+            "configure",
+            "configuration",
+            "option",
+            "options",
+            "preferences",
+            "api key",
+            "admin",
+            "provider",
+        ),
+        body=(
+            "Every Free Claude Code option lives in Settings inside the app: "
+            "providers and API keys, models, messaging, the Studio section, and "
+            "voice. Type in the search bar to find one. Studio options include "
+            "Main Model, Local Runtime URL, Fast Local Replies, Agent Temperature, "
+            "Agent Commands, Web Access, Web Search API Key, voice, and Obsidian "
+            "Vault. Knowledge & Memory also has its own search bar for its cards."
+        ),
+    ),
+    GuideTopic(
+        title="Desktop app on Windows",
+        route="",
+        where=(
+            "Double-click scripts\\windows\\install-studio-app.cmd once. Then "
+            "open FCC Studio from the Desktop or Start menu."
+        ),
+        terms=(
+            "desktop",
+            "windows",
+            "shortcut",
+            "icon",
+            "startup",
+            "launch",
+            "exe",
+            "physical app",
+            "application",
+            "start menu",
+        ),
+        body=(
+            "The installer sets Studio up once and adds an FCC Studio icon to "
+            "the Desktop and Start menu. Opening it starts the server hidden, "
+            "shows a splash, and opens Studio in its own window without browser "
+            "tabs; closing the window stops the server. Run the installer with "
+            "-StartWithWindows to open it at sign-in, or -Uninstall to remove the "
+            "icons (your agents and memory stay)."
+        ),
+    ),
+    GuideTopic(
+        title="Installing on iPhone",
+        route="/studio#more",
+        where="In Safari on the iPhone: Share, then Add to Home Screen. Setup help: Knowledge & Memory (MENU), Install on your iPhone.",
+        terms=(
+            "ios",
+            "iphone",
+            "ipad",
+            "home screen",
+            "pwa",
+            "phone",
+            "mobile",
+            "tailscale",
+            "install",
+        ),
+        body=(
+            "Open this page in Safari on the same network as the server, tap Share, "
+            "then Add to Home Screen. Studio then runs full screen with its own "
+            "icon, safe-area padding, and touch-sized controls. Away from home, "
+            "Tailscale gives the phone a private link to this PC, and tailscale "
+            "serve adds the HTTPS the microphone needs."
+        ),
+    ),
+    GuideTopic(
+        title="Chats",
+        route="/studio#chats",
+        where="The Chats tab: every conversation and room, and New chat.",
+        terms=(
+            "chats",
+            "chat",
+            "history",
+            "past",
+            "conversations",
+            "previous",
+            "old",
+            "new chat",
+        ),
+        body=(
+            "The Chats tab keeps every conversation with every agent and every "
+            "room, newest first. New chat starts one with any agent. Inside a "
+            "chat, its settings can turn on light tuning or teacher mode for "
+            "that conversation."
+        ),
+    ),
+    GuideTopic(
+        title="Troubleshooting",
+        route="/studio#home",
+        where=(
+            "HUD: tap SYSTEM STATUS when it is not OPTIMAL. I list what is wrong "
+            "right now at the top of this sheet."
+        ),
+        terms=(
+            "wrong",
+            "broken",
+            "error",
+            "errors",
+            "fix",
+            "problem",
+            "problems",
+            "issue",
+            "not working",
+            "doesn't work",
+            "dont work",
+            "attention",
+            "failed",
+            "crash",
+            "trouble",
+            "stuck",
+            "offline",
+        ),
+        body=(
+            "LOCAL MODELS OFFLINE means Studio cannot reach LM Studio: open LM "
+            "Studio, load a model, and switch the server on in the Developer tab. "
+            "ATTENTION means the last reply failed; the reason shows here. A "
+            "model that 'has no key' is a server model without an API key: "
+            "pick a local model with CHOOSE BRAIN or add the key in Settings. No "
+            "microphone: use localhost on this PC or HTTPS on a phone. No voice: "
+            "Knowledge & Memory (MENU), Main AI voice, Download the voice. Searches failing: add a "
+            "search key. If the desktop app will not open, run "
+            "install-studio-app.cmd again."
+        ),
+        asks=(
+            "Why does it say LOCAL MODELS OFFLINE?",
+            "How do I set up LM Studio?",
+        ),
+    ),
+)
+
+STARTER_QUESTIONS: tuple[str, ...] = (
+    "What can this app do?",
+    "How do I set up LM Studio?",
+    "How do I talk to Jarvis with my voice?",
+    "How do I get the Builder to make an app?",
+    "How do I make replies faster?",
+    "How do I add an agent?",
+)
+
+GUIDE_PERSONA = (
+    "You are the Guide inside FCC Studio. Answer questions about this app in "
+    "plain, friendly language, in at most six short sentences. Always say where "
+    "to tap, using the button and page names exactly as written in your notes "
+    "(they are shown in capitals on the HUD). Only describe features in your "
+    "notes. If something is not there, say you are not sure and name the "
+    "closest page. Never invent settings or buttons. If a problem listed under "
+    "'This install right now' explains the question, start with its fix."
+)
+
+_WORD = re.compile(r"[a-z0-9][a-z0-9_+#-]*")
+_STOP = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "how",
+        "can",
+        "you",
+        "what",
+        "does",
+        "this",
+        "that",
+        "with",
+        "are",
+        "your",
+        "my",
+        "is",
+        "do",
+        "to",
+        "in",
+        "on",
+        "of",
+        "it",
+        "an",
+        "be",
+        "me",
+        "get",
+        "use",
+        "where",
+        "why",
+        "when",
+        "which",
+        "one",
+        "from",
+        "into",
+        "app",
+        "there",
+        "have",
+        "about",
+        "make",
+        "work",
+        "works",
+        "want",
+        "need",
+        "show",
+        "not",
+        "working",
+        "made",
+    }
+)
+
+
+def _stem(word: str) -> str:
+    """Fold simple English endings so 'models' finds 'model', 'tuning' finds 'tune'."""
+    while True:
+        for ending in ("ing", "ies", "es", "ed", "s", "e"):
+            if word.endswith(ending) and len(word) - len(ending) >= 3:
+                base = word[: -len(ending)]
+                word = f"{base}y" if ending == "ies" else base
+                break
+        else:
+            return word
+
+
+def _stems(text: str) -> set[str]:
+    words = (word for word in _WORD.findall(text.lower()) if word not in _STOP)
+    return {stem for stem in map(_stem, words) if len(stem) > 1 and stem not in _STOP}
+
+
+def _normal(text: str) -> str:
+    return " ".join(_WORD.findall(text.lower().replace("'", "")))
+
+
+@dataclass(frozen=True, slots=True)
+class GuideProblem:
+    """Something wrong with this install right now, and how to fix it."""
+
+    title: str
+    fix: str
+    route: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GuideState:
+    """A snapshot of the install, so the guide can answer about this device."""
+
+    agent_count: int = 0
+    site_count: int = 0
+    ready_models: int = 0
+    guide_model: str = ""
+    guide_model_ready: bool = False
+    tuning_enabled: bool = False
+    teacher_enabled: bool = False
+    vault_configured: bool = False
+    main_name: str = "Jarvis"
+    main_model: str = ""
+    main_model_ready: bool = True
+    local_url: str = ""
+    local_reachable: bool | None = None
+    local_models: tuple[str, ...] = ()
+    web_online: bool | None = None
+    web_access: str = ""
+    search_provider: str = ""
+    search_problem: str = ""
+    voice_speak: str = ""
+    voice_ready: bool = True
+    commands: str = ""
+    approvals: int = 0
+    busy_agents: tuple[str, ...] = ()
+    agents: tuple[str, ...] = ()
+    last_error: str = ""
+    problems: tuple[GuideProblem, ...] = ()
+
+    def summary(self) -> str:
+        """Render the snapshot as a few lines of context for the guide."""
+        lines = [
+            f"This install has {self.agent_count} agents"
+            + (f" ({', '.join(self.agents)})" if self.agents else "")
+            + f", {self.site_count} sites, {self.ready_models} downloaded models.",
+            f"Guide model: {self.guide_model or 'none'}"
+            f"{' (ready)' if self.guide_model_ready else ' (not downloaded)'}.",
+        ]
+        if self.main_model:
+            lines.append(
+                f"{self.main_name} uses {self.main_model}"
+                f"{'' if self.main_model_ready else ' (cannot be reached)'}."
+            )
+        if self.local_reachable is not None:
+            served = ", ".join(self.local_models[:6]) or "no models loaded"
+            lines.append(
+                f"Local runtime at {self.local_url or 'the local URL'} is "
+                + (f"running: {served}." if self.local_reachable else "not reachable.")
+            )
+        if self.web_online is not None:
+            lines.append(
+                f"Internet: {'online' if self.web_online else 'offline'}, "
+                f"web access {self.web_access or 'on'}, search by "
+                f"{self.search_provider or 'DuckDuckGo'}."
+            )
+        if self.voice_speak:
+            lines.append(
+                f"Voice: {self.voice_speak}"
+                f"{'' if self.voice_ready else ' (not downloaded yet)'}."
+            )
+        if self.commands:
+            lines.append(f"Agent commands: {self.commands}.")
+        if self.busy_agents:
+            lines.append(f"Working right now: {', '.join(self.busy_agents)}.")
+        lines.append(
+            f"Light tuning is {'on' if self.tuning_enabled else 'off'}. "
+            f"Teacher mode is {'on' if self.teacher_enabled else 'off'}. "
+            f"Obsidian vault is "
+            f"{'configured' if self.vault_configured else 'not configured'}."
+        )
+        if self.problems:
+            lines.append(
+                "Problems: " + " ".join(f"{p.title}: {p.fix}" for p in self.problems)
+            )
+        return "\n".join(lines)
+
+
+def diagnose(state: GuideState) -> tuple[GuideProblem, ...]:
+    """List what is wrong with this install right now, most urgent first."""
+    problems: list[GuideProblem] = []
+    local_main = state.main_model.startswith("local/")
+    if state.local_reachable is False and (local_main or not state.main_model_ready):
+        problems.append(
+            GuideProblem(
+                "Local models are offline",
+                f"Studio cannot reach LM Studio at {state.local_url or 'http://localhost:1234/v1'}. "
+                "Open LM Studio, load a model, and switch Start Server on in the "
+                "Developer tab.",
+                "/studio#models",
+            )
+        )
+    elif state.local_reachable and not state.local_models and local_main:
+        problems.append(
+            GuideProblem(
+                "No model is loaded",
+                "LM Studio is running but serves no model. Load one in LM Studio, "
+                "or use Choose a model from this PC on the Models page.",
+                "/studio#models",
+            )
+        )
+    if not state.main_model_ready and state.main_model and not local_main:
+        problems.append(
+            GuideProblem(
+                f"{state.main_name}'s model has no key",
+                f"{state.main_model} needs an API key. Pick a local model with "
+                "CHOOSE BRAIN on the HUD, or add the key in Settings.",
+                "/studio#home",
+            )
+        )
+    if state.last_error:
+        problems.append(
+            GuideProblem(
+                "The last reply failed",
+                f"{state.last_error[:240]} Try again, or check the model with "
+                "CHOOSE BRAIN.",
+                "/studio#home",
+            )
+        )
+    if state.approvals:
+        problems.append(
+            GuideProblem(
+                f"{state.approvals} command{'s' if state.approvals != 1 else ''} "
+                "waiting for you",
+                "An agent asked to run a command. Press Run it or Deny on the HUD.",
+                "/studio#home",
+            )
+        )
+    if state.web_online is False:
+        problems.append(
+            GuideProblem(
+                "This PC is offline",
+                "Web tools are paused and agents work from memory. They come back "
+                "on their own when the internet does.",
+                "/studio#more",
+            )
+        )
+    if state.search_problem:
+        problems.append(
+            GuideProblem(
+                "Web search key problem",
+                f"{state.search_problem} Fix it in Settings, under Studio, Web "
+                "Search API Key.",
+                "/studio#more",
+            )
+        )
+    if state.voice_speak == "builtin" and not state.voice_ready:
+        problems.append(
+            GuideProblem(
+                "The voice is not downloaded yet",
+                "Knowledge & Memory (MENU), Main AI voice, Download the voice. Until then the browser "
+                "voice speaks.",
+                "/studio#more",
+            )
+        )
+    return tuple(problems)
+
+
+@dataclass(frozen=True, slots=True)
+class GuideLink:
+    """A place in the app the answer points to."""
+
+    label: str
+    route: str
+
+
+@dataclass(frozen=True, slots=True)
+class GuideAnswer:
+    """What the guide replies, plus where the user should tap next."""
+
+    text: str
+    topics: tuple[str, ...] = ()
+    route: str = ""
+    offline: bool = False
+    links: tuple[GuideLink, ...] = ()
+    suggestions: tuple[str, ...] = ()
+
+
+def knowledge_text() -> str:
+    """Render everything the guide is allowed to claim about the app."""
+    return "\n\n".join(_topic_text(topic) for topic in GUIDE_TOPICS)
+
+
+def _topic_text(topic: GuideTopic) -> str:
+    where = f"\nWhere: {topic.where}" if topic.where else ""
+    return f"## {topic.title}{where}\n{topic.body}"
+
+
+def topic_index() -> str:
+    """One line per topic, so the model knows the whole app in a few hundred words."""
+    return "\n".join(
+        f"- {topic.title}: {topic.where or topic.body[:90]}" for topic in GUIDE_TOPICS
+    )
+
+
+def _score(topic: GuideTopic, stems: set[str], phrase: str) -> int:
+    score = 0
+    for term in topic.terms:
+        if " " in term or "-" in term or "_" in term:
+            score += 3 if f" {term} " in f" {phrase} " else 0
+        elif _stem(term) in stems:
+            score += 3
+    score += 2 * len(_stems(topic.title) & stems)
+    score += min(3, len(_stems(topic.body) & {s for s in stems if len(s) > 3}))
+    return score
+
+
+def match_topics(question: str, *, limit: int = 2) -> tuple[GuideTopic, ...]:
+    """Return the topics that best match a question, best first."""
+    stems = _stems(question)
+    phrase = _normal(question)
+    scored = [(topic, _score(topic, stems, phrase)) for topic in GUIDE_TOPICS]
+    ranked = sorted(
+        (pair for pair in scored if pair[1] >= 2),
+        key=lambda pair: pair[1],
+        reverse=True,
+    )
+    if not ranked:
+        return ()
+    best = ranked[0][1]
+    return tuple(topic for topic, score in ranked[:limit] if score * 3 >= best)
+
+
+def _links(topics: Sequence[GuideTopic]) -> tuple[GuideLink, ...]:
+    seen: dict[str, GuideLink] = {}
+    for topic in topics:
+        if topic.route and topic.route not in seen:
+            seen[topic.route] = GuideLink(page_name(topic.route), topic.route)
+    return tuple(seen.values())
+
+
+def page_name(route: str) -> str:
+    """The name of the page a route opens, as the user sees it."""
+    return {
+        "home": "Command Center",
+        "chats": "Chats",
+        "agents": "Agents",
+        "learn": "Classroom",
+        "models": "Models",
+        "tune": "Tuning & LoRA",
+        "more": "Knowledge & Memory",
+        "connectors": "Connectors",
+        "ideas": "Ideas board",
+        "hq": "HQ",
+        "settings": "Settings",
+    }.get(route.rsplit("#", 1)[-1], route)
+
+
+def _suggestions(topics: Sequence[GuideTopic], question: str) -> tuple[str, ...]:
+    asked = question.strip().lower().rstrip("?")
+    picks: list[str] = []
+    for ask in [a for topic in topics for a in topic.asks] + list(STARTER_QUESTIONS):
+        if ask.lower().rstrip("?") != asked and ask not in picks:
+            picks.append(ask)
+    return tuple(picks[:3])
+
+
+_TROUBLE = re.compile(
+    r"\b(wrong|broken|errors?|fix|problems?|issues?|nothing|not working|"
+    r"doesn'?t|dont|won'?t|can'?t|cant|failed|attention|offline|stuck|slow)\b"
+)
+
+
+def offline_answer(question: str, state: GuideState) -> GuideAnswer:
+    """Answer from the built-in knowledge when no guide model is available."""
+    matched = match_topics(question)
+    trouble = bool(state.problems) and bool(_TROUBLE.search(question.lower()))
+    parts: list[str] = []
+    if trouble:
+        parts.append(
+            "Right now: "
+            + " ".join(f"**{p.title}.** {p.fix}" for p in state.problems[:3])
+        )
+    if not matched and not trouble:
+        titles = ", ".join(topic.title for topic in GUIDE_TOPICS[1:6])
+        return GuideAnswer(
+            text=(
+                "I can explain any part of Studio: "
+                f"{titles}, and more. Ask about one of those, or load a model in "
+                "LM Studio so I can answer in my own words."
+            ),
+            offline=True,
+            suggestions=STARTER_QUESTIONS[:3],
+        )
+    for topic in matched:
+        where = f"\n*Where:* {topic.where}" if topic.where else ""
+        parts.append(f"**{topic.title}** — {topic.body}{where}")
+    links = _links(matched)
+    first = state.problems[0].route if trouble else ""
+    if first and all(link.route != first for link in links):
+        links = (GuideLink(page_name(first), first), *links)
+    return GuideAnswer(
+        text="\n\n".join(parts),
+        topics=tuple(topic.title for topic in matched),
+        route=links[0].route if links else "",
+        offline=True,
+        links=links,
+        suggestions=_suggestions(matched, question),
+    )
+
+
+class GuideAssistant:
+    """Answer 'how does this app work' with a model, or from built-in help."""
+
+    def __init__(
+        self,
+        *,
+        router: StudioModelRouter,
+        model: str,
+        max_tokens: int = 400,
+    ) -> None:
+        self._router = router
+        self._model = model
+        self._max_tokens = max_tokens
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def system_prompt(self, state: GuideState, question: str = "") -> str:
+        """Compose the persona, the most relevant notes, the index, and this install.
+
+        A small local model reads a short prompt much faster, so it gets the
+        full text of the topics that match the question plus a one-line index
+        of everything else, not the whole manual.
+        """
+        matched = match_topics(question, limit=3) if question else GUIDE_TOPICS
+        notes = "\n\n".join(_topic_text(topic) for topic in matched) or "(none match)"
+        return (
+            f"{GUIDE_PERSONA}\n\n"
+            f"# Notes for this question\n{notes}\n\n"
+            f"# Everything in FCC Studio\n{topic_index()}\n\n"
+            f"# This install right now\n{state.summary()}"
+        )
+
+    async def answer(
+        self,
+        question: str,
+        state: GuideState,
+        *,
+        history: Sequence[ChatMessage] = (),
+    ) -> GuideAnswer:
+        """Answer one question, falling back to built-in help on any failure."""
+        if not state.guide_model_ready and self._model.startswith("local/"):
+            return offline_answer(question, state)
+        matched = match_topics(question)
+        try:
+            reply = await self._router.complete(
+                [*history[-6:], ChatMessage.user(question)],
+                model=self._model,
+                system=self.system_prompt(state, question),
+                temperature=0.2,
+                max_tokens=self._max_tokens,
+            )
+        except StudioLLMError:
+            return offline_answer(question, state)
+        text = reply.text.strip()
+        if not text:
+            return offline_answer(question, state)
+        links = _links(matched)
+        return GuideAnswer(
+            text=text,
+            topics=tuple(topic.title for topic in matched),
+            route=links[0].route if links else "",
+            links=links,
+            suggestions=_suggestions(matched, question),
+        )

@@ -1,0 +1,96 @@
+/* Game launch: deep night, cyan and magenta glow, a big title. */
+:root {
+  --night: #0a0b1a;
+  --panel: #141633;
+  --ink: #eef0ff;
+  --muted: #a6aad6;
+  --cyan: #35f0ff;
+  --magenta: #ff3ea5;
+  --line: #2a2d5c;
+  --radius: 12px;
+  --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --display: "Impact", "Arial Black", "Helvetica Neue", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--night); color: var(--ink); font: 17px/1.6 var(--font); }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+.skip { position: absolute; left: -999px; }
+.skip:focus { left: 16px; top: 16px; background: var(--cyan); color: var(--night); padding: 8px 12px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+.top { position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 16px clamp(16px, 5vw, 56px); background: rgb(10 11 26 / 0.85); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.brand { font: 400 1.4rem var(--display); letter-spacing: 0.08em; text-decoration: none; }
+nav { display: flex; align-items: center; gap: 24px; }
+nav a { text-decoration: none; color: var(--muted); }
+nav a:hover { color: var(--ink); }
+nav .wish-link { color: var(--night); background: var(--cyan); padding: 8px 16px; border-radius: 999px; font-weight: 700; }
+.menu { display: none; }
+
+main > section { padding: clamp(48px, 8vw, 104px) clamp(16px, 5vw, 56px); }
+.hero { position: relative; overflow: hidden; text-align: center; min-height: 82vh; display: grid; place-content: center; background: radial-gradient(60% 50% at 50% 40%, #241a5c 0%, var(--night) 70%); }
+.stars { position: absolute; inset: 0; background-image:
+  radial-gradient(2px 2px at 20% 30%, #fff8, transparent),
+  radial-gradient(1px 1px at 70% 20%, #fff9, transparent),
+  radial-gradient(2px 2px at 40% 70%, #fff6, transparent),
+  radial-gradient(1px 1px at 85% 60%, #fffa, transparent),
+  radial-gradient(1px 1px at 10% 80%, #fff7, transparent);
+  animation: drift 40s linear infinite; }
+@keyframes drift { to { transform: translateY(-40px); } }
+.studio { position: relative; color: var(--muted); text-transform: uppercase; letter-spacing: 0.24em; font-size: 0.8rem; margin: 0; }
+h1 { position: relative; font: 400 clamp(3.4rem, 13vw, 9rem)/0.95 var(--display); margin: 12px 0; letter-spacing: 0.04em; }
+.glow { color: #fff; text-shadow: 0 0 18px var(--cyan), 0 0 42px rgb(53 240 255 / 0.5), 4px 4px 0 var(--magenta); }
+.tagline { position: relative; max-width: 30em; margin: 0 auto; color: var(--muted); font-size: 1.15rem; }
+.hero-actions { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 28px; }
+.platforms { position: relative; color: var(--muted); font-size: 0.9rem; margin-top: 20px; }
+
+.neon, .ghost { display: inline-flex; align-items: center; justify-content: center; min-height: 50px; padding: 12px 28px; border-radius: 999px; font: 700 1rem var(--font); text-decoration: none; cursor: pointer; }
+.neon { background: var(--magenta); color: var(--night); border: 0; box-shadow: 0 0 24px rgb(255 62 165 / 0.6); transition: box-shadow 0.2s, transform 0.2s; }
+.neon:hover { transform: translateY(-2px); box-shadow: 0 0 40px rgb(255 62 165 / 0.85); }
+.ghost { border: 2px solid var(--cyan); color: var(--cyan); background: transparent; }
+
+.screen { aspect-ratio: 16 / 9; max-width: 1000px; margin: 0 auto; border-radius: var(--radius); border: 1px solid var(--line); background: linear-gradient(135deg, #1b1d48, #3a1544); display: grid; place-items: center; box-shadow: 0 0 60px rgb(53 240 255 / 0.15); }
+.play { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 50%; background: rgb(255 255 255 / 0.12); border: 2px solid var(--cyan); color: var(--cyan); font-size: 1.8rem; padding-left: 6px; }
+
+h2 { font: 400 clamp(2rem, 5vw, 3.4rem) var(--display); letter-spacing: 0.04em; margin: 0 0 24px; }
+.about { max-width: 860px; margin: 0 auto; text-align: center; }
+.about p { color: var(--muted); font-size: 1.15rem; }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.grid article { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 24px; transition: border-color 0.2s; }
+.grid article:hover { border-color: var(--cyan); }
+.grid span { font-size: 1.6rem; color: var(--cyan); }
+.grid h3 { margin: 10px 0 6px; }
+.grid p { margin: 0; color: var(--muted); }
+
+.facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 0; }
+.facts div { background: var(--panel); border-radius: var(--radius); padding: 18px; border: 1px solid var(--line); }
+.facts dt { color: var(--muted); font-size: 0.85rem; }
+.facts dd { margin: 4px 0 0; font-weight: 700; }
+
+.wishlist { text-align: center; }
+.form { display: flex; flex-wrap: wrap; justify-content: center; align-items: end; gap: 12px; }
+.form label { display: grid; gap: 6px; text-align: left; color: var(--muted); }
+input { min-height: 50px; min-width: min(320px, 80vw); padding: 10px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font: inherit; }
+.note { flex-basis: 100%; margin: 0; min-height: 1.6em; color: var(--cyan); }
+
+.foot { display: flex; justify-content: space-between; padding: 24px clamp(16px, 5vw, 56px); border-top: 1px solid var(--line); color: var(--muted); }
+
+@media (max-width: 860px) {
+  .menu { display: block; min-height: 44px; padding: 0 16px; border-radius: 999px; border: 2px solid var(--cyan); background: transparent; color: var(--cyan); font: 700 0.95rem var(--font); }
+  nav { display: none; position: absolute; top: 72px; left: 0; right: 0; flex-direction: column; align-items: stretch; gap: 0; padding: 8px clamp(16px, 5vw, 56px) 16px; background: var(--night); border-bottom: 1px solid var(--line); }
+  nav.open { display: flex; }
+  nav a { padding: 12px 0; }
+  .grid, .facts { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) { .grid, .facts { grid-template-columns: 1fr; } }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .stars { animation: none; }
+  * { transition: none !important; }
+}
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }

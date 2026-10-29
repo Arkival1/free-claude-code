@@ -27,6 +27,7 @@ MISTRAL_DEFAULT_BASE = "https://api.mistral.ai/v1"
 CODESTRAL_DEFAULT_BASE = "https://codestral.mistral.ai/v1"
 LMSTUDIO_DEFAULT_BASE = "http://localhost:1234/v1"
 LLAMACPP_DEFAULT_BASE = "http://localhost:8080/v1"
+NOTEBOOK_DEFAULT_BASE = "http://localhost:8090/v1"
 OLLAMA_DEFAULT_BASE = "http://localhost:11434"
 OLLAMA_CLOUD_DEFAULT_BASE = "https://ollama.com/v1"
 OPENCODE_ZEN_DEFAULT_BASE = "https://opencode.ai/zen/v1"
@@ -82,6 +83,8 @@ NARAROUTE_DEFAULT_BASE = "https://router.bynara.id/v1"
 POOLSIDE_DEFAULT_BASE = "https://inference.poolside.ai/v1"
 # LLM7.io OpenAI-compatible Chat Completions API.
 LLM7_DEFAULT_BASE = "https://api.llm7.io/v1"
+FREELLMAPI_DEFAULT_BASE = "http://localhost:3001/v1"
+OMNIROUTE_DEFAULT_BASE = "http://localhost:20128/v1"
 # Lightning AI Model APIs OpenAI-compatible Chat Completions gateway.
 LIGHTNING_DEFAULT_BASE = "https://lightning.ai/api/v1"
 # Experiential Labs OpenAI-compatible Chat Completions gateway.
@@ -690,6 +693,42 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_attr="ollama_api_key",
         default_base_url=OLLAMA_CLOUD_DEFAULT_BASE,
         proxy_attr="ollama_cloud_proxy",
+    ),
+    "freellmapi": ProviderDescriptor(
+        provider_id="freellmapi",
+        display_name="FreeLLMAPI (on this PC)",
+        website_url="https://github.com/tashfeenahmed/freellmapi",
+        logo_filename="freellmapi.svg",
+        credential_env="FREELLMAPI_API_KEY",
+        credential_url="http://localhost:3001",
+        credential_attr="freellmapi_api_key",
+        default_base_url=FREELLMAPI_DEFAULT_BASE,
+        base_url_attr="freellmapi_base_url",
+        proxy_attr="freellmapi_proxy",
+    ),
+    "notebook": ProviderDescriptor(
+        provider_id="notebook",
+        display_name="Cloud notebook (Kaggle, Colab)",
+        website_url="https://www.kaggle.com/code",
+        logo_filename="notebook.svg",
+        credential_env="NOTEBOOK_API_KEY",
+        credential_url="https://www.kaggle.com/code",
+        credential_attr="notebook_api_key",
+        default_base_url=NOTEBOOK_DEFAULT_BASE,
+        base_url_attr="notebook_base_url",
+        proxy_attr="notebook_proxy",
+    ),
+    "omniroute": ProviderDescriptor(
+        provider_id="omniroute",
+        display_name="OmniRoute (on this PC)",
+        website_url="https://github.com/cheaper-inference/OmniRoute",
+        logo_filename="omniroute.svg",
+        credential_env="OMNIROUTE_API_KEY",
+        credential_url="http://localhost:20128",
+        credential_attr="omniroute_api_key",
+        default_base_url=OMNIROUTE_DEFAULT_BASE,
+        base_url_attr="omniroute_base_url",
+        proxy_attr="omniroute_proxy",
     ),
     "lmstudio": ProviderDescriptor(
         provider_id="lmstudio",
