@@ -386,7 +386,8 @@ export async function skill(args) {
   const fromPc = async () => {
     if (!state.settings.pc) return "";
     const wanted = {};
-    for (const key of ["action", "query", "name", "repo"]) if (typeof args[key] === "string" && args[key]) wanted[key] = args[key].slice(0, 300);
+    for (const key of ["action", "query", "name", "repo", "file"]) if (typeof args[key] === "string" && args[key]) wanted[key] = args[key].slice(0, 300);
+    if (Number.isInteger(args.line)) wanted.line = args.line;
     try {
       return await pcSkill(wanted);
     } catch {

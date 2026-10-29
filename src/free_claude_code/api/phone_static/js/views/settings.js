@@ -218,7 +218,7 @@ async function exportBackup() {
   for (const agent of state.agents) chats[agent.id] = await chatOf(agent.id);
   const { keys, pc, plugins, ...settings } = state.settings;
   // Plugin keys stay on the phone, like the cloud keys: only their switches go.
-  settings.plugins = Object.fromEntries(Object.entries(plugins || {}).map(([name, saved]) => [name, { on: Boolean(saved.on), hosts: saved.hosts || [] }]));
+  settings.plugins = Object.fromEntries(Object.entries(plugins || {}).map(([name, saved]) => [name, { on: Boolean(saved.on) }]));
   const backup = {
     app: "FCC Phone",
     version: VERSION,
@@ -251,13 +251,23 @@ function importButton() {
       if (!state.agents.some((agent) => agent.id === "jarvis")) state.agents.unshift(newAgent(DEFAULT_TEAM[0]));
       state.memories = (backup.memories || []).map((memory) => ({ ...memory, synced: false }));
       for (const key of ["projects", "rooms", "todos", "studies"]) state[key] = backup[key] || [];
-      // Keys stay as they are on this phone; a backup only carries switches.
+      // A backup only carries switches: each key and the addresses it may be
+      // sent to stay as they are on this phone, so a backup file can never
+      // point a saved key at a new address.
       const kept = state.settings.plugins || {};
       const restored = (backup.settings && backup.settings.plugins) || {};
       const plugins = Object.fromEntries(
-        [...new Set([...Object.keys(kept), ...Object.keys(restored)])].map((name) => [name, { ...(restored[name] || {}), key: (kept[name] || {}).key || "" }])
+        [...new Set([...Object.keys(kept), ...Object.keys(restored)])].map((name) => {
+          const here = kept[name] || {};
+          const on = restored[name] ? Boolean(restored[name].on) : Boolean(here.on);
+          return [name, { on, key: here.key || "", hosts: here.hosts || [] }];
+        })
       );
-      Object.assign(state.settings, backup.settings || {}, { keys: state.settings.keys, pc: state.settings.pc, plugins });
+      // Keys, where they go (the custom AI's address, the PC link) and what
+      // cloud brains may read stay as this phone has them: a backup file can
+      // never send a saved key somewhere new or widen what's shared.
+      const { keys, pc, customBase, cloudSeesPc } = state.settings;
+      Object.assign(state.settings, backup.settings || {}, { keys, pc, customBase, cloudSeesPc, plugins });
       await Promise.all([save.agents(), save.memories(), save.settings(), save.projects(), save.rooms(), save.todos(), save.studies()]);
       for (const [agentId, chat] of Object.entries(backup.chats || {})) {
         state.chats[agentId] = chat;

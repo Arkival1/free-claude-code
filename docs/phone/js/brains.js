@@ -50,7 +50,26 @@ export const chosenBrain = (agent) => (agent.brain && agent.brain !== "default" 
  * brain really used (isPrivate reads this). */
 export const FALLBACK_ORDER = ["local", "gemini", "groq", "openrouter", "custom", "pc"];
 
+// A turn pins its agent's brain at the start (agents.js), like the PC: if
+// that brain goes away mid-turn the turn stops, instead of moving what a
+// private brain read on to a cloud one; memory rules (isPrivate) stay the
+// same for the whole turn too.
+const pins = new Map();
+
+/** Pin the agent's brain for one turn; call what it returns when it ends. */
+export function pinBrain(agent) {
+  const pin = pins.get(agent.id);
+  if (pin) pin.turns += 1;
+  else pins.set(agent.id, { brain: brainOf(agent), turns: 1 });
+  return () => {
+    const held = pins.get(agent.id);
+    if (held && --held.turns <= 0) pins.delete(agent.id);
+  };
+}
+
 export function brainOf(agent) {
+  const pin = pins.get(agent.id);
+  if (pin) return pin.brain;
   const chosen = chosenBrain(agent);
   if (chosen && brainReady(chosen)) return chosen;
   if (state.settings.fallback === false) return chosen;
@@ -63,8 +82,7 @@ export function localModelOf(agent) {
   return engine.modelById(id) || state.models.find((model) => model.ready);
 }
 
-export function modelOf(agent) {
-  const brain = brainOf(agent);
+export function modelOf(agent, brain = brainOf(agent)) {
   if (brain === "local") {
     const model = localModelOf(agent);
     return model ? model.name : "";
@@ -197,10 +215,10 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
     return normalise(message);
   }
   if (!brainReady(brain)) throw new BrainError(`Add your ${PROVIDERS[brain].label} key in More, Settings first.`);
-  let model = modelOf(agent);
+  let model = modelOf(agent, brain);
   if (!model) {
     await listModels(brain);
-    model = modelOf(agent);
+    model = modelOf(agent, brain);
   }
   if (!model) throw new BrainError(`Pick a model for ${PROVIDERS[brain].label} in Settings.`);
   const useTools = tools.length && !state.settings.noTools[`${brain}:${model}`];

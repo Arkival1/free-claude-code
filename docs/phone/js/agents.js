@@ -1,6 +1,6 @@
 // How phone agents think, use tools, and hand work to each other.
 import { state, save, chatOf, changed, feed, agentByName, toolsOf } from "./state.js";
-import { think, brainOf, isPrivate, PROVIDERS, modelOf } from "./brains.js";
+import { think, brainOf, isPrivate, pinBrain, PROVIDERS, modelOf } from "./brains.js";
 import { specsFor, runTool, recall, setHooks, pcMemoryAllowed, canRead } from "./tools.js";
 import { startStudy } from "./learn.js";
 
@@ -126,11 +126,12 @@ export async function markUnanswered(reason = "") {
 /** Answer one message in the agent's chat. */
 export async function answer(agent, text, { project } = {}) {
   setBusy(agent, true);
-  const convo = await history(agent);
-  await addTurn(agent, { role: "user", text });
-  convo.push({ role: "user", content: text });
+  const unpin = pinBrain(agent);
   const ctx = { project: project || null, depth: 0, chain: [agent.id], built: new Set() };
   try {
+    const convo = await history(agent);
+    await addTurn(agent, { role: "user", text });
+    convo.push({ role: "user", content: text });
     const said = await loop(agent, systemPrompt(agent, text, ctx), convo, ctx, {
       maxRounds: agent.role === "builder" ? 30 : 8,
       onTool: (call, result) => {
@@ -145,9 +146,13 @@ export async function answer(agent, text, { project } = {}) {
     await addTurn(agent, { role: "error", text: error.message });
     throw error;
   } finally {
+    unpin();
     setBusy(agent, false);
   }
 }
+
+/** How a job that failed starts its report (Tasks reads it). */
+export const COULDNT_FINISH = "couldn't finish";
 
 /** A job done in the background: the agent works it through and reports. */
 export async function runTask(agent, goal, { project = null, depth = 0, chain = [], by = "you" } = {}) {
@@ -155,10 +160,11 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
   state.jobs.unshift(job);
   state.jobs.length = Math.min(state.jobs.length, 30);
   setBusy(agent, true);
+  const unpin = pinBrain(agent);
   feed(agent.name, `Started: ${goal.slice(0, 100)}`, "start");
-  await addTurn(agent, { role: "task", text: `Job from ${by}: ${goal}` });
   const ctx = { project, depth, chain: [...chain, agent.id], built: new Set() };
   try {
+    await addTurn(agent, { role: "task", text: `Job from ${by}: ${goal}` });
     const result = await loop(agent, systemPrompt(agent, goal, ctx), [{ role: "user", content: goal }], ctx, {
       maxRounds: agent.role === "builder" ? 30 : agent.role === "tester" ? 20 : 10,
       onTool: async (call, output) => {
@@ -182,9 +188,10 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
     job.result = error.message;
     await addTurn(agent, { role: "error", text: error.message });
     feed(agent.name, `Stopped: ${error.message}`, "error");
-    return `${agent.name} couldn't finish: ${error.message}`;
+    return `${agent.name} ${COULDNT_FINISH}: ${error.message}`;
   } finally {
     job.ended_at = Date.now();
+    unpin();
     setBusy(agent, false);
   }
 }

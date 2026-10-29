@@ -4,7 +4,7 @@
 // brains (a model on the phone, or a cloud key); no PC needed.
 import { state, save, changed, feed, jarvis, agentByName } from "./state.js";
 import { think } from "./brains.js";
-import { runTask } from "./agents.js";
+import { runTask, COULDNT_FINISH } from "./agents.js";
 import { findPlugins } from "./plugins.js";
 import { uid } from "./ui.js";
 
@@ -26,8 +26,9 @@ function teamLines() {
   return state.agents.map((agent) => `- ${agent.name} (${agent.role}): ${(agent.tools || []).slice(0, 12).join(", ")}`).join("\n");
 }
 
-/** Read the planner's steps; anything unusable becomes one step for Jarvis. */
-export function parseSteps(text, goal) {
+/** Read the planner's steps; anything unusable becomes one step for Jarvis
+ * (or, with fallback off, no steps at all). */
+export function parseSteps(text, goal, { fallback = true } = {}) {
   const found = String(text || "").match(/\{[\s\S]*\}/);
   let steps = [];
   try {
@@ -50,7 +51,8 @@ export function parseSteps(text, goal) {
         result: "",
       };
     });
-  return clean.length ? clean : [{ id: "s1", agent: jarvis().name, do: goal, plugin: "", status: "waiting", result: "" }];
+  if (clean.length || !fallback) return clean;
+  return [{ id: "s1", agent: jarvis().name, do: goal, plugin: "", status: "waiting", result: "" }];
 }
 
 async function plan(task) {
@@ -94,7 +96,9 @@ async function review(task, done) {
   }
   const text = String(reply.text || "");
   if (!/"steps"\s*:/.test(text)) return;
-  const fresh = parseSteps(text, task.goal).slice(0, room);
+  // No usable steps in the answer: keep the plan (never the whole job again).
+  const fresh = parseSteps(text, task.goal, { fallback: false }).slice(0, room);
+  if (!fresh.length) return;
   const kept = task.steps.filter((step) => step.status !== "waiting");
   task.steps = [...kept, ...fresh.map((step, index) => ({ ...step, id: `s${kept.length + index + 1}` }))];
   task.replanned = (task.replanned || 0) + 1;
@@ -123,7 +127,10 @@ export async function startTask(goal, by = "you") {
 export function resumeTask(id) {
   const task = state.tasks.find((item) => item.id === id);
   if (!task) throw new Error("That job is gone.");
-  if (running.has(task.id)) return task;
+  if (running.has(task.id)) {
+    task.stopping = false; // Run again while a stop waits: keep going.
+    return task;
+  }
   task.status = task.steps.length ? "working" : "planning";
   for (const step of task.steps) if (step.status !== "done") step.status = "waiting";
   work(task);
@@ -170,7 +177,7 @@ async function work(task) {
         .filter(Boolean)
         .join("\n\n");
       const result = await runTask(agent, brief, { by: "Jarvis", chain: [jarvis().id] });
-      const failed = result.startsWith(`${agent.name} couldn't finish`);
+      const failed = result.startsWith(`${agent.name} ${COULDNT_FINISH}`);
       step.status = failed ? "failed" : "done";
       step.result = result.slice(0, STEP_RESULT_CHARS);
       task.updated_at = Date.now();

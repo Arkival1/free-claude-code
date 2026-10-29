@@ -118,13 +118,17 @@ export async function usePlugin(args) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const response = await fetch(address, { headers, signal: controller.signal });
+    // With the key in it, the request never follows a redirect: the listed
+    // host can't pass the key on to an address the user didn't approve.
+    const response = await fetch(address, { headers, signal: controller.signal, redirect: wantsKey ? "error" : "follow" });
     let body = await response.text();
-    // An API that echoes the key back never hands it to the model.
-    if (saved.key) body = body.replaceAll(saved.key, "[key]");
+    // An API that echoes the key back (as sent, URL-encoded or JSON-escaped)
+    // never hands it to the model.
+    if (saved.key) for (const form of new Set([saved.key, encodeURIComponent(saved.key), JSON.stringify(saved.key).slice(1, -1)])) body = body.replaceAll(form, "[key]");
     return `${item.name} answered ${response.status}:\n${body.slice(0, CALL_CHARS)}`;
   } catch (error) {
     if (error.name === "AbortError") throw new Error(`${item.name} took too long to answer.`);
+    if (wantsKey) throw new Error(`${item.name} couldn't be reached from the phone, or it tried to send the call (and the key) to another address, which is never allowed.`);
     throw new Error(`${item.name} couldn't be reached from the phone (it may not allow apps in a browser to call it).`);
   } finally {
     clearTimeout(timer);
