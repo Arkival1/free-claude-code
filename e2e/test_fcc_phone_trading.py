@@ -56,8 +56,10 @@ def test_plugins_and_the_design_templates(page: Page, admin_base_url: str) -> No
     page.on("pageerror", lambda error: errors.append(str(error)))
     pair(page, admin_base_url)
     go(page, "plugins")
-    expect(page.get_by_role("heading", name="How it works")).to_be_visible()
-    expect(page.get_by_role("heading", name="Switched on", exact=False)).to_be_visible()
+    expect(page.get_by_role("heading", name="Plugins on this phone")).to_be_visible()
+    expect(
+        page.get_by_role("heading", name="On my PC: switched on", exact=False)
+    ).to_be_visible()
     expect(page.get_by_label("GitHub repo")).to_be_visible()
     expect(page.get_by_role("heading", name="Subagents", exact=False)).to_be_visible()
     page.get_by_label("Subagent name").fill("Checker")
@@ -68,9 +70,9 @@ def test_plugins_and_the_design_templates(page: Page, admin_base_url: str) -> No
     expect(page.get_by_label("Checker on")).not_to_be_checked()
     no_sideways_scroll(page)
 
-    # With no model on the phone, agents think with the PC: nothing to download.
+    # With no model on the phone and no key, agents think with the PC.
     assert page.evaluate("() => window.fccPhone.brainOf({brain: 'default'})") == "pc"
-    # A saved cloud key is never a stand-in: only agents set to it use it.
+    # A free cloud key comes before the PC: the phone never relies on the PC.
     brains = page.evaluate(
         """() => {
             const phone = window.fccPhone;
@@ -85,7 +87,7 @@ def test_plugins_and_the_design_templates(page: Page, admin_base_url: str) -> No
             return [local, cloud, unpaired];
         }"""
     )
-    assert brains == ["pc", "gemini", "local"]
+    assert brains == ["gemini", "gemini", "gemini"]
 
     files = page.evaluate(
         "() => window.fccPhone.templateFiles('cafe-warm', 'Bean There')"
@@ -149,17 +151,16 @@ def test_every_screen_opens_cleanly_on_an_iphone(
     assert errors == []
 
 
-def test_tasks_start_on_the_pc(page: Page, admin_base_url: str) -> None:
+def test_a_task_can_run_on_the_pc_when_paired(page: Page, admin_base_url: str) -> None:
     errors: list[str] = []
     page.on("pageerror", lambda error: errors.append(str(error)))
-    open_phone(page, admin_base_url, "tasks")
-    expect(page.get_by_role("button", name="Pair with my PC")).to_be_visible()
     pair(page, admin_base_url)
     go(page, "more")
-    page.get_by_role("button", name="Tasks: Give your PC's team a whole job").click()
+    page.get_by_role("button", name="Tasks: Give Jarvis a whole job").click()
     expect(page.get_by_role("heading", name="New task")).to_be_visible()
     page.get_by_role("button", name="Start").click()
     expect(page.get_by_text("Say what the job is first.")).to_be_visible()
+    page.get_by_label("Run it on").select_option("pc")
     page.get_by_label("The job").fill("Research three tradie websites")
     page.get_by_role("button", name="Start").click()
     expect(page.get_by_role("heading", name="Steps")).to_be_visible()

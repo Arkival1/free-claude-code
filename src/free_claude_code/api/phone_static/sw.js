@@ -1,6 +1,6 @@
 /* FCC Phone service worker: the app, and the on-phone engine once fetched,
    open with no connection. AI, weather, and PC calls are never cached. */
-const VERSION = "2.7.0";
+const VERSION = "2.8.0";
 const CACHE = `fcc-phone-${VERSION}`;
 const ENGINE_CACHE = "fcc-phone-engine-3.6.1";
 const SHELL = [
@@ -13,6 +13,10 @@ const SHELL = [
   "icon-512.png",
   "vendor/wllama.min.js",
   "js/app.js",
+  "js/tasks.js",
+  "js/plugins.js",
+  "js/apis.js",
+  "js/skills.js",
   "js/agents.js",
   "js/brains.js",
   "js/engine.js",

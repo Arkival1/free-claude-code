@@ -177,7 +177,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.107.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.108.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -224,9 +224,18 @@ Notes carried over from the long session that built FCC Studio (LCC).
   API works in place"): on the PC, a local agent's turn uses the server model
   while LM Studio is unreachable (`STUDIO_LOCAL_BACKUP`, pinned at turn start
   in `agents.py _private_view`, so the turn is sealed and memory stays on the
-  PC; `effective_model` is unchanged). On the phone, `brainOf` falls back to
-  the PC's FCC model (then a phone model) only, never to a cloud key (owner,
-  6.107: "make it on PC FCC model"); `isPrivate` follows the brain used.
+  PC; `effective_model` is unchanged). On the phone, `brainOf` falls back
+  phone model → cloud key → PC (owner, 6.108: "don't make it rely on my PC";
+  6.107's PC-first order was a misreading); `isPrivate` follows the brain used.
+- FCC Phone works on its own like Manus (6.108): Jarvis plans a job into
+  steps on the phone (`js/tasks.js`), picks plugins and skills, re-plans
+  between steps, and runs his agents on the phone's brains; games go to the
+  Builder then the Tester. FCC's skills ship in the app (`js/skills.js`, built
+  from `studio/builtin_skills` minus the PC-only ones). Phone plugins come from
+  the public-apis catalog (`js/apis.js`; `js/plugins.js`): keys stay on the
+  phone, are filled in only for the hosts the owner lists, never reach a
+  model (`{key}` placeholder, echoes blanked) and never go into backups.
+  Settings has a search bar. PC Tasks, plugins and HQ stay optional extras.
 - FCC Phone Tasks (6.106, `studio/phone_tasks.py`): the phone starts and
   follows PC team plans and opens their files in Projects. From the phone the
   owner may add a GitHub repo, switch repos and subagents on or off, and add

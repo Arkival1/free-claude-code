@@ -44,12 +44,11 @@ export class BrainError extends Error {}
 /** The brain the agent (or the default) is set to. */
 export const chosenBrain = (agent) => (agent.brain && agent.brain !== "default" ? agent.brain : state.settings.brain);
 
-/** If the chosen brain isn't set up (no model on the phone yet), the PC's
- * FCC model stands in, then a model on this phone. A cloud key is only ever
- * used by an agent set to that cloud brain (owner, 6.107), so nothing goes
- * to a cloud service the user didn't pick. Memory rules follow the brain
- * really used (isPrivate reads this). */
-export const FALLBACK_ORDER = ["pc", "local"];
+/** If the chosen brain isn't set up (no model on the phone yet), the next one
+ * that is: a model on this phone, then a cloud API key, and the PC last, so
+ * the phone never relies on the PC (owner, 6.108). Memory rules follow the
+ * brain really used (isPrivate reads this). */
+export const FALLBACK_ORDER = ["local", "gemini", "groq", "openrouter", "custom", "pc"];
 
 export function brainOf(agent) {
   const chosen = chosenBrain(agent);

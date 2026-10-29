@@ -84,7 +84,7 @@ async function render() {
     settings: () => settings.render(view),
     help: () => more.renderHelp(view),
     trade: () => trade.render(view),
-    plugins: () => plugins.render(view),
+    plugins: () => plugins.render(view, param),
     tasks: () => tasks.render(view, param),
     hq: () => hq.render(view),
   };

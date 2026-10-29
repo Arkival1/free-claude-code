@@ -2741,7 +2741,33 @@ account, and costs nothing.
   switch** (closing every position too needs you to type CLOSE EVERYTHING).
   Real money is switched on, and real-money orders approved, on the PC only;
   account numbers and keys never reach the phone.
-- **Tasks (paired), like Manus**: type a whole job ("make a website for my
+- **Works on its own, like Manus (no PC needed)**: talk to Jarvis (type or
+  🎤) and give him a whole job: a game, a website, research, a plan. He plans
+  it into steps on **Tasks**, gives each to the agent that fits, picks the
+  plugin and skill each step needs, checks after every step and changes the
+  rest of the plan when what was found calls for it, while you watch each step
+  (✓ done, ● working). A game goes to the Builder (it reads the game-design
+  skill and builds from the game template) and then the Tester plays it. It
+  runs on the phone's own brains: a model on the phone, or a free cloud key
+  (much better for long jobs: phone models are small). Stop and Run again
+  work, and a job cut short when the app closes can be run again.
+- **Skills on the phone**: 28 of FCC's own skills ship inside the app (game
+  design with its eight specialist guides, web design engineer, frontend
+  design and the style skills, app developer, debugging, code review, testing,
+  security and more), read by Jarvis, the Builder, Researcher, Helper and
+  Tester with the `skill` tool only when a job needs one; paired, the PC's
+  plugins' skills join them.
+- **Plugins on the phone**: a catalog of 1,557 free APIs (from public-apis,
+  MIT, shipped with FCC), each with what it does, whether it needs a key, and
+  its docs link. Search it, switch one on, and add its key if it needs one:
+  the key stays on the phone, is sent only to the API addresses you list, is
+  never shown to the AI (agents write `{key}` where it goes; an API that
+  echoes it back has it blanked), and never goes into a backup. Jarvis, the
+  Researcher and the Builder find the best plugin for a job and call it
+  (`use_plugin`).
+- **Search in Settings**: one box finds every screen and setting, where to
+  get free cloud keys, and the plugins that fit, with their links.
+- **Tasks (paired) on your PC**: type a whole job ("make a website for my
   electrician business with a quote form, then check it on a phone"). Your
   PC's team plans it into steps and does them one by one with all its tools,
   plugins, subagents and repo agents, while the phone shows each step live
@@ -2762,10 +2788,10 @@ account, and costs nothing.
   or off, and add or switch off subagents (name and role). They all run on
   the PC. The Builder and Jarvis read a plugin's skills with the `skill` tool
   only when a job needs one.
-- **No download needed**: when an agent's brain isn't set up (no model on the
-  phone yet), it thinks with your PC's FCC model instead (Settings, on by
-  default). A cloud key is only used by agents you set to that cloud brain,
-  never as a stand-in. Memory rules follow the brain really used.
+- **No download needed, no PC needed**: when an agent's brain isn't set up
+  (no model on the phone yet), it uses the next one that is: a model on the
+  phone, then a free cloud key, and your PC last if it's paired (Settings, on
+  by default). Memory rules follow the brain really used.
 - **FCC's designs on the phone**: the Builder can also start a site from
   FCC's 8 designs (studio minimal, bold brutalist, soft SaaS, warm cafe,
   boutique shop, trade business, game launch, creator links), the same as

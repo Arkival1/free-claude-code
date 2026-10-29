@@ -5,6 +5,22 @@ import { PROVIDERS, CLOUD, listModels, brainReady, think } from "../brains.js";
 import { pair, unpair, sync } from "../sync.js";
 import * as engine from "../engine.js";
 import { store } from "../store.js";
+import { findPlugins } from "../plugins.js";
+import { ITEMS } from "./more.js";
+
+// What the search bar finds besides plugins: every screen and setting.
+const FEATURES = [
+  ...ITEMS.map(([route, , title, sub]) => [title, sub, route]),
+  ["Home", "Jarvis's command center: talk, quick commands, agents at work", "home"],
+  ["Chats", "Talk to any agent", "chats"],
+  ["Agents", "The team: each agent's brain, tools and instructions", "agents"],
+  ["Models", "AI models on this phone: download, load, test speed", "models"],
+  ["Brain", "Which AI every agent thinks with by default", "settings"],
+  ["Free cloud keys", "Gemini, Groq, OpenRouter or any OpenAI-style service", "settings"],
+  ["Connect to my PC", "Pair with FCC Studio on your PC (optional)", "settings"],
+  ["Voice", "Jarvis speaks his replies", "settings"],
+  ["Backup", "Save or restore everything on this phone", "settings"],
+];
 
 export function render(view) {
   const settings = state.settings;
@@ -28,6 +44,7 @@ export function render(view) {
     if (estimate) usage.textContent = `Storage used by FCC Phone: ${bytes(estimate.usage)} of ${bytes(estimate.quota)} allowed.`;
   });
   view.replaceChildren(
+    searchCard(),
     card("Brain", [
       el("label", {}, ["Agents think with", brains]),
       el("p", { class: "muted", text: "On this phone: a model from Models, free and private. Cloud: paste a free key below. My PC: once paired. Each agent can also have its own brain (Agents, Team brains)." }),
@@ -37,7 +54,7 @@ export function render(view) {
           await save.settings();
           changed("settings");
         } }),
-        el("span", { text: "If an agent's brain isn't set up (no model on this phone yet), it thinks with your PC's FCC model instead. No download needed. Cloud keys are only used by agents you set to them." }),
+        el("span", { text: "If an agent's brain isn't set up (no model on this phone yet), use the next one that is: a model on this phone, then a free cloud key, then your PC if it's paired. Works without the PC." }),
       ]),
       button("Test the brain", async () => {
         notify("Asking…");
@@ -171,10 +188,37 @@ function pcCard() {
   ]);
 }
 
+function searchCard() {
+  const box = el("input", { type: "search", "aria-label": "Search FCC", placeholder: "Search features, settings, APIs and plugins" });
+  const results = el("div", { class: "search-results" });
+  const row = (title, sub, action, label) =>
+    el("button", { class: "item as-button", type: "button", onclick: action, "aria-label": label || title }, [
+      el("div", { class: "grow" }, [el("strong", { text: title }), el("small", { text: sub })]),
+    ]);
+  const link = (title, sub, href) =>
+    el("a", { class: "item", href, target: "_blank", rel: "noopener noreferrer" }, [el("div", { class: "grow" }, [el("strong", { text: title }), el("small", { text: sub })])]);
+  box.addEventListener("input", () => {
+    const query = box.value.trim().toLowerCase();
+    if (!query) return results.replaceChildren();
+    const features = FEATURES.filter(([title, sub]) => `${title} ${sub}`.toLowerCase().includes(query)).slice(0, 6);
+    const keys = Object.values(PROVIDERS).filter((item) => item.keyUrl && `${item.label} ${item.note} key api`.toLowerCase().includes(query));
+    const plugins = findPlugins(query, 6);
+    results.replaceChildren(
+      ...features.map(([title, sub, route]) => row(title, sub, () => go(route))),
+      ...keys.map((item) => link(`Get a free ${item.label} key`, item.note, item.keyUrl)),
+      ...plugins.map((item) => row(`Plugin: ${item.name}`, `${item.about} · ${item.needsKey ? "needs a key" : "no key"} · ${item.on ? "on" : "off"}`, () => go(`plugins/${encodeURIComponent(item.name)}`), `Plugin ${item.name}`)),
+      ...(features.length || keys.length || plugins.length ? [] : [el("p", { class: "empty", text: "Nothing found. Try other words." })])
+    );
+  });
+  return card("Search", [box, results]);
+}
+
 async function exportBackup() {
   const chats = {};
   for (const agent of state.agents) chats[agent.id] = await chatOf(agent.id);
-  const { keys, pc, ...settings } = state.settings;
+  const { keys, pc, plugins, ...settings } = state.settings;
+  // Plugin keys stay on the phone, like the cloud keys: only their switches go.
+  settings.plugins = Object.fromEntries(Object.entries(plugins || {}).map(([name, saved]) => [name, { on: Boolean(saved.on), hosts: saved.hosts || [] }]));
   const backup = {
     app: "FCC Phone",
     version: VERSION,
@@ -207,7 +251,13 @@ function importButton() {
       if (!state.agents.some((agent) => agent.id === "jarvis")) state.agents.unshift(newAgent(DEFAULT_TEAM[0]));
       state.memories = (backup.memories || []).map((memory) => ({ ...memory, synced: false }));
       for (const key of ["projects", "rooms", "todos", "studies"]) state[key] = backup[key] || [];
-      Object.assign(state.settings, backup.settings || {}, { keys: state.settings.keys, pc: state.settings.pc });
+      // Keys stay as they are on this phone; a backup only carries switches.
+      const kept = state.settings.plugins || {};
+      const restored = (backup.settings && backup.settings.plugins) || {};
+      const plugins = Object.fromEntries(
+        [...new Set([...Object.keys(kept), ...Object.keys(restored)])].map((name) => [name, { ...(restored[name] || {}), key: (kept[name] || {}).key || "" }])
+      );
+      Object.assign(state.settings, backup.settings || {}, { keys: state.settings.keys, pc: state.settings.pc, plugins });
       await Promise.all([save.agents(), save.memories(), save.settings(), save.projects(), save.rooms(), save.todos(), save.studies()]);
       for (const [agentId, chat] of Object.entries(backup.chats || {})) {
         state.chats[agentId] = chat;

@@ -1234,3 +1234,12 @@ pre.notes {
     box-shadow: 0 0 2px var(--good);
   }
 }
+
+.search-results:empty {
+  display: none;
+}
+
+.search-results .item {
+  text-decoration: none;
+  color: inherit;
+}

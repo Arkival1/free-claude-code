@@ -7,6 +7,8 @@ import * as projects from "./projects.js";
 import { PICTURE_SUFFIXES, polishNotes } from "./polish.js";
 import { lookAtSite, describeLook } from "./inspect.js";
 import { TEMPLATES, templateFiles } from "./templates.js";
+import { usePlugin } from "./plugins.js";
+import { SKILLS } from "./skills.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
 const hooks = { delegate: null, learn: null, teamStatus: null };
@@ -44,6 +46,24 @@ export const SPECS = {
     description: "Search the web (through the user's PC) and get titles, links, and snippets.",
     parameters: { type: "object", properties: { query: text("What to search for.") }, required: ["query"] },
   },
+  use_plugin: {
+    description: "Free APIs (plugins) the phone can call itself, from a catalog of over 1,500: action find with need returns the plugins that fit best, with whether each is switched on and needs a key; pick the best one, read its docs with read_page, then action call with plugin and the https:// url to call (write {key} where its API key goes; FCC fills it in). Only switched-on plugins can be called.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["find", "call"] },
+        need: text("find: what you need, e.g. 'live AFL scores' or 'currency rates'."),
+        plugin: text("call: the plugin's name, as find showed it."),
+        url: text("call: the full https:// address, with {key} where the key goes."),
+        headers: { type: "object", description: "call: extra headers, e.g. {\"X-Api-Key\": \"{key}\"}." },
+      },
+      required: ["action"],
+    },
+  },
+  start_task: {
+    description: "Start a big job on this phone, like Manus: you (Jarvis) plan it into steps, each agent does its part with its tools and the plugin you pick for it, and the user follows it on Tasks. Use it when a job has several parts; give the whole job in the user's words.",
+    parameters: { type: "object", properties: { goal: text("The whole job.") }, required: ["goal"] },
+  },
   pc_task: {
     description: "Hand a whole job to the user's PC team (needs the PC link), like Manus: action start with goal plans it into steps that the PC's agents do with all their tools, plugins and subagents (websites, apps, games, research, files); action status with id says how far it is. The user follows it live on Tasks. Use it for big jobs; answer small questions yourself.",
     parameters: {
@@ -57,14 +77,15 @@ export const SPECS = {
     },
   },
   skill: {
-    description: "Skills from the plugins switched on on the user's PC (needs the PC link): action search with a query finds the right skill, read with its name gives the full instructions, list shows them. Read one only when the job needs it, then follow it.",
+    description: "FCC's skills, on this phone: step-by-step know-how for game design, web design and engineering, apps, debugging, testing, security and more (plus your PC's plugins' skills when paired). action search with a query finds the right one, read with its name (and file for a skill's extra guide) gives the full instructions, list shows them all. Read one only when the job needs it, then follow it.",
     parameters: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["search", "list", "read"] },
-        query: text("search: what you need, e.g. 'game level design'."),
+        query: text("search: what you need, e.g. 'game level design' or 'landing page look'."),
         name: text("read: the skill's name."),
-        repo: text("list or read: one repo."),
+        file: text("read: one of the skill's extra guides, e.g. reference/level-designer.md."),
+        repo: text("On the PC: one repo."),
       },
       required: ["action"],
     },
@@ -196,6 +217,13 @@ export async function runTool(agent, call, ctx) {
         const results = await pcSearch(String(args.query || ""));
         return results.length ? results.map((hit, i) => `${i + 1}. ${hit.title}\n   ${hit.url}\n   ${hit.snippet || ""}`).join("\n") : "No results.";
       }
+      case "use_plugin":
+        return await usePlugin(args);
+      case "start_task": {
+        const { startTask } = await import("./tasks.js");
+        const task = await startTask(String(args.goal || ""), agent.name);
+        return `Started the job on this phone (${task.id}): planning the steps now. The user can follow it on More, Tasks.`;
+      }
       case "pc_task": {
         if (args.action === "status") {
           const job = await pcCall(`/studio/api/phone/tasks/${encodeURIComponent(String(args.id || ""))}`, undefined, "GET", 30000);
@@ -204,11 +232,8 @@ export async function runTool(agent, call, ctx) {
         const job = await pcCall("/studio/api/phone/tasks", { goal: String(args.goal || "").slice(0, 4000) });
         return `Started on the PC (job ${job.id}): ${job.steps.length ? `${job.steps.length} steps` : "planning the steps"}. The user can follow it on More, Tasks.`;
       }
-      case "skill": {
-        const wanted = {};
-        for (const key of ["action", "query", "name", "repo"]) if (typeof args[key] === "string" && args[key]) wanted[key] = args[key].slice(0, 300);
-        return (await pcSkill(wanted)) || "Nothing found.";
-      }
+      case "skill":
+        return await skill(args);
       case "todo":
         return await todo(agent, args);
       case "start_project": {
@@ -351,6 +376,55 @@ async function needProject(agent, ctx) {
 
 /** Save a fact. Jarvis keeps his to himself unless he shares it; every other
  * agent's go where the whole team reads them. */
+// ------------------------------------------------------------------- skills
+
+const SKILL_CHARS = 14000;
+
+/** FCC's skills, bundled into the app; the PC's plugins' skills when paired. */
+export async function skill(args) {
+  const action = String(args.action || "list");
+  const fromPc = async () => {
+    if (!state.settings.pc) return "";
+    const wanted = {};
+    for (const key of ["action", "query", "name", "repo"]) if (typeof args[key] === "string" && args[key]) wanted[key] = args[key].slice(0, 300);
+    try {
+      return await pcSkill(wanted);
+    } catch {
+      return "";
+    }
+  };
+  if (action === "read") {
+    const wanted = String(args.name || "").trim().toLowerCase();
+    const name = Object.keys(SKILLS).find((key) => key === wanted) || Object.keys(SKILLS).find((key) => wanted && key.includes(wanted));
+    if (name) {
+      const found = SKILLS[name];
+      const file = String(args.file || "").trim();
+      if (file) {
+        const text = found.files[file] || found.files[`reference/${file.replace(/^reference\//, "")}`];
+        if (!text) return `${name} has no file ${file}. Its files: ${Object.keys(found.files).join(", ") || "none"}.`;
+        return `${name}/${file}:\n${text.slice(0, SKILL_CHARS)}`;
+      }
+      const extra = Object.keys(found.files).length ? `\n\n[Extra guides, read with file: ${Object.keys(found.files).join(", ")}]` : "";
+      const cut = found.text.length > SKILL_CHARS ? `\n\n[Cut at ${SKILL_CHARS.toLocaleString()} of ${found.text.length.toLocaleString()} characters.]` : "";
+      return `Skill ${name}:\n${found.text.slice(0, SKILL_CHARS)}${cut}${extra}`;
+    }
+    return (await fromPc()) || `No skill is called ${args.name}. Use action search or list.`;
+  }
+  if (action === "search") {
+    const wanted = words(String(args.query || args.name || ""));
+    if (!wanted.length) throw new Error("search needs a query, like 'game levels'.");
+    const scored = Object.entries(SKILLS)
+      .map(([name, found]) => [wanted.reduce((sum, word) => sum + (name.includes(word) ? 3 : 0) + (found.about.toLowerCase().includes(word) ? 1 : 0), 0), name, found])
+      .filter(([score]) => score > 0)
+      .sort((a, b) => b[0] - a[0])
+      .slice(0, 8);
+    const here = scored.length ? `Skills on this phone (read one with action read and its name):\n${scored.map(([, name, found]) => `- ${name}: ${found.about.slice(0, 200)}`).join("\n")}` : "";
+    const pc = await fromPc();
+    return [here, pc ? `On your PC:\n${pc}` : ""].filter(Boolean).join("\n\n") || "No skill matches that.";
+  }
+  return `Skills on this phone:\n${Object.entries(SKILLS).map(([name, found]) => `- ${name}: ${found.about.slice(0, 120)}`).join("\n")}${state.settings.pc ? "\n(Your PC's plugins have more: use action search.)" : ""}`;
+}
+
 export async function remember(agent, raw, { share = false } = {}) {
   const clean = raw.trim();
   if (!clean) return "Nothing to remember.";
