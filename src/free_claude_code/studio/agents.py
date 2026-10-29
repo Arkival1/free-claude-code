@@ -876,6 +876,7 @@ class AgentRunner:
         temperature: float = 0.2,
         sealed: Callable[[Agent], Awaitable[bool]] | None = None,
         pin_model: Callable[[str], Awaitable[str | None]] | None = None,
+        private_memory: bool = True,
         local_control: bool = False,
         main_own_memory: bool = False,
         learned: Callable[[str, ToolCall], Awaitable[None]] | None = None,
@@ -897,6 +898,7 @@ class AgentRunner:
         # Says which agents think on a server, and so must not see memory.
         self._sealed = sealed
         self._pin_model = pin_model
+        self._private_memory = private_memory
         self._router = router
         self._toolbox = toolbox
         self._memory = memory
@@ -1581,12 +1583,16 @@ class AgentRunner:
                     continue
                 logger.warning("Studio agent call failed: {}", error)
                 # A turn that may hold the user's memory never moves to a
-                # server model halfway: only a sealed turn, or a model on
-                # this PC, takes over.
+                # server model halfway: only a sealed turn, a model on this
+                # PC, or any model when memory isn't kept private, takes over.
                 if (
                     fallback_model
                     and fallback_model != model
-                    and (sealed or self._local_model(fallback_model))
+                    and (
+                        sealed
+                        or not self._private_memory
+                        or self._local_model(fallback_model)
+                    )
                 ):
                     # The job still gets done: on the model that just worked
                     # for the main AI, with a note saying so.

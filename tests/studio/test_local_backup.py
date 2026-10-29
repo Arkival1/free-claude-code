@@ -5,6 +5,7 @@ memory never reaches the server (owner, 6.106)."""
 import pytest
 
 from free_claude_code.studio.llm import LLMReply, StudioLLMError
+from free_claude_code.studio.models import PhoneLink
 
 from .conftest import ScriptedLLM, tool_reply
 from .test_private_memory import everything_sent, is_sealed, team
@@ -130,4 +131,62 @@ async def test_a_failing_pc_model_never_hands_memory_to_a_server_model(
     assert len(local_calls) >= 2, "the PC model recalled, then failed"
     to_server = [c for c in model.calls if "test-model" in str(c["model"])]
     assert all("Biscuit" not in everything_sent(c) for c in to_server)
+    await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_the_phone_is_told_the_pc_brain_isnt_private_while_lm_studio_is_off(
+    make_studio, monkeypatch
+):
+    studio, _, _ = await team(
+        make_studio,
+        **{"STUDIO_LOCAL_BACKUP": True, "NVIDIA_NIM_API_KEY": "test-only-key"},
+    )
+    status = dict(ON)
+
+    async def local_status():
+        return status
+
+    monkeypatch.setattr(studio, "_local_status", local_status)
+    link = PhoneLink(name="iPhone", token_hash="x")
+    assert (await studio.phone_hello(link))["private"] is True
+    status.update(OFF)
+    hello = await studio.phone_hello(link)
+    assert hello["private"] is False and "test-model" in str(hello["model"])
+    assert await studio.is_private_from(await studio.main_agent())
+    await studio.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_without_private_memory_a_failing_model_still_hands_over(
+    make_studio, monkeypatch
+):
+    """Nothing is private then, so the main AI's model may finish the job."""
+    holder: list[ScriptedLLM] = []
+
+    def answer(system: str, prompt: str):
+        if "qwen2.5-coder-7b" in str(holder[0].calls[-1]["model"]):
+            raise StudioLLMError("LM Studio crashed")
+        return tool_reply("finish", {"summary": "Finished on the server."})
+
+    studio, model, agents = await team(
+        make_studio,
+        answer,
+        STUDIO_MAIN_AGENT_MODEL="nvidia_nim/test-model",
+        STUDIO_PRIVATE_MEMORY=False,
+    )
+    holder.append(model)
+
+    async def local_status():
+        return ON
+
+    monkeypatch.setattr(studio, "_local_status", local_status)
+    (builder,) = await studio.assign_models(
+        {agents["Builder"].id: "local/qwen2.5-coder-7b"}
+    )
+    run, _ = await studio.run_agent_task(
+        builder, "Write the tagline.", site_id=None, parent_chat_id=None
+    )
+    assert run.status == "succeeded", run.error
+    assert any("test-model" in str(c["model"]) for c in model.calls)
     await studio.shutdown()

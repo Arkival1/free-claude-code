@@ -1939,6 +1939,7 @@ class StudioService:
             notes=self._notes_keeper,
             sealed=self.is_private_from,
             pin_model=self._local_backup,
+            private_memory=self.settings.studio_private_memory,
             local_control=self.settings.studio_local_control,
             main_own_memory=self.settings.studio_main_own_memory,
             learned=self._learn_call if self.settings.studio_jarvis_playbook else None,
@@ -7156,14 +7157,18 @@ class StudioService:
     async def phone_hello(self, link: PhoneLink) -> JsonObject:
         """Who this PC is, and whether its main AI thinks on this PC."""
         main = await self.main_agent()
-        model = await self.effective_model(main.model or self.default_model)
+        own = main.model or self.default_model
+        model = await self.effective_model(own)
+        # While LM Studio is off the main AI thinks on the server model, so
+        # it isn't private then (the phone re-reads this at every sync).
+        backup = await self._local_backup(own)
         return {
             "pc": socket.gethostname(),
             "version": package_version(),
             "main": main.name,
-            "model": model,
+            "model": backup or model,
             # Memory from the PC may only go to a brain that runs on the PC.
-            "private": self.runs_on_this_pc(model),
+            "private": self.runs_on_this_pc(model) and not backup,
             "phone": link.name,
         }
 
