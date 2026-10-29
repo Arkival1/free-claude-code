@@ -1457,6 +1457,13 @@ hand parts to. Each agent asks for a light, everyday or strong model; FCC gives
 it the **Light Model** or **Strong Model** (Settings, Studio) or the default, so
 simple jobs don't spend a strong model's tokens.
 
+**When LM Studio is off.** Agents set to a model on this PC think with the
+server model instead (your NVIDIA key) while LM Studio or the PC's other model
+runtime isn't running, so jobs still get done (Settings, Studio: **Server
+Model When Local Models Are Off**, on by default). The switch is made at the
+start of each turn and that turn is sealed like any server agent's, so memory
+stays on the PC; a turn already running on the PC is never moved halfway.
+
 **Coding skills for every agent.** FCC's own skills now include nine
 coding skills the agents read when a job needs one (skill tool, by name):
 test-driven-development, incremental-implementation, api-and-interface-design,
@@ -2734,9 +2741,25 @@ account, and costs nothing.
   switch** (closing every position too needs you to type CLOSE EVERYTHING).
   Real money is switched on, and real-money orders approved, on the PC only;
   account numbers and keys never reach the phone.
-- **Plugins (paired)**: the repos switched on on your PC. The Builder and
-  Jarvis get the `skill` tool and read one of those skills only when a job
-  needs it (game-design for games, frontend-design for a site's look).
+- **Tasks (paired), like Manus**: type a whole job ("make a website for my
+  electrician business with a quote form, then check it on a phone"). Your
+  PC's team plans it into steps and does them one by one with all its tools,
+  plugins, subagents and repo agents, while the phone shows each step live
+  (✓ done, ● working) with what each agent found. **Stop** and **Run again**
+  work from the phone, the job keeps going if you leave the screen, and
+  **Open the files on this phone** brings what it made (pages, code, small
+  pictures) into Projects to preview. Jarvis can start one too: say "have my
+  PC build ..." (his `pc_task` tool).
+- **Plugins and subagents (paired)**: add a plugin from a GitHub link (your
+  PC downloads it, keeps a copy, and reads its skills and agents; its MCP
+  servers stay off until you switch them on on the PC), switch any repo on
+  or off, and add or switch off subagents (name and role). They all run on
+  the PC. The Builder and Jarvis read a plugin's skills with the `skill` tool
+  only when a job needs one.
+- **No download needed**: when an agent's brain isn't set up (no model on the
+  phone yet), it uses the next one that is: this phone, then your PC, then a
+  cloud key (Settings, on by default). Memory rules follow the brain really
+  used.
 - **FCC's designs on the phone**: the Builder can also start a site from
   FCC's 8 designs (studio minimal, bold brutalist, soft SaaS, warm cafe,
   boutique shop, trade business, game launch, creator links), the same as

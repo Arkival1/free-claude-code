@@ -31,6 +31,14 @@ export function render(view) {
     card("Brain", [
       el("label", {}, ["Agents think with", brains]),
       el("p", { class: "muted", text: "On this phone: a model from Models, free and private. Cloud: paste a free key below. My PC: once paired. Each agent can also have its own brain (Agents, Team brains)." }),
+      el("label", { class: "check" }, [
+        el("input", { type: "checkbox", checked: settings.fallback !== false, "aria-label": "Use the next brain that is set up", onchange: async (event) => {
+          settings.fallback = event.target.checked;
+          await save.settings();
+          changed("settings");
+        } }),
+        el("span", { text: "If an agent's brain isn't set up (no model on this phone yet), use the next one that is: this phone, then your PC, then a cloud key. No download needed." }),
+      ]),
       button("Test the brain", async () => {
         notify("Asking…");
         try {

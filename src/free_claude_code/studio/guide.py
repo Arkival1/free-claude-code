@@ -1132,7 +1132,13 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
             "and the kill switch; real money stays on this PC) and Plugins "
             "(the repos switched on here, whose skills the phone's Builder and "
             "Jarvis read with the skill tool). The phone Builder also starts "
-            "sites from FCC's 8 designs."
+            "sites from FCC's 8 designs. Tasks on the phone hand a whole job "
+            "to this PC's team, like Manus: it plans the steps, the agents do "
+            "them with every tool, plugin and subagent, the phone shows each "
+            "step live, and the files it made open in the phone's Projects. "
+            "Plugins and subagents can be added and switched on or off from "
+            "the phone too (MCP servers stay off until switched on here). With "
+            "no model on the phone, its agents think with this PC instead."
         ),
         asks=("Who can see my memory?", "How do I install Studio on my iPhone?"),
     ),

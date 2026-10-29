@@ -177,7 +177,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.105.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.106.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -220,6 +220,16 @@ Notes carried over from the long session that built FCC Studio (LCC).
   practice, stop, use the kill switch (closing everything needs the typed
   phrase), deny any waiting order and approve practice orders only. Real
   money, real-money approvals, keys, accounts and settings stay on the PC.
+- Model fallback (owner, 6.106: "local models, and if they're not there the
+  API works in place"): on the PC, a local agent's turn uses the server model
+  while LM Studio is unreachable (`STUDIO_LOCAL_BACKUP`, pinned at turn start
+  in `agents.py _private_view`, so the turn is sealed and memory stays on the
+  PC; `effective_model` is unchanged). On the phone, `brainOf` falls back
+  phone model → PC → cloud key, and `isPrivate` follows the brain used.
+- FCC Phone Tasks (6.106, `studio/phone_tasks.py`): the phone starts and
+  follows PC team plans and opens their files in Projects. From the phone the
+  owner may add a GitHub repo, switch repos and subagents on or off, and add
+  subagents; MCP servers stay off (switched on only on the PC).
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

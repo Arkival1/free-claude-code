@@ -3,9 +3,10 @@ import { state } from "../state.js";
 import { el, card, go } from "../ui.js";
 
 const ITEMS = [
+  ["tasks", "▶", "Tasks", "Give your PC's team a whole job and watch it work"],
   ["projects", "⚒", "Projects", "Websites and apps the Builder makes"],
   ["trade", "₿", "Trading", "Your PC's Trading Bank: watch, approve, stop"],
-  ["plugins", "⧉", "Plugins", "Skills and plugins from your PC"],
+  ["plugins", "⧉", "Plugins and subagents", "Add, switch on and off: they run on your PC"],
   ["rooms", "◎", "Agent rooms", "Several agents in one conversation"],
   ["learn", "◈", "Learn", "Have Jarvis study a subject"],
   ["todos", "✓", "To-dos and reminders", "Your list, kept by Jarvis"],

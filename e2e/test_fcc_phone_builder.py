@@ -311,7 +311,7 @@ def test_older_phone_agents_get_the_new_tools_once(
     assert "list_photos" in upgraded["instructions"]
     assert "cafe-warm" in upgraded["instructions"]
     assert "skill tool" in upgraded["instructions"]
-    assert upgraded["toolsVersion"] == 4
+    assert upgraded["toolsVersion"] == 5
 
     # A tool the user turned off afterwards stays off; an edited prompt stays.
     again = page.evaluate(
@@ -327,7 +327,7 @@ def test_older_phone_agents_get_the_new_tools_once(
             tools: ['write_file'], toolsVersion: 3})"""
     )
     assert plugins["tools"] == ["write_file", "skill"]
-    assert plugins["instructions"] == "Mine" and plugins["toolsVersion"] == 4
+    assert plugins["instructions"] == "Mine" and plugins["toolsVersion"] == 5
     builder = page.evaluate(
         "() => window.fccPhone.state.agents.find((a) => a.id === 'builder')"
     )

@@ -875,6 +875,7 @@ class AgentRunner:
         live: MutableMapping[str, str] | None = None,
         temperature: float = 0.2,
         sealed: Callable[[Agent], Awaitable[bool]] | None = None,
+        pin_model: Callable[[str], Awaitable[str | None]] | None = None,
         local_control: bool = False,
         main_own_memory: bool = False,
         learned: Callable[[str, ToolCall], Awaitable[None]] | None = None,
@@ -895,6 +896,7 @@ class AgentRunner:
         self._main_own_memory = main_own_memory
         # Says which agents think on a server, and so must not see memory.
         self._sealed = sealed
+        self._pin_model = pin_model
         self._router = router
         self._toolbox = toolbox
         self._memory = memory
@@ -922,6 +924,13 @@ class AgentRunner:
         )
         if granted != agent.tools:
             agent = agent.model_copy(update={"tools": granted})
+        if self._pin_model is not None:
+            # The PC's own models are off: this whole turn uses the server
+            # model, and is sealed below as any server agent is.
+            own = agent.model or self._default_model
+            pinned = await self._pin_model(own)
+            if pinned and pinned != own:
+                agent = agent.model_copy(update={"model": pinned})
         sealed = self._sealed is not None and await self._sealed(agent)
         if sealed:
             # The user's memory is out of reach; its own area stays in reach.

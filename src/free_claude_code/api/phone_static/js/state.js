@@ -1,7 +1,7 @@
 // Everything the app knows, loaded from the phone and saved back as it changes.
 import { store } from "./store.js";
 
-export const VERSION = "2.5.0";
+export const VERSION = "2.6.0";
 
 export const PHONE_TOOLS = {
   remember: "Memory",
@@ -29,11 +29,12 @@ export const PHONE_TOOLS = {
   team_status: "Team",
   learn: "Memory",
   skill: "Plugins",
+  pc_task: "Team",
 };
 export const ALL_TOOLS = Object.keys(PHONE_TOOLS);
 export const MAIN_ONLY = new Set(["team_status"]);
 /** Tools that work only while the phone is paired with the PC. */
-export const PC_ONLY = new Set(["web_search", "skill"]);
+export const PC_ONLY = new Set(["web_search", "skill", "pc_task"]);
 /** Tools that read the user's memory, kept from cloud brains on the phone too. */
 export const MEMORY_TOOLS = new Set(["recall", "learn"]);
 
@@ -41,7 +42,7 @@ const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_fi
 const DESIGN = ["find_images", "polish_check", "look_at_site"];
 const PHOTOS = ["list_photos", "use_photo"];
 export const ROLE_TOOLS = {
-  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill"],
+  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task"],
   builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill"],
   researcher: ["wikipedia", "read_page", "web_search", "remember", "recall", "calculate"],
   helper: ["remember", "recall", "calculate", "todo", "weather", "wikipedia"],
@@ -84,8 +85,9 @@ const TOOLS_ADDED = {
   2: { builder: ["restore_file", ...DESIGN], tester: ["look_at_site", "polish_check", "restore_file"] },
   3: { builder: PHOTOS, main: ["list_photos"] },
   4: { builder: ["skill"], main: ["skill"] },
+  5: { main: ["pc_task"] },
 };
-const TOOLS_VERSION = 4;
+const TOOLS_VERSION = 5;
 
 export const DEFAULT_TEAM = [
   { id: "jarvis", name: "Jarvis", role: "main" },
@@ -118,6 +120,7 @@ export const defaultSettings = () => ({
   pc: null,
   cloudSeesPc: false,
   speak: false,
+  fallback: true,
   engine: { context: 4096, gpu: true },
 });
 

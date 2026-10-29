@@ -891,6 +891,9 @@ class Settings(BaseModel):
     studio_private_memory: bool = Field(
         default=True, validation_alias="STUDIO_PRIVATE_MEMORY"
     )
+    studio_local_backup: bool = Field(
+        default=True, validation_alias="STUDIO_LOCAL_BACKUP"
+    )
     studio_all_tools: bool = Field(default=True, validation_alias="STUDIO_ALL_TOOLS")
     studio_mcp_server: bool = Field(default=True, validation_alias="STUDIO_MCP_SERVER")
     studio_local_control: bool = Field(

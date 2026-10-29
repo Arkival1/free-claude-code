@@ -36,7 +36,7 @@ from free_claude_code.config.settings import Settings
 from free_claude_code.core.json_types import JsonObject, JsonValue
 from free_claude_code.core.version import package_version
 
-from . import reference_look, system_monitor
+from . import phone_tasks, reference_look, system_monitor
 from .agents import (
     SEALED_TOOLS,
     AgentRunner,
@@ -346,7 +346,7 @@ from .search import SearchBudget, SearchError, StudioSearch
 from .sites import SiteError, SiteWorkspace, content_type_for, slugify
 from .starter import StarterRepo, bundled_bytes, load_starters
 from .store import StudioNotFoundError, StudioStore
-from .subagents import SUBAGENT_ROLES, helper_goal, pick, when
+from .subagents import HELPER_ROLES, SUBAGENT_ROLES, helper_goal, pick, when
 from .team_models import (
     find_agent_name,
     match_model,
@@ -1273,9 +1273,45 @@ class StudioService:
             logger.info("Studio: {}", note)
         return pick
 
+    def _server_backup(self, model: str) -> str | None:
+        """The server model for a local one while the PC's runtime is off
+        (owner, 6.106), when that is switched on and the server has a key."""
+        if not self.settings.studio_local_backup:
+            return None
+        server = self.server_model
+        if not server or self._is_local(server) or not self._has_server_key(server):
+            return None
+        note = f"{model} can't run (LM Studio is off), so Studio is using {server}."
+        if note != self._stand_in_note:
+            self._stand_in_note = note
+            logger.info("Studio: {}", note)
+        return server
+
+    def _has_server_key(self, model: str) -> bool:
+        """True when the model's provider is a server one whose key is set."""
+        descriptor = PROVIDER_CATALOG.get(parse_provider_type(model))
+        if descriptor is None or descriptor.local or descriptor.credential_attr is None:
+            return False
+        return self._server_model_ready(model)
+
     async def effective_model(self, model: str) -> str:
         """The model a call to this reference actually reaches."""
         return await self._stand_in_model(model) or model
+
+    async def _local_backup(self, model: str) -> str | None:
+        """The server model for a local one while the PC's runtime is off.
+
+        Only an agent's turn uses it: the runner pins the turn to this model
+        at its start and seals the turn as a server agent's, so memory never
+        reaches the server; a turn already running on this PC is never moved
+        to a server halfway, and other calls keep their own model.
+        """
+        if not model.startswith(LOCAL_MODEL_PREFIX):
+            return None
+        status = await self._local_status()
+        if status.get("reachable") is not False:
+            return None
+        return self._server_backup(model)
 
     def _memory(self) -> MemoryService:
         settings = self.settings
@@ -1902,6 +1938,7 @@ class StudioService:
             temperature=self.settings.studio_agent_temperature,
             notes=self._notes_keeper,
             sealed=self.is_private_from,
+            pin_model=self._local_backup,
             local_control=self.settings.studio_local_control,
             main_own_memory=self.settings.studio_main_own_memory,
             learned=self._learn_call if self.settings.studio_jarvis_playbook else None,
@@ -7185,6 +7222,68 @@ class StudioService:
             ],
         }
 
+    async def phone_tasks(self, link: PhoneLink) -> JsonObject:
+        """The team's jobs, newest first, for FCC Phone's Tasks screen."""
+        del link
+        return {
+            "tasks": [
+                phone_tasks.task_view(self.plan_view(plan))
+                for plan in await self.plans(limit=20)
+            ]
+        }
+
+    async def phone_task_start(self, link: PhoneLink, goal: str) -> JsonObject:
+        """Plan a job for the PC's team from the phone and start it."""
+        goal = " ".join(goal.split())[:4000]
+        if not goal:
+            raise PhoneLinkError("Say what the job is.")
+        main_chat = await self.main_chat()
+        plan = await self.start_plan(
+            goal, made_by=f"you ({link.name})", chat_id=main_chat.id
+        )
+        return phone_tasks.task_view(self.plan_view(plan))
+
+    async def phone_task(self, link: PhoneLink, plan_id: str) -> JsonObject:
+        del link
+        return phone_tasks.task_view(self.plan_view(await self._phone_plan(plan_id)))
+
+    async def phone_task_stop(self, link: PhoneLink, plan_id: str) -> JsonObject:
+        del link
+        await self._phone_plan(plan_id)
+        return phone_tasks.task_view(self.plan_view(await self.stop_plan(plan_id)))
+
+    async def phone_task_resume(self, link: PhoneLink, plan_id: str) -> JsonObject:
+        del link
+        await self._phone_plan(plan_id)
+        return phone_tasks.task_view(self.plan_view(await self.resume_plan(plan_id)))
+
+    async def phone_task_files(self, link: PhoneLink, plan_id: str) -> JsonObject:
+        """The text files a job made, to open in the phone's Projects."""
+        del link
+        plan = await self._phone_plan(plan_id)
+        if not plan.site_id:
+            raise PhoneLinkError("This job didn't make any files.")
+        site = await self.site(plan.site_id)
+        rows = [
+            (item.path, item.content_type, item.size)
+            for item in await self._sites.files(plan.site_id)
+        ]
+        sent, left = phone_tasks.pick_files(rows)
+        types = {path: content_type for path, content_type, _ in rows}
+        files = {
+            path: phone_tasks.as_text(
+                types[path], await self._sites.read_bytes(plan.site_id, path)
+            )
+            for path in sent
+        }
+        return phone_tasks.files_view(site.name, files, left)
+
+    async def _phone_plan(self, plan_id: str) -> TeamPlan:
+        plan = await self._store.get(TeamPlan, plan_id)
+        if plan is None:
+            raise PhoneLinkError("That job is gone.")
+        return plan
+
     async def phone_plugins(self, link: PhoneLink) -> JsonObject:
         """The repos (skills, plugin agents, MCP servers) added on the PC, for
         FCC Phone's Plugins list. Read only: switches stay on the PC."""
@@ -7192,6 +7291,7 @@ class StudioService:
         return {
             "repos": [
                 {
+                    "id": extension.id,
                     "name": extension.name,
                     "description": extension.description[:300],
                     "enabled": extension.enabled,
@@ -7203,6 +7303,81 @@ class StudioService:
                 for extension in await self._extensions.all()
             ]
         }
+
+    async def phone_plugin_add(self, link: PhoneLink, url: str) -> JsonObject:
+        """Add a GitHub repo from the phone, as Add from GitHub does on the PC:
+        its skills and agents come in switched on, its MCP servers stay off."""
+        del link
+        try:
+            extension = await self.add_extension(url.strip()[:500])
+        except (StudioError, ExtensionError) as error:
+            raise PhoneLinkError(str(error)) from error
+        return {
+            "id": extension.id,
+            "name": extension.name,
+            "skills": len(extension.skills),
+        }
+
+    async def phone_plugin_switch(
+        self, link: PhoneLink, ext_id: str, *, on: bool
+    ) -> JsonObject:
+        """Switch a repo on or off from the phone (its MCP servers stay as
+        they are: off unless switched on on the PC)."""
+        del link
+        try:
+            extension = await self.switch_extension(ext_id, on=on)
+        except (StudioError, StudioNotFoundError, ExtensionError) as error:
+            raise PhoneLinkError(str(error)) from error
+        return {
+            "id": extension.id,
+            "name": extension.name,
+            "enabled": extension.enabled,
+        }
+
+    async def phone_subagents(self, link: PhoneLink) -> JsonObject:
+        """The owner's subagents and the roles one can have, for the phone."""
+        del link
+        return {
+            "roles": [
+                {"role": role.role, "title": role.title, "when": role.when}
+                for role in HELPER_ROLES
+            ],
+            "subagents": [
+                {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "role": agent.role,
+                    "active": agent.active,
+                    "model": model_label(agent.model or self.default_model),
+                }
+                for agent in await self.subagents()
+            ],
+        }
+
+    async def phone_subagent_add(
+        self, link: PhoneLink, *, name: str, role: str
+    ) -> JsonObject:
+        del link
+        try:
+            agent = await self.create_subagent(name=name.strip()[:60], role=role)
+        except StudioError as error:
+            raise PhoneLinkError(str(error)) from error
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "role": agent.role,
+            "active": agent.active,
+        }
+
+    async def phone_subagent_switch(
+        self, link: PhoneLink, agent_id: str, *, active: bool
+    ) -> JsonObject:
+        del link
+        try:
+            agent = await self.set_subagent_active(agent_id, active)
+        except (StudioError, StudioNotFoundError) as error:
+            raise PhoneLinkError(str(error)) from error
+        return {"id": agent.id, "name": agent.name, "active": agent.active}
 
     async def phone_skill(self, link: PhoneLink, payload: JsonObject) -> JsonObject:
         """The skill tool for a phone agent: search, list or read the skills

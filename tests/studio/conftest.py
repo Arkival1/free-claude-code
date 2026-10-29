@@ -125,6 +125,8 @@ def studio_settings() -> Callable[..., Settings]:
             # Tests run agents on a server model; the private-memory tests
             # turn this back on.
             "STUDIO_PRIVATE_MEMORY": False,
+            # Tests pick their models; the backup tests turn this on.
+            "STUDIO_LOCAL_BACKUP": False,
             # Tests check each agent's own tool list; the all-tools tests turn
             # this back on.
             "STUDIO_ALL_TOOLS": False,

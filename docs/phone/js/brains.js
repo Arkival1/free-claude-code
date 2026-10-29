@@ -41,7 +41,20 @@ export const CLOUD = ["gemini", "groq", "openrouter", "custom"];
 
 export class BrainError extends Error {}
 
-export const brainOf = (agent) => (agent.brain && agent.brain !== "default" ? agent.brain : state.settings.brain);
+/** The brain the agent (or the default) is set to. */
+export const chosenBrain = (agent) => (agent.brain && agent.brain !== "default" ? agent.brain : state.settings.brain);
+
+/** If the chosen brain isn't set up (no model on the phone, no key), the
+ * next one that is: this phone, then the PC, then a cloud key. Memory rules
+ * follow the brain really used (isPrivate reads this). */
+export const FALLBACK_ORDER = ["local", "pc", "gemini", "groq", "openrouter", "custom"];
+
+export function brainOf(agent) {
+  const chosen = chosenBrain(agent);
+  if (chosen && brainReady(chosen)) return chosen;
+  if (state.settings.fallback === false) return chosen;
+  return FALLBACK_ORDER.find((brain) => brainReady(brain)) || chosen;
+}
 export const baseOf = (brain) => (brain === "custom" ? state.settings.customBase.replace(/\/+$/, "") : PROVIDERS[brain] && PROVIDERS[brain].base);
 
 export function localModelOf(agent) {
@@ -56,7 +69,8 @@ export function modelOf(agent) {
     return model ? model.name : "";
   }
   if (brain === "pc") return (state.settings.pc && state.settings.pc.model) || "";
-  return (agent.brain !== "default" && agent.model) || state.settings.models[brain] || "";
+  // The agent's own model only belongs to the brain it chose.
+  return (agent.brain === brain && agent.model) || state.settings.models[brain] || "";
 }
 
 export function brainReady(brain) {

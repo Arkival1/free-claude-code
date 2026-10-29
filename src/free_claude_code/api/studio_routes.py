@@ -3515,6 +3515,154 @@ async def phone_skill(
         raise _phone_failed(error) from error
 
 
+class PhoneTaskPayload(BaseModel):
+    goal: str = Field(min_length=1, max_length=4000)
+
+
+class PhoneRepoPayload(BaseModel):
+    url: str = Field(min_length=3, max_length=500)
+
+
+class PhoneSwitchPayload(BaseModel):
+    on: bool
+
+
+class PhoneSubagentPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    role: str = Field(min_length=1, max_length=40)
+
+
+@router.get("/studio/api/phone/tasks")
+async def phone_tasks(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """The PC team's jobs, for FCC Phone's Tasks screen."""
+    return await studio.phone_tasks(await _phone(request, studio))
+
+
+@router.post("/studio/api/phone/tasks", status_code=202)
+async def phone_task_start(
+    payload: PhoneTaskPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    """Plan a job for the PC's team and start it."""
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_task_start(link, payload.goal)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.get("/studio/api/phone/tasks/{plan_id}")
+async def phone_task(
+    plan_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_task(link, plan_id)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.post("/studio/api/phone/tasks/{plan_id}/stop")
+async def phone_task_stop(
+    plan_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_task_stop(link, plan_id)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.post("/studio/api/phone/tasks/{plan_id}/resume", status_code=202)
+async def phone_task_resume(
+    plan_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_task_resume(link, plan_id)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.get("/studio/api/phone/tasks/{plan_id}/files")
+async def phone_task_files(
+    plan_id: str, request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    """The text files a job made, to open in the phone's Projects."""
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_task_files(link, plan_id)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.post("/studio/api/phone/plugins")
+async def phone_plugin_add(
+    payload: PhoneRepoPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    """Add a GitHub repo from the phone (its MCP servers stay off)."""
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_plugin_add(link, payload.url)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.post("/studio/api/phone/plugins/{ext_id}/switch")
+async def phone_plugin_switch(
+    ext_id: str,
+    payload: PhoneSwitchPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_plugin_switch(link, ext_id, on=payload.on)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.get("/studio/api/phone/subagents")
+async def phone_subagents(
+    request: Request, studio: StudioService = Depends(get_studio)
+) -> JsonObject:
+    return await studio.phone_subagents(await _phone(request, studio))
+
+
+@router.post("/studio/api/phone/subagents")
+async def phone_subagent_add(
+    payload: PhoneSubagentPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_subagent_add(
+            link, name=payload.name, role=payload.role
+        )
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
+@router.post("/studio/api/phone/subagents/{agent_id}/switch")
+async def phone_subagent_switch(
+    agent_id: str,
+    payload: PhoneSwitchPayload,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+) -> JsonObject:
+    link = await _phone(request, studio)
+    try:
+        return await studio.phone_subagent_switch(link, agent_id, active=payload.on)
+    except PhoneLinkError as error:
+        raise _phone_failed(error) from error
+
+
 # The Trading Bank on the phone: a read of the desk and the actions that keep
 # money safe or stay in practice (see studio/phone_desk.py). Live trading,
 # keys, accounts and settings stay on the PC.

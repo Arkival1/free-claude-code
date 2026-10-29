@@ -2,7 +2,7 @@
 import { state, save, feed, changed, toolsOf, agentByName } from "./state.js";
 import { uid, words } from "./ui.js";
 import { isPrivate } from "./brains.js";
-import { syncSoon, pcSearch, pcSkill } from "./sync.js";
+import { syncSoon, pcSearch, pcSkill, pcCall } from "./sync.js";
 import * as projects from "./projects.js";
 import { PICTURE_SUFFIXES, polishNotes } from "./polish.js";
 import { lookAtSite, describeLook } from "./inspect.js";
@@ -43,6 +43,18 @@ export const SPECS = {
   web_search: {
     description: "Search the web (through the user's PC) and get titles, links, and snippets.",
     parameters: { type: "object", properties: { query: text("What to search for.") }, required: ["query"] },
+  },
+  pc_task: {
+    description: "Hand a whole job to the user's PC team (needs the PC link), like Manus: action start with goal plans it into steps that the PC's agents do with all their tools, plugins and subagents (websites, apps, games, research, files); action status with id says how far it is. The user follows it live on Tasks. Use it for big jobs; answer small questions yourself.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["start", "status"] },
+        goal: text("start: the whole job, in the user's words plus anything they told you."),
+        id: text("status: the job's id."),
+      },
+      required: ["action"],
+    },
   },
   skill: {
     description: "Skills from the plugins switched on on the user's PC (needs the PC link): action search with a query finds the right skill, read with its name gives the full instructions, list shows them. Read one only when the job needs it, then follow it.",
@@ -183,6 +195,14 @@ export async function runTool(agent, call, ctx) {
       case "web_search": {
         const results = await pcSearch(String(args.query || ""));
         return results.length ? results.map((hit, i) => `${i + 1}. ${hit.title}\n   ${hit.url}\n   ${hit.snippet || ""}`).join("\n") : "No results.";
+      }
+      case "pc_task": {
+        if (args.action === "status") {
+          const job = await pcCall(`/studio/api/phone/tasks/${encodeURIComponent(String(args.id || ""))}`, undefined, "GET", 30000);
+          return `${job.goal}: ${job.running ? "working" : job.status}, ${job.done_steps} of ${job.steps.length} steps done.${job.summary ? `\n${job.summary}` : ""}`;
+        }
+        const job = await pcCall("/studio/api/phone/tasks", { goal: String(args.goal || "").slice(0, 4000) });
+        return `Started on the PC (job ${job.id}): ${job.steps.length ? `${job.steps.length} steps` : "planning the steps"}. The user can follow it on More, Tasks.`;
       }
       case "skill": {
         const wanted = {};

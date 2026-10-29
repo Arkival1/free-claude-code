@@ -1362,6 +1362,19 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_LOCAL_BACKUP",
+        "Server Model When Local Models Are Off",
+        "studio",
+        "boolean",
+        settings_attr="studio_local_backup",
+        description=(
+            "When LM Studio (or the PC's other model runtime) isn't running, "
+            "agents set to a model on this PC think with the server model "
+            "instead (if its key is set), so jobs still get done. Memory stays "
+            "on this PC while they do, as for any server agent."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LOCAL_MODEL_TURNS",
         "Local Models Take Turns",
         "studio",

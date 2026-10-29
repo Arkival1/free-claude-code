@@ -4,7 +4,7 @@ import { $, el, notify, closeSheet } from "./ui.js";
 import { sync } from "./sync.js";
 import { speak } from "./voice.js";
 import { calculate, findImages, remember, recall, canRead } from "./tools.js";
-import { bestModel } from "./brains.js";
+import { bestModel, brainOf } from "./brains.js";
 import { readGguf } from "./gguf.js";
 import { checkProject, bundle, previewHtml, zipProject } from "./projects.js";
 import { recoverFromCrash } from "./engine.js";
@@ -25,6 +25,7 @@ import * as settings from "./views/settings.js";
 import * as more from "./views/more.js";
 import * as trade from "./views/trade.js";
 import * as plugins from "./views/plugins.js";
+import * as tasks from "./views/tasks.js";
 
 const view = $("view");
 const TITLES = {
@@ -42,6 +43,7 @@ const TITLES = {
   help: "Help",
   trade: "Trading",
   plugins: "Plugins",
+  tasks: "Tasks",
 };
 const TAB_OF = { home: "home", chats: "chats", chat: "chats", agents: "agents", models: "models" };
 let cleanup = null;
@@ -81,6 +83,7 @@ async function render() {
     help: () => more.renderHelp(view),
     trade: () => trade.render(view),
     plugins: () => plugins.render(view),
+    tasks: () => tasks.render(view, param),
   };
   try {
     const result = await screens[route]();
@@ -149,6 +152,7 @@ window.fccPhone = {
   version: VERSION,
   calculate,
   bestModel,
+  brainOf,
   readGguf,
   checkProject,
   bundle,
