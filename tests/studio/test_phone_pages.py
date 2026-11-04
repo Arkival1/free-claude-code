@@ -89,3 +89,25 @@ async def test_the_pc_serves_the_phone_app(make_studio):
         finally:
             await studio.shutdown()
             await app.state.services.admin.close()
+
+
+def test_the_phone_carries_three_byte_for_byte_with_its_licence():
+    """The Game Lab's engine on the phone is the vendored three.js r186."""
+    import hashlib
+
+    root = Path(__file__).resolve().parents[2] / "vendor" / "three"
+    sums = dict(
+        reversed(line.split())
+        for line in (root / "SHA256SUMS").read_text().splitlines()
+    )
+    for name in ("three.module.js", "three.core.js"):
+        digest = hashlib.sha256(
+            (PHONE_DIR / "vendor" / "three" / name).read_bytes()
+        ).hexdigest()
+        assert sums[f"build/{name}"] == digest, name
+    assert (
+        "The MIT License"
+        in (PHONE_DIR / "vendor" / "three" / "LICENSE.txt").read_text()
+    )
+    page = (PHONE_DIR / "index.html").read_text()
+    assert '"three": "./vendor/three/three.module.js"' in page

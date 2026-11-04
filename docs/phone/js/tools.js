@@ -9,6 +9,7 @@ import { lookAtSite, describeLook } from "./inspect.js";
 import { TEMPLATES, templateFiles } from "./templates.js";
 import { usePlugin } from "./plugins.js";
 import { useLibrary, LIBRARY_KINDS } from "./library.js";
+import { game3dFiles, useLab, GAME3D_ABOUT } from "./lab.js";
 import { SKILLS } from "./skills.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
@@ -31,6 +32,10 @@ export const SPECS = {
   recall: {
     description: "Search memory for what is known about something before answering. kind narrows it: advice (what other AIs told you), lesson, pattern, thought, taste or fact. Search; don't read everything.",
     parameters: { type: "object", properties: { query: text("What to look for."), kind: { type: "string", enum: Object.keys(MEMORY_KINDS) } }, required: ["query"] },
+  },
+  lab: {
+    description: "The Game Lab, for 3D games: guide (how to engineer a 3D game that looks good and plays well on a phone, and how to make your own textures, shaders, models and animation), list (what the Lab kit has: textures, shaders, models, animation, controls), add (put the kit, lab/kit.js, in the current project). A new 3D game starts from start_project with template game3d.",
+    parameters: { type: "object", properties: { action: { type: "string", enum: ["guide", "list", "add"] } }, required: ["action"] },
   },
   library: {
     description: "The user's library of approved references for games and websites (their own projects, photos and notes, and games and sites they approved). search finds the ones that fit; read one by its id. Read the fitting ones before you design, then make something original in their spirit; never copy.",
@@ -113,10 +118,10 @@ export const SPECS = {
     },
   },
   start_project: {
-    description: `Start (or switch to) a project, a folder of files for a website or app. For a new one, pick the closest starter template (${Object.entries(TEMPLATES).map(([name, t]) => `${name}: ${t.about}`).join("; ")}), then make it the user's.`,
+    description: `Start (or switch to) a project, a folder of files for a website or app. For a new one, pick the closest starter template (${Object.entries(TEMPLATES).map(([name, t]) => `${name}: ${t.about}`).join("; ")}; ${GAME3D_ABOUT}), then make it the user's.`,
     parameters: {
       type: "object",
-      properties: { name: text("The project's name."), template: { type: "string", enum: Object.keys(TEMPLATES), description: "A starter template for a new project." } },
+      properties: { name: text("The project's name."), template: { type: "string", enum: [...Object.keys(TEMPLATES), "game3d"], description: "A starter template for a new project." } },
       required: ["name"],
     },
   },
@@ -242,6 +247,8 @@ export async function runTool(agent, call, ctx) {
       }
       case "library":
         return useLibrary(args);
+      case "lab":
+        return await useLab(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
       case "use_plugin":
         return await usePlugin(args);
       case "start_task": {
@@ -265,13 +272,17 @@ export async function runTool(agent, call, ctx) {
         const project = await projects.createProject(String(args.name || ""), agent.name);
         ctx.project = project;
         const template = String(args.template || "");
-        if (template && TEMPLATES[template]) {
+        if (template && (TEMPLATES[template] || template === "game3d")) {
           // Helpers' parts (parts/) wait beside an empty project; the template still goes in.
           if (Object.keys(project.files).some((path) => !path.startsWith("parts/"))) {
             return `${project.name} already has files (${Object.keys(project.files).join(", ")}), so the template wasn't used. Build on them.`;
           }
-          for (const [path, body] of Object.entries(templateFiles(template, project.name))) {
+          const files = template === "game3d" ? await game3dFiles(project.name) : templateFiles(template, project.name);
+          for (const [path, body] of Object.entries(files)) {
             await projects.writeFile(project, path, body, agent.name);
+          }
+          if (template === "game3d") {
+            return `Started ${project.name} from the game3d template: ${Object.keys(project.files).join(", ")}. It already plays. Now make it the user's: the world, the enemies and boss (TUNE at the top of game.js), the colours and the story; read the lab guide for how to make your own textures, shaders, models and animation with lab/kit.js.`;
           }
           return `Started ${project.name} from the ${template} template: ${Object.keys(project.files).join(", ")}. Now make it the user's: rewrite index.html with real content for this job (keep the structure and class names), set the colours at the top of styles.css, and replace every placeholder line.`;
         }

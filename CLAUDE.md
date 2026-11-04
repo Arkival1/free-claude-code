@@ -260,7 +260,13 @@ Notes carried over from the long session that built FCC Studio (LCC).
   all); finished work waits in the Library (`js/library.js`) for approval and
   approved references feed the next job; More, Plugins has the Plugin APIs
   master switch (`settings.pluginsOn`). The local AI "branch" and phone
-  connectors are paused until the owner asks again.
+  connectors are paused until the owner asks again. The phone Game Lab
+  (owner: games, websites and the Lab, with advisers/helpers): `lab/kit.js`
+  (textures, shaders, models, animation, controls, all FCC's own code),
+  the `game3d` starter in `lab/souls/`, `js/lab.js` (the `lab` tool and its
+  guide), `js/views/lab.js` (live previews); three.js r186 is vendored in
+  `phone_static/vendor/three/` and loaded by import map; previews link a
+  project's own modules as data addresses (`projects.js linkModules`).
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

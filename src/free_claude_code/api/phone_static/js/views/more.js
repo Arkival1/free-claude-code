@@ -14,6 +14,7 @@ export const ITEMS = [
   ["memory", "✦", "Memory", "What your agents remember, and your PC's"],
   ["minds", "❋", "Minds", "Each AI's advice book, lessons, patterns and thoughts, and your taste"],
   ["library", "▣", "Library", "Approved games, sites, photos and notes the AI makes originals from"],
+  ["lab", "⚗", "Game Lab", "3D games: textures, shaders, models and animation made in code"],
   ["agents/brains", "⚙", "Team brains", "Who thinks with what"],
   ["settings", "⚙", "Settings", "Free cloud brains, your PC, voice, backups"],
   ["help", "?", "Help", "How FCC Phone works"],

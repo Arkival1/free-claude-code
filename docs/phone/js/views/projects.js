@@ -117,8 +117,15 @@ function renderProject(view, id) {
         html
           ? el("div", { class: "row" }, [
               button("Open full screen", () => fullScreen(project, page)),
-              pageNames.length > 1
-                ? button("Save all files (.zip)", () => projects.download(`${project.slug}.zip`, projects.zipProject(project)))
+              // A 3D game saves as a zip with its engine; one page saves as one file.
+              pageNames.length > 1 || /\bfrom\s*["']three["']/.test(Object.values(project.files).join("\n"))
+                ? button("Save all files (.zip)", async () => {
+                    try {
+                      projects.download(`${project.slug}.zip`, projects.zipProject(await projects.forDownload(project)));
+                    } catch (error) {
+                      notify(error.message);
+                    }
+                  })
                 : button("Save as one HTML file", () => projects.download(`${project.slug}.html`, projects.bundle(project))),
             ])
           : null,

@@ -1363,7 +1363,7 @@ body[data-look="playground"] button.ghost {
 }
 
 body[data-look="playground"] .tabs {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   background: rgba(246, 244, 239, 0.97);
 }
 
@@ -1525,6 +1525,44 @@ body[data-look="playground"] .sheet-head h2 {
   object-fit: contain;
   border-radius: 12px;
   margin: 0 0 10px;
+}
+
+.lab-stage {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 11;
+  border-radius: 12px;
+  background: #120d0c;
+  touch-action: none;
+}
+
+.lab-tabs,
+.lab-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.lab-chips {
+  margin: 10px 0 0;
+}
+
+.lab-chip {
+  min-height: 40px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  text-transform: capitalize;
+}
+
+.lab-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.lab-caption {
+  margin: 10px 0 0;
 }
 
 .master-switch {

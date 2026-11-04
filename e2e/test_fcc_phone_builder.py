@@ -246,6 +246,7 @@ def test_the_builder_builds_with_templates_photos_and_a_look(
         "webapp",
         "game",
         *FCC_DESIGNS,
+        "game3d",
     ]
     results = [
         m["content"] for call in seen for m in call["messages"] if m["role"] == "tool"
@@ -308,6 +309,7 @@ def test_older_phone_agents_get_the_new_tools_once(
         "skill",
         "use_plugin",
         "library",
+        "lab",
     ]
     assert "find_images" in upgraded["instructions"]
     assert "list_photos" in upgraded["instructions"]
@@ -328,7 +330,7 @@ def test_older_phone_agents_get_the_new_tools_once(
             id: 'b3', name: 'B3', role: 'builder', instructions: 'Mine',
             tools: ['write_file'], toolsVersion: 3})"""
     )
-    assert plugins["tools"] == ["write_file", "skill", "use_plugin", "library"]
+    assert plugins["tools"] == ["write_file", "skill", "use_plugin", "library", "lab"]
     assert plugins["instructions"] == "Mine" and plugins["toolsVersion"] == 7
     builder = page.evaluate(
         "() => window.fccPhone.state.agents.find((a) => a.id === 'builder')"

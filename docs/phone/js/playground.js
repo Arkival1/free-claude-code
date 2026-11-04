@@ -54,12 +54,12 @@ export const KINDS = {
     glyph: "◇",
     placeholder: "A game where… (the goal, the controls, the feel you want)",
     engineering:
-      "Game engineering, step by step. 1. Read the game-design skill, and search the library (library tool) for approved game references. 2. Design: one clear goal, a core loop that is fun in 30 seconds, touch controls first, rising difficulty, score and feedback on every hit. 3. Start from the game template (start_project with template game) and build it in game.js (your helpers' parts are in parts/: read them and use them). 4. Playtest with look_at_site, fix what breaks, and balance the difficulty. Draw original art (shapes, SVG, canvas); never copy someone else's game or art.",
+      "Game engineering, step by step. For a 3D game (3D, third-person, Souls-like, a boss fight, an open world), start_project with template game3d (it already plays: a warrior, a boss, a bonfire, fire and fog) and read the lab tool's guide; make it the user's world with the Lab kit, and make your own textures, shaders, models and animation the same way. For a 2D game: 1. Read the game-design skill, and search the library (library tool) for approved game references. 2. Design: one clear goal, a core loop that is fun in 30 seconds, touch controls first, rising difficulty, score and feedback on every hit. 3. Start from the game template (start_project with template game) and build it in game.js (your helpers' parts are in parts/: read them and use them). 4. Playtest with look_at_site, fix what breaks, and balance the difficulty. Draw original art (shapes, SVG, canvas); never copy someone else's game or art.",
   },
 };
 
 /** Games or websites: a job that talks about play is a game. */
-export const kindOf = (goal) => (/\b(game|play|player|level|enemy|boss|score|shooter|platformer|puzzle|rpg|arcade)\b/i.test(goal) ? "game" : "website");
+export const kindOf = (goal) => (/\b(game|play|player|level|enemy|boss|score|shooter|platformer|puzzle|rpg|arcade|3d|souls|third-person|fps)\b/i.test(goal) ? "game" : "website");
 
 /** The part each helper builds, by the job and the helper's role. */
 const HELPER_PARTS = {
@@ -101,6 +101,7 @@ export const HANDS_TOOLS = [
   "skill",
   "use_plugin",
   "library",
+  "lab",
   "ask_agent",
 ];
 /** Helpers build their part in the main AI's project; they never start a
@@ -122,6 +123,7 @@ export const HELPER_TOOLS = [
   "skill",
   "use_plugin",
   "library",
+  "lab",
 ];
 /** Advisers look and think; they never change anything. */
 export const ADVISER_TOOLS = [

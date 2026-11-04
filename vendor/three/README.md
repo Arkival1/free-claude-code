@@ -27,6 +27,12 @@ still match. Studio loads them only when a 3D view opens, through the
 import map in `index.html` (`three` → `three.module.js`), and sends them
 gzip-compressed (about 2.1 MB becomes about 450 KB).
 
+FCC Phone (6.109, the Game Lab) carries the same two files, byte for byte,
+in `src/free_claude_code/api/phone_static/vendor/three/` (built into
+`docs/phone/vendor/three/`) with this licence as `LICENSE.txt`: the phone's
+3D games and the Lab load them through an import map (`three` →
+`vendor/three/three.module.js`), and a 3D game's download carries them.
+
 Left out: the rest of the package (the WebGPU and TSL builds, the other
 examples, `src/`), which Studio doesn't use. The full tarball can be
 fetched again from npm and checked against `SHA256SUMS`.

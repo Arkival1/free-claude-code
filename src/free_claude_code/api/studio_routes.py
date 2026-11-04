@@ -3895,7 +3895,12 @@ def phone_file(name: str = "index.html") -> FileResponse:
     kind = _PHONE_TYPES.get(path.suffix)
     if kind is None or not path.is_relative_to(root) or not path.is_file():
         raise HTTPException(status_code=404, detail="Not part of FCC Phone.")
-    return FileResponse(path, media_type=kind, headers={"Cache-Control": "no-cache"})
+    headers = {"Cache-Control": "no-cache"}
+    if name.startswith(("vendor/three/", "lab/")):
+        # A 3D game previews in a sandboxed frame (an origin of its own) and
+        # loads the Game Lab's engine from here, as GitHub Pages allows too.
+        headers["Access-Control-Allow-Origin"] = "*"
+    return FileResponse(path, media_type=kind, headers=headers)
 
 
 # ---------------------------------------------------------------- the Lab

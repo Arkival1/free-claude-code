@@ -275,12 +275,12 @@ def test_settings_switches_between_the_hud_and_the_playground(
     expect(tabs).to_have_text(["◆Home", "◌Chats", "◎Agents", "⚡Models", "⋯More"])
     go(page, "settings")
     page.get_by_role("button", name="Playground").click()
-    expect(tabs).to_have_text(["+New task", "◷Tasks", "▤Files", "⋯More"])
+    expect(tabs).to_have_text(["+New task", "◷Tasks", "▤Files", "⚗Lab", "⋯More"])
     assert page.evaluate("() => window.fccPhone.state.settings.look") == "playground"
     page.reload()
     page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
     page.evaluate("() => window.fccPhone.ready")
-    expect(tabs).to_have_text(["+New task", "◷Tasks", "▤Files", "⋯More"])
+    expect(tabs).to_have_text(["+New task", "◷Tasks", "▤Files", "⚗Lab", "⋯More"])
     page.locator("#tabs .tab", has_text="Files").click()
     expect(page.get_by_text("Your work, all in one place")).to_be_visible()
     go(page, "settings")
@@ -375,3 +375,88 @@ def test_a_helper_that_cannot_finish_is_named_in_the_result(
     help_step = next(s for s in task["steps"] if s["stage"] == "help")
     assert help_step["status"] == "failed"
     assert "Builder couldn't finish its part" in task["summary"]
+
+
+def website_brain(body: dict) -> dict:
+    system = body["messages"][0]["content"]
+    messages = body["messages"]
+    asked = str(messages[1].get("content")) if len(messages) > 1 else ""
+    tools_used = [m for m in messages if m["role"] == "tool"]
+    if "Write down what to keep in your own mind" in system:
+        return say(json.dumps({"pattern": "Content first, then the layout."}))
+    if "You are a helper in the user's Playground" in system:
+        if not tools_used:
+            return tool_call(
+                "write_file",
+                {
+                    "path": "parts/content.md",
+                    "content": "# Calm Yoga\nClasses at 7am and 6pm. $20 a class.",
+                },
+            )
+        return say("Wrote parts/content.md: the studio's real text.")
+    if "You are an adviser in the user's Playground" in system:
+        if "Advise the main AI before it starts" in asked:
+            return say("Use the landing template; check with look_at_site.")
+        return say("LOOKS GOOD")
+    if "You are the main AI in the user's Playground" in system:
+        if not tools_used:
+            name = re.search(r"Work in the project (.+?): start_project", asked)
+            assert name, asked
+            return tool_call(
+                "start_project", {"name": name.group(1), "template": "landing"}
+            )
+        if len(tools_used) == 1:
+            return tool_call("read_file", {"path": "parts/content.md"})
+        return say("Built the landing page with the studio's classes and prices.")
+    return say("Hi!")
+
+
+def test_the_main_ai_builds_a_website_with_a_helper_and_advisers(
+    page: Page, admin_base_url: str
+) -> None:
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    seen = fake_gemini(page, website_brain)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    go(page, "settings")
+    page.get_by_role("button", name="Playground").click()
+    go(page, "home")
+    page.get_by_role("button", name="Make a website").click()
+    page.get_by_label("The task").fill("a calm yoga studio site with class times")
+    expect(page.get_by_text("Helping (they build parts): Researcher")).to_be_visible()
+    page.get_by_role("button", name="Start task ↗").click()
+    page.wait_for_function(
+        "() => window.fccPhone.state.tasks[0] && window.fccPhone.state.tasks[0].status === 'done'",
+        timeout=30000,
+    )
+    task = page.evaluate("() => window.fccPhone.state.tasks[0]")
+    assert task["type"] == "website"
+    assert [(s["stage"], s["agent"]) for s in task["steps"]][:4] == [
+        ("kickoff", "Tester"),
+        ("kickoff", "Helper"),
+        ("work", "Jarvis"),
+        ("help", "Researcher"),
+    ]
+    project = page.evaluate(
+        f"() => window.fccPhone.state.projects.find((p) => p.id === {json.dumps(task['project_id'])})"
+    )
+    assert {"index.html", "parts/content.md"} <= set(project["files"])
+    # The main AI read the helper's part, and worked to the website steps.
+    briefs = [
+        call
+        for call in seen
+        if "You are the main AI in the user's Playground"
+        in call["messages"][0]["content"]
+    ]
+    assert any(
+        m["role"] == "tool" and "Classes at 7am" in str(m.get("content"))
+        for call in briefs
+        for m in call["messages"]
+    )
+    assert any(
+        "Website engineering" in call["messages"][0]["content"] for call in briefs
+    )
+    library = page.evaluate("() => window.fccPhone.state.library")
+    assert library[0]["kind"] == "website" and library[0]["approved"] is False
+    assert errors == []

@@ -29,6 +29,7 @@ import * as tasks from "./views/tasks.js";
 import * as hq from "./views/hq.js";
 import * as playground from "./views/playground.js";
 import * as library from "./views/library.js";
+import * as lab from "./views/lab.js";
 
 const view = $("view");
 const TITLES = {
@@ -51,6 +52,7 @@ const TITLES = {
   files: "Files",
   minds: "Minds",
   library: "Library",
+  lab: "Game Lab",
 };
 // Two looks (Settings, Look): the HUD (the command centre and the whole team)
 // and the Playground (one main AI does the work, the others advise).
@@ -66,12 +68,13 @@ const TABS = {
     ["home", "+", "New task"],
     ["tasks", "◷", "Tasks"],
     ["files", "▤", "Files"],
+    ["lab", "⚗", "Lab"],
     ["more", "⋯", "More"],
   ],
 };
 const TAB_OF = {
   hud: { home: "home", chats: "chats", chat: "chats", agents: "agents", models: "models" },
-  playground: { home: "home", tasks: "tasks", files: "files", projects: "files" },
+  playground: { home: "home", tasks: "tasks", files: "files", projects: "files", lab: "lab" },
 };
 const lookOf = () => (state.settings.look === "playground" ? "playground" : "hud");
 
@@ -107,13 +110,14 @@ async function render() {
     else button.removeAttribute("aria-current");
   }
   $("title").textContent = route === "home" && lookOf() === "playground" ? "Playground" : TITLES[route] || "FCC Phone";
-  $("back").hidden = route === "home" || (lookOf() === "playground" ? ["tasks", "files", "more"] : ["chats", "agents", "models", "more"]).includes(route);
+  $("back").hidden = route === "home" || (lookOf() === "playground" ? ["tasks", "files", "lab", "more"] : ["chats", "agents", "models", "more"]).includes(route);
   drawPill();
   const screens = {
     home: () => (lookOf() === "playground" ? playground.renderHome(view) : hud.render(view)),
     files: () => playground.renderFiles(view),
     minds: () => playground.renderMinds(view),
     library: () => library.render(view),
+    lab: () => lab.render(view),
     chats: () => chat.renderList(view),
     chat: () => chat.render(view, param),
     agents: () => agents.render(view, param),

@@ -66,6 +66,12 @@ export function renderHome(view) {
   };
   for (const input of [hands, helpers, advisers]) input.addEventListener("change", drawTeam);
   box.addEventListener("input", drawTeam);
+  // "Ask the AI for one" in the Game Lab starts a 3D game here.
+  if (state.labAsk) {
+    box.value = state.labAsk;
+    state.labAsk = "";
+    drawTeam();
+  }
   drawTeam();
 
   const start = async () => {

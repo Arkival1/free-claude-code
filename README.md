@@ -2797,6 +2797,21 @@ account, and costs nothing.
   notes and your own projects, and every game or site the Playground finishes
   waits there for you to **Approve**. The AI reads only approved references
   (the `library` tool) before it designs, and makes originals in their spirit.
+- **Game Lab (3D)**: the **Lab** tab shows the kit live in 3D: textures
+  (stone, wood, grass, metal, lava, sand, bark, ice: drawn from seeded noise
+  with normal maps), shaders (fire, embers, water, glow, toon, dissolve, sky),
+  models (a jointed warrior, a horned boss, trees, burning trees, rocks, a
+  pagoda tower, weapons) and animation (idle, walk, run, attack, heavy, roll,
+  hit, dead), all made in code, so nothing needs a licence. **Start a 3D
+  game** makes a third-person action game that already plays (a warrior with
+  stamina, dodge roll, light and heavy attacks, lock-on and healing flasks, a
+  boss with telegraphed blows and a second phase, a bonfire checkpoint,
+  burning trees, embers and fog, touch controls); **Ask the AI for one** starts
+  a Playground job. The AI starts 3D games from this template (`game3d`),
+  reads the `lab` tool's guide (how to make games look good on a phone and
+  feel right, and how to make its own textures, shaders, models and
+  animation), and builds with the kit (`lab/kit.js`). It runs on three.js
+  r186, which the app carries; a 3D game's download takes it along.
 - **Plugin APIs switch**: More, Plugins has **Plugin APIs on**: on, the AI may
   call the plugins you switched on (with the keys you added; saving a key
   switches its plugin on); off stops every plugin at once.

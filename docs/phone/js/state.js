@@ -33,6 +33,7 @@ export const PHONE_TOOLS = {
   use_plugin: "Plugins",
   start_task: "Team",
   library: "Library",
+  lab: "Lab",
 };
 export const ALL_TOOLS = Object.keys(PHONE_TOOLS);
 export const MAIN_ONLY = new Set(["team_status"]);
@@ -58,8 +59,8 @@ const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_fi
 const DESIGN = ["find_images", "polish_check", "look_at_site"];
 const PHOTOS = ["list_photos", "use_photo"];
 export const ROLE_TOOLS = {
-  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library"],
-  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library"],
+  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library", "lab"],
+  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library", "lab"],
   researcher: ["wikipedia", "read_page", "web_search", "remember", "recall", "calculate", "use_plugin", "skill"],
   helper: ["remember", "recall", "calculate", "todo", "weather", "wikipedia", "skill"],
   tester: ["list_files", "read_file", "check_project", "look_at_site", "polish_check", "edit_file", "write_file", "restore_file", "remember", "recall", "skill"],
@@ -105,7 +106,7 @@ const TOOLS_ADDED = {
   4: { builder: ["skill"], main: ["skill"] },
   5: { main: ["pc_task"] },
   6: { main: ["use_plugin", "start_task"], researcher: ["use_plugin", "skill"], builder: ["use_plugin"], tester: ["skill"], helper: ["skill"] },
-  7: { main: ["library"], builder: ["library"] },
+  7: { main: ["library", "lab"], builder: ["library", "lab"] },
 };
 const TOOLS_VERSION = 7;
 

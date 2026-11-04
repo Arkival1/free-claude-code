@@ -141,6 +141,33 @@ export async function editFile(project, path, find, replace, agentName) {
 }
 
 /** One HTML page with the project's CSS and JS inlined, for previews and saving. */
+/** A path from a module's folder and a relative import ("./lab/kit.js"). */
+function joinPath(from, ref) {
+  const parts = from.split("/").slice(0, -1);
+  for (const piece of ref.split("/")) {
+    if (piece === "..") parts.pop();
+    else if (piece !== "." && piece !== "") parts.push(piece);
+  }
+  return parts.join("/");
+}
+
+/** A module's code with its imports of the project's own files turned into
+ * data addresses, so modules load in the sandboxed preview (and in one saved
+ * HTML file). Bare imports ("three") are left to the import map. */
+export function linkModules(files, code, from, seen = new Set()) {
+  return code.replace(/(\bfrom\s*|\bimport\s*\(?\s*)(["'])(\.{1,2}\/[^"']+\.m?js)\2/g, (match, lead, quote, ref) => {
+    const path = joinPath(from, ref);
+    const text = files[path];
+    if (typeof text !== "string" || seen.has(path)) return match;
+    const linked = linkModules(files, text, path, new Set([...seen, path]));
+    return `${lead}${quote}data:text/javascript;charset=utf-8,${encodeURIComponent(linked)}${quote}`;
+  });
+}
+
+/** Where the app keeps three.js for 3D games (the Game Lab's engine). */
+export const THREE_PATH = "vendor/three/three.module.js";
+const usesThree = (html) => /\bfrom\s*["']three["']|\bimport\s*\(\s*["']three["']\s*\)/.test(html);
+
 export function bundle(project, page = "index.html") {
   const files = project.files;
   const entry = files[page] ? page : Object.keys(files).find((name) => /\.html?$/i.test(name));
@@ -154,7 +181,8 @@ export function bundle(project, page = "index.html") {
     const js = files[cleanRelative(src)];
     if (js === undefined) return tag;
     const module = /type=["']module["']/i.test(before + after);
-    return `<script${module ? ' type="module"' : ""}>\n${js.replace(/<\/script/gi, "<\\/script")}\n</script>`;
+    const code = module ? linkModules(files, js, cleanRelative(src)) : js;
+    return `<script${module ? ' type="module"' : ""}>\n${code.replace(/<\/script/gi, "<\\/script")}\n</script>`;
   });
   // Pictures drawn as SVG files in the project go in as data addresses.
   const picture = (ref) => {
@@ -194,7 +222,11 @@ const PAGE_LINKS =
 export function previewHtml(project, { page = "index.html", extra = "" } = {}) {
   const html = bundle(project, page);
   if (html === null) return null;
-  const inject = STORAGE_SHIM + PAGE_LINKS + extra;
+  // A 3D game imports "three": point it at the app's own copy (first, before any module).
+  const engine = usesThree(html) && !/type=["']importmap["']/i.test(html)
+    ? `<script type="importmap">${JSON.stringify({ imports: { three: new URL(`../${THREE_PATH}`, import.meta.url).href } })}</script>`
+    : "";
+  const inject = engine + STORAGE_SHIM + PAGE_LINKS + extra;
   if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (tag) => tag + inject);
   if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (tag) => tag + inject);
   return inject + html;
@@ -312,6 +344,24 @@ function crc32(bytes) {
 }
 
 /** Every file of the project in one .zip (stored, not compressed), in a folder. */
+/** The project as it downloads: a 3D game takes three.js with it (and an
+ * import map in its pages that points there), so it runs on its own. */
+export async function forDownload(project) {
+  const text = Object.values(project.files).filter((body) => typeof body === "string" && !isPicture(body)).join("\n");
+  if (!usesThree(text)) return project;
+  const files = { ...project.files };
+  for (const name of ["three.module.js", "three.core.js"]) {
+    const response = await fetch(new URL(`../vendor/three/${name}`, import.meta.url));
+    if (!response.ok) throw new Error("Couldn't add three.js to the download. Try again with the internet on.");
+    files[`vendor/three/${name}`] = await response.text();
+  }
+  const map = `<script type="importmap">${JSON.stringify({ imports: { three: `./${THREE_PATH}` } })}</script>`;
+  for (const [path, body] of Object.entries(files)) {
+    if (/\.html?$/i.test(path) && typeof body === "string" && !/type=["']importmap["']/i.test(body)) files[path] = body.replace(/<head[^>]*>/i, (tag) => `${tag}\n  ${map}`);
+  }
+  return { ...project, files };
+}
+
 export function zipProject(project) {
   const encoder = new TextEncoder();
   const parts = [];

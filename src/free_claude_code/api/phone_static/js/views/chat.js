@@ -4,7 +4,7 @@ import { el, button, card, go, notify, openSheet, closeSheet } from "../ui.js";
 import { answer, runTask, isBusy } from "../agents.js";
 import { brainOf, brainReady, PROVIDERS, modelOf } from "../brains.js";
 import { speak, micButton } from "../voice.js";
-import { createProject, findProject, projectById, zipProject, download } from "../projects.js";
+import { createProject, findProject, projectById, zipProject, download, forDownload } from "../projects.js";
 import { store } from "../store.js";
 import { addPhoto, setNote, photoLine } from "../photos.js";
 
@@ -23,7 +23,13 @@ export function downloadCard(turn, { hud = false } = {}) {
     ]),
     project
       ? el("div", { class: "row download-actions" }, [
-          button("Download", () => download(turn.file_name || `${project.slug}.zip`, zipProject(project)), { class: "primary", "aria-label": `Download ${turn.name || "the app"}` }),
+          button("Download", async () => {
+            try {
+              download(turn.file_name || `${project.slug}.zip`, zipProject(await forDownload(project)));
+            } catch (error) {
+              notify(error.message);
+            }
+          }, { class: "primary", "aria-label": `Download ${turn.name || "the app"}` }),
           button("Open", () => go(`projects/${project.id}`)),
         ])
       : null,
