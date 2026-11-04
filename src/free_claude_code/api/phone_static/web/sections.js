@@ -239,16 +239,13 @@ export const SAMPLE_TEXT = [
   "Everything you need, in one place",
   "A short line that sums up the offer",
   "The biggest benefit, with a number",
-  "Northwind",
   "Turn features into benefits",
   "Explain the first step and why it's easy",
   "The second big benefit, told as a story",
   "Give the best thing the biggest tile",
   "A line about where the food comes from",
-  "Maya Chen",
-  "Sam Okafor",
-  "Jordan Ellis",
-  "Ava Park",
+  "It changed how we work. Simple, fast and it just looks right.",
+  "is the rare thing that does exactly what it says",
   "Tell the story in three sentences",
   "How we choose our suppliers",
   "Say where, and who you serve.",
@@ -270,9 +267,12 @@ export const RECIPES = {
 const escape = (text) => String(text).replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
 
 /** The site's own styles.css: its look on top of the kit. */
+/** A look, font pair, section or recipe by id (never an inherited key). */
+export const known = (table, id) => typeof id === "string" && Object.hasOwn(table, id);
+
 export function lookCss(lookId = "ocean", fontsId = "") {
-  const look = LOOKS[lookId] || LOOKS.ocean;
-  const fonts = FONTS[fontsId] || FONTS[look.fonts];
+  const look = known(LOOKS, lookId) ? LOOKS[lookId] : LOOKS.ocean;
+  const fonts = known(FONTS, fontsId) ? FONTS[fontsId] : FONTS[look.fonts];
   return `/* This site's look (on the FCC Web kit, kit/kit.css). Change the brand
    colour, the accent or the fonts here and the whole site follows. */
 :root {
@@ -288,23 +288,23 @@ export function lookCss(lookId = "ocean", fontsId = "") {
 
 /** A whole page from sections, in a look. */
 export function pageHtml({ title = "My site", description = "", sections = RECIPES.business.sections, look = "ocean", fonts = "" } = {}) {
-  const chosen = LOOKS[look] || LOOKS.ocean;
-  const pair = FONTS[fonts] || FONTS[chosen.fonts];
+  const chosen = known(LOOKS, look) ? LOOKS[look] : LOOKS.ocean;
+  const pair = known(FONTS, fonts) ? FONTS[fonts] : FONTS[chosen.fonts];
   const name = escape(title);
   // The menu bar goes before <main> and the footer after it.
   const part = (group, wanted) =>
     sections
-      .filter((id) => SECTIONS[id] && (SECTIONS[id].group === group) === wanted)
+      .filter((id) => known(SECTIONS, id) && (SECTIONS[id].group === group) === wanted)
       .map((id) => SECTIONS[id].html)
       .join("\n")
-      .replaceAll("FCCNAME", name);
+      .replaceAll("FCCNAME", () => name);
   const navs = part("Navigation", true);
   const footers = part("Footer", true);
   const body = sections
-    .filter((id) => SECTIONS[id] && !["Navigation", "Footer"].includes(SECTIONS[id].group))
+    .filter((id) => known(SECTIONS, id) && !["Navigation", "Footer"].includes(SECTIONS[id].group))
     .map((id) => SECTIONS[id].html)
     .join("\n")
-    .replaceAll("FCCNAME", name);
+    .replaceAll("FCCNAME", () => name);
   const fontLink = pair.families.length ? `\n  <link rel="preconnect" href="https://fonts.googleapis.com" />\n  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />\n  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?${pair.families.map((family) => `family=${family}`).join("&")}&display=swap" />` : "";
   return `<!doctype html>
 <html lang="en" data-theme="${chosen.theme}">
@@ -317,6 +317,7 @@ export function pageHtml({ title = "My site", description = "", sections = RECIP
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✦</text></svg>" />${fontLink}
   <link rel="stylesheet" href="kit/kit.css" />
   <link rel="stylesheet" href="styles.css" />
+  <script>document.documentElement.classList.add("js")</script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>

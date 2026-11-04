@@ -1,8 +1,9 @@
 // FCC Web kit: the small bits of script a kit site uses (FCC's own code).
 // The phone menu, reveal on scroll, a light/dark switch, a picture viewer
 // for galleries, the year in the footer, and forms that say thank you.
-// Everything works without it; it only adds polish.
+// Everything shows without it; it only adds polish.
 (() => {
+  document.documentElement.classList.add("js");
   const ready = (fn) => (document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", fn) : fn());
 
   ready(() => {
@@ -73,14 +74,15 @@
         box.setAttribute("role", "dialog");
         box.setAttribute("aria-label", "Picture");
         box.append(item.cloneNode(true));
-        const close = () => box.remove();
+        const escape = (key) => {
+          if (key.key === "Escape") close();
+        };
+        const close = () => {
+          box.remove();
+          document.removeEventListener("keydown", escape);
+        };
         box.addEventListener("click", close);
-        document.addEventListener("keydown", function escape(key) {
-          if (key.key === "Escape") {
-            close();
-            document.removeEventListener("keydown", escape);
-          }
-        });
+        document.addEventListener("keydown", escape);
         document.body.append(box);
       });
     }
@@ -88,7 +90,7 @@
     for (const year of document.querySelectorAll("[data-year]")) year.textContent = String(new Date().getFullYear());
 
     // Forms with no address to send to say thank you instead of reloading.
-    for (const form of document.querySelectorAll("form[data-thanks]")) {
+    for (const form of document.querySelectorAll("form")) {
       form.addEventListener("submit", (event) => {
         if (form.getAttribute("action")) return;
         event.preventDefault();

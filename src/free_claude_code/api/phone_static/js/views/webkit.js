@@ -129,6 +129,7 @@ export function render(view) {
           width = value;
           holder.dataset.width = value;
           draw();
+          fit();
         } }))),
         holder,
       ]),
@@ -136,12 +137,17 @@ export function render(view) {
     preview();
   };
 
+  // The computer view is a 1280px page scaled down to fit this phone.
+  const fit = () => requestAnimationFrame(() => holder.style.setProperty("--fit", String((holder.clientWidth || 360) / 1280)));
+  window.addEventListener("resize", fit);
   view.replaceChildren(controls);
   draw();
+  fit();
   kitFiles()
     .then((files) => {
       kit = files;
       preview();
     })
     .catch((error) => notify(error.message));
+  return () => window.removeEventListener("resize", fit);
 }

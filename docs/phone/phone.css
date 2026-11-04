@@ -1816,8 +1816,8 @@ body[data-look="playground"] .sheet-head h2 {
 
 .web-frame[data-width="computer"] .web-preview {
   width: 1280px;
-  height: calc(70vh / 0.27);
-  transform: scale(0.27);
+  height: calc(70vh / var(--fit, 0.27));
+  transform: scale(var(--fit, 0.27));
   transform-origin: 0 0;
 }
 

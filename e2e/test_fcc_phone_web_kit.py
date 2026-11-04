@@ -128,3 +128,61 @@ def test_the_ai_builds_websites_with_the_web_kit_tool(
     assert result["finished"] == "Ridge Plumbing passed every check.", result[
         "finished"
     ]
+
+
+def test_web_kit_edge_cases_from_people_and_models(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    result = page.evaluate(
+        """async () => {
+            const { runTool } = await import('./js/tools.js');
+            const { createProject, writeFile, checkProject } = await import('./js/projects.js');
+            const { pageHtml } = await import('./web/sections.js');
+            const builder = window.fccPhone.state.agents.find((a) => a.id === 'builder');
+            const project = await createProject('Cash $& Carry');
+            const ctx = { project, depth: 0, chain: [], built: new Set() };
+            const tool = (args) => runTool(builder, { name: 'web_kit', arguments: args }, ctx);
+            const out = {};
+            out.first = await tool({ action: 'page', sections: ['hero-center', 'constructor', 'faq'], look: 'toString' });
+            out.index = project.files['index.html'];
+            out.styles = project.files['styles.css'];
+            // A second page call never overwrites the work without replace.
+            await writeFile(project, 'index.html', '<h1>My own words</h1>', 'Builder');
+            out.again = await tool({ action: 'page', recipe: 'shop' });
+            out.kept = project.files['index.html'];
+            out.replaced = await tool({ action: 'page', recipe: 'shop', replace: true });
+            // Stand-ins: an empty art div is flagged whichever attribute comes
+            // first; one with a photo inside is a finished picture.
+            const check = async (html) => {
+                await writeFile(project, 'index.html', html, 'Builder');
+                return checkProject(project).join(' ');
+            };
+            out.flagged = await check('<!doctype html><html><head><title>A</title></head><body><div role="img" class="art art-2" aria-label="Van"></div></body></html>');
+            out.photo = await check('<!doctype html><html><head><title>A</title></head><body><div class="art" role="img" aria-label="Van"><img class="photo" src="https://x.example/van.jpg" alt="Van"></div></body></html>');
+            out.realName = await check('<!doctype html><html><head><title>A</title></head><body><h1>Northwind Traders</h1><p>Ava Park runs it.</p></body></html>');
+            out.noScript = pageHtml({ title: 'Plain', sections: ['hero-center'] }).replace('<script>document.documentElement.classList.add("js")</script>', '').replace('<script src="kit/kit.js" defer></script>', '');
+            return out;
+        }"""
+    )
+    assert "Cash $&amp; Carry" in result["index"] and "FCCNAME" not in result["index"]
+    assert (
+        "Not in the kit, so left out: section constructor, look toString"
+        in result["first"]
+    )
+    assert "--brand: #2563eb" in result["styles"]
+    assert "already has an index.html: nothing was changed" in result["again"]
+    assert result["kept"] == "<h1>My own words</h1>"
+    assert result["replaced"].startswith("Built Cash $& Carry from the Web kit")
+    assert "gradient stand-ins" in result["flagged"]
+    assert "gradient stand-ins" not in result["photo"]
+    assert "sample line" not in result["realName"]
+    # Without any script the revealed sections still show.
+    page.set_content(
+        result["no_script"] if "no_script" in result else result["noScript"]
+    )
+    page.add_style_tag(path="src/free_claude_code/api/phone_static/web/kit.css")
+    opacity = page.evaluate(
+        "() => getComputedStyle(document.querySelector('[data-reveal]')).opacity"
+    )
+    assert opacity == "1"

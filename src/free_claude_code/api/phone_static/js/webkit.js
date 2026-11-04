@@ -1,7 +1,7 @@
 // The Web kit on the phone: a design system (web/kit.css, kit.js) and
 // polished sections (web/sections.js) that websites are built from, the
 // guide to website design engineering, and the web_kit tool the AI uses.
-import { SECTIONS, LOOKS, FONTS, RECIPES, pageHtml, lookCss } from "../web/sections.js";
+import { SECTIONS, LOOKS, FONTS, RECIPES, pageHtml, lookCss, known } from "../web/sections.js";
 
 export { SECTIONS, LOOKS, FONTS, RECIPES, pageHtml, lookCss };
 
@@ -18,11 +18,12 @@ export async function kitFiles() {
 
 /** A whole site from the kit: the page, its look, and the kit. */
 export async function webKitFiles(title, { recipe = "", sections = null, look = "", fonts = "", description = "" } = {}) {
-  const base = RECIPES[recipe] || null;
-  const chosen = Array.isArray(sections) && sections.length ? sections.filter((id) => SECTIONS[id]) : base ? base.sections : RECIPES.business.sections;
+  const base = known(RECIPES, recipe) ? RECIPES[recipe] : null;
+  const asked = Array.isArray(sections) ? sections.map(String) : [];
+  const chosen = asked.length ? asked.filter((id) => known(SECTIONS, id)) : base ? base.sections : RECIPES.business.sections;
   if (!chosen.length) throw new Error(`None of those are kit sections. The list action shows them.`);
-  const lookId = LOOKS[look] ? look : base ? base.look : "ocean";
-  const fontsId = FONTS[fonts] ? fonts : "";
+  const lookId = known(LOOKS, look) ? look : base ? base.look : "ocean";
+  const fontsId = known(FONTS, fonts) ? fonts : "";
   return {
     "index.html": pageHtml({ title: String(title || "My site").replace(/[<>]/g, ""), description, sections: chosen, look: lookId, fonts: fontsId }),
     "styles.css": lookCss(lookId, fontsId),
@@ -71,18 +72,26 @@ export async function useWebKit(args, ctx, writeFile) {
     ].join("\n");
   }
   if (action === "section") {
-    const section = SECTIONS[String(args.id || "")];
+    const section = known(SECTIONS, args.id) ? SECTIONS[args.id] : null;
     if (!section) throw new Error(`No section called ${args.id}. The list action shows them.`);
     return `${section.name} (${section.group}): ${section.about}\nIt needs kit/kit.css (web_kit add). Replace FCCNAME with the site's name.\n\n${section.html}`;
   }
   if (action === "page" || action === "add") {
     if (ctx.partsOnly) return "As a helper you write only under parts/: put your section or page there (web_kit section shows the markup).";
     if (!ctx.project) throw new Error("Start or pick a project first (start_project), then use web_kit page.");
+    if (action === "page" && ctx.project.files["index.html"] && args.replace !== true && args.replace !== "true") {
+      return `${ctx.project.name} already has an index.html: nothing was changed. To start the page over from the kit, call page again with replace true; to keep your work, use section and edit_file instead.`;
+    }
     const files = action === "add" ? await kitFiles() : await webKitFiles(args.title || ctx.project.name, { recipe: args.recipe, sections: args.sections, look: args.look, fonts: args.fonts, description: args.description });
     for (const [path, body] of Object.entries(files)) await writeFile(ctx.project, path, body);
-    return action === "add"
-      ? `Put the Web kit in ${ctx.project.name}: kit/kit.css and kit/kit.js. Link them in each page: <link rel="stylesheet" href="kit/kit.css" /> before your styles.css, and <script src="kit/kit.js" defer></script>.`
-      : `Built ${ctx.project.name} from the Web kit: ${Object.keys(files).join(", ")}. Now write the real content into index.html, swap the .art stand-ins for real photos, and set the look in styles.css. Then check_project, look_at_site and polish_check.`;
+    if (action === "add") return `Put the Web kit in ${ctx.project.name}: kit/kit.css and kit/kit.js. Link them in each page: <link rel="stylesheet" href="kit/kit.css" /> before your styles.css, and <script src="kit/kit.js" defer></script>.`;
+    const ignored = [
+      ...(Array.isArray(args.sections) ? args.sections.map(String).filter((id) => !known(SECTIONS, id)) : []).map((id) => `section ${id}`),
+      ...(args.look && !known(LOOKS, args.look) ? [`look ${args.look}`] : []),
+      ...(args.fonts && !known(FONTS, args.fonts) ? [`fonts ${args.fonts}`] : []),
+      ...(args.recipe && !known(RECIPES, args.recipe) ? [`recipe ${args.recipe}`] : []),
+    ];
+    return `Built ${ctx.project.name} from the Web kit: ${Object.keys(files).join(", ")}.${ignored.length ? ` Not in the kit, so left out: ${ignored.join(", ")} (the list action shows what is).` : ""} Now write the real content into index.html, swap the .art stand-ins for real photos, and set the look in styles.css. Then check_project, look_at_site and polish_check.`;
   }
   throw new Error("action is guide, list, section, page or add.");
 }

@@ -72,6 +72,7 @@ export const SPECS = {
         look: { type: "string", enum: ["ocean", "forest", "espresso", "sunset", "midnight", "rose", "mono", "mint"], description: "page: the look (brand colour, accent, theme, fonts)." },
         fonts: { type: "string", enum: ["modern", "editorial", "warm", "tech", "friendly", "luxury", "bold"], description: "page: a font pair instead of the look's own." },
         description: text("page: one line for search engines and link previews."),
+        replace: { type: "boolean", description: "page: true to start index.html over when the project already has one." },
       },
       required: ["action"],
     },
