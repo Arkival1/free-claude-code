@@ -96,10 +96,10 @@ def test_the_phone_carries_three_byte_for_byte_with_its_licence():
     import hashlib
 
     root = Path(__file__).resolve().parents[2] / "vendor" / "three"
-    sums = dict(
-        reversed(line.split())
-        for line in (root / "SHA256SUMS").read_text().splitlines()
-    )
+    sums: dict[str, str] = {}
+    for line in (root / "SHA256SUMS").read_text().splitlines():
+        digest, name = line.split()
+        sums[name] = digest
     for name in ("three.module.js", "three.core.js"):
         digest = hashlib.sha256(
             (PHONE_DIR / "vendor" / "three" / name).read_bytes()

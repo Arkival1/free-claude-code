@@ -6,7 +6,7 @@ import io
 import json
 import zipfile
 
-from playwright.sync_api import Page, expect
+from playwright.sync_api import ConsoleMessage, Page, expect
 
 from .test_fcc_phone import go, open_phone
 
@@ -16,10 +16,12 @@ def test_the_lab_shows_the_kit_live_and_starts_a_3d_game(
 ) -> None:
     errors: list[str] = []
     page.on("pageerror", lambda error: errors.append(str(error)))
-    page.on(
-        "console",
-        lambda message: message.type == "error" and errors.append(message.text),
-    )
+
+    def console_error(message: ConsoleMessage) -> None:
+        if message.type == "error":
+            errors.append(message.text)
+
+    page.on("console", console_error)
     open_phone(page, admin_base_url)
     go(page, "lab")
     expect(page.locator("section.card h2", has_text="Game Lab")).to_be_visible()
