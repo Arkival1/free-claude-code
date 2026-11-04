@@ -89,6 +89,9 @@ function describe(item) {
 /** The use_plugin tool: find the best plugin for a need, or call one. */
 export async function usePlugin(args) {
   const action = String(args.action || "find");
+  if (state.settings.pluginsOn === false) {
+    throw new Error("Plugin APIs are switched off: the user switches them on in More, Plugins.");
+  }
   if (action === "find") {
     const found = findPlugins(String(args.need || args.query || ""));
     if (!found.length) return "No plugin in the catalog matches that. Try other words, or use read_page or wikipedia.";

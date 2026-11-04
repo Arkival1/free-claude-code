@@ -7,12 +7,12 @@ import { el, button, card, notify, go, ago, meter } from "../ui.js";
 import { pcCall } from "../sync.js";
 import { createProject, writeFile, putPicture, isPicture } from "../projects.js";
 import { startTask, stopTask, resumeTask, isRunning } from "../tasks.js";
-import { startPlayground } from "../playground.js";
+import { startPlayground, said } from "../playground.js";
 
 const REFRESH_MS = 5000;
 const MARK = { done: "✓", running: "●", working: "●", planning: "…", failed: "✕", stopped: "■", skipped: "–", waiting: "○" };
 // A Playground job's stages.
-const STAGE = { kickoff: "Advice", work: "The work", review: "Check" };
+const STAGE = { kickoff: "Advice", help: "Helper's part", work: "The work", review: "Check" };
 
 async function openFiles(task) {
   try {
@@ -43,7 +43,7 @@ function stepRow(step) {
     el("div", { class: "grow" }, [
       el("strong", { text: `${step.agent}: ${step.do}` }),
       el("small", { text: `${STAGE[step.stage] ? `${STAGE[step.stage]}${step.pass > 1 ? ` (try ${step.pass})` : ""} · ` : ""}${step.status}${step.plugin ? ` · plugin ${step.plugin}` : ""}${step.source ? ` · from ${step.source}` : ""}` }),
-      step.result ? el("p", { class: "small", text: step.result }) : null,
+      step.result ? el("p", { class: "small", text: step.stage ? said(step) : step.result }) : null,
     ]),
   ]);
 }
@@ -177,7 +177,7 @@ function renderPhoneTask(view, id) {
         task.kind === "playground"
           ? el("p", {
               class: "small",
-              text: `${(agentById(task.hands) || { name: "The main AI" }).name} does the work${(task.advisers || []).length ? ` · advising: ${task.advisers.map((adviser) => (agentById(adviser) || { name: "?" }).name).join(", ")}${task.meeting ? " (team meeting)" : ""}` : ""}`,
+              text: `${task.type === "game" ? "A game" : task.type === "website" ? "A website" : "The job"}: ${(agentById(task.hands) || { name: "The main AI" }).name} builds it${(task.helpers || []).length ? ` · helping: ${task.helpers.map((helper) => (agentById(helper) || { name: "?" }).name).join(", ")}` : ""}${(task.advisers || []).length ? ` · advising: ${task.advisers.map((adviser) => (agentById(adviser) || { name: "?" }).name).join(", ")}` : ""}`,
             })
           : null,
         el("p", { class: "muted small", text: `On this phone · ${done} of ${total} steps${task.replanned ? ` · Jarvis changed the plan ${task.replanned}×` : ""} · updated ${ago(task.updated_at)}` }),
@@ -185,6 +185,7 @@ function renderPhoneTask(view, id) {
           busy ? button("Stop", () => { stopTask(id); notify("Stopping after this step."); }, { class: "danger" }) : null,
           !busy && task.status !== "done" ? button("Run again", () => { resumeTask(id); notify("Going again from where it stopped."); draw(); }, { class: "primary" }) : null,
           task.project_id ? button("Open the project", () => go(`projects/${task.project_id}`)) : button("Projects", () => go("projects")),
+          task.libraryId ? button("Library", () => go("library")) : null,
         ]),
       ]),
       card("Steps", total ? task.steps.map(stepRow) : [el("p", { class: "muted", text: "Planning the steps…" })]),

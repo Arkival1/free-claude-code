@@ -4,7 +4,7 @@
 // (skills, plugin agents, MCP servers) and subagents: add a repo from GitHub,
 // switch repos and subagents on or off, add a subagent. MCP servers stay off
 // until switched on on the PC.
-import { state, onChange } from "../state.js";
+import { state, onChange, save, changed } from "../state.js";
 import { el, button, card, notify, openSheet, closeSheet } from "../ui.js";
 import { pcCall } from "../sync.js";
 import { allPlugins, findPlugins, setPlugin, hostOf } from "../plugins.js";
@@ -76,6 +76,15 @@ export function render(view, param = "") {
   view.replaceChildren(
     card("Plugins on this phone", [
       el("p", { text: `${allPlugins().length.toLocaleString()} free APIs. Switch one on and your agents can use it; Jarvis picks the best fit for what you ask. Keys stay on this phone.` }),
+      el("label", { class: "check master-switch" }, [
+        el("input", { type: "checkbox", checked: state.settings.pluginsOn !== false, "aria-label": "Plugin APIs on", onchange: async (event) => {
+          state.settings.pluginsOn = event.target.checked;
+          await save.settings();
+          changed("plugins");
+          notify(event.target.checked ? "Plugin APIs are on: the AI can call the plugins you switched on." : "Plugin APIs are off: no plugin is called until you switch them back on.");
+        } }),
+        el("span", { text: "Plugin APIs on: the AI may call the plugins switched on below (with the keys you added). Off stops every plugin at once." }),
+      ]),
       search,
     ]),
     results,

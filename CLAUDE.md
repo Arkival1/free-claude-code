@@ -252,6 +252,15 @@ Notes carried over from the long session that built FCC Studio (LCC).
   pattern, lesson); the owner's taste (tag taste) goes to every AI in a job.
   PC: `studio/playground.py`, `PlaygroundJob`, `/studio/api/playground*`,
   `playground.js/css`; phone: `js/playground.js`, `js/views/playground.js`.
+  Phone only from here (owner: "No pc only mobile"): the phone Playground
+  makes games and websites only, engineered; up to two helpers build parts
+  in `parts/` (the template still goes in), advisers are unlimited (two talk
+  at a time) and give tool tips; the main AI keeps an advice book and
+  lessons (memory kinds advice/lesson, mini notes, searched per job, never
+  all); finished work waits in the Library (`js/library.js`) for approval and
+  approved references feed the next job; More, Plugins has the Plugin APIs
+  master switch (`settings.pluginsOn`). The local AI "branch" and phone
+  connectors are paused until the owner asks again.
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

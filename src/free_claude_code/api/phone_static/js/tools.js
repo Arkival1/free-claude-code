@@ -8,6 +8,7 @@ import { PICTURE_SUFFIXES, polishNotes } from "./polish.js";
 import { lookAtSite, describeLook } from "./inspect.js";
 import { TEMPLATES, templateFiles } from "./templates.js";
 import { usePlugin } from "./plugins.js";
+import { useLibrary, LIBRARY_KINDS } from "./library.js";
 import { SKILLS } from "./skills.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
@@ -28,8 +29,16 @@ export const SPECS = {
     },
   },
   recall: {
-    description: "Search memory for what is known about something before answering.",
-    parameters: { type: "object", properties: { query: text("What to look for.") }, required: ["query"] },
+    description: "Search memory for what is known about something before answering. kind narrows it: advice (what other AIs told you), lesson, pattern, thought, taste or fact. Search; don't read everything.",
+    parameters: { type: "object", properties: { query: text("What to look for."), kind: { type: "string", enum: Object.keys(MEMORY_KINDS) } }, required: ["query"] },
+  },
+  library: {
+    description: "The user's library of approved references for games and websites (their own projects, photos and notes, and games and sites they approved). search finds the ones that fit; read one by its id. Read the fitting ones before you design, then make something original in their spirit; never copy.",
+    parameters: {
+      type: "object",
+      properties: { action: { type: "string", enum: ["search", "read"] }, query: text("What you're making, in a few words."), kind: { type: "string", enum: Object.keys(LIBRARY_KINDS) }, id: text("A reference's id, to read it.") },
+      required: ["action"],
+    },
   },
   calculate: {
     description: "Exact arithmetic: + - * / % ^, brackets, sqrt, round, min, max, '15% of 80'. Use it for every sum.",
@@ -213,7 +222,7 @@ export async function runTool(agent, call, ctx) {
       case "remember":
         return await remember(agent, String(args.text || ""), { share: args.share === true, kind: String(args.kind || "fact") });
       case "recall": {
-        const found = recall(agent, String(args.query || ""), 8);
+        const found = recall(agent, String(args.query || ""), 8, String(args.kind || ""));
         return found.length ? found.map((row) => `- ${row.kind && row.kind !== "fact" ? `[${row.kind}] ` : ""}${row.text}${row.from ? ` (${row.from})` : ""}`).join("\n") : "Nothing in memory about that.";
       }
       case "calculate":
@@ -228,6 +237,8 @@ export async function runTool(agent, call, ctx) {
         const results = await pcSearch(String(args.query || ""));
         return results.length ? results.map((hit, i) => `${i + 1}. ${hit.title}\n   ${hit.url}\n   ${hit.snippet || ""}`).join("\n") : "No results.";
       }
+      case "library":
+        return useLibrary(args);
       case "use_plugin":
         return await usePlugin(args);
       case "start_task": {
@@ -252,7 +263,8 @@ export async function runTool(agent, call, ctx) {
         ctx.project = project;
         const template = String(args.template || "");
         if (template && TEMPLATES[template]) {
-          if (Object.keys(project.files).length) {
+          // Helpers' parts (parts/) wait beside an empty project; the template still goes in.
+          if (Object.keys(project.files).some((path) => !path.startsWith("parts/"))) {
             return `${project.name} already has files (${Object.keys(project.files).join(", ")}), so the template wasn't used. Build on them.`;
           }
           for (const [path, body] of Object.entries(templateFiles(template, project.name))) {
@@ -484,13 +496,13 @@ export function pcMemoryAllowed(agent) {
   return isPrivate(agent) || Boolean(state.settings.cloudSeesPc);
 }
 
-export function recall(agent, query, limit) {
+export function recall(agent, query, limit, kind = "") {
   const terms = new Set(words(query));
   const score = (value) => words(value).reduce((sum, word) => sum + (terms.has(word) ? 1 : 0), 0);
   const rows = state.memories
-    .filter((memory) => canRead(agent, memory))
+    .filter((memory) => canRead(agent, memory) && (!kind || (memory.kind || "fact") === kind))
     .map((memory) => ({ text: memory.text, kind: memory.kind || "fact", at: memory.created_at, score: score(memory.text), from: whose(agent, memory) }));
-  if (pcMemoryAllowed(agent)) {
+  if (pcMemoryAllowed(agent) && (!kind || kind === "fact")) {
     for (const memory of state.pcMemories) rows.push({ text: memory.text, at: memory.created_at, score: score(memory.text), from: "from your PC" });
   }
   return rows

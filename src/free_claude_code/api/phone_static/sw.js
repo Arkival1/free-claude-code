@@ -15,6 +15,7 @@ const SHELL = [
   "js/app.js",
   "js/tasks.js",
   "js/playground.js",
+  "js/library.js",
   "js/plugins.js",
   "js/apis.js",
   "js/skills.js",
@@ -50,6 +51,7 @@ const SHELL = [
   "js/views/settings.js",
   "js/views/tasks.js",
   "js/views/playground.js",
+  "js/views/library.js",
   "js/views/todos.js",
   "js/views/trade.js",
 ];

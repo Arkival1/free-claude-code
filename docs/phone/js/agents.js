@@ -3,6 +3,7 @@ import { state, save, chatOf, changed, feed, agentByName, toolsFor, MIND_KINDS }
 import { think, brainOf, isPrivate, pinBrain, PROVIDERS, modelOf } from "./brains.js";
 import { specsFor, runTool, recall, setHooks, pcMemoryAllowed, canRead } from "./tools.js";
 import { startStudy } from "./learn.js";
+import { words } from "./ui.js";
 
 const HISTORY_TURNS = 20;
 const MAX_HANDOFF_DEPTH = 2;
@@ -32,10 +33,11 @@ export function systemPrompt(agent, question, ctx = {}) {
     const files = Object.keys(ctx.project.files);
     parts.push(`Current project: ${ctx.project.name}. Files: ${files.length ? files.join(", ") : "none yet"}.`);
   }
-  // The AI's own mind: how it works best and what it learned, then the
+  // The AI's own mind: the few notes from its advice book, lessons and
+  // patterns that fit this job (found by search, never all of them), then the
   // user's taste, which every AI follows.
-  const mind = state.memories.filter((memory) => memory.agent_id === agent.id && (memory.kind === "pattern" || memory.kind === "lesson")).slice(0, 6);
-  if (mind.length) parts.push(`How you work best (your own thinking patterns and lessons):\n${mind.map((memory) => `- ${memory.text}`).join("\n")}`);
+  const mind = mindNotes(agent, question);
+  if (mind.length) parts.push(`Your own notes that fit this job (advice you were given, lessons, ways that work; recall with a kind finds more):\n${mind.map((memory) => `- ${memory.text}`).join("\n")}`);
   const taste = state.memories.filter((memory) => memory.kind === "taste").slice(0, 8);
   if (taste.length) parts.push(`The user's taste (make things in their image):\n${taste.map((memory) => `- ${memory.text}`).join("\n")}`);
   const shown = new Set([...mind, ...taste].map((memory) => memory.text));
@@ -47,6 +49,21 @@ export function systemPrompt(agent, question, ctx = {}) {
   const lines = [...relevant.map((row) => `- ${row.text}${row.from ? ` (${row.from})` : ""}`), ...recent.map((memory) => `- ${memory.text}`)];
   if (lines.length) parts.push(`What you remember (use it when it helps):\n${lines.join("\n")}`);
   return parts.filter(Boolean).join("\n\n");
+}
+
+/** The notes in an AI's own mind (advice book, lessons, patterns) that share
+ * the most words with the job; with no match, its newest few patterns and
+ * lessons. Mini notes only, so the prompt stays small. */
+export function mindNotes(agent, question, limit = 5) {
+  const own = state.memories.filter((memory) => memory.agent_id === agent.id && ["advice", "lesson", "pattern"].includes(memory.kind));
+  const terms = new Set(words(question));
+  const scored = own
+    .map((memory) => [words(memory.text).reduce((sum, word) => sum + (terms.has(word) ? 1 : 0), 0), memory])
+    .filter(([score]) => score > 0)
+    .sort((a, b) => b[0] - a[0] || b[1].created_at - a[1].created_at)
+    .map(([, memory]) => memory);
+  const picked = scored.length ? scored : own.filter((memory) => memory.kind !== "advice");
+  return picked.slice(0, limit);
 }
 
 async function addTurn(agent, turn) {

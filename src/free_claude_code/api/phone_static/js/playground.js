@@ -1,24 +1,71 @@
-// The Playground (FCC's Manus-like mode). One main AI does the job with its
-// own hands, thinking on the phone's own model when one is ready; up to two
-// advisers think alongside it (three AIs at once), a team meeting brings more
-// in to advise (still two at a time), and none of them touches the work unless
-// the user hands it to them. After the work the advisers check it and the main
-// AI fixes what they found (up to three tries in all). Each AI then writes
-// down what to keep in its own mind: a thought, a thinking pattern, a lesson.
+// The Playground (FCC's Manus-like mode) makes two things, properly
+// engineered: games and websites. One main AI does the job with its own
+// hands, thinking on the phone's own model when one is ready. Up to two
+// helpers physically help: each builds a part (content, pages, art, a
+// playtest) in the same project, so three AIs work at once. Any number of
+// advisers advise (two talk at a time), telling the main AI what to do and
+// which of its tools to use; none of them takes the work over unless the
+// user hands it to them. After the work the advisers check it and the main
+// AI fixes what they found, three tries in all. The main AI keeps what the
+// advisers told it in its advice book and what the fixes taught it as
+// lessons, so it learns; every AI also writes down a thought, a thinking
+// pattern and a lesson. A finished game or site goes to the library for the
+// user to approve, and approved work becomes a reference for the next one.
 import { state, agentById, jarvis, feed, ROLE_PROMPTS } from "./state.js";
 import { runTask, COULDNT_FINISH } from "./agents.js";
 import { think, pinBrain, brainReady } from "./brains.js";
 import { remember } from "./tools.js";
-import { projectById } from "./projects.js";
+import { projectById, createProject } from "./projects.js";
+import { addToLibrary } from "./library.js";
 
-/** Advisers thinking at the same time as the main AI: three AIs at once. */
+/** Helpers that build parts alongside the main AI: three AIs at once. */
+export const MAX_HELPERS = 2;
+/** Advisers talk two at a time; there is no limit on how many advise. */
 export const MAX_ADVISERS = 2;
-/** Advisers in a team meeting (they take turns, two at a time). */
-export const MAX_MEETING = 5;
 /** The work, then up to two fixes. */
 export const MAX_PASSES = 3;
+/** A note in an AI's memory stays short: a mini note, not an essay. */
+export const MINI_NOTE = 220;
 const STEP_CHARS = 1500;
-const LOOKS_GOOD = /\blooks good\b/i;
+/** An adviser's approval: the reply starts with LOOKS GOOD (and no "but"). */
+export const LOOKS_GOOD = /^[\s*_"'`>-]*looks good\b(?![^.!\n]*\bbut\b)/i;
+
+/** The two things the Playground makes, and how each is engineered. */
+export const KINDS = {
+  website: {
+    label: "Website",
+    glyph: "⌘",
+    placeholder: "A website for… (who it's for, what it sells, the feel you want)",
+    engineering:
+      "Website engineering, step by step. 1. Plan: who it is for, the pages, the sections of each, and the look. Search the library (library tool) for approved references and recall the user's taste first. 2. Start from the closest template or FCC design with start_project. 3. Build every page with real content (your helpers' parts are in parts/: read them with list_files and read_file and use them). 4. Check: check_project, look_at_site on a phone and a computer, polish_check; fix what they find. Make something original: take the feel of a reference, never copy it.",
+  },
+  game: {
+    label: "Game",
+    glyph: "◇",
+    placeholder: "A game where… (the goal, the controls, the feel you want)",
+    engineering:
+      "Game engineering, step by step. 1. Read the game-design skill, and search the library (library tool) for approved game references. 2. Design: one clear goal, a core loop that is fun in 30 seconds, touch controls first, rising difficulty, score and feedback on every hit. 3. Start from the game template (start_project with template game) and build it in game.js (your helpers' parts are in parts/: read them and use them). 4. Playtest with look_at_site, fix what breaks, and balance the difficulty. Draw original art (shapes, SVG, canvas); never copy someone else's game or art.",
+  },
+};
+
+/** Games or websites: a job that talks about play is a game. */
+export const kindOf = (goal) => (/\b(game|play|player|level|enemy|boss|score|shooter|platformer|puzzle|rpg|arcade)\b/i.test(goal) ? "game" : "website");
+
+/** The part each helper builds, by the job and the helper's role. */
+const HELPER_PARTS = {
+  website: {
+    researcher: "Write the real content in parts/content.md: the names, headings, paragraphs, prices and opening hours, and photo links from find_images with their credits.",
+    builder: "Build the extra pages the main AI won't start with (about, contact, gallery) as parts/pages/*.html in the same style, ready to move in.",
+    tester: "Write parts/checks.md: what to try on a phone and a computer, then check what exists so far with check_project and note what breaks.",
+    any: "Build one useful part of the site in your own file under parts/ and say what it is for.",
+  },
+  game: {
+    researcher: "Write parts/design.md: the rules, the levels and the difficulty curve, using the game-design skill.",
+    builder: "Make the game's art and sound in parts/art.js: drawn shapes and colours for the player, enemies and pick-ups, and short sound effects with the Web Audio API, as functions the main AI can call.",
+    tester: "Write parts/playtest.md: what to try, then play what exists so far with look_at_site and note what breaks.",
+    any: "Build one useful part of the game in your own file under parts/ and say what it is for.",
+  },
+};
 
 /** The main AI's hands: every tool that makes or finds things. */
 export const HANDS_TOOLS = [
@@ -38,25 +85,44 @@ export const HANDS_TOOLS = [
   "remember",
   "recall",
   "calculate",
-  "weather",
   "wikipedia",
   "read_page",
   "web_search",
-  "todo",
   "skill",
   "use_plugin",
+  "library",
   "ask_agent",
+];
+/** Helpers build their part in the main AI's project; they never start a
+ * project, delete files or hand work on. */
+export const HELPER_TOOLS = [
+  "write_file",
+  "read_file",
+  "edit_file",
+  "list_files",
+  "check_project",
+  "find_images",
+  "look_at_site",
+  "list_photos",
+  "recall",
+  "calculate",
+  "wikipedia",
+  "read_page",
+  "web_search",
+  "skill",
+  "use_plugin",
+  "library",
 ];
 /** Advisers look and think; they never change anything. */
 export const ADVISER_TOOLS = [
   "recall",
   "calculate",
-  "weather",
   "wikipedia",
   "read_page",
   "web_search",
   "skill",
   "use_plugin",
+  "library",
   "list_files",
   "read_file",
   "check_project",
@@ -66,28 +132,40 @@ export const ADVISER_TOOLS = [
 ];
 
 export const HANDS_PROMPT =
-  "You are the main AI in the user's Playground, and you are the hands: you do the whole job yourself, start to finish, with your tools (research, plans, writing, code, websites, games). Your advisers only advise: weigh what they say, use what helps, and decide yourself; ask one with ask_agent when you want advice mid-job. Work in the user's image: their ideas and taste come first, and when they say what they like, keep it with remember (kind taste). When a job makes files, use the current project or start_project, write complete files, then check_project and look_at_site and fix what they find. Read a skill when a job needs depth (game-design before a game, web-design-engineer or frontend-design for a look). Finish by saying what you made and where.";
+  "You are the main AI in the user's Playground, and you are the hands: you make the whole game or website yourself, start to finish, with your tools. Your helpers build parts for you in parts/ (read them and use what is good); your advisers only advise: weigh what they say, use what helps, and decide yourself; ask one with ask_agent when you want advice mid-job. Work in the user's image: their ideas and taste come first, and when they say what they like, keep it with remember (kind taste). Finish by saying what you made and which files.";
+
+export const HELPER_PROMPT =
+  "You are a helper in the user's Playground. The main AI is making the game or website; you build one part of it for the main AI to use, in your own files under parts/ in its project. Never rewrite the main AI's files, never start another project. Make your part complete and good, then say in two lines what you made and how to use it.";
 
 export const ADVISER_PROMPT =
-  "You are an adviser in the user's Playground. The main AI does the work with its own hands; you never change files or do the job yourself. Think it through, look things up or read the project with your tools when it helps, and give advice the main AI can act on: short, specific, the most important first.";
+  "You are an adviser in the user's Playground. The main AI does the work with its own hands; you never change files or do the job yourself. Think it through, look things up or read the project with your tools when it helps, and give advice the main AI can act on: short, specific, the most important first, and say which of its tools to use for what.";
 
 const REFLECT =
-  'You just took part in a job in the user\'s Playground. Write down what to keep in your own mind, as JSON only: {"thought": "one thing you are still thinking about after this job", "pattern": "a way of working that went well and that you will use again", "lesson": "a mistake or surprise to remember next time"}. Leave a field empty when there is nothing worth keeping.';
+  'You just took part in making a game or website in the user\'s Playground. Write down what to keep in your own mind, as JSON only, one short line each: {"thought": "one thing you are still thinking about", "pattern": "a way of working that went well and that you will use again", "lesson": "a mistake or surprise to remember next time"}. Leave a field empty when there is nothing worth keeping.';
 
-/** Advisers that fit a job: testers and researchers for things to build,
- * researchers and planners for the rest. The main AI is never its own adviser. */
-export function pickAdvisers(goal, handsId, count = MAX_ADVISERS) {
-  const making = /\b(game|site|website|web|app|page|code|build|make|design|shop|landing)\b/i.test(goal);
-  const order = making ? ["tester", "researcher", "helper", "builder", "main"] : ["researcher", "helper", "tester", "builder", "main"];
-  const rank = (agent) => {
-    const index = order.indexOf(agent.role);
-    return index === -1 ? order.length : index;
-  };
+const rankBy = (order) => (agent) => {
+  const index = order.indexOf(agent.role);
+  return index === -1 ? order.length : index;
+};
+
+/** Helpers that fit: the Builder (when it isn't the main AI) and the
+ * Researcher for content, the Tester for a playtest. */
+export function pickHelpers(kind, handsId, count = 1) {
+  const order = kind === "game" ? ["builder", "researcher", "tester"] : ["researcher", "builder", "tester"];
+  const rank = rankBy(order);
   return state.agents
-    .filter((agent) => agent.id !== handsId)
+    .filter((agent) => agent.id !== handsId && order.includes(agent.role))
     .sort((a, b) => rank(a) - rank(b))
-    .slice(0, count)
+    .slice(0, Math.min(Math.max(0, count), MAX_HELPERS))
     .map((agent) => agent.id);
+}
+
+/** Advisers: every agent that isn't the main AI or a helper ("all"), or the
+ * two that fit best. Testers and researchers first. */
+export function pickAdvisers(goal, handsId, count = MAX_ADVISERS, skip = []) {
+  const rank = rankBy(["tester", "researcher", "helper", "builder", "main"]);
+  const pool = state.agents.filter((agent) => agent.id !== handsId && !skip.includes(agent.id)).sort((a, b) => rank(a) - rank(b));
+  return (count === Infinity ? pool : pool.slice(0, count)).map((agent) => agent.id);
 }
 
 /** Run fn over the items with at most `size` running at once. If one fails
@@ -125,14 +203,21 @@ function stepFor(task, stage, pass, agent, what) {
 }
 
 /** Run one step unless it is already done (a job that runs again picks up
- * where it stopped). Returns the step's result. */
+ * where it stopped). A step that breaks is marked failed, never left running. */
 async function runStep(task, step, saveTasks, fn) {
   if (step.status === "done") return step.result;
   if (task.stopping) throw new Stopped();
   step.status = "running";
   task.updated_at = Date.now();
   await saveTasks();
-  const result = String(await fn());
+  let result;
+  try {
+    result = String(await fn());
+  } catch (error) {
+    step.status = "failed";
+    step.result = `Couldn't finish: ${error.message}`.slice(0, STEP_CHARS);
+    throw error;
+  }
   step.status = result.startsWith(`${step.agent} ${COULDNT_FINISH}`) ? "failed" : "done";
   step.result = result.slice(0, STEP_CHARS);
   task.updated_at = Date.now();
@@ -141,13 +226,23 @@ async function runStep(task, step, saveTasks, fn) {
 }
 
 const filesOf = (project) => (project ? Object.keys(project.files) : []);
+/** What the agent itself said in a step, without "Name finished (project X): ". */
+export const said = (step) => {
+  const prefix = `${step.agent} finished`;
+  if (!step.result.startsWith(prefix)) return step.result;
+  return step.result.slice(prefix.length).replace(/^ \(project [^)]*\)/, "").replace(/^: /, "");
+};
+export const mini = (text) => {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  return clean.length > MINI_NOTE ? `${clean.slice(0, MINI_NOTE - 1)}…` : clean;
+};
 
 function adviseBrief(task, hands, project, what) {
   const files = filesOf(project);
   return [
     what,
-    `The job: ${task.goal}`,
-    `The main AI doing it: ${hands.name}.`,
+    `The job: make a ${KINDS[task.type].label.toLowerCase()}. ${task.goal}`,
+    `The main AI doing it: ${hands.name}. Its tools: ${HANDS_TOOLS.join(", ")}.`,
     project ? `The project: ${project.name} (files: ${files.length ? files.join(", ") : "none yet"}).` : "",
   ]
     .filter(Boolean)
@@ -163,6 +258,21 @@ function advise(adviser, hands, project, brief) {
     tools: ADVISER_TOOLS,
     instructions: `${ADVISER_PROMPT}\n\n${adviser.instructions || ""}`.trim(),
     maxRounds: 4,
+  });
+}
+
+/** One helper builds its part in the main AI's project. */
+function help(task, helper, hands, project) {
+  const parts = HELPER_PARTS[task.type] || HELPER_PARTS.website;
+  const part = parts[helper.role] || parts.any;
+  return runTask(helper, `${part}\n\nThe job: make a ${KINDS[task.type].label.toLowerCase()}. ${task.goal}\n\nThe main AI (${hands.name}) builds it in the project ${project.name}; your files go under parts/.`, {
+    project,
+    by: hands.name,
+    chain: [hands.id],
+    tools: HELPER_TOOLS,
+    instructions: `${HELPER_PROMPT}\n\n${helper.instructions || ""}`.trim(),
+    maxRounds: 12,
+    maxTokens: 4000,
   });
 }
 
@@ -183,14 +293,15 @@ export function consult(from, worker, question, ctx) {
 function notes(steps) {
   return steps
     .filter((step) => step && step.status === "done" && step.result)
-    .map((step) => `- ${step.agent}: ${step.result.replace(/^\S+ finished(?: \(project [^)]*\))?: /, "")}`)
+    .map((step) => `- ${step.agent}: ${said(step)}`)
     .join("\n");
 }
 
-function handsBrief(task, project, pass, advice) {
+function handsBrief(task, project, pass, advice, helpers) {
   const parts = [
-    pass === 1 ? task.goal : `Fix what your advisers found, then check again. The job: ${task.goal}`,
-    project ? `Work in the project ${project.name}.` : "If the job makes files, start a project with start_project.",
+    pass === 1 ? `Make a ${KINDS[task.type].label.toLowerCase()}. ${task.goal}` : `Fix what your advisers found, then check again. The job: ${task.goal}`,
+    `Work in the project ${project.name}: start_project with exactly that name and the template that fits (its files under parts/ are your helpers').`,
+    helpers.length ? `Your helpers ${helpers.map((helper) => helper.name).join(" and ")} are building parts for you in parts/.` : "",
     advice ? `${pass === 1 ? "Your advisers said" : "Your advisers found"}:\n${advice}\nUse what helps; you decide.` : "",
   ];
   return parts.filter(Boolean).join("\n\n");
@@ -202,49 +313,77 @@ async function reflect(agent, task, story) {
     const found = String(reply.text || "").match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(found ? found[0] : "{}");
     for (const kind of ["thought", "pattern", "lesson"]) {
-      if (typeof parsed[kind] === "string" && parsed[kind].trim()) await remember(agent, parsed[kind], { kind });
+      if (typeof parsed[kind] === "string" && parsed[kind].trim()) await remember(agent, mini(parsed[kind]), { kind });
     }
   } catch {
     // Nothing worth keeping, or a brain that couldn't answer: the job is done either way.
   }
 }
 
+/** A short project name from the job: "a snake game with neon colours" →
+ * "Snake game". */
+export function projectName(goal, kind) {
+  const words = String(goal || "")
+    .replace(/^(please\s+)?((make|build|create|design|do|code)\s+)?(me\s+)?((a|an|the|my)\s+)?/i, "")
+    .replace(/[^\w\s'-]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4)
+    .join(" ");
+  const name = words || `New ${KINDS[kind].label.toLowerCase()}`;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 /** Run (or pick up) a Playground job. Saves as it goes; sets the job's status. */
 export async function runPlayground(task, saveTasks) {
   const hands = agentById(task.hands) || jarvis();
   task.hands = hands.id;
-  const advisers = (task.advisers || []).map(agentById).filter((agent) => agent && agent.id !== hands.id);
+  task.type = KINDS[task.type] ? task.type : kindOf(task.goal);
+  const helpers = (task.helpers || []).map(agentById).filter((agent) => agent && agent.id !== hands.id).slice(0, MAX_HELPERS);
+  const advisers = (task.advisers || []).map(agentById).filter((agent) => agent && agent.id !== hands.id && !helpers.includes(agent));
   // The main AI thinks on this phone's own model when one is ready, unless
   // the user turned that off; the job keeps that brain to the end.
   const unpin = pinBrain(hands, state.settings.playgroundLocal !== false && brainReady("local") ? "local" : "");
-  task.status = "working";
-  task.updated_at = Date.now();
-  await saveTasks();
   try {
-    let project = task.project_id ? projectById(task.project_id) || null : null;
-    // 1. The advisers advise before the work (a team meeting: everyone, two at a time).
+    task.status = "working";
+    task.updated_at = Date.now();
+    await saveTasks();
+    // The project is made first, so the helpers can build their parts in it.
+    let project = (task.project_id && projectById(task.project_id)) || (await createProject(projectName(task.goal, task.type), hands.name));
+    task.project_id = project.id;
+    // 1. The advisers advise before the work, two at a time, and say which tools to use.
     const kickoff = advisers.map((adviser) => stepFor(task, "kickoff", 0, adviser, "Advise before the work"));
-    const kickoffBrief = adviseBrief(task, hands, project, "Advise the main AI before it starts: the best approach, what would make the result great, and one thing to watch out for. At most six short lines.");
+    const kickoffBrief = adviseBrief(task, hands, project, "Advise the main AI before it starts: the best approach, which of its tools to use for what, what would make it great, and one thing to watch out for. At most six short lines.");
     await inTurns(kickoff, MAX_ADVISERS, (step, index) => runStep(task, step, saveTasks, () => advise(advisers[index], hands, project, kickoffBrief)));
     let advice = notes(kickoff);
+    // What the advisers said goes into the main AI's advice book, so it learns.
+    for (const step of kickoff) if (step.status === "done" && !step.kept) {
+      await remember(hands, mini(`${step.agent} advised (${task.type}): ${said(step)}`), { kind: "advice" });
+      step.kept = true;
+    }
     const reviewers = advisers.slice(0, MAX_ADVISERS);
-    let clean = !reviewers.length;
+    let verdict = reviewers.length ? "" : "Done";
     for (let pass = 1; pass <= MAX_PASSES; pass += 1) {
-      // 2. The main AI does the job (or fixes it) with its own hands.
-      const work = stepFor(task, "work", pass, hands, pass === 1 ? "Do the job" : "Fix what the advisers found");
+      // 2. The main AI does the job (or fixes it) with its own hands, while the
+      // helpers build their parts beside it on the first try.
+      const work = stepFor(task, "work", pass, hands, pass === 1 ? "Build it" : "Fix what the advisers found");
+      const parts = pass === 1 ? helpers.map((helper) => stepFor(task, "help", 1, helper, "Build a part")) : [];
       const report = {};
-      await runStep(task, work, saveTasks, () =>
-        runTask(hands, handsBrief(task, project, pass, advice), {
+      const building = runStep(task, work, saveTasks, () =>
+        runTask(hands, handsBrief(task, project, pass, advice, pass === 1 ? helpers : []), {
           project,
           by: "you",
           tools: HANDS_TOOLS,
-          instructions: `${HANDS_PROMPT}\n\nHow to build sites and games well:\n${hands.role === "builder" ? hands.instructions : ROLE_PROMPTS.builder}`,
+          instructions: `${HANDS_PROMPT}\n\n${KINDS[task.type].engineering}\n\nHow to build well:\n${hands.role === "builder" ? hands.instructions : ROLE_PROMPTS.builder}`,
           maxRounds: 30,
           maxTokens: 4000,
           consult: true,
           report,
         })
       );
+      const helping = inTurns(parts, MAX_HELPERS, (step, index) => runStep(task, step, saveTasks, () => help(task, helpers[index], hands, project)));
+      const [built] = await Promise.allSettled([building, helping]);
+      if (built.status === "rejected") throw built.reason;
       if (report.ctx && report.ctx.project) {
         project = report.ctx.project;
         task.project_id = project.id;
@@ -257,20 +396,39 @@ export async function runPlayground(task, saveTasks) {
         task,
         hands,
         project,
-        `The main AI says it finished:\n${work.result}\n\nCheck the work against the job (read the files, run check_project or look_at_site when it helps). If it is good, answer exactly: LOOKS GOOD. Otherwise list what to fix, most important first, at most five lines.`
+        `The main AI says it finished:\n${work.result}\n\nCheck the work against the job (read the files, run check_project or look_at_site when it helps). If it is good, start your answer with LOOKS GOOD. Otherwise list what to fix, most important first, at most five lines, and the tool to fix each with.`
       );
       await inTurns(reviews, MAX_ADVISERS, (step, index) => runStep(task, step, saveTasks, () => advise(reviewers[index], hands, project, reviewBrief)));
-      clean = reviews.every((step) => step.status !== "done" || LOOKS_GOOD.test(step.result));
-      if (clean) break;
-      advice = notes(reviews.filter((step) => !LOOKS_GOOD.test(step.result)));
+      const checked = reviews.filter((step) => step.status === "done");
+      if (!checked.length) {
+        verdict = "Done, but the advisers couldn't check it";
+        break;
+      }
+      const approves = (step) => LOOKS_GOOD.test(said(step));
+      if (checked.every(approves)) {
+        verdict = "Done";
+        break;
+      }
+      advice = notes(checked.filter((step) => !approves(step)));
+      verdict = "Done, with notes the advisers still had";
+      // What the check found becomes a lesson in the main AI's own mind.
+      const found = checked.filter((step) => !approves(step) && !step.kept);
+      if (found.length) {
+        await remember(hands, mini(`On a ${task.type}, ${found.map((step) => step.agent).join(" and ")} found: ${found.map(said).join(" / ")}`), { kind: "lesson" });
+        for (const step of found) step.kept = true;
+      }
     }
     // 4. Each AI keeps what it learned in its own mind.
     const story = task.steps.map((step) => `${step.agent} (${step.do}): ${step.result.slice(0, 400)}`).join("\n");
-    for (const agent of [hands, ...advisers.slice(0, MAX_ADVISERS)]) await reflect(agent, task, story);
-    const made = project ? ` Project: ${project.name} (${filesOf(project).length} files).` : "";
+    for (const agent of [hands, ...helpers, ...reviewers]) await reflect(agent, task, story);
+    // 5. The finished work waits in the library for the user's approval.
+    if (project && filesOf(project).length && !task.libraryId) {
+      const item = await addToLibrary({ kind: task.type, title: project.name, notes: task.goal, project, by: hands.name, approved: false });
+      task.libraryId = item.id;
+    }
     const last = [...task.steps].reverse().find((step) => step.stage === "work" && step.status === "done");
     task.status = "done";
-    task.summary = `${clean ? "Done" : "Done, with notes the advisers still had"}.${made}\n${last ? last.result : ""}`.trim();
+    task.summary = `${verdict || "Done"}. Project: ${project.name} (${filesOf(project).length} files). It's in your Library to approve.\n${last ? last.result : ""}`.trim();
     feed(hands.name, `Finished in the Playground: ${task.goal.slice(0, 80)}`, "done");
   } catch (error) {
     if (error instanceof Stopped || task.stopping) {
@@ -281,6 +439,7 @@ export async function runPlayground(task, saveTasks) {
       task.summary = `Couldn't finish it: ${error.message}`;
       feed(hands.name, task.summary, "error");
     }
+    for (const step of task.steps) if (step.status === "running") step.status = task.status === "stopped" ? "stopped" : "failed";
   } finally {
     unpin();
     task.updated_at = Date.now();
@@ -288,12 +447,19 @@ export async function runPlayground(task, saveTasks) {
   }
 }
 
-/** Start a Playground job: who does the work (the main AI unless the user
- * handed it to another agent), who advises, and the project to work in. */
-export async function startPlayground(goal, { hands = "", advisers = "auto", project = "" } = {}) {
+/** Start a Playground job: a game or a website; who does the work (the main
+ * AI unless the user hands it to another agent); how many helpers build
+ * parts (0 to 2); who advises ("auto" two, "all", "none", or chosen ids);
+ * and the project to work in. */
+export async function startPlayground(goal, { type = "", hands = "", helpers = 1, advisers = "auto", project = "" } = {}) {
   const { startTask } = await import("./tasks.js");
+  const kind = KINDS[type] ? type : kindOf(goal);
   const doer = agentById(hands) || jarvis();
-  const count = advisers === "meeting" ? MAX_MEETING : advisers === "none" ? 0 : MAX_ADVISERS;
-  const picked = Array.isArray(advisers) ? advisers.filter((id) => id !== doer.id && agentById(id)).slice(0, MAX_MEETING) : pickAdvisers(goal, doer.id, count);
-  return startTask(goal, "you", { kind: "playground", status: "working", hands: doer.id, advisers: picked, meeting: advisers === "meeting", project_id: project || "" });
+  const helping = Array.isArray(helpers) ? helpers.filter((id) => id !== doer.id && agentById(id)).slice(0, MAX_HELPERS) : pickHelpers(kind, doer.id, Number(helpers) || 0);
+  const advising = Array.isArray(advisers)
+    ? advisers.filter((id) => id !== doer.id && !helping.includes(id) && agentById(id))
+    : advisers === "none"
+      ? []
+      : pickAdvisers(goal, doer.id, advisers === "all" ? Infinity : MAX_ADVISERS, helping);
+  return startTask(goal, "you", { kind: "playground", type: kind, status: "working", hands: doer.id, helpers: helping, advisers: advising, meeting: advisers === "all", project_id: project || "" });
 }

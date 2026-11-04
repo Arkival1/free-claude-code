@@ -22,6 +22,7 @@ const FEATURES = [
   ["Backup", "Save or restore everything on this phone", "settings"],
   ["Look: HUD or Playground", "Switch between the command centre and the Playground (one main AI, advisers)", "settings"],
   ["Files", "Everything the Playground's main AI made, with search", "files"],
+  ["Plugin APIs switch", "Let the AI call the plugins you switched on, or stop them all", "plugins"],
 ];
 
 /** HUD or Playground: the two looks of FCC Phone. */

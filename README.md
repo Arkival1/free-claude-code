@@ -2774,16 +2774,32 @@ account, and costs nothing.
   work, and a job cut short when the app closes can be run again.
 - **Playground look (2.9)**: Settings, **Look**, switches FCC Phone between
   the **HUD** and the **Playground**, clean and simple like Manus, with tabs
-  **New task**, **Tasks**, **Files** and **More**. Give it a task: one **main
-  AI** (Jarvis, unless you hand it to another agent) does the whole job with
-  its own hands, on the phone's own model when one is ready, while up to two
-  **advisers** advise before it starts and check after (three AIs at once; a
-  *Team meeting* brings more in, two at a time). Advisers only look and think;
-  cloud and PC brains take the work over only when you hand it to them. The
-  main AI fixes what they find, three tries in all, and can ask one for advice
-  mid-job. **Minds** shows each AI's thinking patterns, lessons and thoughts
-  (its own, written after each task) and **Your taste**, which every AI reads
-  so it makes things in your image.
+  **New task**, **Tasks**, **Files** and **More**. The Playground makes two
+  things, properly engineered: **games** and **websites**. Pick *Make a game*
+  or *Make a website* and say what you want: one **main AI** (Jarvis, unless
+  you hand it to another agent) builds it with its own hands, on the phone's
+  own model when one is ready, following engineering steps (plan, references,
+  template, build, test on a phone and a computer, fix). Up to two
+  **helpers** build parts beside it in the same project (content, extra
+  pages, the game's art and sound, a playtest) under `parts/`, so three AIs
+  work at once; any number of **advisers** advise (two talk at a time),
+  telling it what to do and which of its tools to use, and check the work
+  after. They only advise: cloud and PC brains take the work over only when
+  you hand it to them. The main AI fixes what they find, three tries in all.
+- **It learns**: what the advisers told it goes into the main AI's
+  **Advice book**, and what their checks found becomes a **lesson**; with its
+  own thinking patterns and thoughts these are short notes. Before a job it
+  searches them for the few that fit (it never rereads everything), and
+  `recall` with a kind searches them on purpose. **Minds** shows each AI's
+  advice book, lessons, patterns and thoughts with a search bar, **Save as a
+  file** downloads one AI's mind, and **Your taste** is what every AI follows.
+- **Library**: your approved references for games and websites: add photos,
+  notes and your own projects, and every game or site the Playground finishes
+  waits there for you to **Approve**. The AI reads only approved references
+  (the `library` tool) before it designs, and makes originals in their spirit.
+- **Plugin APIs switch**: More, Plugins has **Plugin APIs on**: on, the AI may
+  call the plugins you switched on (with the keys you added; saving a key
+  switches its plugin on); off stops every plugin at once.
 - **Skills on the phone**: 28 of FCC's own skills ship inside the app (game
   design with its eight specialist guides, web design engineer, frontend
   design and the style skills, app developer, debugging, code review, testing,

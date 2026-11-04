@@ -32,6 +32,7 @@ export const PHONE_TOOLS = {
   pc_task: "Team",
   use_plugin: "Plugins",
   start_task: "Team",
+  library: "Library",
 };
 export const ALL_TOOLS = Object.keys(PHONE_TOOLS);
 export const MAIN_ONLY = new Set(["team_status"]);
@@ -48,16 +49,17 @@ export const MEMORY_KINDS = {
   thought: "Thoughts",
   pattern: "Thinking patterns",
   lesson: "Lessons",
+  advice: "Advice book",
 };
-/** Kinds that belong to one AI's own mind. */
-export const MIND_KINDS = new Set(["thought", "pattern", "lesson"]);
+/** Kinds that belong to one AI's own mind (advice: what other AIs told it). */
+export const MIND_KINDS = new Set(["thought", "pattern", "lesson", "advice"]);
 
 const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_files", "delete_file", "check_project", "restore_file"];
 const DESIGN = ["find_images", "polish_check", "look_at_site"];
 const PHOTOS = ["list_photos", "use_photo"];
 export const ROLE_TOOLS = {
-  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task"],
-  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin"],
+  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library"],
+  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library"],
   researcher: ["wikipedia", "read_page", "web_search", "remember", "recall", "calculate", "use_plugin", "skill"],
   helper: ["remember", "recall", "calculate", "todo", "weather", "wikipedia", "skill"],
   tester: ["list_files", "read_file", "check_project", "look_at_site", "polish_check", "edit_file", "write_file", "restore_file", "remember", "recall", "skill"],
@@ -103,8 +105,9 @@ const TOOLS_ADDED = {
   4: { builder: ["skill"], main: ["skill"] },
   5: { main: ["pc_task"] },
   6: { main: ["use_plugin", "start_task"], researcher: ["use_plugin", "skill"], builder: ["use_plugin"], tester: ["skill"], helper: ["skill"] },
+  7: { main: ["library"], builder: ["library"] },
 };
-const TOOLS_VERSION = 6;
+const TOOLS_VERSION = 7;
 
 export const DEFAULT_TEAM = [
   { id: "jarvis", name: "Jarvis", role: "main" },
@@ -142,6 +145,8 @@ export const defaultSettings = () => ({
   // hud: the command centre and the whole team; playground: one main AI does
   // the work with its own hands and the others advise (Manus-like).
   look: "hud",
+  // Plugin APIs: the master switch over every plugin's own switch.
+  pluginsOn: true,
   // In the Playground the main AI thinks on this phone's own model when one is ready.
   playgroundLocal: true,
   engine: { context: 4096, gpu: true },
@@ -157,6 +162,7 @@ export const state = {
   todos: [],
   studies: [],
   tasks: [],
+  library: [],
   models: [],
   photos: [],
   chats: {},
@@ -178,6 +184,7 @@ export const save = {
   todos: () => store.set("todos", state.todos),
   studies: () => store.set("studies", state.studies),
   tasks: () => store.set("tasks", state.tasks),
+  library: () => store.set("library", state.library),
   models: () => store.set("models", state.models),
   photos: () => store.set("photos", state.photos),
   chat: (id) => store.set(`chat:${id}`, state.chats[id] || []),
@@ -201,7 +208,7 @@ export async function load() {
   for (const agent of state.agents) upgradeAgent(agent);
   state.agents.sort((a, b) => (a.id === "jarvis" ? -1 : b.id === "jarvis" ? 1 : a.created_at - b.created_at));
   await save.agents();
-  for (const key of ["memories", "pcMemories", "projects", "rooms", "todos", "studies", "tasks", "models", "photos"]) {
+  for (const key of ["memories", "pcMemories", "projects", "rooms", "todos", "studies", "tasks", "models", "photos", "library"]) {
     state[key] = await store.get(key, []);
   }
   // A study or job cut short when the app closed is picked up as stopped.

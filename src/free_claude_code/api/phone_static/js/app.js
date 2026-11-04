@@ -28,6 +28,7 @@ import * as plugins from "./views/plugins.js";
 import * as tasks from "./views/tasks.js";
 import * as hq from "./views/hq.js";
 import * as playground from "./views/playground.js";
+import * as library from "./views/library.js";
 
 const view = $("view");
 const TITLES = {
@@ -49,6 +50,7 @@ const TITLES = {
   hq: "HQ",
   files: "Files",
   minds: "Minds",
+  library: "Library",
 };
 // Two looks (Settings, Look): the HUD (the command centre and the whole team)
 // and the Playground (one main AI does the work, the others advise).
@@ -111,6 +113,7 @@ async function render() {
     home: () => (lookOf() === "playground" ? playground.renderHome(view) : hud.render(view)),
     files: () => playground.renderFiles(view),
     minds: () => playground.renderMinds(view),
+    library: () => library.render(view),
     chats: () => chat.renderList(view),
     chat: () => chat.render(view, param),
     agents: () => agents.render(view, param),
