@@ -466,3 +466,49 @@ async def test_a_copied_demo_runs_in_real_godot(tmp_path, demo_id):
         (project / path).write_bytes(data)
     report = await GodotEngine(root, platform="linux").check(project)
     assert report.passed, report.problems
+
+
+@pytest.mark.skipif(not REAL_GODOT, reason="set FCC_GODOT_BIN to a Godot 4.7.2 program")
+def test_the_action_starter_plays_every_combat_path_in_real_godot(tmp_path):
+    """The action-3d fight played by a script: graphics presets, the boss
+    waking, every boss attack, death and the bonfire respawn, a landed
+    blow, the stagger, phase two, victory, the flask and the roll's
+    i-frames, with no script or engine error on the way."""
+    import subprocess
+
+    project = tmp_path / "game"
+    for path, data in godot.starter_files("action-3d", "Test").items():
+        (project / path).parent.mkdir(parents=True, exist_ok=True)
+        (project / path).write_bytes(data)
+    selftest = Path(__file__).parent / "data" / "action3d_selftest.gd"
+    shutil.copy(selftest, project / "selftest.gd")
+    with (project / "project.godot").open("a") as config:
+        config.write('\n[autoload]\n\nSelftest="*res://selftest.gd"\n')
+    subprocess.run(
+        [REAL_GODOT, "--headless", "--import", "--path", str(project)],
+        capture_output=True,
+        timeout=300,
+        check=False,
+    )
+    played = subprocess.run(
+        [REAL_GODOT, "--headless", "--path", str(project)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+    output = played.stdout + played.stderr
+    errors = [
+        line
+        for line in output.splitlines()
+        if "SCRIPT ERROR" in line or line.startswith("ERROR:")
+    ]
+    assert errors == [], output[-3000:]
+    assert "SELFTEST revived: hp 100.0 state move boss dormant" in output
+    assert "SELFTEST boss after death: dead won true" in output
+    assert "SELFTEST untouchable mid-roll: true" in output
+    assert "SELFTEST light hit: 900.0 -> 874.0" in output
+    assert "SELFTEST mid-slam ring true glow true" in output
+    assert "SELFTEST after reset ring false glow 0.0 boss bar false" in output
+    assert "SELFTEST keyboard fight keys 4" in output
+    assert "SELFTEST done" in output

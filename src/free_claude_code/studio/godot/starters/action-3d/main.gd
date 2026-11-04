@@ -630,9 +630,10 @@ func _process(delta: float) -> void:
 	if near and Input.is_action_just_pressed("interact") and not player.call("dead"):
 		player.call("refill")
 		if not won:
-			boss.call("reset")
 			_boss_awake = false
+			boss.call("reset")
 			_lock(false)
+			_on_boss_changed()
 		hud.call("say", "BONFIRE LIT", Color("#f0c27a"), 2.0)
 	if Input.is_action_just_pressed("lock"):
 		var close := player.global_position.distance_to(boss.global_position) < 32.0
@@ -663,7 +664,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _on_player_changed() -> void:
 	var hp: float = player.get("hp")
-	hud.call("show_player", hp, player.get("max_hp"), player.get("stamina"), player.get("max_stamina"), player.get("flasks"))
+	hud.call("show_player", hp, player.get("max_hp"), player.get("stamina"), player.get("max_stamina"), player.get("flasks"), player.get("max_flasks"))
 	if hp < _last_hp:
 		hud.call("flash")
 		rig.call("shake", 0.6)
@@ -678,8 +679,8 @@ func _on_player_died() -> void:
 	player.call("revive", Vector3(bonfire.x, height_at(bonfire.x, bonfire.z) + 0.3, bonfire.z + 1.8))
 	_last_hp = player.get("hp")
 	if not won:
-		boss.call("reset")
 		_boss_awake = false
+		boss.call("reset")
 		_on_boss_changed()
 
 
@@ -705,8 +706,8 @@ func _on_boss_defeated() -> void:
 	_on_boss_changed()
 	hud.call("say", "VICTORY", Color("#f0c27a"), 4.0)
 	var burst := Look.embers(Vector3(8, 3, 8), 300)
-	burst.global_position = boss.global_position + Vector3(0, 1.5, 0)
 	add_child(burst)
+	burst.global_position = boss.global_position + Vector3(0, 1.5, 0)
 
 
 func _on_slammed(where: Vector3, strength: float) -> void:
@@ -720,10 +721,10 @@ func _on_slammed(where: Vector3, strength: float) -> void:
 
 func _add_inputs() -> void:
 	var keys := {
-		"left": [KEY_A, KEY_LEFT], "right": [KEY_D, KEY_RIGHT], "forward": [KEY_W, KEY_UP], "back": [KEY_S, KEY_DOWN],
+		"left": [KEY_A], "right": [KEY_D], "forward": [KEY_W], "back": [KEY_S],
 		"run": [KEY_SHIFT], "roll": [KEY_SPACE], "heal": [KEY_F], "lock": [KEY_Q], "interact": [KEY_E],
-		"graphics": [KEY_F2], "info": [KEY_F3], "attack": [], "heavy": [],
-		"look_left": [], "look_right": [], "look_up": [], "look_down": [],
+		"graphics": [KEY_F2], "info": [KEY_F3], "attack": [KEY_J], "heavy": [KEY_K],
+		"look_left": [KEY_LEFT], "look_right": [KEY_RIGHT], "look_up": [KEY_UP], "look_down": [KEY_DOWN],
 	}
 	var mouse := {"attack": MOUSE_BUTTON_LEFT, "heavy": MOUSE_BUTTON_RIGHT, "lock": MOUSE_BUTTON_MIDDLE}
 	var buttons := {"roll": JOY_BUTTON_B, "attack": JOY_BUTTON_RIGHT_SHOULDER, "heavy": JOY_BUTTON_Y, "heal": JOY_BUTTON_X, "lock": JOY_BUTTON_RIGHT_STICK, "interact": JOY_BUTTON_A, "run": JOY_BUTTON_LEFT_STICK}

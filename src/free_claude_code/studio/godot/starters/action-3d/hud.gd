@@ -15,6 +15,7 @@ var prompt: Label
 var help: Label
 var info: Label
 var vignette: ColorRect
+var _fade: Tween
 
 
 func _ready() -> void:
@@ -64,7 +65,7 @@ func _ready() -> void:
 	help.position = Vector2(-470, 30)
 	help.size = Vector2(440, 200)
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	help.text = "WASD move · Shift run · Space roll\nLeft click light · Right click heavy\nQ lock on · F flask · E rest at the bonfire\nClick to grab the mouse · Esc to free it\nF2 graphics · F3 info"
+	help.text = "WASD move · Shift run · Space roll\nLeft click or J light · Right click or K heavy\nArrows or mouse look · Q lock on · F flask\nE rest at the bonfire · Click grabs the mouse, Esc frees it\nF2 graphics · F3 info · a gamepad works too"
 	add_child(help)
 	var fade := create_tween()
 	fade.tween_interval(9.0)
@@ -100,12 +101,12 @@ func _label(size: int, color: Color) -> Label:
 	return label
 
 
-func show_player(hp: float, max_hp: float, stamina_now: float, max_stamina: float, flasks_left: int) -> void:
+func show_player(hp: float, max_hp: float, stamina_now: float, max_stamina: float, flasks_left: int, flasks_max := 3) -> void:
 	health.max_value = max_hp
 	health.value = hp
 	stamina.max_value = max_stamina
 	stamina.value = stamina_now
-	flasks.text = "Flask  " + "◆ ".repeat(flasks_left) + "◇ ".repeat(maxi(0, 3 - flasks_left))
+	flasks.text = "Flask  " + "◆ ".repeat(flasks_left) + "◇ ".repeat(maxi(0, flasks_max - flasks_left))
 
 
 func show_boss(title: String, hp: float, max_hp: float, visible_now: bool) -> void:
@@ -118,10 +119,12 @@ func show_boss(title: String, hp: float, max_hp: float, visible_now: bool) -> vo
 func say(text: String, color: Color, seconds := 3.0) -> void:
 	message.text = text
 	message.add_theme_color_override("font_color", color)
-	var fade := create_tween()
-	fade.tween_property(message, "modulate:a", 1.0, 0.6)
-	fade.tween_interval(seconds)
-	fade.tween_property(message, "modulate:a", 0.0, 1.0)
+	if _fade and _fade.is_valid():
+		_fade.kill()
+	_fade = create_tween()
+	_fade.tween_property(message, "modulate:a", 1.0, 0.6)
+	_fade.tween_interval(seconds)
+	_fade.tween_property(message, "modulate:a", 0.0, 1.0)
 
 
 func flash() -> void:

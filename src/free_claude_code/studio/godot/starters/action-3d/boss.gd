@@ -35,6 +35,7 @@ var ring: MeshInstance3D
 var ring_glow: StandardMaterial3D
 var fire: GPUParticles3D
 var _did_hit := false
+var _slammed := false
 var _poise := 0.0
 var _poise_clock := 0.0
 var _pause := 1.0
@@ -84,6 +85,8 @@ func reset() -> void:
 	global_position = home
 	velocity = Vector3.ZERO
 	facing = 0.0
+	_poise = 0.0
+	_pause = 1.0
 	_start("dormant")
 	fire.emitting = false
 	changed.emit()
@@ -115,6 +118,13 @@ func _start(next: String) -> void:
 	state = next
 	state_time = 0.0
 	_did_hit = false
+	_slammed = false
+	# A new move starts clean: no ring or glow left from one cut short.
+	if ring:
+		ring.visible = false
+	var glow: StandardMaterial3D = body.get("weapon_glow") if body else null
+	if glow:
+		glow.emission_energy_multiplier = 0.0
 
 
 func _speed_up() -> float:
@@ -173,9 +183,9 @@ func _physics_process(delta: float) -> void:
 				if _pause <= 0.0:
 					_choose(distance)
 		_:
-			_attack(delta, to, distance)
 			shown = state
 			progress = state_time / (float(ATTACKS[state]["time"]) * _speed_up())
+			_attack(delta, to, distance)
 	move_and_slide()
 	body.rotation.y = facing
 	var speed := clampf(Vector2(velocity.x, velocity.z).length() / 3.4, 0.0, 1.0)
@@ -231,9 +241,9 @@ func _attack(delta: float, to: Vector3, distance: float) -> void:
 		ring_glow.albedo_color.a = 0.25 + 0.5 * grow
 	if state_time >= opens and state_time <= closes and not _did_hit and player:
 		_try_hit(spec, to, distance, ahead)
-	if state == "slam" or state == "burst":
-		if state_time >= opens and state_time - (1.0 / 60.0) < opens:
-			slammed.emit(ring.global_position, 1.0 if state == "slam" else 1.4)
+	if (state == "slam" or state == "burst") and state_time >= opens and not _slammed:
+		_slammed = true
+		slammed.emit(ring.global_position, 1.0 if state == "slam" else 1.4)
 	if state_time >= float(spec["time"]) * pace:
 		ring.visible = false
 		_start("move")
