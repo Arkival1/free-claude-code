@@ -102,9 +102,10 @@ def test_the_ai_builds_websites_with_the_web_kit_tool(
                 checked: await runTool(builder, { name: 'check_project', arguments: {} }, ctx),
                 finished: await (async () => {
                     // The AI writes the real words and photos: then it passes.
-                    const { SAMPLE_TEXT } = await import('./web/sections.js');
+                    const { SAMPLE_TEXT, SAMPLE_NAMES } = await import('./web/sections.js');
                     let html = project.files['index.html'];
                     for (const line of SAMPLE_TEXT) html = html.replaceAll(line, 'Ridge Plumbing fixes leaks fast');
+                    for (const line of SAMPLE_NAMES) html = html.replaceAll(line, 'A real customer');
                     html = html.replaceAll('hello@example.com', 'jobs@ridgeplumbing.com.au');
                     html = html.replace(/<div class="art([^"]*)" role="img" aria-label="([^"]*)"([^>]*)><\\/div>/g, '<div class="art$1"$3><img class="photo" src="https://images.ridgeplumbing.com.au/van.jpg" alt="$2"></div>');
                     await writeFile(project, 'index.html', html, 'Builder');
@@ -160,7 +161,9 @@ def test_web_kit_edge_cases_from_people_and_models(
             };
             out.flagged = await check('<!doctype html><html><head><title>A</title></head><body><div role="img" class="art art-2" aria-label="Van"></div></body></html>');
             out.photo = await check('<!doctype html><html><head><title>A</title></head><body><div class="art" role="img" aria-label="Van"><img class="photo" src="https://x.example/van.jpg" alt="Van"></div></body></html>');
-            out.realName = await check('<!doctype html><html><head><title>A</title></head><body><h1>Northwind Traders</h1><p>Ava Park runs it.</p></body></html>');
+            out.quotes = await check("<!doctype html><html><head><title>A</title></head><body><div class='art' role=img>\\n<!-- photo here -->\\n</div></body></html>");
+            out.fakeNames = await check('<!doctype html><html><head><title>A</title></head><body><p>Maya Chen and Sam Okafor love it.</p></body></html>');
+            out.realName = await check('<!doctype html><html><head><title>A</title></head><body><h1>Northwind Traders</h1><p>Family run since 1990.</p></body></html>');
             out.noScript = pageHtml({ title: 'Plain', sections: ['hero-center'] }).replace('<script>document.documentElement.classList.add("js")</script>', '').replace('<script src="kit/kit.js" defer></script>', '');
             return out;
         }"""
@@ -177,6 +180,9 @@ def test_web_kit_edge_cases_from_people_and_models(
     assert "gradient stand-ins" in result["flagged"]
     assert "gradient stand-ins" not in result["photo"]
     assert "sample line" not in result["realName"]
+    assert "made-up names" not in result["realName"]
+    assert "gradient stand-ins" in result["quotes"]
+    assert "made-up names (Maya Chen, Sam Okafor)" in result["fakeNames"]
     # Without any script the revealed sections still show.
     page.set_content(
         result["no_script"] if "no_script" in result else result["noScript"]

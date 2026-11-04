@@ -3,7 +3,7 @@
 import { state, save, changed, feed } from "./state.js";
 import { uid } from "./ui.js";
 import { STARTER_TEXT } from "./templates.js";
-import { SAMPLE_TEXT } from "../web/sections.js";
+import { SAMPLE_TEXT, SAMPLE_NAMES } from "../web/sections.js";
 
 export const MAX_FILE_CHARS = 200_000;
 /** Earlier versions kept of each file, so restore_file can undo a change. */
@@ -296,11 +296,13 @@ export function checkProject(project) {
     if (starter) problems.push(`${name} still has the template's placeholder line "${starter}"; replace it with real content.`);
     const sample = SAMPLE_TEXT.find((line) => text.includes(line));
     if (sample && !starter) problems.push(`${name} still has the Web kit's sample line "${sample}"; write the real words for this site.`);
+    const names = SAMPLE_NAMES.filter((line) => text.includes(line));
+    if (names.length >= 2) problems.push(`${name} still has the Web kit's made-up names (${names.join(", ").replaceAll("&amp;", "&")}); use real reviews, people and clients, or leave those sections out.`);
     // The Web kit's gradient stand-ins for photos (role="img"): real photos,
     // or make one decorative on purpose by taking its role and label off.
     // An empty .art div with role="img" (either attribute first); one with a
     // photo inside is a finished picture.
-    const standIns = (text.match(/<div\b(?=[^>]*\bclass="[^"]*\bart\b)(?=[^>]*\brole="img")[^>]*>\s*<\/div>/g) || []).length;
+    const standIns = (text.match(/<div\b(?=[^>]*\bclass\s*=\s*["']?[^"'>]*\bart\b)(?=[^>]*\brole\s*=\s*["']?img\b)[^>]*>\s*(?:<!--[\s\S]*?-->\s*)*<\/div>/gi) || []).length;
     if (standIns) problems.push(`${name}: ${standIns} picture(s) are still the Web kit's gradient stand-ins; put real photos in (find_images or use_photo: an <img class="photo"> in place of the div), or make one decorative on purpose by removing role="img" and its aria-label.`);
   }
   for (const page of pages) {

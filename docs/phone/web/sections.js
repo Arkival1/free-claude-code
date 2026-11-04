@@ -255,6 +255,10 @@ export const SAMPLE_TEXT = [
   "A one-line promise.",
 ];
 
+/** The kit's made-up names (reviewers, team, logos). One could be real; two
+ *  or more on a page means the samples are still there. */
+export const SAMPLE_NAMES = ["Maya Chen", "Sam Okafor", "Lucia Romero", "Jordan Ellis", "Ava Park", "Leo Grant", "Nia Brooks", "Omar Haddad", "Northwind", "Atlas&amp;Co"];
+
 /** Ready-made section lists for common sites. */
 export const RECIPES = {
   business: { name: "Local business", look: "espresso", sections: ["nav-simple", "hero-image", "logos", "about-split", "menu", "testimonials", "gallery", "faq", "contact", "footer-columns"] },
