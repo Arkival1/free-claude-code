@@ -137,6 +137,12 @@ function makeStage(THREE, Lab, canvas) {
     scene.remove(subject);
     subject.traverse((child) => {
       if (child.geometry) child.geometry.dispose();
+      for (const material of [child.material].flat()) {
+        if (!material) continue;
+        for (const value of Object.values(material)) if (value && value.isTexture) value.dispose();
+        for (const uniform of Object.values(material.uniforms || {})) if (uniform.value && uniform.value.isTexture) uniform.value.dispose();
+        material.dispose();
+      }
     });
     subject = new THREE.Group();
     scene.add(subject);
@@ -276,7 +282,9 @@ function makeStage(THREE, Lab, canvas) {
     textureImage: (kind) => Lab.makeTexture(kind, { size: 256 }).canvas.toDataURL("image/jpeg", 0.85),
     stop: () => {
       cancelAnimationFrame(frame);
+      clear();
       renderer.dispose();
+      renderer.forceContextLoss();
     },
   };
 }

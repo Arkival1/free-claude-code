@@ -112,7 +112,7 @@ let bannerTime = 0;
 
 function reset() {
   Object.assign(me, { hp: TUNE.player.hp, stamina: TUNE.player.stamina, flasks: TUNE.player.flasks, state: "idle", t: 0, alive: true });
-  Object.assign(foe, { hp: TUNE.boss.hp, state: "idle", t: 0, phase: 1, alive: true, awake: false });
+  Object.assign(foe, { hp: TUNE.boss.hp, state: "idle", t: 0, phase: 1, alive: true, awake: false, swing: 0 });
   player.root.position.set(0, 0, TUNE.arena - 5);
   boss.root.position.set(0, 0, -TUNE.arena + 6);
   boss.root.visible = true;

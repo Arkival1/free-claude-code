@@ -248,6 +248,7 @@ export async function runTool(agent, call, ctx) {
       case "library":
         return useLibrary(args);
       case "lab":
+        if (ctx.partsOnly && args.action === "add") return partsOnly("lab/kit.js");
         return await useLab(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
       case "use_plugin":
         return await usePlugin(args);

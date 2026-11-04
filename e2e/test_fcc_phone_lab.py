@@ -3,7 +3,6 @@ live in 3D, a 3D game that starts from the starter and runs in the preview,
 the lab tool the AI uses, and a download that carries its engine."""
 
 import io
-import json
 import zipfile
 
 from playwright.sync_api import ConsoleMessage, Page, expect
@@ -101,6 +100,7 @@ def test_the_lab_tool_and_a_3d_download(page: Page, admin_base_url: str) -> None
     assert "ash-arena/vendor/three/three.module.js" in names
     assert "ash-arena/vendor/three/three.core.js" in names
     assert "ash-arena/lab/kit.js" in names
+    assert "ash-arena/vendor/three/LICENSE.txt" in names
     assert '"three":"./vendor/three/three.module.js"' in result["index"]
 
 
@@ -129,4 +129,27 @@ def test_a_3d_job_in_the_playground_starts_from_the_game3d_template(
     expect(page.get_by_label("The task")).to_have_value("a 3D third-person game where ")
     tabs = page.locator("#tabs .tab")
     expect(tabs).to_have_text(["+New task", "◷Tasks", "▤Files", "⚗Lab", "⋯More"])
-    assert json.dumps(True)
+
+
+def test_helpers_cant_swap_the_kit_and_single_quoted_imports_link(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    result = page.evaluate(
+        """async () => {
+            const { runTool } = await import('./js/tools.js');
+            const { createProject, linkModules } = await import('./js/projects.js');
+            const builder = window.fccPhone.state.agents.find((a) => a.id === 'builder');
+            const project = await createProject('Helper kit test');
+            const ctx = { project, depth: 0, chain: [], built: new Set(), partsOnly: true };
+            const added = await runTool(builder, { name: 'lab', arguments: { action: 'add' } }, ctx);
+            const files = { 'lab/kit.js': `export const it = "it's";`, 'game.js': '' };
+            const linked = linkModules(files, "import { it } from './lab/kit.js';", 'game.js');
+            const url = linked.match(/'(data:[^']*)'/)[1];
+            const module = await import(url);
+            return { added, files: Object.keys(project.files), value: module.it };
+        }"""
+    )
+    assert "only under parts/" in result["added"]
+    assert "lab/kit.js" not in result["files"]
+    assert result["value"] == "it's"

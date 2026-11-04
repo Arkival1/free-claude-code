@@ -160,7 +160,7 @@ export function linkModules(files, code, from, seen = new Set()) {
     const text = files[path];
     if (typeof text !== "string" || seen.has(path)) return match;
     const linked = linkModules(files, text, path, new Set([...seen, path]));
-    return `${lead}${quote}data:text/javascript;charset=utf-8,${encodeURIComponent(linked)}${quote}`;
+    return `${lead}${quote}data:text/javascript;charset=utf-8,${encodeURIComponent(linked).replaceAll("'", "%27")}${quote}`;
   });
 }
 
@@ -218,6 +218,10 @@ const STORAGE_SHIM =
 const PAGE_LINKS =
   "<script>document.addEventListener('click',(e)=>{const a=e.target.closest&&e.target.closest('a[href]');if(!a||e.defaultPrevented)return;const h=a.getAttribute('href');if(/^(#|mailto:|tel:|javascript:)/i.test(h))return;e.preventDefault();if(/^(https?:)?\\/\\//i.test(h)){window.open(h,'_blank','noopener');return}const page=h.split('#')[0].split('?')[0];if(page)parent.postMessage({fccPage:page},'*')});</script>";
 
+// The <head> and <html> tags (not <header>), for putting things first in a page.
+const HEAD = /<head(\s[^>]*)?>/i;
+const HTML = /<html(\s[^>]*)?>/i;
+
 /** A page of the project, ready for a sandboxed preview; extra goes first in <head>. */
 export function previewHtml(project, { page = "index.html", extra = "" } = {}) {
   const html = bundle(project, page);
@@ -227,8 +231,8 @@ export function previewHtml(project, { page = "index.html", extra = "" } = {}) {
     ? `<script type="importmap">${JSON.stringify({ imports: { three: new URL(`../${THREE_PATH}`, import.meta.url).href } })}</script>`
     : "";
   const inject = engine + STORAGE_SHIM + PAGE_LINKS + extra;
-  if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (tag) => tag + inject);
-  if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (tag) => tag + inject);
+  if (HEAD.test(html)) return html.replace(HEAD, (tag) => tag + inject);
+  if (HTML.test(html)) return html.replace(HTML, (tag) => tag + inject);
   return inject + html;
 }
 
@@ -350,14 +354,14 @@ export async function forDownload(project) {
   const text = Object.values(project.files).filter((body) => typeof body === "string" && !isPicture(body)).join("\n");
   if (!usesThree(text)) return project;
   const files = { ...project.files };
-  for (const name of ["three.module.js", "three.core.js"]) {
+  for (const name of ["three.module.js", "three.core.js", "LICENSE.txt"]) {
     const response = await fetch(new URL(`../vendor/three/${name}`, import.meta.url));
     if (!response.ok) throw new Error("Couldn't add three.js to the download. Try again with the internet on.");
     files[`vendor/three/${name}`] = await response.text();
   }
   const map = `<script type="importmap">${JSON.stringify({ imports: { three: `./${THREE_PATH}` } })}</script>`;
   for (const [path, body] of Object.entries(files)) {
-    if (/\.html?$/i.test(path) && typeof body === "string" && !/type=["']importmap["']/i.test(body)) files[path] = body.replace(/<head[^>]*>/i, (tag) => `${tag}\n  ${map}`);
+    if (/\.html?$/i.test(path) && typeof body === "string" && !/type=["']importmap["']/i.test(body)) files[path] = HEAD.test(body) ? body.replace(HEAD, (tag) => `${tag}\n  ${map}`) : HTML.test(body) ? body.replace(HTML, (tag) => `${tag}\n${map}`) : `${map}\n${body}`;
   }
   return { ...project, files };
 }
