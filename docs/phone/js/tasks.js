@@ -110,11 +110,13 @@ function saveTasks() {
   return save.tasks();
 }
 
-/** Start a job on the phone: plan it, then run its steps in the background. */
-export async function startTask(goal, by = "you") {
+/** Start a job on the phone: plan it, then run its steps in the background.
+ * A Playground job (kind "playground") is done by one main AI with its own
+ * hands while its advisers advise (playground.js); extra holds who does what. */
+export async function startTask(goal, by = "you", extra = {}) {
   const clean = String(goal || "").trim();
   if (!clean) throw new Error("Say what the job is first.");
-  const task = { id: uid(), goal: clean.slice(0, 2000), by, status: "planning", steps: [], summary: "", created_at: Date.now(), updated_at: Date.now() };
+  const task = { id: uid(), goal: clean.slice(0, 2000), by, status: "planning", steps: [], summary: "", ...extra, created_at: Date.now(), updated_at: Date.now() };
   state.tasks.unshift(task);
   state.tasks.length = Math.min(state.tasks.length, 30);
   await saveTasks();
@@ -131,7 +133,7 @@ export function resumeTask(id) {
     task.stopping = false; // Run again while a stop waits: keep going.
     return task;
   }
-  task.status = task.steps.length ? "working" : "planning";
+  task.status = task.steps.length || task.kind === "playground" ? "working" : "planning";
   for (const step of task.steps) if (step.status !== "done") step.status = "waiting";
   work(task);
   return task;
@@ -149,6 +151,11 @@ async function work(task) {
   running.add(task.id);
   task.stopping = false;
   try {
+    if (task.kind === "playground") {
+      const { runPlayground } = await import("./playground.js");
+      await runPlayground(task, saveTasks);
+      return;
+    }
     if (!task.steps.length) {
       task.steps = await plan(task);
       task.status = "working";

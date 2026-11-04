@@ -125,6 +125,8 @@ _ASSET_FILENAMES = frozenset(
         "ops.js",
         "scanner.css",
         "scanner.js",
+        "playground.css",
+        "playground.js",
         "ops3d.js",
         "three.module.js",
         "three.core.js",
@@ -1537,6 +1539,85 @@ async def resume_plan(
 ) -> JsonObject:
     """Run a stopped plan again from where it stopped."""
     return studio.plan_view(await studio.resume_plan(plan_id))
+
+
+# ------------------------------------------------------------ playground
+
+
+class PlaygroundPayload(BaseModel):
+    goal: str
+    hands_id: str = ""
+    advisers: str | list[str] = "auto"
+    """auto (two that fit), meeting (up to five), none, or chosen agent ids."""
+    site_id: str | None = None
+
+
+class TastePayload(BaseModel):
+    text: str
+
+
+@router.get("/studio/api/playground")
+async def list_playground(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Playground jobs, newest first."""
+    return {
+        "jobs": [studio.playground_view(job) for job in await studio.playground_jobs()]
+    }
+
+
+@router.post("/studio/api/playground", status_code=202)
+async def start_playground(
+    payload: PlaygroundPayload,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """One main AI does the job with its own hands; the advisers advise."""
+    job = await studio.start_playground(
+        payload.goal,
+        hands_id=payload.hands_id,
+        advisers=payload.advisers,
+        site_id=payload.site_id or None,
+    )
+    return studio.playground_view(job)
+
+
+@router.get("/studio/api/playground/minds")
+async def playground_minds(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Each AI's thinking patterns, lessons and thoughts, and the owner's taste."""
+    return await studio.playground_minds()
+
+
+@router.post("/studio/api/playground/taste", status_code=201)
+async def add_taste(
+    payload: TastePayload, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    entry = await studio.add_taste(payload.text)
+    return {"id": entry.id, "text": entry.text}
+
+
+@router.get("/studio/api/playground/{job_id}")
+async def get_playground(
+    job_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return studio.playground_view(await studio.playground_job(job_id))
+
+
+@router.post("/studio/api/playground/{job_id}/stop")
+async def stop_playground(
+    job_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return studio.playground_view(await studio.stop_playground(job_id))
+
+
+@router.post("/studio/api/playground/{job_id}/resume", status_code=202)
+async def resume_playground(
+    job_id: str, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Run a stopped or failed job again from where it stopped."""
+    return studio.playground_view(await studio.resume_playground(job_id))
 
 
 # ------------------------------------------------------------ connectors

@@ -27,6 +27,7 @@ import * as trade from "./views/trade.js";
 import * as plugins from "./views/plugins.js";
 import * as tasks from "./views/tasks.js";
 import * as hq from "./views/hq.js";
+import * as playground from "./views/playground.js";
 
 const view = $("view");
 const TITLES = {
@@ -46,8 +47,45 @@ const TITLES = {
   plugins: "Plugins",
   tasks: "Tasks",
   hq: "HQ",
+  files: "Files",
+  minds: "Minds",
 };
-const TAB_OF = { home: "home", chats: "chats", chat: "chats", agents: "agents", models: "models" };
+// Two looks (Settings, Look): the HUD (the command centre and the whole team)
+// and the Playground (one main AI does the work, the others advise).
+const TABS = {
+  hud: [
+    ["home", "◆", "Home"],
+    ["chats", "◌", "Chats"],
+    ["agents", "◎", "Agents"],
+    ["models", "⚡", "Models"],
+    ["more", "⋯", "More"],
+  ],
+  playground: [
+    ["home", "+", "New task"],
+    ["tasks", "◷", "Tasks"],
+    ["files", "▤", "Files"],
+    ["more", "⋯", "More"],
+  ],
+};
+const TAB_OF = {
+  hud: { home: "home", chats: "chats", chat: "chats", agents: "agents", models: "models" },
+  playground: { home: "home", tasks: "tasks", files: "files", projects: "files" },
+};
+const lookOf = () => (state.settings.look === "playground" ? "playground" : "hud");
+
+/** Draw the tab bar (and the page colours) for the look the user picked. */
+function drawTabs() {
+  const look = lookOf();
+  document.body.dataset.look = look;
+  document.documentElement.dataset.look = look;
+  const theme = document.querySelector('meta[name="theme-color"]');
+  if (theme) theme.setAttribute("content", look === "playground" ? "#f6f4ef" : "#02070d");
+  $("tabs").replaceChildren(
+    ...TABS[look].map(([route, glyph, label]) =>
+      el("button", { class: "tab", type: "button", "data-route": route, onclick: () => (location.hash = route) }, [el("span", { "aria-hidden": "true", text: glyph }), label])
+    )
+  );
+}
 let cleanup = null;
 let renderId = 0;
 
@@ -61,16 +99,18 @@ async function render() {
   cleanup = null;
   closeSheet();
   document.body.dataset.route = route;
-  const tab = TAB_OF[route] || "more";
+  const tab = TAB_OF[lookOf()][route] || "more";
   for (const button of document.querySelectorAll(".tab")) {
     if (button.dataset.route === tab) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   }
-  $("title").textContent = TITLES[route] || "FCC Phone";
-  $("back").hidden = route === "home" || ["chats", "agents", "models", "more"].includes(route);
+  $("title").textContent = route === "home" && lookOf() === "playground" ? "Playground" : TITLES[route] || "FCC Phone";
+  $("back").hidden = route === "home" || (lookOf() === "playground" ? ["tasks", "files", "more"] : ["chats", "agents", "models", "more"]).includes(route);
   drawPill();
   const screens = {
-    home: () => hud.render(view),
+    home: () => (lookOf() === "playground" ? playground.renderHome(view) : hud.render(view)),
+    files: () => playground.renderFiles(view),
+    minds: () => playground.renderMinds(view),
     chats: () => chat.renderList(view),
     chat: () => chat.render(view, param),
     agents: () => agents.render(view, param),
@@ -129,11 +169,6 @@ function checkReminders() {
   }
 }
 
-for (const button of document.querySelectorAll(".tab")) {
-  button.addEventListener("click", () => {
-    location.hash = button.dataset.route;
-  });
-}
 $("back").addEventListener("click", () => history.back());
 $("sheet").addEventListener("click", (event) => {
   if (event.target.hasAttribute("data-close")) closeSheet();
@@ -144,6 +179,10 @@ document.addEventListener("visibilitychange", () => {
 });
 onChange((what) => {
   if (what === "pc") drawPill();
+  if (what === "look") {
+    drawTabs();
+    render();
+  }
 });
 
 if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
@@ -177,6 +216,7 @@ window.fccPhone = {
 
 // Resolves once saved data is loaded and the first screen is drawn.
 window.fccPhone.ready = load().then(async () => {
+  drawTabs();
   // If iOS closed the app mid-reply last time, say what happened.
   const crash = await recoverFromCrash().catch(() => "");
   await markUnanswered(crash).catch(() => {});

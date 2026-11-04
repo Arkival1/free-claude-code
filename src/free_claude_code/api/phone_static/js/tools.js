@@ -1,5 +1,5 @@
 // The tools phone agents use, described once for every brain and run here.
-import { state, save, feed, changed, toolsOf, agentByName } from "./state.js";
+import { state, save, feed, changed, toolsFor, agentByName, MEMORY_KINDS, MIND_KINDS } from "./state.js";
 import { uid, words } from "./ui.js";
 import { isPrivate } from "./brains.js";
 import { syncSoon, pcSearch, pcSkill, pcCall } from "./sync.js";
@@ -19,8 +19,13 @@ export function setHooks(next) {
 const text = (description) => ({ type: "string", description });
 export const SPECS = {
   remember: {
-    description: "Save one fact worth keeping: something about the user, a plan, a preference, or a result. Shared by every agent on the phone (and with the PC when paired).",
-    parameters: { type: "object", properties: { text: text("The fact, in one clear sentence.") }, required: ["text"] },
+    description:
+      "Save one thing worth keeping. kind fact (default): something about the user, a plan or a result, shared by every agent (and the PC when paired). kind taste: what the user likes (colours, style, feel), shared so every AI works in their image. kind thought, pattern or lesson: your own mind (a thought you're still working on, a way of working that went well, a mistake not to repeat), which only you read.",
+    parameters: {
+      type: "object",
+      properties: { text: text("The fact, in one clear sentence."), kind: { type: "string", enum: Object.keys(MEMORY_KINDS) } },
+      required: ["text"],
+    },
   },
   recall: {
     description: "Search memory for what is known about something before answering.",
@@ -175,8 +180,13 @@ export const SPECS = {
 // The main AI keeps its own memory, so its remember can share or not.
 const MAIN_SPECS = {
   remember: {
-    description: "Save one fact into your own memory, which only you read. Set share to true to put it where every agent reads it instead.",
-    parameters: { type: "object", properties: { text: text("The fact, in one clear sentence."), share: { type: "boolean" } }, required: ["text"] },
+    description:
+      "Save one fact into your own memory, which only you read. Set share to true to put it where every agent reads it instead. kind taste keeps what the user likes (shared, so every AI works in their image); kind thought, pattern or lesson goes into your own mind.",
+    parameters: {
+      type: "object",
+      properties: { text: text("The fact, in one clear sentence."), share: { type: "boolean" }, kind: { type: "string", enum: Object.keys(MEMORY_KINDS) } },
+      required: ["text"],
+    },
   },
   recall: {
     description: "Search your own memory, the team's, and every agent's; each result says whose it is.",
@@ -184,8 +194,8 @@ const MAIN_SPECS = {
   },
 };
 
-export function specsFor(agent) {
-  return toolsOf(agent)
+export function specsFor(agent, ctx = {}) {
+  return toolsFor(agent, ctx)
     .filter((name) => SPECS[name])
     .map((name) => {
       const spec = (agent.role === "main" && MAIN_SPECS[name]) || SPECS[name];
@@ -196,14 +206,15 @@ export function specsFor(agent) {
 /** Run one tool call for an agent. ctx: {project, depth, chain}. Returns text. */
 export async function runTool(agent, call, ctx) {
   const args = call.arguments || {};
-  if (!toolsOf(agent).includes(call.name)) return `${agent.name} doesn't have the ${call.name} tool. Its tools: ${toolsOf(agent).join(", ")}.`;
+  const allowed = toolsFor(agent, ctx);
+  if (!allowed.includes(call.name)) return `${agent.name} doesn't have the ${call.name} tool${ctx.tools ? " in this job" : ""}. Its tools: ${allowed.join(", ")}.`;
   try {
     switch (call.name) {
       case "remember":
-        return await remember(agent, String(args.text || ""), { share: args.share === true });
+        return await remember(agent, String(args.text || ""), { share: args.share === true, kind: String(args.kind || "fact") });
       case "recall": {
         const found = recall(agent, String(args.query || ""), 8);
-        return found.length ? found.map((row) => `- ${row.text}${row.from ? ` (${row.from})` : ""}`).join("\n") : "Nothing in memory about that.";
+        return found.length ? found.map((row) => `- ${row.kind && row.kind !== "fact" ? `[${row.kind}] ` : ""}${row.text}${row.from ? ` (${row.from})` : ""}`).join("\n") : "Nothing in memory about that.";
       }
       case "calculate":
         return `${args.expression} = ${formatNumber(calculate(String(args.expression || "")))}`;
@@ -426,17 +437,32 @@ export async function skill(args) {
   return `Skills on this phone:\n${Object.entries(SKILLS).map(([name, found]) => `- ${name}: ${found.about.slice(0, 120)}`).join("\n")}${state.settings.pc ? "\n(Your PC's plugins have more: use action search.)" : ""}`;
 }
 
-export async function remember(agent, raw, { share = false } = {}) {
+/** How many of one kind an AI keeps in its own mind; the oldest go first. */
+const MIND_LIMIT = 40;
+
+export async function remember(agent, raw, { share = false, kind = "fact" } = {}) {
   const clean = raw.trim();
   if (!clean) return "Nothing to remember.";
-  const own = agent.role === "main" && !share;
+  const sort = kind in MEMORY_KINDS ? kind : "fact";
+  // Thoughts, patterns and lessons are the AI's own mind; taste is shared so
+  // every AI works in the user's image; facts follow the old rule.
+  const own = MIND_KINDS.has(sort) || (sort === "fact" && agent.role === "main" && !share);
   const same = state.memories.find((memory) => memory.text.toLowerCase() === clean.toLowerCase() && canRead(agent, memory));
   if (same) return `Already remembered: ${same.text}`;
-  state.memories.unshift({ id: uid(), agent_id: agent.id, text: clean.slice(0, 2000), created_at: Date.now(), synced: own, own });
+  state.memories.unshift({ id: uid(), agent_id: agent.id, text: clean.slice(0, 2000), kind: sort, created_at: Date.now(), synced: own, own });
+  if (MIND_KINDS.has(sort)) {
+    const mine = state.memories.filter((memory) => memory.agent_id === agent.id && memory.kind === sort);
+    if (mine.length > MIND_LIMIT) {
+      const drop = new Set(mine.slice(MIND_LIMIT).map((memory) => memory.id));
+      state.memories = state.memories.filter((memory) => !drop.has(memory.id));
+    }
+  }
   await save.memories();
   changed("memory");
-  feed(agent.name, `Remembered: ${clean.slice(0, 90)}`);
+  feed(agent.name, `${sort === "fact" ? "Remembered" : MEMORY_KINDS[sort]}: ${clean.slice(0, 90)}`);
   if (!own) syncSoon();
+  if (sort === "taste") return `Saved to the user's taste (every AI reads it): ${clean}`;
+  if (MIND_KINDS.has(sort)) return `Saved to your own ${MEMORY_KINDS[sort].toLowerCase()}: ${clean}`;
   return own ? `Saved to your own memory: ${clean}` : `Saved to memory: ${clean}`;
 }
 
@@ -463,7 +489,7 @@ export function recall(agent, query, limit) {
   const score = (value) => words(value).reduce((sum, word) => sum + (terms.has(word) ? 1 : 0), 0);
   const rows = state.memories
     .filter((memory) => canRead(agent, memory))
-    .map((memory) => ({ text: memory.text, at: memory.created_at, score: score(memory.text), from: whose(agent, memory) }));
+    .map((memory) => ({ text: memory.text, kind: memory.kind || "fact", at: memory.created_at, score: score(memory.text), from: whose(agent, memory) }));
   if (pcMemoryAllowed(agent)) {
     for (const memory of state.pcMemories) rows.push({ text: memory.text, at: memory.created_at, score: score(memory.text), from: "from your PC" });
   }

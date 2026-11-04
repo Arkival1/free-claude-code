@@ -20,7 +20,41 @@ const FEATURES = [
   ["Connect to my PC", "Pair with FCC Studio on your PC (optional)", "settings"],
   ["Voice", "Jarvis speaks his replies", "settings"],
   ["Backup", "Save or restore everything on this phone", "settings"],
+  ["Look: HUD or Playground", "Switch between the command centre and the Playground (one main AI, advisers)", "settings"],
+  ["Files", "Everything the Playground's main AI made, with search", "files"],
 ];
+
+/** HUD or Playground: the two looks of FCC Phone. */
+function lookCard() {
+  const settings = state.settings;
+  const current = settings.look === "playground" ? "playground" : "hud";
+  const pick = async (look) => {
+    if (current === look) return;
+    settings.look = look;
+    await save.settings();
+    notify(look === "playground" ? "Playground: one main AI does the work, the others advise." : "HUD: the command centre and your whole team.");
+    changed("look");
+  };
+  const option = (look, title, about) =>
+    el("button", { class: `look-option${current === look ? " chosen" : ""}`, type: "button", "aria-pressed": String(current === look), onclick: () => pick(look) }, [
+      el("strong", { text: title }),
+      el("small", { text: about }),
+    ]);
+  return card("Look", [
+    el("div", { class: "look-options" }, [
+      option("hud", "HUD", "The command centre: Jarvis runs your whole team."),
+      option("playground", "Playground", "Clean and simple: one main AI does the work with its own hands; up to two advise at once."),
+    ]),
+    el("label", { class: "check" }, [
+      el("input", { type: "checkbox", checked: settings.playgroundLocal !== false, "aria-label": "Main AI thinks on this phone's model", onchange: async (event) => {
+        settings.playgroundLocal = event.target.checked;
+        await save.settings();
+        changed("settings");
+      } }),
+      el("span", { text: "In the Playground the main AI thinks on this phone's own model when one is ready. Cloud and PC brains only advise, unless you hand them the work." }),
+    ]),
+  ]);
+}
 
 export function render(view) {
   const settings = state.settings;
@@ -45,6 +79,7 @@ export function render(view) {
   });
   view.replaceChildren(
     searchCard(),
+    lookCard(),
     card("Brain", [
       el("label", {}, ["Agents think with", brains]),
       el("p", { class: "muted", text: "On this phone: a model from Models, free and private. Cloud: paste a free key below. My PC: once paired. Each agent can also have its own brain (Agents, Team brains)." }),

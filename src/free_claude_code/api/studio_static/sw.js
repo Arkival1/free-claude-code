@@ -20,6 +20,8 @@ const SHELL = [
   `/studio/assets/${VERSION}/tutor.js`,
   `/studio/assets/${VERSION}/ops.css`,
   `/studio/assets/${VERSION}/ops.js`,
+  `/studio/assets/${VERSION}/playground.css`,
+  `/studio/assets/${VERSION}/playground.js`,
   `/studio/assets/${VERSION}/icon-180.png`,
   `/studio/assets/${VERSION}/icon-192.png`,
   "/studio/manifest.webmanifest",

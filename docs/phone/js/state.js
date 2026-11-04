@@ -1,7 +1,7 @@
 // Everything the app knows, loaded from the phone and saved back as it changes.
 import { store } from "./store.js";
 
-export const VERSION = "2.8.0";
+export const VERSION = "2.9.0";
 
 export const PHONE_TOOLS = {
   remember: "Memory",
@@ -39,6 +39,18 @@ export const MAIN_ONLY = new Set(["team_status"]);
 export const PC_ONLY = new Set(["web_search", "pc_task"]);
 /** Tools that read the user's memory, kept from cloud brains on the phone too. */
 export const MEMORY_TOOLS = new Set(["recall", "learn"]);
+
+/** What a memory is. Each AI keeps its own mind (thoughts, thinking patterns,
+ * lessons); the user's taste is shared so every AI works in the user's image. */
+export const MEMORY_KINDS = {
+  fact: "Facts",
+  taste: "Your taste",
+  thought: "Thoughts",
+  pattern: "Thinking patterns",
+  lesson: "Lessons",
+};
+/** Kinds that belong to one AI's own mind. */
+export const MIND_KINDS = new Set(["thought", "pattern", "lesson"]);
 
 const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_files", "delete_file", "check_project", "restore_file"];
 const DESIGN = ["find_images", "polish_check", "look_at_site"];
@@ -127,6 +139,11 @@ export const defaultSettings = () => ({
   speak: false,
   fallback: true,
   plugins: {},
+  // hud: the command centre and the whole team; playground: one main AI does
+  // the work with its own hands and the others advise (Manus-like).
+  look: "hud",
+  // In the Playground the main AI thinks on this phone's own model when one is ready.
+  playgroundLocal: true,
   engine: { context: 4096, gpu: true },
 });
 
@@ -228,6 +245,14 @@ export function agentByName(name) {
 export function toolsOf(agent) {
   const names = agent.allTools ? ALL_TOOLS.filter((name) => agent.role === "main" || !MAIN_ONLY.has(name)) : agent.tools || [];
   return names.filter((name) => !PC_ONLY.has(name) || state.settings.pc);
+}
+
+/** The tools an agent may use in one job: its own, or the set the job gives
+ * it (the Playground gives the main AI every making tool and its advisers
+ * read-only ones). PC-only tools still wait for pairing. */
+export function toolsFor(agent, ctx = {}) {
+  if (!Array.isArray(ctx.tools)) return toolsOf(agent);
+  return ctx.tools.filter((name) => name in PHONE_TOOLS && (!PC_ONLY.has(name) || state.settings.pc) && (agent.role === "main" || !MAIN_ONLY.has(name)));
 }
 
 // Live events for the HUD feed and the agents-at-work panel.

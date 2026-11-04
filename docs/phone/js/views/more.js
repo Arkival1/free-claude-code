@@ -12,13 +12,22 @@ export const ITEMS = [
   ["learn", "◈", "Learn", "Have Jarvis study a subject"],
   ["todos", "✓", "To-dos and reminders", "Your list, kept by Jarvis"],
   ["memory", "✦", "Memory", "What your agents remember, and your PC's"],
+  ["minds", "❋", "Minds", "Each AI's thinking patterns, lessons and thoughts, and your taste"],
   ["agents/brains", "⚙", "Team brains", "Who thinks with what"],
   ["settings", "⚙", "Settings", "Free cloud brains, your PC, voice, backups"],
   ["help", "?", "Help", "How FCC Phone works"],
 ];
 
 export function render(view) {
+  const playground = state.settings.look === "playground";
   view.replaceChildren(
+    el("button", { class: "item as-button look-switch", type: "button", onclick: () => go("settings"), "aria-label": `Look: ${playground ? "Playground" : "HUD"}. Change it in Settings` }, [
+      el("span", { class: "glyph", "aria-hidden": "true", text: playground ? "◐" : "◆" }),
+      el("div", { class: "grow" }, [
+        el("strong", { text: playground ? "Look: Playground" : "Look: HUD" }),
+        el("small", { text: playground ? "One main AI does the work; switch to the HUD in Settings" : "The command centre; switch to the Playground in Settings" }),
+      ]),
+    ]),
     card(
       "More",
       ITEMS.map(([route, glyph, title, sub]) =>

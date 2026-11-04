@@ -1,0 +1,394 @@
+/* The Playground: FCC's Manus-like look. Warm paper, ink, a serif headline,
+   quiet cards; one main AI does the work and the others advise. Every Studio
+   page takes these colours while the Playground look is on. */
+
+.look-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.look-option {
+  display: grid;
+  gap: 4px;
+  min-height: 92px;
+  padding: 12px;
+  text-align: left;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.look-option small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.look-option.chosen {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+html[data-look="playground"] {
+  background: #f6f4ef;
+  color-scheme: light;
+}
+
+body[data-look="playground"] {
+  --bg: #f6f4ef;
+  --surface: #ffffff;
+  --surface-2: #f0ede6;
+  --line: rgba(29, 27, 22, 0.14);
+  --text: #1d1b16;
+  --muted: #625e55;
+  --accent: #1d1b16;
+  --accent-ink: #ffffff;
+  --good: #1f7a46;
+  --warn: #8a4b00;
+  --bad: #b3261e;
+  --cyan: #1d1b16;
+  --radius: 14px;
+  --serif: ui-serif, "New York", Georgia, "Times New Roman", serif;
+  color-scheme: light;
+  background: var(--bg);
+}
+
+/* Studio dresses every page as a dark console; the Playground look undoes
+   that on every page (the HUD page itself stays the HUD). */
+body[data-look="playground"][data-ui="page"] {
+  background: var(--bg);
+}
+
+body[data-look="playground"] .app-bar,
+body[data-look="playground"][data-ui="page"] .app-bar {
+  background: rgba(246, 244, 239, 0.92);
+  border-bottom-color: var(--line);
+}
+
+body[data-look="playground"][data-ui="page"] .app-bar h1 {
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  text-shadow: none;
+}
+
+body[data-look="playground"][data-ui="page"] .card {
+  background: var(--surface);
+  border-radius: 16px;
+  clip-path: none;
+}
+
+body[data-look="playground"][data-ui="page"] .card > h2,
+body[data-look="playground"][data-ui="page"] .card > h3,
+body[data-look="playground"][data-ui="page"] .card-head h2 {
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+body[data-look="playground"][data-ui="page"] .card > h2::before,
+body[data-look="playground"][data-ui="page"] .card-head h2::before {
+  content: none;
+}
+
+body[data-look="playground"][data-ui="page"] .list-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+body[data-look="playground"][data-ui="page"] input[type="text"],
+body[data-look="playground"][data-ui="page"] input[type="url"],
+body[data-look="playground"][data-ui="page"] input[type="search"],
+body[data-look="playground"][data-ui="page"] input[type="number"],
+body[data-look="playground"][data-ui="page"] input:not([type]),
+body[data-look="playground"][data-ui="page"] textarea,
+body[data-look="playground"][data-ui="page"] select,
+body[data-look="playground"] .sheet-panel input[type="text"],
+body[data-look="playground"] .sheet-panel textarea,
+body[data-look="playground"] .sheet-panel select {
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--text);
+}
+
+body[data-look="playground"][data-ui="page"] .pg .pg-box {
+  background: transparent;
+  border: 0;
+}
+
+body[data-look="playground"] button.primary {
+  box-shadow: none;
+}
+
+body[data-look="playground"] button.secondary {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+body[data-look="playground"] .tab-bar,
+body[data-look="playground"][data-ui="page"] .tab-bar {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  background: rgba(246, 244, 239, 0.96);
+  border-top-color: var(--line);
+}
+
+body[data-look="playground"][data-ui="page"] .tab {
+  font-family: inherit;
+  letter-spacing: 0;
+  border-radius: 12px;
+}
+
+body[data-look="playground"] .tab[aria-current="page"],
+body[data-look="playground"][data-ui="page"] .tab[aria-current="page"] {
+  color: var(--text);
+  background: rgba(29, 27, 22, 0.07);
+  box-shadow: none;
+}
+
+.pg {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pg h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.pg-top,
+.pg-head,
+.pg-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pg-actions {
+  justify-content: flex-start;
+}
+
+.pg-actions input {
+  flex: 1;
+  min-width: 12em;
+}
+
+.pg-crumb {
+  margin: 0;
+  color: var(--muted);
+}
+
+.pg-crumb strong {
+  color: var(--text);
+}
+
+.pg-muted {
+  color: var(--muted);
+  margin: 0;
+}
+
+.pg-small {
+  font-size: 14px;
+  margin: 0;
+}
+
+.pg-hero {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 16px 0 6px;
+  text-align: center;
+}
+
+.pg-mark {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px 16px 22px 22px;
+  background: var(--text);
+  color: var(--bg);
+  font: 700 30px/1 var(--serif, Georgia, serif);
+}
+
+.pg-title {
+  margin: 4px 0 0 !important;
+  font: 500 34px/1.15 var(--serif, Georgia, serif) !important;
+  letter-spacing: -0.01em;
+}
+
+.pg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.pg-box {
+  width: 100%;
+  min-height: 110px;
+  border: 0;
+  padding: 4px 2px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+
+.pg-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pg select,
+.pg input,
+.pg button {
+  min-height: var(--tap);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 12px;
+}
+
+.pg .pg-primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.pg .pg-danger {
+  color: var(--bad);
+}
+
+.pg .pg-ghost {
+  border: 0;
+  background: transparent;
+  font-weight: 500;
+}
+
+.pg-chips {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pg .pg-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 14px;
+  text-align: left;
+}
+
+.pg-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
+.pg .pg-link {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pg .pg-item,
+.pg-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.pg-step {
+  border-width: 0 0 1px;
+  border-radius: 0;
+  padding: 10px 0;
+}
+
+.pg-glyph {
+  width: 1.2em;
+  flex: none;
+  text-align: center;
+}
+
+.pg-grow {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pg-grow small {
+  color: var(--muted);
+}
+
+.pg-result {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.pg-search {
+  width: 100%;
+}
+
+.pg-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.pg-sub {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .pg-row,
+  .pg-chips {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .pg-row select:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .pg-title {
+    font-size: 30px !important;
+  }
+}

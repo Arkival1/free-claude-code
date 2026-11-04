@@ -110,6 +110,25 @@ def _classroom_reply(system: str, prompt: str) -> str | None:
     )
 
 
+def _playground_reply(system: str, prompt: str) -> str | None:
+    """The Playground's main AI, advisers and their notes, for its page."""
+    if "Write down what to keep in your own mind" in system:
+        return json.dumps(
+            {
+                "thought": "The owner likes calm pages.",
+                "pattern": "Sketch the sections before writing the page.",
+                "lesson": "",
+            }
+        )
+    if "You are an adviser in the owner's Playground" in system:
+        if "Advise the main AI before it starts" in prompt:
+            return "Keep it to one calm page with big headings."
+        return "LOOKS GOOD"
+    if "You are the main AI in the owner's Playground" in system:
+        return "Made the page: index.html and styles.css."
+    return None
+
+
 class _ClassroomWebTools(StubWebToolsClient):
     """Canned reading for the classroom's teacher when it steps out."""
 
@@ -150,6 +169,8 @@ class _StudioEchoModel:
         del tools, temperature, max_tokens
         prompt = str(messages[-1].content) if messages else ""
         lesson = _classroom_reply(system, prompt)
+        if lesson is None:
+            lesson = _playground_reply(system, prompt)
         if lesson is not None:
             return LLMReply(text=lesson, model=model or "")
         match = re.search(

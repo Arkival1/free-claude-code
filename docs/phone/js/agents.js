@@ -1,5 +1,5 @@
 // How phone agents think, use tools, and hand work to each other.
-import { state, save, chatOf, changed, feed, agentByName, toolsOf } from "./state.js";
+import { state, save, chatOf, changed, feed, agentByName, toolsFor, MIND_KINDS } from "./state.js";
 import { think, brainOf, isPrivate, pinBrain, PROVIDERS, modelOf } from "./brains.js";
 import { specsFor, runTool, recall, setHooks, pcMemoryAllowed, canRead } from "./tools.js";
 import { startStudy } from "./learn.js";
@@ -19,9 +19,9 @@ export function systemPrompt(agent, question, ctx = {}) {
   const now = new Date();
   const parts = [
     agent.role === "main" ? `You are ${agent.name}, the user's main AI.` : `You are ${agent.name}, one of the user's AI agents (${agent.role}).`,
-    agent.instructions || "",
+    ctx.instructions || agent.instructions || "",
     `You run inside FCC Phone on the user's iPhone. It is ${now.toLocaleString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}.`,
-    `Your tools: ${toolsOf(agent).join(", ") || "none"}. Use a tool whenever it gives a better answer than guessing. Keep replies short and easy to read on a phone.`,
+    `Your tools: ${toolsFor(agent, ctx).join(", ") || "none"}. Use a tool whenever it gives a better answer than guessing. Keep replies short and easy to read on a phone.`,
     "Hold what you make to a business level: polished, complete, and ready for a real business to use, never a rough draft or a placeholder.",
   ];
   if (agent.role === "main") {
@@ -32,9 +32,16 @@ export function systemPrompt(agent, question, ctx = {}) {
     const files = Object.keys(ctx.project.files);
     parts.push(`Current project: ${ctx.project.name}. Files: ${files.length ? files.join(", ") : "none yet"}.`);
   }
-  const relevant = recall(agent, question, 6);
+  // The AI's own mind: how it works best and what it learned, then the
+  // user's taste, which every AI follows.
+  const mind = state.memories.filter((memory) => memory.agent_id === agent.id && (memory.kind === "pattern" || memory.kind === "lesson")).slice(0, 6);
+  if (mind.length) parts.push(`How you work best (your own thinking patterns and lessons):\n${mind.map((memory) => `- ${memory.text}`).join("\n")}`);
+  const taste = state.memories.filter((memory) => memory.kind === "taste").slice(0, 8);
+  if (taste.length) parts.push(`The user's taste (make things in their image):\n${taste.map((memory) => `- ${memory.text}`).join("\n")}`);
+  const shown = new Set([...mind, ...taste].map((memory) => memory.text));
+  const relevant = recall(agent, question, 6).filter((row) => !shown.has(row.text));
   const recent = state.memories
-    .filter((memory) => canRead(agent, memory))
+    .filter((memory) => canRead(agent, memory) && !MIND_KINDS.has(memory.kind) && memory.kind !== "taste")
     .slice(0, 4)
     .filter((memory) => !relevant.some((row) => row.text === memory.text));
   const lines = [...relevant.map((row) => `- ${row.text}${row.from ? ` (${row.from})` : ""}`), ...recent.map((memory) => `- ${memory.text}`)];
@@ -91,9 +98,10 @@ async function history(agent) {
 
 /** The tool loop: think, run the tools asked for, think again, until a reply. */
 async function loop(agent, system, convo, ctx, { maxRounds, onTool }) {
-  const tools = specsFor(agent);
+  const tools = specsFor(agent, ctx);
+  const maxTokens = ctx.maxTokens || (agent.role === "builder" ? 4000 : 1200);
   for (let round = 0; round < maxRounds; round += 1) {
-    const reply = await think(agent, system, convo, round < maxRounds - 1 ? tools : [], { maxTokens: agent.role === "builder" ? 4000 : 1200 });
+    const reply = await think(agent, system, convo, round < maxRounds - 1 ? tools : [], { maxTokens });
     if (!reply.tool_calls.length) return reply.text || "(no answer)";
     convo.push({
       role: "assistant",
@@ -154,19 +162,25 @@ export async function answer(agent, text, { project } = {}) {
 /** How a job that failed starts its report (Tasks reads it). */
 export const COULDNT_FINISH = "couldn't finish";
 
-/** A job done in the background: the agent works it through and reports. */
-export async function runTask(agent, goal, { project = null, depth = 0, chain = [], by = "you" } = {}) {
+/** A job done in the background: the agent works it through and reports.
+ * A job can give the agent its own tools, instructions and step limit for
+ * this one job (the Playground does), and a report object gets the job's
+ * context (report.ctx), so the caller sees the project it worked in. With
+ * consult, the agent's ask_agent only gets advice: the other agent never
+ * takes the work over. */
+export async function runTask(agent, goal, { project = null, depth = 0, chain = [], by = "you", tools = null, instructions = "", maxRounds = 0, maxTokens = 0, consult = false, report = null } = {}) {
   const job = { id: `${Date.now()}`, agent: agent.id, goal, by, status: "working", started_at: Date.now(), steps: 0, result: "" };
   state.jobs.unshift(job);
   state.jobs.length = Math.min(state.jobs.length, 30);
   setBusy(agent, true);
   const unpin = pinBrain(agent);
   feed(agent.name, `Started: ${goal.slice(0, 100)}`, "start");
-  const ctx = { project, depth, chain: [...chain, agent.id], built: new Set() };
+  const ctx = { project, depth, chain: [...chain, agent.id], built: new Set(), tools, instructions, maxTokens, consult };
+  if (report) report.ctx = ctx;
   try {
     await addTurn(agent, { role: "task", text: `Job from ${by}: ${goal}` });
     const result = await loop(agent, systemPrompt(agent, goal, ctx), [{ role: "user", content: goal }], ctx, {
-      maxRounds: agent.role === "builder" ? 30 : agent.role === "tester" ? 20 : 10,
+      maxRounds: maxRounds || (agent.role === "builder" ? 30 : agent.role === "tester" ? 20 : 10),
       onTool: async (call, output) => {
         noteBuilt(ctx, call);
         job.steps += 1;
@@ -208,6 +222,12 @@ async function delegate(from, name, task, projectName, ctx) {
     return `${worker.name} thinks on this phone and takes jobs from Jarvis and the other agents here, not from agents on a cloud AI. Ask Jarvis if you need it.`;
   }
   if (isBusy(worker)) return `${worker.name} is busy with another job. Try again in a moment, or do it yourself.`;
+  // In the Playground the main AI keeps the work: asking another agent gets
+  // its advice, never its hands.
+  if (ctx.consult) {
+    const { consult } = await import("./playground.js");
+    return consult(from, worker, task, ctx);
+  }
   let project = ctx.project;
   if (projectName) {
     const { findProject, createProject } = await import("./projects.js");

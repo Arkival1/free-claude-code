@@ -35,6 +35,7 @@ from .models import (
     ModelAsset,
     PhoneLink,
     Photo,
+    PlaygroundJob,
     Record,
     ScanFinding,
     SiteProject,
@@ -92,6 +93,7 @@ _JSON_FIELDS = frozenset(
         "tasks",
         "checkpoints",
         "release",
+        "advisers",
     }
 )
 
@@ -133,6 +135,7 @@ TABLES: Mapping[type[Record], str] = {
     StudioFlag: "studio_flags",
     ScanFinding: "studio_scan_findings",
     TeamPlan: "studio_plans",
+    PlaygroundJob: "studio_playground_jobs",
     TradeRound: "studio_trade_rounds",
     TradeEvent: "studio_trade_events",
     TradeOrder: "studio_trade_orders",

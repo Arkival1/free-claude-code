@@ -912,7 +912,7 @@ class AgentRunner:
         self._temperature = temperature
 
     async def _private_view(
-        self, agent: Agent
+        self, agent: Agent, *, lead: bool = True
     ) -> tuple[Agent, bool, tuple[str, ...] | None]:
         """The agent as it may act, and whom it may direct.
 
@@ -920,6 +920,7 @@ class AgentRunner:
         server; and, on this PC, with the tools to direct the agents on
         server AIs. Who directs whom follows each agent's current model, so
         switching a model moves an agent between the two groups at once.
+        ``lead`` False (a Playground adviser): it directs nobody.
         """
         granted = self._toolbox.granted(
             agent.tools, role=agent.role, chosen=agent.all_tools
@@ -942,6 +943,9 @@ class AgentRunner:
                     "tools": tuple(t for t in agent.tools if t not in SEALED_TOOLS),
                 }
             )
+        if not lead:
+            # An adviser looks and thinks; it never directs anyone.
+            return agent, sealed, ()
         if agent.role == MAIN_ROLE:
             return agent, sealed, None
         if agent.role == "guide":
@@ -1295,6 +1299,7 @@ class AgentRunner:
         note: str = "",
         fallback_model: str | None = None,
         keep_going: Callable[[], Awaitable[bool]] | None = None,
+        lead: bool = True,
     ) -> AgentRun:
         """Run one autonomous goal to completion and persist its outcome.
 
@@ -1305,7 +1310,7 @@ class AgentRunner:
         ``note`` rides along with the goal (what the team shared in the room)
         without becoming part of it.
         """
-        agent, sealed, directs = await self._private_view(agent)
+        agent, sealed, directs = await self._private_view(agent, lead=lead)
         started = run.model_copy(update={"status": "running", "updated_at": now_ms()})
         await self._store.put(started)
         await self._store.append_message(

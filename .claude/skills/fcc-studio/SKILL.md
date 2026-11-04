@@ -31,6 +31,7 @@ the user-facing description of every feature is the `## Studio` section of
 
 | Page | What it does |
 | --- | --- |
+| Playground (`#home` when the Look is Playground; `#ptasks`, `#pjob/<id>`, `#pfiles`, `#pminds`) | Manus-like look: one main AI does the job, up to two advisers advise and check (`playground.js/css`, `studio/playground.py`) |
 | Home (`#home`, HUD) | Jarvis command center: gold orb, talk/voice (offline Kokoro speech + Whisper), team status, agents at work, agent chat room |
 | Chats (`#chats`, `#chat/<id>`, `#room/<id>`) | Chats with one agent, and rooms where several agents talk, hand off and finish tasks |
 | Agents (`#agents`, `#agent/<id>`, `#task/<id>`) | Run a task for an agent, add agents (presets, + button, repo agents), Team brains (a model per agent: Test, then Save) |
@@ -114,6 +115,7 @@ docs/             GitHub Pages: index.html and docs/phone (built phone app)
 | `playbook.py`, `call_guard.py`, `presets.py` | Jarvis's tool notes, small-model call guard, agent presets |
 | `voice.py`, `local_voice.py`, `obsidian.py`, `phone_link.py`, `hq.py`, `lab/`, `farm/` | Voice, Obsidian mirror, phone pairing, HQ, Lab, Content Farm |
 | FCC Phone (on its own) | `api/phone_static/js/tasks.js` (Jarvis plans, re-plans and runs a job on the phone), `js/skills.js` (FCC skills in the app), `js/plugins.js` + `js/apis.js` (free API catalog, keys on the phone, `use_plugin`), `js/views/settings.js` search bar; the generated files come from `scripts/phone/build_pages.py`. Check phone scripts with `node --experimental-default-type=module --check` (plain `--check` misses module errors) |
+| `playground.py` | The Playground: rules and words (`HANDS_TOOLS`, `ADVISER_TOOLS`, prompts, `pick_advisers`, briefs, `reflection`); jobs run in `service.py` (`start_playground`, `_playground_drive`, `_playground_step` with `lead=False` for advisers, `playground_minds`, `add_taste`); record `PlaygroundJob`; phone twin `js/playground.js` + `js/views/playground.js` (look switch in Settings) |
 | `phone_tasks.py` | FCC Phone Tasks (Manus-style): views of PC team plans and the files sent to the phone (`/studio/api/phone/tasks*`); phone plugin add/switch, subagents and the phone HQ are in `service.py` (`phone_plugin_*`, `phone_subagent*`, `phone_hq*`) |
 | `phone_desk.py` | FCC Phone's Trading card through the PC link (`/studio/api/phone/trading*`): totals only; start practice, stop, kill, deny, approve practice orders only. Phone Plugins (`/studio/api/phone/plugins`, `/skill`) are in `service.py` |
 | `subagents.py` | Subagents: `HELPER_ROLES` (role, during/after, words, part), `pick` (fitting, switched-on, max 2, never for helpers), `helper_goal`; `Agent.subagent`/`active`; service `create_subagent`, `set_subagent_active`, `_helpers_for`, `_subagent_helps` (hooked in `_run_task`); Agents page Subagents card; new `developer` role |

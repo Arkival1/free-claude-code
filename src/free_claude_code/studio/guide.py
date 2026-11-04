@@ -1456,6 +1456,44 @@ GUIDE_TOPICS: tuple[GuideTopic, ...] = (
         ),
     ),
     GuideTopic(
+        title="Playground",
+        route="/studio#settings",
+        where="Settings (or More), Look: Playground. Then New task in the tab bar.",
+        terms=(
+            "playground",
+            "look",
+            "hud or playground",
+            "manus",
+            "one ai",
+            "main ai does",
+            "advisers",
+            "adviser",
+            "team meeting",
+            "minds",
+            "my taste",
+            "thinking patterns",
+            "new task",
+        ),
+        body=(
+            "The Playground is Studio's second look, clean and simple like Manus. "
+            "Switch it in Settings or More (Look: HUD or Playground); the choice is "
+            "kept in this browser and the HUD stays one tap away. On New task you "
+            "say what you want done: one main AI does the whole job with its own "
+            "hands, thinking on this PC's model when one is set up, and up to two "
+            "advisers (usually agents on server AIs) advise before it starts and "
+            "check the work after, so three AIs work at once. A team meeting brings "
+            "up to five in to advise, two at a time. Advisers only look and think: "
+            "they never change files or direct anyone unless you hand the work to "
+            "them (pick who does it). When the advisers find problems the main AI "
+            "fixes them, three tries in all. Tasks lists every job (Stop, Run "
+            "again, Open the project); Files lists your projects. Minds shows each "
+            "AI's own thinking patterns, lessons and thoughts, written after every "
+            "task, and Your taste: what you like, which every AI in a task reads "
+            "so it makes things in your image."
+        ),
+        asks=("What is the Playground?", "How do advisers work?"),
+    ),
+    GuideTopic(
         title="HQ",
         route="/studio#hq",
         where="HQ in the tab bar (or MENU, HQ).",
@@ -2630,6 +2668,9 @@ def page_name(route: str) -> str:
         "ideas": "Ideas board",
         "hq": "HQ",
         "settings": "Settings",
+        "ptasks": "Playground tasks",
+        "pfiles": "Playground files",
+        "pminds": "Minds",
     }.get(route.rsplit("#", 1)[-1], route)
 
 

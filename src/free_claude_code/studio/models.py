@@ -891,3 +891,46 @@ class TeamPlan(Record):
     on the shelf when it ends."""
     created_at: int = Field(default_factory=now_ms)
     updated_at: int = Field(default_factory=now_ms)
+
+
+type PlaygroundStatus = Literal["working", "done", "failed", "stopped"]
+type PlaygroundStage = Literal["kickoff", "work", "review"]
+
+
+class PlaygroundStep(BaseModel):
+    """One turn in a Playground job: an adviser's advice or check, or the
+    main AI's work on one try."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stage: PlaygroundStage
+    try_no: int = 0
+    """Which try a work or check step belongs to (0 for the advice before)."""
+    agent_id: str
+    agent: str
+    """The agent's name."""
+    do: str
+    status: StepStatus = "waiting"
+    result: str = ""
+    run_id: str = ""
+
+
+class PlaygroundJob(Record):
+    """The Playground (FCC's Manus-like mode): one main AI does the job with
+    its own hands while up to two advisers advise and check it."""
+
+    id: str = Field(default_factory=lambda: new_id("pgj"))
+    goal: str
+    hands_id: str
+    """The agent doing the work: the main AI unless the owner handed it on."""
+    hands_model: str = ""
+    """The model the main AI works with (this PC's own when one is set up)."""
+    advisers: tuple[str, ...] = ()
+    """Agent ids, in the order they advise."""
+    meeting: bool = False
+    status: PlaygroundStatus = "working"
+    steps: tuple[PlaygroundStep, ...] = ()
+    site_id: str | None = None
+    summary: str = ""
+    created_at: int = Field(default_factory=now_ms)
+    updated_at: int = Field(default_factory=now_ms)

@@ -56,11 +56,14 @@ export const FALLBACK_ORDER = ["local", "gemini", "groq", "openrouter", "custom"
 // same for the whole turn too.
 const pins = new Map();
 
-/** Pin the agent's brain for one turn; call what it returns when it ends. */
-export function pinBrain(agent) {
+/** Pin the agent's brain for one turn; call what it returns when it ends.
+ * A brain named here (and ready) is used instead of the agent's own: the
+ * Playground's main AI thinks on the phone's own model. A turn inside a
+ * pinned one keeps the outer pin. */
+export function pinBrain(agent, brain = "") {
   const pin = pins.get(agent.id);
   if (pin) pin.turns += 1;
-  else pins.set(agent.id, { brain: brainOf(agent), turns: 1 });
+  else pins.set(agent.id, { brain: brain && brainReady(brain) ? brain : brainOf(agent), turns: 1 });
   return () => {
     const held = pins.get(agent.id);
     if (held && --held.turns <= 0) pins.delete(agent.id);

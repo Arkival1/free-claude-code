@@ -222,6 +222,8 @@ from .models import (
     PhoneLink,
     Photo,
     PlanStep,
+    PlaygroundJob,
+    PlaygroundStep,
     ScanFinding,
     SiteProject,
     StudioFlag,
@@ -293,6 +295,26 @@ from .playbook import (
     own_tool,
     slash_names,
     starter_notes,
+)
+from .playground import (
+    ADVISER_PROMPT,
+    ADVISER_TOOLS,
+    HANDS_PROMPT,
+    HANDS_TOOLS,
+    MAX_ADVISERS,
+    MAX_MEETING,
+    MAX_TRIES,
+    MIND_TAGS,
+    REFLECT_PROMPT,
+    STEP_CHARS,
+    TASTE_TAG,
+    advice_brief,
+    advice_notes,
+    check_brief,
+    hands_brief,
+    looks_good,
+    pick_advisers,
+    reflection,
 )
 from .presets import (
     BUILDER_PROMPT,
@@ -1151,6 +1173,8 @@ class StudioService:
         self._started_at = now_ms()
         # Team plans being run: plan id -> its coordinator.
         self._plan_jobs: dict[str, asyncio.Task[object]] = {}
+        self._playground_runs: dict[str, asyncio.Task[object]] = {}
+        self._playground_lock = asyncio.Lock()
         # Chat turns started from the HQ, so Stop reaches them too:
         # agent id -> {turn: (chat id, what it was asked)}.
         self._hq_turns: dict[str, dict[asyncio.Task[object], tuple[str, str]]] = {}
@@ -10248,6 +10272,583 @@ class StudioService:
             "running": plan.id in self._plan_jobs,
             "done_steps": sum(step.status == "done" for step in plan.steps),
         }
+
+    # ------------------------------------------------------------ playground
+
+    async def playground_jobs(self, *, limit: int = 30) -> tuple[PlaygroundJob, ...]:
+        jobs = await self._store.find(
+            PlaygroundJob, order_by="created_at DESC", limit=limit
+        )
+        return tuple([await self._playground_settled(job) for job in jobs])
+
+    async def playground_job(self, job_id: str) -> PlaygroundJob:
+        return await self._playground_settled(
+            await self._store.require(PlaygroundJob, job_id)
+        )
+
+    async def _playground_settled(self, job: PlaygroundJob) -> PlaygroundJob:
+        """A job left working when FCC closed has no driver: it is stopped,
+        and Run again picks it up from there."""
+        if job.status != "working" or job.id in self._playground_runs:
+            return job
+        steps = tuple(
+            step.model_copy(update={"status": "stopped"})
+            if step.status == "running"
+            else step
+            for step in job.steps
+        )
+        stopped = job.model_copy(
+            update={
+                "status": "stopped",
+                "steps": steps,
+                "summary": "Stopped when FCC closed; Run again picks up from there.",
+                "updated_at": now_ms(),
+            }
+        )
+        await self._store.put(stopped)
+        return stopped
+
+    def playground_view(self, job: PlaygroundJob) -> JsonObject:
+        return {
+            **job.model_dump(mode="json"),
+            "running": job.id in self._playground_runs,
+            "done_steps": sum(step.status == "done" for step in job.steps),
+        }
+
+    def _hands_model(self, hands: Agent, agents: Sequence[Agent]) -> str:
+        """The main AI works on this PC's own model when one is set up; the
+        API and server AIs advise."""
+        if self._is_local(hands.model):
+            return hands.model
+        local = self._local_team_model(agents)
+        return local if self._is_local(local) else hands.model
+
+    async def start_playground(
+        self,
+        goal: str,
+        *,
+        hands_id: str = "",
+        advisers: str | Sequence[str] = "auto",
+        site_id: str | None = None,
+    ) -> PlaygroundJob:
+        """Start a Playground job: the main AI (or the agent the owner handed
+        it to) does the work; the advisers advise and check it."""
+        goal = goal.strip()
+        if not goal:
+            raise StudioError("Say what the task is first.")
+        main = await self.main_agent()  # makes the starter team on first use
+        agents = [agent for agent in await self.agents() if not agent.archived]
+        hands = next((a for a in agents if a.id == hands_id), main)
+        if site_id:
+            await self._store.require(SiteProject, site_id)
+        if isinstance(advisers, str):
+            count = {"meeting": MAX_MEETING, "none": 0}.get(advisers, MAX_ADVISERS)
+            picked = pick_advisers(
+                goal, agents, hands.id, count=count, is_local=self._is_local
+            )
+        else:
+            known = {agent.id for agent in agents}
+            picked = tuple(
+                dict.fromkeys(a for a in advisers if a in known and a != hands.id)
+            )[:MAX_MEETING]
+        job = PlaygroundJob(
+            goal=goal[:4000],
+            hands_id=hands.id,
+            hands_model=self._hands_model(hands, agents),
+            advisers=picked,
+            meeting=advisers == "meeting",
+            site_id=site_id,
+        )
+        await self._store.put(job)
+        self._drive_playground(job.id)
+        return job
+
+    def _drive_playground(self, job_id: str) -> None:
+        job = self.spawn(self._playground_drive(job_id))
+        self._playground_runs[job_id] = job
+        job.add_done_callback(lambda _: self._playground_runs.pop(job_id, None))
+
+    async def stop_playground(self, job_id: str) -> PlaygroundJob:
+        """Stop a Playground job: the turn running now stops, the rest wait
+        for Run again."""
+        driver = self._playground_runs.pop(job_id, None)
+        if driver is not None:
+            driver.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await driver
+        return await self.playground_job(job_id)
+
+    async def resume_playground(self, job_id: str) -> PlaygroundJob:
+        """Run a stopped or failed job again: finished turns stay finished."""
+        job = await self.playground_job(job_id)
+        if job_id in self._playground_runs or job.status == "done":
+            return job
+        steps = tuple(
+            step
+            if step.status == "done"
+            else step.model_copy(
+                update={"status": "waiting", "result": "", "run_id": ""}
+            )
+            for step in job.steps
+        )
+        job = job.model_copy(
+            update={
+                "status": "working",
+                "steps": steps,
+                "summary": "",
+                "updated_at": now_ms(),
+            }
+        )
+        await self._store.put(job)
+        self._drive_playground(job.id)
+        return job
+
+    async def _playground_update(
+        self,
+        job_id: str,
+        stage: str,
+        try_no: int,
+        agent: Agent,
+        changes: JsonObject,
+    ) -> PlaygroundStep:
+        """Add or change one step (one lock, so two advisers saving at once
+        never lose each other's step)."""
+        async with self._playground_lock:
+            job = await self._store.require(PlaygroundJob, job_id)
+            steps = list(job.steps)
+            index = next(
+                (
+                    i
+                    for i, step in enumerate(steps)
+                    if step.stage == stage
+                    and step.try_no == try_no
+                    and step.agent_id == agent.id
+                ),
+                None,
+            )
+            if index is None:
+                step = PlaygroundStep.model_validate(
+                    {
+                        "stage": stage,
+                        "try_no": try_no,
+                        "agent_id": agent.id,
+                        "agent": agent.name,
+                        **changes,
+                    }
+                )
+                steps.append(step)
+            else:
+                step = steps[index].model_copy(update=changes)
+                steps[index] = step
+            await self._store.put(
+                job.model_copy(update={"steps": tuple(steps), "updated_at": now_ms()})
+            )
+            return step
+
+    async def _playground_step(
+        self,
+        job_id: str,
+        stage: str,
+        try_no: int,
+        agent: Agent,
+        goal: str,
+        *,
+        tools: Sequence[str],
+        prompt: str,
+        site_id: str | None,
+        model: str = "",
+        max_steps: int = 0,
+        adviser: bool = False,
+    ) -> tuple[PlaygroundStep, AgentRun | None]:
+        """Run one turn unless it already finished (Run again skips it).
+        An adviser's turn is a plain one (no role habits such as a
+        Researcher searching the web for its whole brief) that directs nobody."""
+        job = await self._store.require(PlaygroundJob, job_id)
+        done = next(
+            (
+                step
+                for step in job.steps
+                if step.stage == stage
+                and step.try_no == try_no
+                and step.agent_id == agent.id
+                and step.status == "done"
+            ),
+            None,
+        )
+        if done is not None:
+            return done, None
+        await self._playground_update(
+            job_id, stage, try_no, agent, {"status": "running"}
+        )
+        view = agent.model_copy(
+            update={
+                "tools": tuple(tools),
+                "all_tools": False,
+                "system_prompt": f"{prompt}\n\n{agent.system_prompt}".strip(),
+                "model": model or agent.model,
+                **({"role": "assistant"} if adviser else {}),
+            }
+        )
+        try:
+            run = await self._playground_turn(
+                view, goal, site_id=site_id, max_steps=max_steps, lead=not adviser
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            # Anything a turn hits (a site that's down, a tool that broke)
+            # fails this step only; an adviser's never stops the job.
+            logger.exception("Playground turn for {} failed", agent.name)
+            step = await self._playground_update(
+                job_id,
+                stage,
+                try_no,
+                agent,
+                {
+                    "status": "failed",
+                    "result": f"Couldn't finish: {error}"[:STEP_CHARS],
+                },
+            )
+            return step, None
+        failed = run.status != "succeeded"
+        said = (run.result or run.error or "").strip()
+        step = await self._playground_update(
+            job_id,
+            stage,
+            try_no,
+            agent,
+            {
+                "status": "failed" if failed else "done",
+                "result": said[:STEP_CHARS],
+                "run_id": run.id,
+            },
+        )
+        return step, run
+
+    async def _playground_turn(
+        self,
+        agent: Agent,
+        goal: str,
+        *,
+        site_id: str | None,
+        max_steps: int = 0,
+        lead: bool = True,
+    ) -> AgentRun:
+        """One agent turn with the tools and words the Playground gives it."""
+        chat = await self.create_chat(
+            agent_id=agent.id, title=goal.strip()[:48], kind="agent", site_id=site_id
+        )
+        run = AgentRun.model_validate(
+            {
+                "agent_id": agent.id,
+                "chat_id": chat.id,
+                "goal": goal.strip(),
+                "site_id": site_id,
+                "max_steps": max_steps or self._steps_for(agent),
+            }
+        )
+        await self._store.put(run)
+        async with self._working(agent.id):
+            job = self.spawn(
+                self._runner().run_task(
+                    agent,
+                    chat,
+                    run,
+                    fallback_model=await self._fallback_model(agent),
+                    lead=lead,
+                )
+            )
+            self._run_jobs[run.id] = job
+            try:
+                finished = cast(AgentRun, await job)
+            except asyncio.CancelledError:
+                await self._mark_stopped(run)
+                raise
+            finally:
+                self._run_jobs.pop(run.id, None)
+        if not finished.site_id:
+            # start_project made the turn's chat its project: the job works there.
+            home = await self._store.get(Chat, chat.id)
+            if home is not None and home.site_id:
+                finished = finished.model_copy(update={"site_id": home.site_id})
+        await self._refresh_site_count(finished.site_id)
+        await self._after_memory_change([agent.id], wait=False)
+        return finished
+
+    async def _playground_round(
+        self,
+        job_id: str,
+        stage: str,
+        try_no: int,
+        advisers: Sequence[Agent],
+        goal: str,
+        site_id: str | None,
+    ) -> list[PlaygroundStep]:
+        """The advisers' turns, two at a time (with the main AI, three AIs at
+        once); each step is listed first so they show in order."""
+        for adviser in advisers:
+            await self._playground_update(
+                job_id,
+                stage,
+                try_no,
+                adviser,
+                {
+                    "do": "Advise before the work"
+                    if stage == "kickoff"
+                    else "Check the work"
+                },
+            )
+        lanes = asyncio.Semaphore(MAX_ADVISERS)
+
+        async def one(adviser: Agent) -> PlaygroundStep:
+            async with lanes:
+                step, _ = await self._playground_step(
+                    job_id,
+                    stage,
+                    try_no,
+                    adviser,
+                    goal,
+                    tools=ADVISER_TOOLS,
+                    prompt=ADVISER_PROMPT,
+                    site_id=site_id,
+                    max_steps=6,
+                    adviser=True,
+                )
+                return step
+
+        return list(await asyncio.gather(*(one(adviser) for adviser in advisers)))
+
+    async def _owner_taste(self, *, limit: int = 8) -> list[str]:
+        """What the owner likes (memories tagged taste): every AI follows it."""
+        main = await self.main_agent()
+        found: list[str] = []
+        for owner in (SHARED_MEMORY_ID, main.id):
+            for entry in await self._memory().entries(owner):
+                if TASTE_TAG in entry.tags and entry.text not in found:
+                    found.append(entry.text)
+        return found[:limit]
+
+    async def add_taste(self, text: str) -> MemoryEntry:
+        """Keep something the owner likes where every AI reads it."""
+        text = text.strip()
+        if not text:
+            raise StudioError("Say what you like first.")
+        memory = self._memory()
+        entry = await memory.share(text, author="you", tags=(TASTE_TAG,))
+        if entry is None:
+            entry = await memory.remember(
+                (await self.main_agent()).id, text, tags=(TASTE_TAG,)
+            )
+        if entry is None:
+            raise StudioError("That couldn't be kept.")
+        return entry
+
+    async def _playground_drive(self, job_id: str) -> None:
+        job = await self._store.require(PlaygroundJob, job_id)
+        agents = {agent.id: agent for agent in await self.agents()}
+        hands = agents.get(job.hands_id) or await self.main_agent()
+        advisers = [
+            agents[agent_id]
+            for agent_id in job.advisers
+            if agent_id in agents and agent_id != hands.id
+        ]
+        taste = await self._owner_taste()
+        liked = (
+            "\n\nThe owner's taste (make things in their image):\n"
+            + "\n".join(f"- {line}" for line in taste)
+            if taste
+            else ""
+        )
+        site_id = job.site_id
+        try:
+            site = await self._store.get(SiteProject, site_id) if site_id else None
+            kickoff = await self._playground_round(
+                job_id,
+                "kickoff",
+                0,
+                advisers,
+                advice_brief(job.goal, hands.name, site.name if site else "") + liked,
+                site_id,
+            )
+            advice = advice_notes(kickoff)
+            reviewers = advisers[:MAX_ADVISERS]
+            clean = not reviewers
+            for try_no in range(1, MAX_TRIES + 1):
+                await self._playground_update(
+                    job_id,
+                    "work",
+                    try_no,
+                    hands,
+                    {
+                        "do": "Do the job"
+                        if try_no == 1
+                        else "Fix what the advisers found"
+                    },
+                )
+                work, run = await self._playground_step(
+                    job_id,
+                    "work",
+                    try_no,
+                    hands,
+                    hands_brief(job.goal, try_no, advice, site.name if site else "")
+                    + liked,
+                    tools=HANDS_TOOLS,
+                    prompt=HANDS_PROMPT,
+                    site_id=site_id,
+                    model=job.hands_model,
+                    max_steps=self.settings.studio_builder_max_steps,
+                )
+                if run is not None and run.site_id and run.site_id != site_id:
+                    site_id = run.site_id
+                    site = await self._store.get(SiteProject, site_id)
+                    async with self._playground_lock:
+                        current = await self._store.require(PlaygroundJob, job_id)
+                        await self._store.put(
+                            current.model_copy(update={"site_id": site_id})
+                        )
+                if work.status != "done":
+                    raise StudioError(work.result or "The main AI couldn't finish.")
+                if not reviewers:
+                    break
+                reviews = await self._playground_round(
+                    job_id,
+                    "review",
+                    try_no,
+                    reviewers,
+                    check_brief(
+                        job.goal, hands.name, work.result, site.name if site else ""
+                    )
+                    + liked,
+                    site_id,
+                )
+                clean = all(
+                    step.status != "done" or looks_good(step.result) for step in reviews
+                )
+                if clean:
+                    break
+                advice = advice_notes(
+                    [step for step in reviews if not looks_good(step.result)]
+                )
+            current = await self._store.require(PlaygroundJob, job_id)
+            story = "\n".join(
+                f"{step.agent} ({step.do}): {step.result[:400]}"
+                for step in current.steps
+            )
+            for agent, model in [
+                (hands, job.hands_model),
+                *((a, "") for a in reviewers),
+            ]:
+                await self._playground_reflect(agent, model, current.goal, story)
+            last = next(
+                (
+                    s
+                    for s in reversed(current.steps)
+                    if s.stage == "work" and s.status == "done"
+                ),
+                None,
+            )
+            made = f" Project: {site.name}." if site else ""
+            summary = (
+                f"{'Done' if clean else 'Done, with notes the advisers still had'}.{made}"
+                + (f"\n{last.result}" if last else "")
+            )
+            await self._playground_finish(job_id, "done", summary)
+        except asyncio.CancelledError:
+            await self._playground_finish(
+                job_id, "stopped", "Stopped. Run again picks up from there."
+            )
+            raise
+        except Exception as error:
+            # Never a job left "working" with nobody driving it.
+            if not isinstance(
+                error, StudioError | StudioNotFoundError | StudioLLMError
+            ):
+                logger.exception("Playground job {} failed", job_id)
+            await self._playground_finish(
+                job_id, "failed", f"Couldn't finish it: {error}"
+            )
+
+    async def _playground_finish(self, job_id: str, status: str, summary: str) -> None:
+        async with self._playground_lock:
+            job = await self._store.require(PlaygroundJob, job_id)
+            steps = tuple(
+                step.model_copy(update={"status": "stopped"})
+                if step.status == "running"
+                else step
+                for step in job.steps
+            )
+            await self._store.put(
+                job.model_copy(
+                    update={
+                        "status": status,
+                        "steps": steps,
+                        "summary": summary,
+                        "updated_at": now_ms(),
+                    }
+                )
+            )
+
+    async def _playground_reflect(
+        self, agent: Agent, model: str, goal: str, story: str
+    ) -> None:
+        """The AI keeps what it learned in its own mind: a thought, a thinking
+        pattern and a lesson, in its own memory area."""
+        view = agent.model_copy(update={"model": model}) if model else agent
+        chosen = await self.effective_model(view.model or self.default_model)
+        lane = (
+            "model_local" if chosen.startswith(LOCAL_MODEL_PREFIX) else "model_server"
+        )
+        try:
+            async with self.workers.lane(lane, label=f"{agent.name} reflecting"):
+                reply = await self._router.complete(
+                    [
+                        ChatMessage.user(
+                            f"The job: {goal}\n\nWhat happened:\n{story[-3000:]}"
+                        )
+                    ],
+                    model=chosen,
+                    system=REFLECT_PROMPT,
+                    temperature=0.3,
+                    max_tokens=300,
+                )
+        except StudioLLMError:
+            return
+        owner = server_area(agent.id) if await self.is_private_from(view) else agent.id
+        for tag, text in reflection(reply.text).items():
+            await self._memory().remember(
+                owner, text, tags=(tag, "playground"), source="playground"
+            )
+
+    async def playground_minds(self) -> JsonObject:
+        """Each AI's own mind (thinking patterns, lessons, thoughts) and the
+        owner's taste, for the Playground's Minds page."""
+        minds: list[JsonValue] = []
+        memory = self._memory()
+        for agent in await self.agents():
+            if agent.archived or agent.role == "guide":
+                continue
+            entries = [
+                entry
+                for owner in (agent.id, server_area(agent.id))
+                for entry in await memory.entries(owner)
+            ]
+            mind: JsonObject = {"agent_id": agent.id, "name": agent.name}
+            for tag in MIND_TAGS:
+                mind[tag] = [
+                    {"id": entry.id, "text": entry.text, "at": entry.created_at}
+                    for entry in entries
+                    if tag in entry.tags
+                ][:8]
+            minds.append(mind)
+        taste: list[JsonValue] = []
+        main = await self.main_agent()
+        for owner in (SHARED_MEMORY_ID, main.id):
+            taste.extend(
+                {"id": entry.id, "text": entry.text, "at": entry.created_at}
+                for entry in await memory.entries(owner)
+                if TASTE_TAG in entry.tags
+            )
+        return {"taste": taste, "minds": minds}
 
     async def _active_runs(self) -> tuple[AgentRun, ...]:
         """Tasks still going, without reading every task ever run."""

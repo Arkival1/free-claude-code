@@ -3,7 +3,7 @@
   "use strict";
 
   const TOKEN_KEY = "fcc.studio.token";
-  const TAB_ROUTES = ["home", "chats", "hq", "agents", "lab", "farm", "trade", "learn", "more"];
+  const TAB_ROUTES = ["home", "chats", "hq", "agents", "lab", "farm", "trade", "learn", "more", "ptasks", "pfiles"];
   const POLL_MS = 2500;
   const HIDDEN_POLL_MS = 10000;
 
@@ -198,6 +198,60 @@
   for (const tab of document.querySelectorAll(".tab")) {
     tab.addEventListener("click", () => go(tab.dataset.route));
   }
+
+  // Two looks: the HUD (the command centre and the whole team) and the
+  // Playground (one main AI does the work, the others advise). The choice is
+  // kept in this browser; Settings and More switch it.
+  const hudTabs = [...document.querySelectorAll(".tab-bar .tab")];
+  const PLAYGROUND_TABS = [
+    ["home", "+", "New task"],
+    ["ptasks", "◷", "Tasks"],
+    ["pfiles", "▤", "Files"],
+    ["lab", "⚗", "Lab"],
+    ["more", "⋯", "More"],
+  ];
+  const playgroundLook = () => Boolean(window.FCCPlayground) && window.FCCPlayground.look() === "playground";
+  function applyLook() {
+    const playground = playgroundLook();
+    document.body.dataset.look = playground ? "playground" : "hud";
+    document.documentElement.dataset.look = document.body.dataset.look;
+    const bar = document.querySelector(".tab-bar");
+    if (!bar) return;
+    bar.replaceChildren(
+      ...(playground
+        ? PLAYGROUND_TABS.map(([route, glyph, label]) =>
+            el("button", { class: "tab", "data-route": route, onclick: () => go(route) }, [
+              el("span", { class: "tab-glyph", text: glyph }),
+              el("span", { class: "tab-label", text: label }),
+            ])
+          )
+        : hudTabs)
+    );
+  }
+  function switchLook(next) {
+    if (!window.FCCPlayground) return;
+    window.FCCPlayground.setLook(next);
+    applyLook();
+    notify(next === "playground" ? "Playground: one main AI does the work, the others advise." : "HUD: the command centre and your whole team.");
+    render();
+  }
+  function lookCard() {
+    const current = playgroundLook() ? "playground" : "hud";
+    const option = (value, heading, about) =>
+      el("button", {
+        class: `look-option${current === value ? " chosen" : ""}`,
+        type: "button",
+        "aria-pressed": String(current === value),
+        onclick: () => current !== value && switchLook(value),
+      }, [el("strong", { text: heading }), el("small", { text: about })]);
+    return card("Look", [
+      el("div", { class: "look-options" }, [
+        option("hud", "HUD", "The command centre: Jarvis runs your whole team."),
+        option("playground", "Playground", "Clean and simple: one main AI does the work with its own hands, on this PC's model; up to two advise at once."),
+      ]),
+    ]);
+  }
+  applyLook();
   backButton.addEventListener("click", () => {
     if (mayLeave()) history.back();
   });
@@ -441,6 +495,7 @@
     if (generation !== renderGeneration) return;
     if (!here) {
       view.replaceChildren(
+        lookCard(),
         card("Settings", [
           el("p", {
             class: "muted",
@@ -451,6 +506,7 @@
       return;
     }
     view.replaceChildren(
+      lookCard(),
       el("iframe", { class: "settings-frame", src: "/admin/studio", title: "Free Claude Code settings" })
     );
   }
@@ -5258,6 +5314,7 @@
     view.replaceChildren(
       finder,
       nothing,
+      lookCard(),
       activePluginsCard(added.extensions || []),
       card("Settings", [
         el("p", {
@@ -7467,7 +7524,8 @@
     teardownHud();
     if (!sheet.hidden) closeSheet();
     const { name, id } = route();
-    const hudView = name === "hud" || name === "home";
+    const playgroundHome = name === "home" && playgroundLook();
+    const hudView = (name === "hud" || name === "home") && !playgroundHome;
     if (!hudView) {
       voice.talk = false;
       releaseMicrophone();
@@ -7475,13 +7533,19 @@
     }
     document.body.dataset.ui = hudView ? "hud" : "page";
     document.body.dataset.page = name;
-    setChrome(name, headingFor(name));
+    setChrome(name, playgroundHome ? "Playground" : headingFor(name));
     if (generation !== renderGeneration) return;
     view.replaceChildren(el("p", { class: "muted", text: "Loading…" }));
     try {
       switch (name) {
         case "home":
+          if (playgroundHome) return await renderPlayground(generation, "home");
+          return await renderHud();
         case "hud": return await renderHud();
+        case "ptasks": return await renderPlayground(generation, "tasks");
+        case "pjob": return await renderPlayground(generation, "job", id);
+        case "pfiles": return await renderPlayground(generation, "files");
+        case "pminds": return await renderPlayground(generation, "minds");
         case "chats": return await renderChats();
         case "chat": return await renderChat(id);
         case "room": return await renderRoom(id);
@@ -7516,6 +7580,25 @@
         error instanceof OfflineError ? offlineCard() : errorCard(error)
       );
     }
+  }
+
+  // The Playground lives in playground.js, with the same helpers.
+  async function renderPlayground(generation, page, id = "") {
+    if (!window.FCCPlayground) throw new Error("The Playground didn't load. Reload the page.");
+    await window.FCCPlayground.render(
+      {
+        view,
+        el,
+        api,
+        post,
+        remove,
+        notify,
+        go,
+        alive: () => generation === renderGeneration,
+      },
+      page,
+      id
+    );
   }
 
   // The Lab lives in lab.js; it gets the same helpers as every page.
@@ -7869,6 +7952,10 @@
         ideas: "Ideas board",
         more: "More",
         settings: "Settings",
+        ptasks: "Tasks",
+        pjob: "Task",
+        pfiles: "Files",
+        pminds: "Minds",
       }[name] || "Studio"
     );
   }

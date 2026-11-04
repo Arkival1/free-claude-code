@@ -880,6 +880,27 @@ one himself with the `code_and_test` tool. Lab jobs from the main chat
 the lab tool and reports back; if its model only talks, Studio runs the make
 or mix for it. In the Lab's own chat, Studio still does it at once.
 
+**Playground (6.109).** Studio has two looks: the **HUD** (the command
+centre, Jarvis running the whole team) and the **Playground**, clean and simple
+like Manus. Switch in **Settings** or **More** (*Look: HUD or Playground*; the
+choice is kept in that browser). The Playground's tabs are **New task**,
+**Tasks**, **Files**, **Lab** and **More**, and every page takes its light,
+paper-and-ink colours. On **New task** you say what you want done (or tap
+*Build a website*, *Research anything*, *Write a report*, *Make a game*): one
+**main AI** does the whole job with its own hands, thinking on this PC's model
+when one is set up, while up to two **advisers** (usually agents on server AIs)
+advise before it starts and check the work after; that is three AIs at once.
+Pick *Team meeting* and up to five advise, two at a time. Advisers only look
+and think (reading files, searching, checking), never change files and never
+direct anyone; the server AIs take the work over only when you pick them under
+*who does it*. When an adviser finds problems the main AI fixes them, three
+tries in all. **Tasks** lists every job with Stop and Run again (a job cut
+short when FCC closes can be run again); **Files** lists your projects.
+**Minds** shows each AI's own mind (its *thinking patterns*, *lessons* and
+*thoughts*, written after every task in its own memory area) and **Your
+taste**: what you like, which every AI in a Playground task reads, so it
+makes things in your image.
+
 **HQ.** The **HQ** tab shows the whole team as a pixel office. Every part
 of the agent workflow is a station: Jarvis's command desk, the research
 library, the code workshop, the test bench, the Lab, the video studio, the
@@ -2751,6 +2772,18 @@ account, and costs nothing.
   runs on the phone's own brains: a model on the phone, or a free cloud key
   (much better for long jobs: phone models are small). Stop and Run again
   work, and a job cut short when the app closes can be run again.
+- **Playground look (2.9)**: Settings, **Look**, switches FCC Phone between
+  the **HUD** and the **Playground**, clean and simple like Manus, with tabs
+  **New task**, **Tasks**, **Files** and **More**. Give it a task: one **main
+  AI** (Jarvis, unless you hand it to another agent) does the whole job with
+  its own hands, on the phone's own model when one is ready, while up to two
+  **advisers** advise before it starts and check after (three AIs at once; a
+  *Team meeting* brings more in, two at a time). Advisers only look and think;
+  cloud and PC brains take the work over only when you hand it to them. The
+  main AI fixes what they find, three tries in all, and can ask one for advice
+  mid-job. **Minds** shows each AI's thinking patterns, lessons and thoughts
+  (its own, written after each task) and **Your taste**, which every AI reads
+  so it makes things in your image.
 - **Skills on the phone**: 28 of FCC's own skills ship inside the app (game
   design with its eight specialist guides, web design engineer, frontend
   design and the style skills, app developer, debugging, code review, testing,

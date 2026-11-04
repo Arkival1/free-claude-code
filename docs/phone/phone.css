@@ -1243,3 +1243,312 @@ pre.notes {
   text-decoration: none;
   color: inherit;
 }
+
+/* ------------------------------------------------------------- the looks */
+
+.look-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.look-option {
+  display: grid;
+  gap: 4px;
+  min-height: 96px;
+  padding: 12px;
+  text-align: left;
+  align-content: start;
+}
+
+.look-option small {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.look-option.chosen {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.look-switch {
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+/* The Playground: FCC's Manus-like look. Warm paper, ink, a serif headline,
+   quiet cards; one main AI does the work and the others advise. */
+body[data-look="playground"] {
+  --bg: #f6f4ef;
+  --surface: #ffffff;
+  --surface-2: #f0ede6;
+  --line: rgba(29, 27, 22, 0.16);
+  --line-soft: rgba(29, 27, 22, 0.08);
+  --text: #1d1b16;
+  --muted: #625e55;
+  --accent: #1d1b16;
+  --accent-ink: #ffffff;
+  --good: #1f7a46;
+  --warn: #8a4b00;
+  --bad: #b3261e;
+  --cyan: #1d1b16;
+  --serif: ui-serif, "New York", Georgia, "Times New Roman", serif;
+  color-scheme: light;
+  background: var(--bg);
+}
+
+html[data-look="playground"] {
+  background: #f6f4ef;
+  color-scheme: light;
+}
+
+body[data-look="playground"] a {
+  color: var(--text);
+}
+
+body[data-look="playground"] .bar {
+  background: rgba(246, 244, 239, 0.94);
+}
+
+body[data-look="playground"] .bar h1 {
+  font: 600 17px/1.2 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+body[data-look="playground"] .card {
+  background: var(--surface);
+  border-color: var(--line-soft);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(29, 27, 22, 0.05);
+}
+
+body[data-look="playground"] .card h2,
+body[data-look="playground"] .pg-head h2 {
+  font: 600 17px/1.3 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+}
+
+body[data-look="playground"] .card h2::before {
+  content: none;
+}
+
+body[data-look="playground"] input,
+body[data-look="playground"] select,
+body[data-look="playground"] textarea {
+  background: #fff;
+  border-color: var(--line);
+}
+
+body[data-look="playground"] button {
+  background: #fff;
+  color: var(--text);
+}
+
+body[data-look="playground"] button.primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: #fff;
+}
+
+body[data-look="playground"] button.ghost {
+  background: transparent;
+  font-size: 15px;
+}
+
+body[data-look="playground"] .tabs {
+  grid-template-columns: repeat(4, 1fr);
+  background: rgba(246, 244, 239, 0.97);
+}
+
+body[data-look="playground"] .tab {
+  font: 500 11px/1.2 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  border-radius: 12px;
+}
+
+body[data-look="playground"] .tab[aria-current="page"] {
+  color: var(--text);
+  background: rgba(29, 27, 22, 0.07);
+}
+
+body[data-look="playground"] .toast {
+  background: var(--text);
+  color: #fff;
+  box-shadow: 0 6px 24px rgba(29, 27, 22, 0.2);
+}
+
+body[data-look="playground"] .sheet-panel {
+  border-top-color: var(--line);
+}
+
+body[data-look="playground"] .sheet-head h2 {
+  font: 600 17px/1.3 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.pg-top,
+.pg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pg-crumb {
+  margin: 0;
+  color: var(--muted);
+}
+
+.pg-crumb strong {
+  color: var(--text);
+}
+
+.pg-chat {
+  width: auto;
+  font-size: 14px;
+}
+
+.pg-hero {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 18px 0 16px;
+  text-align: center;
+}
+
+.pg-hero p {
+  margin: 0;
+  max-width: 30em;
+}
+
+.pg-mark {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px 16px 22px 22px;
+  background: var(--text);
+  color: var(--bg);
+  font: 700 30px/1 var(--serif, Georgia, serif);
+}
+
+.pg-title {
+  margin: 4px 0 0;
+  font: 500 30px/1.15 var(--serif, Georgia, serif);
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.pg-ask textarea {
+  min-height: 110px;
+  border: 0;
+  padding: 4px 2px;
+  outline-offset: 4px;
+}
+
+.pg-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.pg-row select:last-child {
+  grid-column: 1 / -1;
+}
+
+.pg-team p {
+  margin: 0 0 4px;
+}
+
+.pg-start {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.pg-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.pg-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  font-weight: 500;
+  border-color: var(--line-soft);
+  border-radius: 14px;
+}
+
+.pg-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-2) !important;
+}
+
+.pg-note p {
+  margin: 4px 0 0;
+}
+
+.pg-note button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.pg-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 0 18px;
+}
+
+.pg-link {
+  min-height: var(--tap);
+  padding: 8px 12px;
+  border: 0;
+  background: transparent !important;
+  color: var(--muted) !important;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pg-head h2 {
+  margin: 0;
+}
+
+.pg-head .ghost {
+  width: auto;
+  font-size: 14px;
+}
+
+.pg-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 40px 12px;
+  text-align: center;
+}
+
+.pg-sub {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pg-file {
+  padding-left: 22px;
+}

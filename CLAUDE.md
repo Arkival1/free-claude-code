@@ -177,7 +177,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.108.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.109.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -240,6 +240,18 @@ Notes carried over from the long session that built FCC Studio (LCC).
   follows PC team plans and opens their files in Projects. From the phone the
   owner may add a GitHub repo, switch repos and subagents on or off, and add
   subagents; MCP servers stay off (switched on only on the PC).
+- The Playground (owner, 6.109): a second look beside the HUD on the PC
+  (Settings or More, Look; kept per browser) and the phone (Settings, Look),
+  Manus-like. One main AI does the job with its own hands, on the local
+  model when one is set up; up to two advisers (server or cloud AIs) advise
+  before and check after (three AIs at once; a team meeting brings up to five,
+  two at a time). Advisers get read-only tools and never direct anyone
+  (`lead=False` in `AgentRunner.run_task`); they take the work over only when
+  the owner picks them as who does it. Up to three tries (fixes from the
+  advisers' checks). Each AI keeps its own mind (memories tagged thought,
+  pattern, lesson); the owner's taste (tag taste) goes to every AI in a job.
+  PC: `studio/playground.py`, `PlaygroundJob`, `/studio/api/playground*`,
+  `playground.js/css`; phone: `js/playground.js`, `js/views/playground.js`.
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

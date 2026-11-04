@@ -2,14 +2,17 @@
 // steps, picks the plugin each step needs, and his agents do the steps one by
 // one with their tools, on the phone's own brains (no PC needed). Paired, a
 // job can run on the PC's team instead; this screen follows either live.
-import { state, onChange } from "../state.js";
+import { state, onChange, agentById } from "../state.js";
 import { el, button, card, notify, go, ago, meter } from "../ui.js";
 import { pcCall } from "../sync.js";
 import { createProject, writeFile, putPicture, isPicture } from "../projects.js";
 import { startTask, stopTask, resumeTask, isRunning } from "../tasks.js";
+import { startPlayground } from "../playground.js";
 
 const REFRESH_MS = 5000;
 const MARK = { done: "✓", running: "●", working: "●", planning: "…", failed: "✕", stopped: "■", skipped: "–", waiting: "○" };
+// A Playground job's stages.
+const STAGE = { kickoff: "Advice", work: "The work", review: "Check" };
 
 async function openFiles(task) {
   try {
@@ -39,7 +42,7 @@ function stepRow(step) {
     el("span", { class: "glyph", "aria-hidden": "true", text: MARK[step.status] || "○" }),
     el("div", { class: "grow" }, [
       el("strong", { text: `${step.agent}: ${step.do}` }),
-      el("small", { text: `${step.status}${step.plugin ? ` · plugin ${step.plugin}` : ""}${step.source ? ` · from ${step.source}` : ""}` }),
+      el("small", { text: `${STAGE[step.stage] ? `${STAGE[step.stage]}${step.pass > 1 ? ` (try ${step.pass})` : ""} · ` : ""}${step.status}${step.plugin ? ` · plugin ${step.plugin}` : ""}${step.source ? ` · from ${step.source}` : ""}` }),
       step.result ? el("p", { class: "small", text: step.result }) : null,
     ]),
   ]);
@@ -79,9 +82,10 @@ function renderList(view) {
         go(`tasks/${task.id}`);
         return;
       }
-      const task = await startTask(text);
+      // In the Playground look the main AI does it with its own hands.
+      const task = state.settings.look === "playground" ? await startPlayground(text) : await startTask(text);
       goal.value = "";
-      notify("Jarvis is planning it.");
+      notify(task.kind === "playground" ? "On it." : "Jarvis is planning it.");
       go(`tasks/${task.id}`);
     } catch (error) {
       notify(error.message);
@@ -116,7 +120,13 @@ function renderList(view) {
         goal,
         state.settings.pc ? el("label", {}, ["Run it on", where]) : null,
         button("Start", start, { class: "primary" }),
-        el("p", { class: "muted small", text: "Jarvis plans the job into steps, picks the plugin each step needs, and his agents do them one by one with their tools. Keep FCC Phone open while it works." }),
+        el("p", {
+          class: "muted small",
+          text:
+            state.settings.look === "playground"
+              ? "The main AI does the job with its own hands; two advisers advise before it starts and check it after. Keep FCC Phone open while it works."
+              : "Jarvis plans the job into steps, picks the plugin each step needs, and his agents do them one by one with their tools. Keep FCC Phone open while it works.",
+        }),
       ]),
       card("Jobs on this phone", state.tasks.length ? state.tasks.map(phoneRow) : [el("p", { class: "empty", text: "No jobs yet." })]),
       ...(state.settings.pc
@@ -164,11 +174,17 @@ function renderPhoneTask(view, id) {
       card(task.status === "planning" ? "Jarvis is planning it" : busy ? "Working on it" : task.status === "done" ? "Done" : `Task ${task.status}`, [
         el("p", { text: task.goal }),
         meter(total ? done / total : 0),
+        task.kind === "playground"
+          ? el("p", {
+              class: "small",
+              text: `${(agentById(task.hands) || { name: "The main AI" }).name} does the work${(task.advisers || []).length ? ` · advising: ${task.advisers.map((adviser) => (agentById(adviser) || { name: "?" }).name).join(", ")}${task.meeting ? " (team meeting)" : ""}` : ""}`,
+            })
+          : null,
         el("p", { class: "muted small", text: `On this phone · ${done} of ${total} steps${task.replanned ? ` · Jarvis changed the plan ${task.replanned}×` : ""} · updated ${ago(task.updated_at)}` }),
         el("div", { class: "row" }, [
           busy ? button("Stop", () => { stopTask(id); notify("Stopping after this step."); }, { class: "danger" }) : null,
           !busy && task.status !== "done" ? button("Run again", () => { resumeTask(id); notify("Going again from where it stopped."); draw(); }, { class: "primary" }) : null,
-          button("Projects", () => go("projects")),
+          task.project_id ? button("Open the project", () => go(`projects/${task.project_id}`)) : button("Projects", () => go("projects")),
         ]),
       ]),
       card("Steps", total ? task.steps.map(stepRow) : [el("p", { class: "muted", text: "Planning the steps…" })]),
