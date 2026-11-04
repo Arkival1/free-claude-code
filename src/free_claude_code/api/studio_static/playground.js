@@ -291,11 +291,12 @@
     const data = await api("/studio/api/playground/minds");
     if (!alive()) return;
     const input = el("input", { class: "pg-search", "aria-label": "Something you like", placeholder: "Dark, moody colours; big readable buttons…" });
-    const row = (entry) =>
+    const row = (entry, taste = false) =>
       el("div", { class: "pg-step" }, [
         el("span", { class: "pg-grow" }, [el("strong", { text: entry.text }), el("small", { text: ago(entry.at) })]),
         el("button", { class: "pg-ghost", type: "button", text: "✕", "aria-label": `Forget: ${entry.text.slice(0, 40)}`, onclick: async () => {
-          await remove(`/studio/api/memory/entry/${encodeURIComponent(entry.id)}`);
+          if (taste) await post("/studio/api/playground/taste/forget", { text: entry.text });
+          else await remove(`/studio/api/memory/entry/${encodeURIComponent(entry.id)}`);
           minds(ctx);
         } }),
       ]);
@@ -308,7 +309,7 @@
       el("div", { class: "pg" }, [
         el("section", { class: "pg-card" }, [
           el("h2", { text: "Your taste" }),
-          el("p", { class: "pg-muted pg-small", text: "What you like. Every AI in a Playground task reads this and makes things in your image." }),
+          el("p", { class: "pg-muted pg-small", text: "What you like. Every AI in a Playground task reads this (the AIs on servers too, so keep it to likes, not secrets) and makes things in your image." }),
           el("div", { class: "pg-actions" }, [
             input,
             el("button", { type: "button", text: "Add", onclick: async () => {
@@ -321,7 +322,7 @@
               }
             } }),
           ]),
-          ...(data.taste.length ? data.taste.map(row) : [el("p", { class: "pg-empty", text: "Nothing yet." })]),
+          ...(data.taste.length ? data.taste.map((entry) => row(entry, true)) : [el("p", { class: "pg-empty", text: "Nothing yet." })]),
         ]),
         ...data.minds.map((mind) => {
           const parts = sections.flatMap(([key, label]) => (mind[key].length ? [el("h3", { class: "pg-sub", text: label }), ...mind[key].map(row)] : []));

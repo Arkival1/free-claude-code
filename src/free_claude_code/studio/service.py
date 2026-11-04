@@ -186,6 +186,7 @@ from .lora import LoraTrainer
 from .mcp import McpError, McpManager, McpTool, ServerSpec
 from .memory import (
     SERVER_AREA_PREFIX,
+    SERVER_SHARED_ID,
     SHARED_MEMORY_ID,
     SKILL_TAG,
     MemoryService,
@@ -10291,22 +10292,26 @@ class StudioService:
         and Run again picks it up from there."""
         if job.status != "working" or job.id in self._playground_runs:
             return job
-        steps = tuple(
-            step.model_copy(update={"status": "stopped"})
-            if step.status == "running"
-            else step
-            for step in job.steps
-        )
-        stopped = job.model_copy(
-            update={
-                "status": "stopped",
-                "steps": steps,
-                "summary": "Stopped when FCC closed; Run again picks up from there.",
-                "updated_at": now_ms(),
-            }
-        )
-        await self._store.put(stopped)
-        return stopped
+        async with self._playground_lock:
+            job = await self._store.require(PlaygroundJob, job.id)
+            if job.status != "working" or job.id in self._playground_runs:
+                return job
+            steps = tuple(
+                step.model_copy(update={"status": "stopped"})
+                if step.status == "running"
+                else step
+                for step in job.steps
+            )
+            stopped = job.model_copy(
+                update={
+                    "status": "stopped",
+                    "steps": steps,
+                    "summary": "Stopped when FCC closed; Run again picks up from there.",
+                    "updated_at": now_ms(),
+                }
+            )
+            await self._store.put(stopped)
+            return stopped
 
     def playground_view(self, job: PlaygroundJob) -> JsonObject:
         return {
@@ -10583,9 +10588,11 @@ class StudioService:
         advisers: Sequence[Agent],
         goal: str,
         site_id: str | None,
+        taste: tuple[str, str] = ("", ""),
     ) -> list[PlaygroundStep]:
         """The advisers' turns, two at a time (with the main AI, three AIs at
-        once); each step is listed first so they show in order."""
+        once); each step is listed first so they show in order. ``taste`` is
+        the owner's taste for AIs on this PC, then for AIs on a server."""
         for adviser in advisers:
             await self._playground_update(
                 job_id,
@@ -10602,12 +10609,13 @@ class StudioService:
 
         async def one(adviser: Agent) -> PlaygroundStep:
             async with lanes:
+                liked = taste[1] if await self.is_private_from(adviser) else taste[0]
                 step, _ = await self._playground_step(
                     job_id,
                     stage,
                     try_no,
                     adviser,
-                    goal,
+                    goal + liked,
                     tools=ADVISER_TOOLS,
                     prompt=ADVISER_PROMPT,
                     site_id=site_id,
@@ -10618,18 +10626,28 @@ class StudioService:
 
         return list(await asyncio.gather(*(one(adviser) for adviser in advisers)))
 
-    async def _owner_taste(self, *, limit: int = 8) -> list[str]:
-        """What the owner likes (memories tagged taste): every AI follows it."""
-        main = await self.main_agent()
+    async def _owner_taste(self, *, server: bool = False, limit: int = 8) -> str:
+        """What the owner likes (memories tagged taste), as a brief's closing
+        lines. AIs on a server read only what the owner gave the server team
+        on the Minds page, never this PC's memory."""
+        owners = (
+            (SERVER_SHARED_ID,)
+            if server
+            else (SHARED_MEMORY_ID, (await self.main_agent()).id)
+        )
         found: list[str] = []
-        for owner in (SHARED_MEMORY_ID, main.id):
+        for owner in owners:
             for entry in await self._memory().entries(owner):
                 if TASTE_TAG in entry.tags and entry.text not in found:
                     found.append(entry.text)
-        return found[:limit]
+        if not found:
+            return ""
+        lines = "\n".join(f"- {line}" for line in found[:limit])
+        return f"\n\nThe owner's taste (make things in their image):\n{lines}"
 
     async def add_taste(self, text: str) -> MemoryEntry:
-        """Keep something the owner likes where every AI reads it."""
+        """Keep something the owner likes where every AI reads it: this PC's
+        team memory, and (said on purpose by the owner) the server team's."""
         text = text.strip()
         if not text:
             raise StudioError("Say what you like first.")
@@ -10639,9 +10657,21 @@ class StudioService:
             entry = await memory.remember(
                 (await self.main_agent()).id, text, tags=(TASTE_TAG,)
             )
+        await memory.remember(SERVER_SHARED_ID, text, tags=(TASTE_TAG,), author="you")
         if entry is None:
             raise StudioError("That couldn't be kept.")
         return entry
+
+    async def forget_taste(self, text: str) -> int:
+        """Forget one thing the owner liked, everywhere it was kept."""
+        memory = self._memory()
+        gone = 0
+        main = await self.main_agent()
+        for owner in (SHARED_MEMORY_ID, main.id, SERVER_SHARED_ID):
+            for entry in await memory.entries(owner):
+                if TASTE_TAG in entry.tags and entry.text == text.strip():
+                    gone += int(await memory.forget(entry.id))
+        return gone
 
     async def _playground_drive(self, job_id: str) -> None:
         job = await self._store.require(PlaygroundJob, job_id)
@@ -10652,13 +10682,9 @@ class StudioService:
             for agent_id in job.advisers
             if agent_id in agents and agent_id != hands.id
         ]
-        taste = await self._owner_taste()
-        liked = (
-            "\n\nThe owner's taste (make things in their image):\n"
-            + "\n".join(f"- {line}" for line in taste)
-            if taste
-            else ""
-        )
+        taste = (await self._owner_taste(), await self._owner_taste(server=True))
+        hands_view = hands.model_copy(update={"model": job.hands_model or hands.model})
+        liked = taste[1] if await self.is_private_from(hands_view) else taste[0]
         site_id = job.site_id
         try:
             site = await self._store.get(SiteProject, site_id) if site_id else None
@@ -10667,12 +10693,14 @@ class StudioService:
                 "kickoff",
                 0,
                 advisers,
-                advice_brief(job.goal, hands.name, site.name if site else "") + liked,
+                advice_brief(job.goal, hands.name, site.name if site else ""),
                 site_id,
+                taste,
             )
             advice = advice_notes(kickoff)
             reviewers = advisers[:MAX_ADVISERS]
             clean = not reviewers
+            unchecked = False
             for try_no in range(1, MAX_TRIES + 1):
                 await self._playground_update(
                     job_id,
@@ -10717,17 +10745,20 @@ class StudioService:
                     reviewers,
                     check_brief(
                         job.goal, hands.name, work.result, site.name if site else ""
-                    )
-                    + liked,
+                    ),
                     site_id,
+                    taste,
                 )
-                clean = all(
-                    step.status != "done" or looks_good(step.result) for step in reviews
-                )
+                checked = [step for step in reviews if step.status == "done"]
+                if not checked:
+                    # Nobody could check it: say so, never call it checked.
+                    unchecked = True
+                    break
+                clean = all(looks_good(step.result) for step in checked)
                 if clean:
                     break
                 advice = advice_notes(
-                    [step for step in reviews if not looks_good(step.result)]
+                    [step for step in checked if not looks_good(step.result)]
                 )
             current = await self._store.require(PlaygroundJob, job_id)
             story = "\n".join(
@@ -10748,10 +10779,14 @@ class StudioService:
                 None,
             )
             made = f" Project: {site.name}." if site else ""
-            summary = (
-                f"{'Done' if clean else 'Done, with notes the advisers still had'}.{made}"
-                + (f"\n{last.result}" if last else "")
+            verdict = (
+                "Done, but the advisers couldn't check it"
+                if unchecked
+                else "Done"
+                if clean
+                else "Done, with notes the advisers still had"
             )
+            summary = f"{verdict}.{made}" + (f"\n{last.result}" if last else "")
             await self._playground_finish(job_id, "done", summary)
         except asyncio.CancelledError:
             await self._playground_finish(
@@ -10813,6 +10848,10 @@ class StudioService:
                 )
         except StudioLLMError:
             return
+        except Exception:
+            # A note that couldn't be written never undoes a finished job.
+            logger.exception("Playground reflection for {} failed", agent.name)
+            return
         owner = server_area(agent.id) if await self.is_private_from(view) else agent.id
         for tag, text in reflection(reply.text).items():
             await self._memory().remember(
@@ -10841,13 +10880,15 @@ class StudioService:
                 ][:8]
             minds.append(mind)
         taste: list[JsonValue] = []
+        seen: set[str] = set()
         main = await self.main_agent()
-        for owner in (SHARED_MEMORY_ID, main.id):
-            taste.extend(
-                {"id": entry.id, "text": entry.text, "at": entry.created_at}
-                for entry in await memory.entries(owner)
-                if TASTE_TAG in entry.tags
-            )
+        for owner in (SHARED_MEMORY_ID, main.id, SERVER_SHARED_ID):
+            for entry in await memory.entries(owner):
+                if TASTE_TAG in entry.tags and entry.text not in seen:
+                    seen.add(entry.text)
+                    taste.append(
+                        {"id": entry.id, "text": entry.text, "at": entry.created_at}
+                    )
         return {"taste": taste, "minds": minds}
 
     async def _active_runs(self) -> tuple[AgentRun, ...]:

@@ -29,7 +29,8 @@ MIND_TAGS: tuple[str, ...] = ("thought", "pattern", "lesson")
 """Memory tags that make up one AI's own mind."""
 TASTE_TAG = "taste"
 """What the owner likes; shared by every AI."""
-LOOKS_GOOD = re.compile(r"\blooks good\b", re.IGNORECASE)
+LOOKS_GOOD = re.compile(r"[\s*_\"'`>-]*looks good\b(?![^.!\n]*\bbut\b)", re.IGNORECASE)
+"""An adviser's approval: the reply starts with LOOKS GOOD (and no "but")."""
 
 HANDS_TOOLS: tuple[str, ...] = (
     "start_project",
@@ -199,7 +200,7 @@ def hands_brief(goal: str, try_no: int, advice: str, project: str = "") -> str:
 
 
 def looks_good(text: str) -> bool:
-    return bool(LOOKS_GOOD.search(text))
+    return bool(LOOKS_GOOD.match(text))
 
 
 def advice_notes(steps: Sequence[PlaygroundStep]) -> str:

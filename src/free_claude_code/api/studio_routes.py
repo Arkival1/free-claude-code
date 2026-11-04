@@ -1598,6 +1598,13 @@ async def add_taste(
     return {"id": entry.id, "text": entry.text}
 
 
+@router.post("/studio/api/playground/taste/forget")
+async def forget_taste(
+    payload: TastePayload, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    return {"forgotten": await studio.forget_taste(payload.text)}
+
+
 @router.get("/studio/api/playground/{job_id}")
 async def get_playground(
     job_id: str, studio: StudioService = Depends(get_studio), _: None = Access

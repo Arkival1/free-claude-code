@@ -8,7 +8,8 @@ import asyncio
 import httpx
 import pytest
 
-from free_claude_code.studio.llm import LOCAL_MODEL_PREFIX
+from free_claude_code.core.json_types import JsonObject, JsonValue
+from free_claude_code.studio.llm import LOCAL_MODEL_PREFIX, StudioLLMError
 from free_claude_code.studio.models import Agent, PlaygroundJob
 from free_claude_code.studio.playground import (
     ADVISER_PROMPT,
@@ -330,3 +331,67 @@ async def test_an_adviser_on_this_pc_directs_nobody(make_studio):
         tools = call["tools"]
         offered = set(tools) if isinstance(tools, list) else set()
         assert not offered & set(LEAD_TOOLS), offered
+
+
+@pytest.mark.asyncio
+async def test_a_check_nobody_could_do_is_never_called_checked(make_studio):
+    def respond(system: str, prompt: str):
+        if system == REFLECT_PROMPT:
+            return "{}"
+        if ADVISER_PROMPT in system:
+            if "Advise the main AI before it starts" in prompt:
+                return "Keep it simple."
+            raise StudioLLMError("The adviser's AI is down.")
+        if HANDS_PROMPT in system:
+            return "Made the page."
+        return "On it."
+
+    studio, _ = make_studio(respond)
+    await studio.ensure_defaults()
+    job = await studio.start_playground("Build a website for a yoga studio")
+    await asyncio.wait_for(studio.wait_for_background(), timeout=30)
+    done = await studio.playground_job(job.id)
+    assert done.status == "done"
+    assert done.summary.startswith("Done, but the advisers couldn't check it")
+    # Nobody found anything to fix, so there was no second try.
+    assert [s.stage for s in done.steps].count("work") == 1
+
+
+def test_only_a_reply_that_starts_with_looks_good_approves():
+    assert looks_good("LOOKS GOOD") and looks_good("**Looks good** to me.")
+    for text in ("Looks good, but the footer is broken", "It looks good", "1. Fix it"):
+        assert not looks_good(text), text
+
+
+@pytest.mark.asyncio
+async def test_server_advisers_only_get_the_taste_given_to_every_ai(make_studio):
+    """With memory kept on this PC, a server adviser never reads the PC's
+    memory: only what the owner put on the Minds page for every AI."""
+    calls: list[dict[str, object]] = []
+    studio, _ = make_studio(script(calls), STUDIO_PRIVATE_MEMORY=True)
+    await studio.ensure_defaults()
+    main = await studio.main_agent()
+    await studio.update_agent(main.id, {"model": f"{LOCAL_MODEL_PREFIX}qwen"})
+    await studio.add_taste("Warm, friendly colours.")
+    # Kept on this PC only (the main AI's own note), tagged as taste.
+    await studio._memory().remember(
+        main.id, "My secret colour is teal.", tags=("taste",)
+    )
+    job = await studio.start_playground("Make a bakery page")
+    await asyncio.wait_for(studio.wait_for_background(), timeout=30)
+    assert (await studio.playground_job(job.id)).status == "done"
+    advice = [str(c["prompt"]) for c in calls if ADVISER_PROMPT in str(c["system"])]
+    assert advice and all("Warm, friendly colours." in a for a in advice)
+    assert not any("teal" in a for a in advice)
+    hands = [str(c["prompt"]) for c in calls if HANDS_PROMPT in str(c["system"])]
+    assert any("teal" in h for h in hands)  # the main AI on this PC reads it
+    assert await studio.forget_taste("Warm, friendly colours.") == 2
+    assert not any(
+        isinstance(t, dict) and t.get("text") == "Warm, friendly colours."
+        for t in taste_rows(await studio.playground_minds())
+    )
+
+
+def taste_rows(minds: JsonObject) -> list[JsonValue]:
+    rows = minds["taste"]
+    return rows if isinstance(rows, list) else []
