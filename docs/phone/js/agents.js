@@ -184,15 +184,16 @@ export const COULDNT_FINISH = "couldn't finish";
  * this one job (the Playground does), and a report object gets the job's
  * context (report.ctx), so the caller sees the project it worked in. With
  * consult, the agent's ask_agent only gets advice: the other agent never
- * takes the work over. */
-export async function runTask(agent, goal, { project = null, depth = 0, chain = [], by = "you", tools = null, instructions = "", maxRounds = 0, maxTokens = 0, consult = false, report = null } = {}) {
+ * takes the work over. With partsOnly (a Playground helper), it writes only
+ * under parts/. */
+export async function runTask(agent, goal, { project = null, depth = 0, chain = [], by = "you", tools = null, instructions = "", maxRounds = 0, maxTokens = 0, consult = false, partsOnly = false, report = null } = {}) {
   const job = { id: `${Date.now()}`, agent: agent.id, goal, by, status: "working", started_at: Date.now(), steps: 0, result: "" };
   state.jobs.unshift(job);
   state.jobs.length = Math.min(state.jobs.length, 30);
   setBusy(agent, true);
   const unpin = pinBrain(agent);
   feed(agent.name, `Started: ${goal.slice(0, 100)}`, "start");
-  const ctx = { project, depth, chain: [...chain, agent.id], built: new Set(), tools, instructions, maxTokens, consult };
+  const ctx = { project, depth, chain: [...chain, agent.id], built: new Set(), tools, instructions, maxTokens, consult, partsOnly };
   if (report) report.ctx = ctx;
   try {
     await addTurn(agent, { role: "task", text: `Job from ${by}: ${goal}` });

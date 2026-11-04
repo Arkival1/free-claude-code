@@ -286,3 +286,92 @@ def test_settings_switches_between_the_hud_and_the_playground(
     go(page, "settings")
     page.get_by_role("button", name="HUD").click()
     expect(tabs).to_have_text(["◆Home", "◌Chats", "◎Agents", "⚡Models", "⋯More"])
+
+
+def test_only_a_plain_looks_good_approves_and_helpers_stay_in_parts(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    verdicts = page.evaluate(
+        """async () => {
+            const { approves } = await import('./js/playground.js');
+            return ['LOOKS GOOD', 'Looks good.', '**Looks good** to me!', 'LOOKS GOOD\\n1. Add a score.',
+                    'Looks good. Fix the score.', 'LOOKS GOOD, however the score is missing.',
+                    'It looks good', '1. Add a score'].map((text) => [text, approves(text)]);
+        }"""
+    )
+    assert [ok for _, ok in verdicts] == [
+        True,
+        True,
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+    ], verdicts
+    wrote = page.evaluate(
+        """async () => {
+            const { runTool } = await import('./js/tools.js');
+            const { createProject } = await import('./js/projects.js');
+            const project = await createProject('Parts test');
+            const builder = window.fccPhone.state.agents.find((a) => a.id === 'builder');
+            const ctx = { project, depth: 0, chain: [], built: new Set(), tools: ['write_file', 'edit_file'], partsOnly: true };
+            const main = await runTool(builder, { name: 'write_file', arguments: { path: 'game.js', content: 'x' } }, ctx);
+            const part = await runTool(builder, { name: 'write_file', arguments: { path: 'parts/art.js', content: 'y' } }, ctx);
+            return { main, part, files: Object.keys(project.files) };
+        }"""
+    )
+    assert "only under parts/" in wrote["main"] and wrote["files"] == ["parts/art.js"]
+
+
+def test_a_full_library_never_drops_an_approved_reference(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    result = page.evaluate(
+        """async () => {
+            const lib = await import('./js/library.js');
+            const state = window.fccPhone.state;
+            state.library = [];
+            const first = await lib.addToLibrary({ kind: 'note', title: 'First approved' });
+            await lib.addToLibrary({ kind: 'game', title: 'Old waiting', approved: false });
+            for (let i = 0; i < 298; i += 1) await lib.addToLibrary({ kind: 'note', title: `Note ${i}` });
+            await lib.addToLibrary({ kind: 'game', title: 'New waiting', approved: false });
+            const kept = state.library.some((item) => item.id === first.id);
+            const dropped = !state.library.some((item) => item.title === 'Old waiting');
+            await lib.removeFromLibrary(state.library.find((item) => item.title === 'New waiting').id);
+            await lib.addToLibrary({ kind: 'note', title: 'Fits again' });
+            let full = '';
+            try { await lib.addToLibrary({ kind: 'note', title: 'One too many' }); } catch (error) { full = error.message; }
+            return { kept, dropped, size: state.library.length, full };
+        }"""
+    )
+    assert result["kept"] and result["dropped"] and result["size"] == 300
+    assert "full" in result["full"]
+
+
+def test_a_helper_that_cannot_finish_is_named_in_the_result(
+    page: Page, admin_base_url: str
+) -> None:
+    fake_gemini(page, playground_brain)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    # The Builder (the helper) thinks with Groq, which has no key, and the
+    # fallback is off: its part can't be built.
+    page.evaluate(
+        """async () => {
+            const state = window.fccPhone.state;
+            state.settings.fallback = false;
+            state.agents.find((a) => a.id === 'builder').brain = 'groq';
+            const { startPlayground } = await import('./js/playground.js');
+            await startPlayground('a snake game with swipe controls', { advisers: 'none' });
+        }"""
+    )
+    page.wait_for_function(
+        "() => window.fccPhone.state.tasks[0].status === 'done'", timeout=30000
+    )
+    task = page.evaluate("() => window.fccPhone.state.tasks[0]")
+    help_step = next(s for s in task["steps"] if s["stage"] == "help")
+    assert help_step["status"] == "failed"
+    assert "Builder couldn't finish its part" in task["summary"]

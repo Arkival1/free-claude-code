@@ -27,8 +27,18 @@ export const MAX_PASSES = 3;
 /** A note in an AI's memory stays short: a mini note, not an essay. */
 export const MINI_NOTE = 220;
 const STEP_CHARS = 1500;
-/** An adviser's approval: the reply starts with LOOKS GOOD (and no "but"). */
-export const LOOKS_GOOD = /^[\s*_"'`>-]*looks good\b(?![^.!\n]*\bbut\b)/i;
+/** An adviser's approval: the reply starts with LOOKS GOOD. */
+export const LOOKS_GOOD = /^[\s*_"'`>-]*looks good\b/i;
+/** Signs a reply that starts with LOOKS GOOD still asks for changes: a list,
+ * or words like but, however, fix, missing. */
+const STILL_WANTS = /(^|\n)\s*(\d+[.)]|[-*•])\s|\b(but|however|though|except|fix|missing|broken|should|needs?|add|change)\b/i;
+
+/** Whether an adviser's own words approve the work: they start with LOOKS
+ * GOOD and ask for nothing more. */
+export const approves = (text) => {
+  const words = String(text || "").trim();
+  return LOOKS_GOOD.test(words) && !STILL_WANTS.test(words.replace(LOOKS_GOOD, ""));
+};
 
 /** The two things the Playground makes, and how each is engineered. */
 export const KINDS = {
@@ -273,6 +283,7 @@ function help(task, helper, hands, project) {
     instructions: `${HELPER_PROMPT}\n\n${helper.instructions || ""}`.trim(),
     maxRounds: 12,
     maxTokens: 4000,
+    partsOnly: true,
   });
 }
 
@@ -382,8 +393,9 @@ export async function runPlayground(task, saveTasks) {
         })
       );
       const helping = inTurns(parts, MAX_HELPERS, (step, index) => runStep(task, step, saveTasks, () => help(task, helpers[index], hands, project)));
-      const [built] = await Promise.allSettled([building, helping]);
+      const [built, helped] = await Promise.allSettled([building, helping]);
       if (built.status === "rejected") throw built.reason;
+      if (helped.status === "rejected" && (helped.reason instanceof Stopped || task.stopping)) throw new Stopped();
       if (report.ctx && report.ctx.project) {
         project = report.ctx.project;
         task.project_id = project.id;
@@ -404,15 +416,15 @@ export async function runPlayground(task, saveTasks) {
         verdict = "Done, but the advisers couldn't check it";
         break;
       }
-      const approves = (step) => LOOKS_GOOD.test(said(step));
-      if (checked.every(approves)) {
+      const approved = (step) => approves(said(step));
+      if (checked.every(approved)) {
         verdict = "Done";
         break;
       }
-      advice = notes(checked.filter((step) => !approves(step)));
+      advice = notes(checked.filter((step) => !approved(step)));
       verdict = "Done, with notes the advisers still had";
       // What the check found becomes a lesson in the main AI's own mind.
-      const found = checked.filter((step) => !approves(step) && !step.kept);
+      const found = checked.filter((step) => !approved(step) && !step.kept);
       if (found.length) {
         await remember(hands, mini(`On a ${task.type}, ${found.map((step) => step.agent).join(" and ")} found: ${found.map(said).join(" / ")}`), { kind: "lesson" });
         for (const step of found) step.kept = true;
@@ -423,12 +435,21 @@ export async function runPlayground(task, saveTasks) {
     for (const agent of [hands, ...helpers, ...reviewers]) await reflect(agent, task, story);
     // 5. The finished work waits in the library for the user's approval.
     if (project && filesOf(project).length && !task.libraryId) {
-      const item = await addToLibrary({ kind: task.type, title: project.name, notes: task.goal, project, by: hands.name, approved: false });
-      task.libraryId = item.id;
+      try {
+        const item = await addToLibrary({ kind: task.type, title: project.name, notes: task.goal, project, by: hands.name, approved: false });
+        task.libraryId = item.id;
+      } catch (error) {
+        feed(hands.name, `Couldn't put ${project.name} in the library: ${error.message}`, "error");
+      }
     }
     const last = [...task.steps].reverse().find((step) => step.stage === "work" && step.status === "done");
+    // A helper that couldn't finish its part is said plainly, never hidden.
+    const missing = task.steps.filter((step) => step.stage === "help" && step.status !== "done").map((step) => step.agent);
+    const short = missing.length ? ` ${missing.join(" and ")} couldn't finish ${missing.length > 1 ? "their parts" : "its part"}.` : "";
+    if (missing.length) feed(hands.name, `${missing.join(" and ")} couldn't finish ${missing.length > 1 ? "their parts" : "its part"} of ${task.goal.slice(0, 60)}`, "error");
+    const shown = filesOf(project).filter((path) => !path.startsWith("parts/")).length;
     task.status = "done";
-    task.summary = `${verdict || "Done"}. Project: ${project.name} (${filesOf(project).length} files). It's in your Library to approve.\n${last ? last.result : ""}`.trim();
+    task.summary = `${verdict || "Done"}.${short} Project: ${project.name} (${shown} files${task.libraryId ? "; it's in your Library to approve" : ""}).\n${last ? last.result : ""}`.trim();
     feed(hands.name, `Finished in the Playground: ${task.goal.slice(0, 80)}`, "done");
   } catch (error) {
     if (error instanceof Stopped || task.stopping) {

@@ -212,6 +212,9 @@ export function specsFor(agent, ctx = {}) {
     });
 }
 
+/** A Playground helper builds its part under parts/; the main AI's files are its own. */
+const partsOnly = (path) => `${path} is the main AI's file. As a helper you write only under parts/ (for example parts/${path.split("/").pop()}); nothing was changed.`;
+
 /** Run one tool call for an agent. ctx: {project, depth, chain}. Returns text. */
 export async function runTool(agent, call, ctx) {
   const args = call.arguments || {};
@@ -277,6 +280,7 @@ export async function runTool(agent, call, ctx) {
       case "write_file": {
         const project = await needProject(agent, ctx);
         const same = projects.cleanPath(args.path);
+        if (ctx.partsOnly && !same.startsWith("parts/")) return partsOnly(same);
         if (project.files[same] !== undefined && project.files[same] === String(args.content ?? "")) {
           return `${same} already holds exactly that, so nothing changed. Make a real improvement (edit_file changes one part), or finish if the work is done.`;
         }
@@ -292,6 +296,7 @@ export async function runTool(agent, call, ctx) {
       }
       case "edit_file": {
         const project = await needProject(agent, ctx);
+        if (ctx.partsOnly && !projects.cleanPath(args.path).startsWith("parts/")) return partsOnly(projects.cleanPath(args.path));
         if (String(args.find || "") === String(args.replace ?? "")) {
           return `These edits leave ${args.path} exactly as it was, so nothing changed. Make a real improvement, or finish if the work is done.`;
         }

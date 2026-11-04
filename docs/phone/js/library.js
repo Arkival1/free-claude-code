@@ -39,8 +39,14 @@ export async function addToLibrary({ kind, title, notes = "", tags = [], project
     approved: Boolean(approved),
     created_at: Date.now(),
   };
+  if (state.library.length >= MAX_ITEMS) {
+    // Full: the oldest one still waiting for approval makes room; approved
+    // references are never dropped without the user removing them.
+    const waiting = [...state.library].reverse().find((entry) => !entry.approved);
+    if (!waiting) throw new Error(`Your library is full (${MAX_ITEMS} approved references): remove some first.`);
+    state.library = state.library.filter((entry) => entry.id !== waiting.id);
+  }
   state.library.unshift(item);
-  state.library.length = Math.min(state.library.length, MAX_ITEMS);
   await save.library();
   changed("library");
   feed(by === "you" ? "You" : by, `${approved ? "Added to" : "Waiting in"} the library: ${item.title}`);
