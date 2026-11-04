@@ -1,6 +1,6 @@
 /* FCC Phone service worker: the app, and the on-phone engine once fetched,
    open with no connection. AI, weather, and PC calls are never cached. */
-const VERSION = "2.9.0";
+const VERSION = "2.10.0";
 const CACHE = `fcc-phone-${VERSION}`;
 const ENGINE_CACHE = "fcc-phone-engine-3.6.1";
 const SHELL = [
@@ -15,6 +15,14 @@ const SHELL = [
   "vendor/three/three.module.js",
   "vendor/three/three.core.js",
   "lab/kit.js",
+  "lab/look3d.js",
+  "lab/science.js",
+  "lab/science-data.js",
+  "lab/tutorials-data.js",
+  "lab/circuit3d.js",
+  "lab/chem3d.js",
+  "lab/jarvis3d.js",
+  "lab/world3d.js",
   "lab/souls/index.html",
   "lab/souls/styles.css",
   "lab/souls/game.js",
@@ -23,6 +31,8 @@ const SHELL = [
   "js/playground.js",
   "js/library.js",
   "js/lab.js",
+  "js/workshop.js",
+  "js/views/workshop.js",
   "js/plugins.js",
   "js/apis.js",
   "js/skills.js",

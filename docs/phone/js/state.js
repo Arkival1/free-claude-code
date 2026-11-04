@@ -1,7 +1,7 @@
 // Everything the app knows, loaded from the phone and saved back as it changes.
 import { store } from "./store.js";
 
-export const VERSION = "2.9.0";
+export const VERSION = "2.10.0";
 
 export const PHONE_TOOLS = {
   remember: "Memory",
@@ -153,6 +153,17 @@ export const defaultSettings = () => ({
   engine: { context: 4096, gpu: true },
 });
 
+/** The Lab's benches as they stand: what's in the beaker, what's on the
+ * breadboard, which blueprint each came from, and where Jarvis is. */
+export function defaultBench() {
+  return {
+    chemistry: { items: [], heat: false, flame: false, result: null },
+    electronics: { parts: [], series: true, sun: true, powered: false, result: null },
+    from: { chemistry: "", electronics: "" },
+    jarvis: { room: "", doing: "", at: 0 },
+  };
+}
+
 export const state = {
   settings: defaultSettings(),
   agents: [],
@@ -164,6 +175,8 @@ export const state = {
   studies: [],
   tasks: [],
   library: [],
+  blueprints: [],
+  bench: defaultBench(),
   models: [],
   photos: [],
   chats: {},
@@ -186,6 +199,8 @@ export const save = {
   studies: () => store.set("studies", state.studies),
   tasks: () => store.set("tasks", state.tasks),
   library: () => store.set("library", state.library),
+  blueprints: () => store.set("blueprints", state.blueprints),
+  bench: () => store.set("bench", state.bench),
   models: () => store.set("models", state.models),
   photos: () => store.set("photos", state.photos),
   chat: (id) => store.set(`chat:${id}`, state.chats[id] || []),
@@ -209,9 +224,13 @@ export async function load() {
   for (const agent of state.agents) upgradeAgent(agent);
   state.agents.sort((a, b) => (a.id === "jarvis" ? -1 : b.id === "jarvis" ? 1 : a.created_at - b.created_at));
   await save.agents();
-  for (const key of ["memories", "pcMemories", "projects", "rooms", "todos", "studies", "tasks", "models", "photos", "library"]) {
+  for (const key of ["memories", "pcMemories", "projects", "rooms", "todos", "studies", "tasks", "models", "photos", "library", "blueprints"]) {
     state[key] = await store.get(key, []);
   }
+  const bench = await store.get("bench", {});
+  const blank = defaultBench();
+  state.bench = { ...blank, ...bench };
+  for (const key of Object.keys(blank)) state.bench[key] = { ...blank[key], ...(bench[key] || {}) };
   // A study or job cut short when the app closed is picked up as stopped.
   for (const study of state.studies) if (study.status === "learning") study.status = "stopped";
   for (const task of state.tasks) if (task.status === "planning" || task.status === "working") task.status = "stopped";

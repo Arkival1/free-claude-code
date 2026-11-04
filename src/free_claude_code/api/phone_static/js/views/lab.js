@@ -1,11 +1,13 @@
-// The Game Lab screen: see what the Lab kit makes, live in 3D (textures,
-// shaders, models, animation), start a 3D game from the starter, or ask the
-// AI for one. The AI builds 3D games with this same kit.
+// The Lab screen: the 3D Lab box (views/workshop.js) and its Game kit room,
+// where you see what the kit makes, live in 3D (textures, shaders, models,
+// animation), start a 3D game from the starter, or ask the AI for one. The AI
+// builds 3D games with this same kit.
 import { state } from "../state.js";
 import { el, button, card, notify, go, openSheet, closeSheet } from "../ui.js";
 import { createProject, writeFile } from "../projects.js";
 import { game3dFiles } from "../lab.js";
 import { addToLibrary } from "../library.js";
+import { render as renderBox } from "./workshop.js";
 
 const SHELVES = {
   textures: { label: "Textures", items: ["stone", "wood", "grass", "metal", "lava", "sand", "bark", "ice"] },
@@ -36,7 +38,13 @@ function startGameSheet() {
   ]);
 }
 
-export function render(view) {
+/** The Lab: the 3D box (#lab), or the Game kit room (#lab/game). */
+export function render(view, param) {
+  return param === "game" ? renderGameKit(view) : renderBox(view);
+}
+
+/** The Game kit: the 3D game-making kit, live, and the 3D game starter. */
+function renderGameKit(view) {
   let shelf = "models";
   let item = "warrior";
   let stage = null;
@@ -82,6 +90,7 @@ export function render(view) {
     card("Game Lab", [
       el("p", { text: "3D games made in code: textures, shaders, models and animation, all original. The AI builds 3D games with this kit, and makes its own new pieces the same way." }),
       el("div", { class: "row" }, [
+        button("⟵ Lab box", () => go("lab")),
         button("Start a 3D game", startGameSheet, { class: "primary" }),
         button("Ask the AI for one", () => {
           state.labAsk = "a 3D third-person game where ";

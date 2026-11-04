@@ -10,6 +10,7 @@ import { TEMPLATES, templateFiles } from "./templates.js";
 import { usePlugin } from "./plugins.js";
 import { useLibrary, LIBRARY_KINDS } from "./library.js";
 import { game3dFiles, useLab, GAME3D_ABOUT } from "./lab.js";
+import { useWorkshop } from "./workshop.js";
 import { SKILLS } from "./skills.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
@@ -34,8 +35,28 @@ export const SPECS = {
     parameters: { type: "object", properties: { query: text("What to look for."), kind: { type: "string", enum: Object.keys(MEMORY_KINDS) } }, required: ["query"] },
   },
   lab: {
-    description: "The Game Lab, for 3D games: guide (how to engineer a 3D game that looks good and plays well on a phone, and how to make your own textures, shaders, models and animation), list (what the Lab kit has: textures, shaders, models, animation, controls), add (put the kit, lab/kit.js, in the current project). A new 3D game starts from start_project with template game3d.",
-    parameters: { type: "object", properties: { action: { type: "string", enum: ["guide", "list", "add"] } }, required: ["action"] },
+    description:
+      "The Lab, which you work yourself (you walk to the room in the user's Lab box; never hand Lab work to another agent). Chemistry: mix (items [{name, amount in mL or g}], heat, flame: the PC Lab's real chemistry: reactions, colour, gas, precipitate, pH, temperature, hazards), shelf (search the chemical shelf; any element works by symbol). Electronics: circuit (parts [{id, count}], series, sun: volts, current, what lights or burns out, resistor values, runtime), parts (search the parts bin). Blueprints: save (name, kind chip|mixture|invention, notes; id of an existing blueprint saves a new version of it), blueprints (search saved ones), load (id or name, version: put it back on the benches to reuse or improve). Library: tutorials (query or topic: build-your-own-x's step-by-step tutorials for building technologies from scratch, with links). 3D games: guide, list, add (the Game Lab kit; new 3D games start from start_project template game3d).",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["mix", "shelf", "circuit", "parts", "save", "blueprints", "load", "tutorials", "guide", "list", "add"] },
+        items: { type: "array", description: "mix: what goes in the beaker.", items: { type: "object", properties: { name: text("A chemical (shelf id, name, formula or element)."), amount: { type: "number", description: "mL for liquids, g for solids." } }, required: ["name"] } },
+        heat: { type: "boolean", description: "mix: heat it over the burner." },
+        flame: { type: "boolean", description: "mix: a flame test." },
+        parts: { type: "array", description: "circuit: the parts on the board, with a power source.", items: { type: "object", properties: { id: text("A part id from the parts bin (aa, 9v, led-red, arduino...)."), count: { type: "number" } }, required: ["id"] } },
+        series: { type: "boolean", description: "circuit: batteries in series (true, volts add) or side by side (false)." },
+        sun: { type: "boolean", description: "circuit: full sun for a solar panel." },
+        name: text("save: the blueprint's name; load: its name."),
+        kind: { type: "string", enum: ["chip", "mixture", "invention"], description: "save: chip (the circuit), mixture (the beaker) or invention (both benches)." },
+        notes: text("save: what it is, how it works, what changed in this version."),
+        id: text("save: a blueprint id to add a version to; load: the blueprint's id."),
+        version: { type: "number", description: "load: which version (newest if left out)." },
+        query: text("shelf, parts, blueprints, tutorials: words to search for."),
+        topic: text("tutorials: a topic (3D Renderer, Database, Emulator / Virtual Machine, Game, Git, Neural Network, Operating System...)."),
+      },
+      required: ["action"],
+    },
   },
   library: {
     description: "The user's library of approved references for games and websites (their own projects, photos and notes, and games and sites they approved). search finds the ones that fit; read one by its id. Read the fitting ones before you design, then make something original in their spirit; never copy.",
@@ -247,9 +268,13 @@ export async function runTool(agent, call, ctx) {
       }
       case "library":
         return useLibrary(args);
-      case "lab":
+      case "lab": {
         if (ctx.partsOnly && args.action === "add") return partsOnly("lab/kit.js");
+        if (ctx.partsOnly && ["mix", "circuit", "save", "load"].includes(args.action)) return "The Lab benches are the main AI's: as a helper you can read the shelf, parts, blueprints and tutorials, and write your part under parts/.";
+        const done = await useWorkshop(args, agent);
+        if (done !== null) return done;
         return await useLab(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
+      }
       case "use_plugin":
         return await usePlugin(args);
       case "start_task": {

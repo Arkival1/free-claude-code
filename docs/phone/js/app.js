@@ -52,7 +52,7 @@ const TITLES = {
   files: "Files",
   minds: "Minds",
   library: "Library",
-  lab: "Game Lab",
+  lab: "Lab",
 };
 // Two looks (Settings, Look): the HUD (the command centre and the whole team)
 // and the Playground (one main AI does the work, the others advise).
@@ -117,7 +117,7 @@ async function render() {
     files: () => playground.renderFiles(view),
     minds: () => playground.renderMinds(view),
     library: () => library.render(view),
-    lab: () => lab.render(view),
+    lab: () => lab.render(view, param),
     chats: () => chat.renderList(view),
     chat: () => chat.render(view, param),
     agents: () => agents.render(view, param),

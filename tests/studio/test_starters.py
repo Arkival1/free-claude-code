@@ -51,6 +51,7 @@ ASKED_FOR = {
     "supermemoryai/supermemory",
     "letta-ai/letta",
     "ultraworkers/claw-code",
+    "codecrafters-io/build-your-own-x",
 }
 
 SECURITY_SKILLS = {

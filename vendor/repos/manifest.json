@@ -476,6 +476,16 @@
       "file": "gamedev-skills__awesome-gamedev-agent-skills.zip",
       "sha256": "db23bc9ab7cd154c18fa9bdb801cf80b0d1ef04e50b34315274fd466cd3bb3dc",
       "size": 91679
+    },
+    {
+      "owner": "codecrafters-io",
+      "repo": "build-your-own-x",
+      "commit": "aa17439b62f384511a5561ce308e9598b94d8989",
+      "licence": "CC0-1.0",
+      "about": "Build your own X: step-by-step tutorials for making technologies from scratch (3D renderers, databases, emulators, Git, neural networks, operating systems, web servers...).",
+      "file": "codecrafters-io__build-your-own-x.zip",
+      "sha256": "c4a52a7684ddb1028a070ff49807aaafea8d4e8e4fcd8f5222f86bc07154db26",
+      "size": 17127
     }
   ]
 }

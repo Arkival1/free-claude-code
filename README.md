@@ -2797,7 +2797,32 @@ account, and costs nothing.
   notes and your own projects, and every game or site the Playground finishes
   waits there for you to **Approve**. The AI reads only approved references
   (the `library` tool) before it designs, and makes originals in their spirit.
-- **Game Lab (3D)**: the **Lab** tab shows the kit live in 3D: textures
+- **The Lab box (3D)**: the **Lab** tab is your crafting table as a 3D
+  cut-away box with two floors (turn it with a finger, pinch to zoom, tap a
+  room to go in). **Chemistry**: put things from the shelf in the beaker
+  (any element by its symbol too), heat it or flame-test it, and **Mix**: the
+  liquid takes its real colour, gases bubble, precipitate clouds and settles,
+  foam erupts, it steams or frosts, a thermometer and a pH strip read it, and
+  the card lists what you'd see, the equations, what was made and the
+  hazards. **Electronics**: power parts from the parts bin (46 of them) on a
+  breadboard: resistors in their real colour bands, LEDs that light, motors
+  and fans that spin, boards whose LEDs blink, burnt parts that smoke, and the
+  current flowing along the wires; the readings card gives volts, current,
+  runtime, the resistor each LED needs, and why something won't work. Both
+  benches run the PC Lab's own rules and tables, so the phone gives the PC's
+  answers with no PC (a test checks thousands of mixes and builds against
+  the PC). **Blueprints**: save the circuit as a **chip**, the beaker as a
+  **mixture** or both as an **invention**; load one later (any version),
+  save a change as its next version, **Add to circuit** drops a chip into
+  another build, and **Improve with Jarvis** hands it to him. **Library**:
+  build-your-own-x's 359 tutorials (codecrafters-io/build-your-own-x, CC0,
+  kept in FCC) by topic: 3D renderers, databases, emulators, Git, neural
+  networks, operating systems and more, with **Ask Jarvis to build it**.
+  **Tell Jarvis** at the bottom: he walks (and rides the lift) to the room
+  and does the job himself with the `lab` tool (mix, shelf, circuit, parts,
+  save, blueprints, load, tutorials) instead of handing it to another agent;
+  the same works from any chat.
+- **Game kit (3D)**: the Lab's **Game kit** room shows the kit live in 3D: textures
   (stone, wood, grass, metal, lava, sand, bark, ice: drawn from seeded noise
   with normal maps), shaders (fire, embers, water, glow, toon, dissolve, sky),
   models (a jointed warrior, a horned boss, trees, burning trees, rocks, a

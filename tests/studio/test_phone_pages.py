@@ -111,3 +111,33 @@ def test_the_phone_carries_three_byte_for_byte_with_its_licence():
     )
     page = (PHONE_DIR / "index.html").read_text()
     assert '"three": "./vendor/three/three.module.js"' in page
+
+
+def test_the_phone_lab_runs_on_the_pc_labs_tables_and_build_your_own_x():
+    """Run scripts/phone/build_pages.py after changing studio/lab or the
+    build-your-own-x copy; the phone's benches use the PC Lab's own tables."""
+    spec = importlib.util.spec_from_file_location(
+        "build_pages", ROOT / "scripts" / "phone" / "build_pages.py"
+    )
+    assert spec is not None and spec.loader is not None
+    build_pages = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_pages)
+    lab = PHONE_DIR / "lab"
+    assert (lab / "science-data.js").read_text(
+        encoding="utf-8"
+    ) == build_pages.science_js()
+    assert (lab / "tutorials-data.js").read_text(
+        encoding="utf-8"
+    ) == build_pages.tutorials_js()
+    data = build_pages.science_data()
+    assert len(data["chemicals"]) > 100 and len(data["parts"]) > 40
+    rows = build_pages.tutorial_rows(
+        "## Tutorials\n#### Build your own `Git`\n"
+        "* [**Python**: _Write yourself a Git!_](https://wyag.thb.lt/)\n"
+        "* [**C**: _Chess Engine In C_](https://youtube.com/x) [video]\n"
+        "## Contribute\n* [**C**: _not a tutorial_](https://x)\n"
+    )
+    assert rows == [
+        ["Git", "Python", "Write yourself a Git!", "https://wyag.thb.lt/", ""],
+        ["Git", "C", "Chess Engine In C", "https://youtube.com/x", "video"],
+    ]

@@ -75,7 +75,14 @@ src/free_claude_code/
                   views, loaded only when shown), three.*.js and three-orbit.js
                   (vendored three.js, see vendor/three), sw.js, icons
   api/phone_static/   FCC Phone source (js/agents.js, tools.js, projects.js,
-                  polish.js, ...); built into docs/phone
+                  polish.js, ...); built into docs/phone. The Lab box:
+                  js/views/workshop.js (screen), js/workshop.js (benches,
+                  blueprints, lab tool actions), lab/world3d.js (the box,
+                  rooms, lift), lab/chem3d.js, lab/circuit3d.js,
+                  lab/jarvis3d.js, lab/look3d.js; lab/science.js is the PC
+                  Lab's sim.py/tech.py in JS on lab/science-data.js
+                  (generated, like lab/tutorials-data.js from
+                  build-your-own-x); #lab/game is the Game kit (js/views/lab.js)
   api/admin_static/   Admin page UI
   studio/         Studio back end (below)
   providers/, core/, application/, runtime/, harnesses/, messaging/, config/,

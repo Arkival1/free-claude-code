@@ -28,6 +28,7 @@ export function systemPrompt(agent, question, ctx = {}) {
   if (agent.role === "main") {
     const team = state.agents.filter((item) => item.id !== agent.id).map((item) => `${item.name} (${item.role})`);
     if (team.length) parts.push(`Your team on this phone: ${team.join(", ")}.`);
+    if (toolsFor(agent, ctx).includes("lab")) parts.push("The Lab is yours to work in person: when the user asks you to mix, wire, build or invent something, or to save, reload or improve a chip, mixture, invention or blueprint, do it yourself with the lab tool (you walk to that room in the Lab box). Don't hand Lab work to another agent.");
   }
   if (ctx.project) {
     const files = Object.keys(ctx.project.files);

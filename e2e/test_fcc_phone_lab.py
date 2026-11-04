@@ -22,7 +22,7 @@ def test_the_lab_shows_the_kit_live_and_starts_a_3d_game(
 
     page.on("console", console_error)
     open_phone(page, admin_base_url)
-    go(page, "lab")
+    go(page, "lab/game")
     expect(page.locator("section.card h2", has_text="Game Lab")).to_be_visible()
     page.wait_for_function(
         "() => document.querySelector('.lab-stage') && document.querySelector('.lab-stage').dataset.ready === 'true'",
@@ -116,7 +116,7 @@ def test_a_3d_job_in_the_playground_starts_from_the_game3d_template(
     )
     assert kinds[0] == "game" and kinds[1] == "website"
     assert "template game3d" in kinds[2]
-    go(page, "lab")
+    go(page, "lab/game")
     page.get_by_role("button", name="Ask the AI for one").click()
     go(page, "settings")
     page.get_by_role("button", name="Playground").click()

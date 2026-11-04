@@ -264,6 +264,7 @@ async function exportBackup() {
     memories: state.memories,
     projects: state.projects,
     library: state.library,
+    blueprints: state.blueprints,
     rooms: state.rooms,
     todos: state.todos,
     studies: state.studies,
@@ -287,7 +288,7 @@ function importButton() {
       state.agents = (backup.agents || []).map((agent) => (agent.tools ? agent : newAgent(agent)));
       if (!state.agents.some((agent) => agent.id === "jarvis")) state.agents.unshift(newAgent(DEFAULT_TEAM[0]));
       state.memories = (backup.memories || []).map((memory) => ({ ...memory, synced: false }));
-      for (const key of ["projects", "rooms", "todos", "studies", "library"]) state[key] = backup[key] || [];
+      for (const key of ["projects", "rooms", "todos", "studies", "library", "blueprints"]) state[key] = backup[key] || [];
       // A backup only carries switches: each key and the addresses it may be
       // sent to stay as they are on this phone, so a backup file can never
       // point a saved key at a new address.
@@ -305,7 +306,7 @@ function importButton() {
       // never send a saved key somewhere new or widen what's shared.
       const { keys, pc, customBase, cloudSeesPc } = state.settings;
       Object.assign(state.settings, backup.settings || {}, { keys, pc, customBase, cloudSeesPc, plugins });
-      await Promise.all([save.agents(), save.memories(), save.settings(), save.projects(), save.rooms(), save.todos(), save.studies(), save.library()]);
+      await Promise.all([save.agents(), save.memories(), save.settings(), save.projects(), save.rooms(), save.todos(), save.studies(), save.library(), save.blueprints()]);
       for (const [agentId, chat] of Object.entries(backup.chats || {})) {
         state.chats[agentId] = chat;
         await store.set(`chat:${agentId}`, chat);

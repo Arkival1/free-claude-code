@@ -79,6 +79,7 @@ adds it back.
 | [Creatorberry/flick](https://github.com/Creatorberry/flick) | `4442fe3556` | MIT | `Creatorberry__flick.zip` (0.08 MB) | Flick: turn a video, link or transcript into short scene animations (skills and agents). |
 | [morluto/rea](https://github.com/morluto/rea) | `fd5cd1b058` | MIT | `morluto__rea.zip` (1.65 MB) | REA: reverse-engineer apps and binaries; its guides, skills and agents (its MCP server starts off). Its `third_party/` folder holds only READMEs and the licences of the tools it points to (evmole MIT, pwndbg MIT). |
 | [alexgreensh/token-optimizer](https://github.com/alexgreensh/token-optimizer) | `549bb58b27` | PolyForm Noncommercial 1.0.0 + small-business permission | `alexgreensh__token-optimizer.zip` (0.60 MB) | Token Optimizer: its guides and skills for cutting wasted tokens (audit, coaching, checkpoints). Its hooks, scripts and dashboard are left out (they would run on every action); free for personal and noncommercial use, and for organisations under 5 people and US$20,000 a month, with its licence and Required Notice kept. |
+| [codecrafters-io/build-your-own-x](https://github.com/codecrafters-io/build-your-own-x) | `aa17439b62` | CC0-1.0 | `codecrafters-io__build-your-own-x.zip` (0.02 MB) | Build your own X: tutorials for making technologies from scratch; the Lab's Library room on the phone. Upstream keeps its CC0 waiver in its README, so FCC wrote `LICENSE` quoting that section word for word. |
 
 ## Left out, and why
 
