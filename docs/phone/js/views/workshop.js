@@ -449,6 +449,7 @@ export function render(view) {
           drawPanel();
         },
       });
+      canvas.world = world;
       world.setTopics(shop.topics());
       world.setBlueprints(state.blueprints);
       showBenches(false);

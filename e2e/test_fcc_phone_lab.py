@@ -120,11 +120,11 @@ def test_a_3d_job_in_the_playground_starts_from_the_game3d_template(
     page.get_by_role("button", name="Ask the AI for one").click()
     go(page, "settings")
     page.get_by_role("button", name="Playground").click()
-    go(page, "home")
+    go(page, "tasks")
+    expect(page.locator("body[data-route='tasks']")).to_have_count(1)
     page.evaluate(
         "() => { window.fccPhone.state.labAsk = 'a 3D third-person game where '; }"
     )
-    go(page, "tasks")
     go(page, "home")
     expect(page.get_by_label("The task")).to_have_value("a 3D third-person game where ")
     tabs = page.locator("#tabs .tab")

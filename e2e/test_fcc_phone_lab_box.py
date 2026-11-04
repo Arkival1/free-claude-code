@@ -344,3 +344,38 @@ def test_blueprint_versions_are_exact_and_model_arguments_are_safe(
     assert result["kept"] == 30 and result["newest"] == 33 and result["next"] == 34
     assert result["loadNewest"] == 33
     assert result["powered"] is False
+
+
+def test_jarvis_lands_on_a_floor_when_a_new_job_comes_mid_ride(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    go(page, "lab")
+    page.wait_for_function(
+        "() => document.querySelector('.lab-world') && document.querySelector('.lab-world').world",
+        timeout=30000,
+    )
+    mid_ride = (
+        "() => { const at = document.querySelector('.lab-world').world.jarvisAt();"
+        " return at.y > 0.4 && at.y < 3.5; }"
+    )
+    arrived = "() => !document.querySelector('.lab-world').world.jarvisAt().walking"
+    world = "document.querySelector('.lab-world').world"
+
+    def send(room: str) -> None:
+        page.evaluate(f"() => {world}.jarvisTo('{room}')")
+
+    # Riding down, sent to a room upstairs; then riding up, sent downstairs.
+    for first, second, floor_y, settle in (
+        ("electronics", "blueprints", 3.6, "chemistry"),
+        ("library", "electronics", 0.3, ""),
+    ):
+        send(first)
+        page.wait_for_function(mid_ride, timeout=90000)
+        send(second)
+        page.wait_for_function(arrived, timeout=90000)
+        at = page.evaluate(f"() => {world}.jarvisAt()")
+        assert abs(at["y"] - floor_y) < 0.02, at
+        if settle:
+            send(settle)
+            page.wait_for_function(arrived, timeout=90000)

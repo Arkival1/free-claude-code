@@ -324,6 +324,7 @@ export function makeWorld(canvas, { onPick = () => {}, onFocus = () => {} } = {}
     canvas.setPointerCapture(event.pointerId);
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointers.size === 1) downAt = { x: event.clientX, y: event.clientY, time: performance.now(), moved: 0 };
+    else if (downAt) downAt.moved = 99; // a second finger: a pinch, never a tap
   };
   const onMove = (event) => {
     const last = pointers.get(event.pointerId);
@@ -410,10 +411,17 @@ export function makeWorld(canvas, { onPick = () => {}, onFocus = () => {} } = {}
   function routeTo(floor, x, z) {
     const here = jarvis.root.position;
     const path = [];
-    if (floor !== walker.floor) {
-      path.push({ x: 0, z: LOBBY_Z, floor: walker.floor });
+    const onFloor = FLOOR_Y.findIndex((y) => Math.abs(here.y - y) < 0.01);
+    if (onFloor === -1) {
+      // Mid-ride in the lift: ride on to the floor he's going to now.
       path.push({ x: 0, z: LOBBY_Z, floor, ride: true });
-    } else if (Math.sign(x) !== Math.sign(here.x) && Math.abs(here.x) > 0.8) path.push({ x: 0, z: LOBBY_Z, floor });
+    } else {
+      walker.floor = onFloor;
+      if (floor !== onFloor) {
+        path.push({ x: 0, z: LOBBY_Z, floor: onFloor });
+        path.push({ x: 0, z: LOBBY_Z, floor, ride: true });
+      } else if (Math.sign(x) !== Math.sign(here.x) && Math.abs(here.x) > 0.8) path.push({ x: 0, z: LOBBY_Z, floor });
+    }
     path.push({ x, z, floor });
     return path;
   }
@@ -448,6 +456,7 @@ export function makeWorld(canvas, { onPick = () => {}, onFocus = () => {} } = {}
       }
       return;
     }
+    if (Math.abs(position.y - FLOOR_Y[step.floor]) > 0.01) position.y = FLOOR_Y[step.floor];
     const dx = step.x - position.x;
     const dz = step.z - position.z;
     const distance = Math.hypot(dx, dz);
@@ -508,7 +517,7 @@ export function makeWorld(canvas, { onPick = () => {}, onFocus = () => {} } = {}
       books.remove(child);
       dispose(child);
     }
-    const counts = topics.map((topic) => Math.max(3, Math.min(9, topic.count)));
+    const counts = topics.map((topic) => Math.max(3, Math.min(9, Number(topic.count) || 3)));
     const total = counts.reduce((a, b) => a + b, 0);
     const shelfBooks = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), standard("#ffffff", 0.7), total);
     const owners = [];
@@ -597,6 +606,8 @@ export function makeWorld(canvas, { onPick = () => {}, onFocus = () => {} } = {}
 
   return {
     focus,
+    /** Where Jarvis stands and which floor he's on (for checks). */
+    jarvisAt: () => ({ x: jarvis.root.position.x, y: jarvis.root.position.y, z: jarvis.root.position.z, floor: walker.floor, walking: walker.path.length > 0 }),
     get focused() {
       return focused;
     },

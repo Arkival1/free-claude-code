@@ -84,7 +84,9 @@ export function label(text, { color = "#ffffff", background = "rgba(15,20,28,0.7
   const texture = canvasTexture(width, 72, (paint, w, h) => {
     paint.fillStyle = background;
     paint.beginPath();
-    paint.roundRect(2, 2, w - 4, h - 4, 30);
+    // roundRect needs iOS 16; older Safari gets square corners, not a crash.
+    if (paint.roundRect) paint.roundRect(2, 2, w - 4, h - 4, 30);
+    else paint.rect(2, 2, w - 4, h - 4);
     paint.fill();
     paint.font = font;
     paint.fillStyle = color;

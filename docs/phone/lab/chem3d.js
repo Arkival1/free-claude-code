@@ -251,7 +251,7 @@ export function makeChemBench() {
     upper.visible = layers.length > 1;
     if (layers[0]) {
       lower.material.opacity = Math.max(0.2, Math.min(0.96, layers[0].opacity));
-      lower.userData.share = layers.length > 1 ? layers[0].ml / v.volume_ml : 1;
+      lower.userData.share = layers.length > 1 && v.volume_ml > 0 ? layers[0].ml / v.volume_ml : 1;
     }
     if (layers[1]) {
       upper.material.color.set(layers[1].colour);

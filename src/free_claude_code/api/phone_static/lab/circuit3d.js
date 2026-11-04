@@ -777,6 +777,7 @@ export function makeCircuitBench() {
     const path = new THREE.CurvePath();
     for (const segment of segments) path.add(segment);
     const length = path.getLength();
+    if (!(length > 1e-6)) return;
     const strength = Math.min(1, Math.log10(1 + milliamps) / 3);
     const count = Math.round(4 + strength * 18 * Math.max(1, length / 20));
     flows.push({ path, length, speed: 2 + strength * 12, count, offset: Math.random() });
