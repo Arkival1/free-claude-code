@@ -3,6 +3,7 @@
 import { state, save, changed, feed } from "./state.js";
 import { uid } from "./ui.js";
 import { STARTER_TEXT } from "./templates.js";
+import { SAMPLE_TEXT } from "../web/sections.js";
 
 export const MAX_FILE_CHARS = 200_000;
 /** Earlier versions kept of each file, so restore_file can undo a change. */
@@ -293,6 +294,12 @@ export function checkProject(project) {
     if (drawn) problems.push(`${name}: ${drawn} picture(s) are still the template's drawn placeholders; use real photos from find_images and remove data-placeholder (or remove it to keep the drawn art).`);
     const starter = STARTER_TEXT.find((line) => text.includes(line));
     if (starter) problems.push(`${name} still has the template's placeholder line "${starter}"; replace it with real content.`);
+    const sample = SAMPLE_TEXT.find((line) => text.includes(line));
+    if (sample && !starter) problems.push(`${name} still has the Web kit's sample line "${sample}"; write the real words for this site.`);
+    // The Web kit's gradient stand-ins for photos (role="img"): real photos,
+    // or make one decorative on purpose by taking its role and label off.
+    const standIns = (text.match(/<div class="art[^"]*" role="img"/g) || []).length;
+    if (standIns) problems.push(`${name}: ${standIns} picture(s) are still the Web kit's gradient stand-ins; put real photos in (find_images or use_photo: an <img class="photo"> in place of the div), or make one decorative on purpose by removing role="img" and its aria-label.`);
   }
   for (const page of pages) {
     const html = project.files[page];

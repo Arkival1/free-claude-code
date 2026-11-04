@@ -11,6 +11,7 @@ import { usePlugin } from "./plugins.js";
 import { useLibrary, LIBRARY_KINDS } from "./library.js";
 import { game3dFiles, useLab, GAME3D_ABOUT } from "./lab.js";
 import { useWorkshop } from "./workshop.js";
+import { useWebKit } from "./webkit.js";
 import { SKILLS } from "./skills.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
@@ -54,6 +55,23 @@ export const SPECS = {
         version: { type: "number", description: "load: which version (newest if left out)." },
         query: text("shelf, parts, blueprints, tutorials: words to search for."),
         topic: text("tutorials: a topic (3D Renderer, Database, Emulator / Virtual Machine, Game, Git, Neural Network, Operating System...)."),
+      },
+      required: ["action"],
+    },
+  },
+  web_kit: {
+    description: "The FCC Web kit for websites: guide (website design engineering: plan, hierarchy, type, space, colour, pictures, copy, mobile, accessibility, speed), list (its sections, looks, font pairs and recipes), section (one section's markup by id), page (build the current project's index.html, styles.css and the kit from a recipe or a list of sections, in a look), add (put kit/kit.css and kit/kit.js in the project).",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["guide", "list", "section", "page", "add"] },
+        id: text("section: a section id (hero-split, pricing, contact...)."),
+        title: text("page: the site's name."),
+        recipe: { type: "string", enum: ["business", "startup", "studio", "shop", "service"], description: "page: a ready-made list of sections." },
+        sections: { type: "array", items: { type: "string" }, description: "page: section ids in order (instead of a recipe)." },
+        look: { type: "string", enum: ["ocean", "forest", "espresso", "sunset", "midnight", "rose", "mono", "mint"], description: "page: the look (brand colour, accent, theme, fonts)." },
+        fonts: { type: "string", enum: ["modern", "editorial", "warm", "tech", "friendly", "luxury", "bold"], description: "page: a font pair instead of the look's own." },
+        description: text("page: one line for search engines and link previews."),
       },
       required: ["action"],
     },
@@ -275,6 +293,8 @@ export async function runTool(agent, call, ctx) {
         if (done !== null) return done;
         return await useLab(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
       }
+      case "web_kit":
+        return await useWebKit(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
       case "use_plugin":
         return await usePlugin(args);
       case "start_task": {

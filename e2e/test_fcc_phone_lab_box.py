@@ -137,7 +137,15 @@ def test_the_lab_box_rooms_benches_and_blueprints(
     )
     rooms = page.locator(".lab-roombar")
     expect(rooms.get_by_role("button")).to_have_text(
-        ["Box", "Chemistry", "Electronics", "Blueprints", "Library", "Game kit"]
+        [
+            "Box",
+            "Chemistry",
+            "Electronics",
+            "Blueprints",
+            "Library",
+            "Web kit",
+            "Game kit",
+        ]
     )
 
     # Electronics: a starter build, readings with the resistor's real colours.

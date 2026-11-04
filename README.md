@@ -2822,6 +2822,19 @@ account, and costs nothing.
   and does the job himself with the `lab` tool (mix, shelf, circuit, parts,
   save, blueprints, load, tutorials) instead of handing it to another agent;
   the same works from any chat.
+- **Web kit**: the Lab's **Web kit** room builds websites from FCC's own
+  design system (`web/kit.css`: fluid type and space, one brand colour and
+  an accent that set everything, light and dark, focus rings, reduce-motion)
+  and 28 polished sections (menus, four heroes, logos, numbers, reviews,
+  feature cards and rows, bento, steps, pricing, menu/price list, products,
+  gallery with a picture viewer, team, story, posts, FAQ, about, call to
+  action, newsletter, contact, footers). Pick a starting point (local
+  business, product launch, portfolio, shop, services), one of eight looks
+  and a font pair, add, move or remove sections, see it live at phone or
+  computer size, and **Start this site**. The AI builds websites the same
+  way (the `web_kit` tool: guide, list, section, page, add) and reads its
+  design-engineering guide; `check_project` lists the kit's sample words and
+  gradient stand-ins until real words and photos replace them.
 - **Game kit (3D)**: the Lab's **Game kit** room shows the kit live in 3D: textures
   (stone, wood, grass, metal, lava, sand, bark, ice: drawn from seeded noise
   with normal maps), shaders (fire, embers, water, glow, toon, dissolve, sky),

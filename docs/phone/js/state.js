@@ -34,6 +34,7 @@ export const PHONE_TOOLS = {
   start_task: "Team",
   library: "Library",
   lab: "Lab",
+  web_kit: "Web kit",
 };
 export const ALL_TOOLS = Object.keys(PHONE_TOOLS);
 export const MAIN_ONLY = new Set(["team_status"]);
@@ -59,8 +60,8 @@ const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_fi
 const DESIGN = ["find_images", "polish_check", "look_at_site"];
 const PHOTOS = ["list_photos", "use_photo"];
 export const ROLE_TOOLS = {
-  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library", "lab"],
-  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library", "lab"],
+  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library", "lab", "web_kit"],
+  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library", "lab", "web_kit"],
   researcher: ["wikipedia", "read_page", "web_search", "remember", "recall", "calculate", "use_plugin", "skill"],
   helper: ["remember", "recall", "calculate", "todo", "weather", "wikipedia", "skill"],
   tester: ["list_files", "read_file", "check_project", "look_at_site", "polish_check", "edit_file", "write_file", "restore_file", "remember", "recall", "skill"],
@@ -107,8 +108,9 @@ const TOOLS_ADDED = {
   5: { main: ["pc_task"] },
   6: { main: ["use_plugin", "start_task"], researcher: ["use_plugin", "skill"], builder: ["use_plugin"], tester: ["skill"], helper: ["skill"] },
   7: { main: ["library", "lab"], builder: ["library", "lab"] },
+  8: { main: ["web_kit"], builder: ["web_kit"] },
 };
-const TOOLS_VERSION = 7;
+const TOOLS_VERSION = 8;
 
 export const DEFAULT_TEAM = [
   { id: "jarvis", name: "Jarvis", role: "main" },

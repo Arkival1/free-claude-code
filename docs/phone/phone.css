@@ -1795,6 +1795,44 @@ body[data-look="playground"] .sheet-head h2 {
   padding-left: 18px;
 }
 
+/* The Web kit room (views/webkit.js) */
+.web-frame {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fff;
+}
+
+.web-preview {
+  display: block;
+  width: 100%;
+  height: 70vh;
+  border: 0;
+}
+
+.web-frame[data-width="computer"] {
+  height: 70vh;
+}
+
+.web-frame[data-width="computer"] .web-preview {
+  width: 1280px;
+  height: calc(70vh / 0.27);
+  transform: scale(0.27);
+  transform-origin: 0 0;
+}
+
+.web-look {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.web-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
 .master-switch {
   margin: 10px 0;
 }

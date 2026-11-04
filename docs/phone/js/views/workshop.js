@@ -71,6 +71,7 @@ export function render(view) {
     bar.replaceChildren(
       el("button", { class: "lab-room", type: "button", "aria-pressed": String(!room), text: "Box", onclick: () => world ? world.focus(null) : setRoom(null) }),
       ...ROOM_ORDER.map((id) => el("button", { class: "lab-room", type: "button", "aria-pressed": String(room === id), text: shop.ROOM_NAMES[id], onclick: () => (world ? world.focus(id) : setRoom(id)) })),
+      el("button", { class: "lab-room", type: "button", text: "Web kit", onclick: () => go("lab/web") }),
       el("button", { class: "lab-room", type: "button", text: "Game kit", onclick: () => go("lab/game") })
     );
     where.textContent = room ? shop.ROOM_NAMES[room] : "The Lab";

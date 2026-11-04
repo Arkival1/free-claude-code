@@ -282,6 +282,12 @@ Notes carried over from the long session that built FCC Studio (LCC).
   (`state.blueprints`, backed up); the Library is
   codecrafters-io/build-your-own-x (CC0, a starter repo; the phone's copy
   `lab/tutorials-data.js` is generated).
+  Website design on the phone (owner: "website design development on
+  mobile"): the Web kit (`web/kit.css`, `web/kit.js`, `web/sections.js`;
+  `js/webkit.js` with the `web_kit` tool, tools version 8; the `#lab/web`
+  room in `js/views/webkit.js`). Websites start from `web_kit page` (a
+  recipe or sections, a look); `check_project` flags the kit's
+  `SAMPLE_TEXT` and `.art` stand-ins (role="img") until replaced.
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

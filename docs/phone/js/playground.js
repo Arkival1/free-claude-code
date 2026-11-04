@@ -47,7 +47,7 @@ export const KINDS = {
     glyph: "⌘",
     placeholder: "A website for… (who it's for, what it sells, the feel you want)",
     engineering:
-      "Website engineering, step by step. 1. Plan: who it is for, the pages, the sections of each, and the look. Search the library (library tool) for approved references and recall the user's taste first. 2. Start from the closest template or FCC design with start_project. 3. Build every page with real content (your helpers' parts are in parts/: read them with list_files and read_file and use them). 4. Check: check_project, look_at_site on a phone and a computer, polish_check; fix what they find. Make something original: take the feel of a reference, never copy it.",
+      "Website engineering, step by step. 1. Plan: who it is for, the one action they should take, the pages, the sections of each, and the look. Read web_kit guide, search the library (library tool) for approved references and recall the user's taste first. 2. Start: start_project, then web_kit page with the closest recipe (business, startup, studio, shop, service) or your own list of sections and a look (or start from a template or FCC design). 3. Build every page with real content (your helpers' parts are in parts/: read them with list_files and read_file and use them). 4. Check: check_project, look_at_site on a phone and a computer, polish_check; fix what they find. Make something original: take the feel of a reference, never copy it.",
   },
   game: {
     label: "Game",
@@ -102,6 +102,7 @@ export const HANDS_TOOLS = [
   "use_plugin",
   "library",
   "lab",
+  "web_kit",
   "ask_agent",
 ];
 /** Helpers build their part in the main AI's project; they never start a
@@ -124,6 +125,7 @@ export const HELPER_TOOLS = [
   "use_plugin",
   "library",
   "lab",
+  "web_kit",
 ];
 /** Advisers look and think; they never change anything. */
 export const ADVISER_TOOLS = [

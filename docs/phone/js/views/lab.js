@@ -8,6 +8,7 @@ import { createProject, writeFile } from "../projects.js";
 import { game3dFiles } from "../lab.js";
 import { addToLibrary } from "../library.js";
 import { render as renderBox } from "./workshop.js";
+import { render as renderWebKit } from "./webkit.js";
 
 const SHELVES = {
   textures: { label: "Textures", items: ["stone", "wood", "grass", "metal", "lava", "sand", "bark", "ice"] },
@@ -40,7 +41,9 @@ function startGameSheet() {
 
 /** The Lab: the 3D box (#lab), or the Game kit room (#lab/game). */
 export function render(view, param) {
-  return param === "game" ? renderGameKit(view) : renderBox(view);
+  if (param === "game") return renderGameKit(view);
+  if (param === "web") return renderWebKit(view);
+  return renderBox(view);
 }
 
 /** The Game kit: the 3D game-making kit, live, and the 3D game starter. */

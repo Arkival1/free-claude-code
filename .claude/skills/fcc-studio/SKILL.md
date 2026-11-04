@@ -82,7 +82,9 @@ src/free_claude_code/
                   lab/jarvis3d.js, lab/look3d.js; lab/science.js is the PC
                   Lab's sim.py/tech.py in JS on lab/science-data.js
                   (generated, like lab/tutorials-data.js from
-                  build-your-own-x); #lab/game is the Game kit (js/views/lab.js)
+                  build-your-own-x); #lab/game is the Game kit (js/views/lab.js);
+                  #lab/web is the Web kit (web/kit.css, kit.js, sections.js,
+                  js/webkit.js = web_kit tool, js/views/webkit.js)
   api/admin_static/   Admin page UI
   studio/         Studio back end (below)
   providers/, core/, application/, runtime/, harnesses/, messaging/, config/,
