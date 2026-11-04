@@ -7,8 +7,10 @@ description: How to make real Godot 4 games in FCC (Godot 4.7.2, GDScript) on th
 
 ## 1. The loop (always)
 1. `godot` action `start` with the closest starter: `platformer-2d`,
-   `rpg-topdown` or `third-person-3d`, and the game's title. Reshape it into
-   the game asked for; keep what works.
+   `rpg-topdown`, `third-person-3d` or `action-3d`, and the game's title.
+   Reshape it into the game asked for; keep what works. For a 3D action,
+   Souls-like or anything that must look great, start from `action-3d`
+   and read section 3 below.
 2. Read the genre's page in `reference/genres.md` (skill tool, file
    `godot-dev/reference/genres.md`) and plan: core loop, controls, levels,
    win and lose, the art style.
@@ -36,6 +38,34 @@ description: How to make real Godot 4 games in FCC (Godot 4.7.2, GDScript) on th
    that repo off, the demos and this skill are enough.
 8. Design before you build: the `game-design` skill (loop, balance, levels,
    story, rewards, art and sound direction, and eight specialist guides).
+
+## 3. Graphics that look S-tier (the action-3d starter)
+- The look is code, so it needs no licence: `look.gd` draws every surface
+  from seamless noise (colour ramp, normal map, roughness) and maps it by
+  world position (triplanar), and makes fire, embers, smoke and sparks
+  (GPUParticles3D with additive soft dots). Add a surface by adding a
+  colour ramp to `SURFACES`; never paint flat colours on big shapes.
+- Light like a film: one low warm sun with soft shadows (4 splits, angular
+  distance), a cool fill light that doesn't draw a sun in the sky, a
+  procedural dusk sky, AgX tone mapping, glow, height fog with sun scatter,
+  and (Forward+) volumetric fog, SSAO, SSIL; Ultra adds SDFGI and SSR.
+  `apply_graphics()` sets Low/Medium/High/Ultra (F2): keep High smooth on
+  a 6 GB card and put anything heavy behind Ultra.
+- Shaders: `terrain.gdshader` blends grass, dirt (vertex colour) and rock
+  (slope); `grass.gdshader` sways in the wind and lets light through the
+  tips (60,000 blades in a MultiMesh); `water.gdshader` ripples with a
+  fresnel sheen; `vignette.gdshader` frames the screen and flashes red on a
+  hit.
+- Characters read by silhouette: `fighter.gd` builds jointed bodies from
+  shapes (pivots at hips, knees, shoulders, elbows) in two or three
+  materials, with horns, glowing eyes, capes and weapons; poses are code
+  (sine for loops, eased curves for attacks), so timing matches the hit
+  windows in `player.gd` and `boss.gd`.
+- Feel: every boss blow is telegraphed (wind-up, weapon glow, a ring where
+  it lands), then a recovery to punish; the camera shakes on big hits;
+  sparks on contact; i-frames in the roll; stamina for everything.
+- Look at your work: `frames` after every visual change. On the PC frames
+  use the simpler renderer; the owner's card shows the full Forward+ look.
 
 ## 2. GDScript 2 (Godot 4), the rules that trip models up
 - Typed variables: `var speed := 120.0`. When `:=` can't infer (a value

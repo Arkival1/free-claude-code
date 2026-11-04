@@ -288,6 +288,13 @@ Notes carried over from the long session that built FCC Studio (LCC).
   room in `js/views/webkit.js`). Websites start from `web_kit page` (a
   recipe or sections, a look); `check_project` flags the kit's
   `SAMPLE_TEXT` and `.art` stand-ins (role="img") until replaced.
+- Godot on the PC (owner: "getting godot working and making SSS tier games
+  with graphics"): FCC's install/check/frames/export path was checked end
+  to end with real Godot 4.7.2; the `action-3d` starter
+  (`studio/godot/starters/action-3d/`) is the high-end 3D base (look.gd,
+  fighter.gd, player.gd, boss.gd, camera_rig.gd, hud.gd, shaders), and the
+  godot-dev skill's section 3 says how to keep games looking that good.
+  Real-Godot tests run with `FCC_GODOT_BIN` set.
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

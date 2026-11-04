@@ -22,7 +22,7 @@ range), quest flags in an autoload, stats in Resources, turn-based battles
 (a battle scene with a turn queue) or real-time (hitboxes), inventory as an
 Array of Item Resources, save to user://. Good: a clear goal, rewards.
 
-## Action RPG / third person 3D [third-person-3d]
+## Action RPG / third person 3D [action-3d, or third-person-3d for simple ones]
 Combat combos (attack chain with timing windows), dodge roll with
 invulnerable frames, lock-on (nearest enemy in a cone), stamina, loot
 drops, skill tree. CharacterBody3D, AnimationTree blend spaces, hitboxes as

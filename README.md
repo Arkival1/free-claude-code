@@ -2025,8 +2025,8 @@ still looks finished.
   with any game job (`vendor/kenney/`, `vendor/phaser/`).
 - **Godot games.** Game jobs are made in Godot 4.7.2 (MIT) on the PC
   unless you ask for a browser or phone game (those use Phaser). The
-  `godot` tool starts a project from `platformer-2d`, `rpg-topdown` or
-  `third-person-3d`, checks it with Godot headless after every change
+  `godot` tool starts a project from `platformer-2d`, `rpg-topdown`,
+  `third-person-3d` or `action-3d`, checks it with Godot headless after every change
   (every script error and missing file, with file and line), records a
   frame to `screenshots/frame.png`, and exports a Windows game. Godot
   downloads once, is checked against Godot's SHA-512 list and kept in the
@@ -2037,6 +2037,17 @@ still looks finished.
   to change into your game. The
   `godot-dev` skill holds the genre book (18 genres) and the guide to art
   styles, animation, physics, worlds and story (`vendor/godot/`).
+  `action-3d` is the high-end starter: an ember temple at dusk drawn in
+  FCC's own code (seamless noise materials on terrain, stone, bark, steel
+  and cloth; a grass shader with 60,000 wind-blown blades; water; fire,
+  embers, smoke and sparks; a pagoda, ruined pillars, burning trees, a
+  bonfire checkpoint), lit like a film (low warm sun with soft shadows, a
+  cool fill, AgX, glow, height fog, and on Forward+ volumetric mist, SSAO
+  and SSIL; Ultra adds SDFGI and SSR; F2 switches Low/Medium/High/Ultra),
+  with a jointed warrior (stamina, dodge roll with i-frames, light and heavy
+  attacks, a flask, lock-on) against a horned boss whose blows are
+  telegraphed, with a stagger and a second phase. Keyboard, mouse and
+  gamepad.
   The `game-design` skill covers the design side before building: core
   loop, balance, levels and pacing, feedback, story, rewards, art and sound
   direction, and eight specialist guides (game, level, narrative and economy

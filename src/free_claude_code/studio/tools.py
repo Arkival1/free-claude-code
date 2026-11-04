@@ -1152,8 +1152,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         name=GODOT_TOOL,
         description=(
             "Make real Godot 4 games (Godot 4.7.2, GDScript) on this PC. start "
-            "begins a project from a starter: platformer-2d, rpg-topdown or "
-            "third-person-3d. Write .gd scripts and .tscn scenes with "
+            "begins a project from a starter: platformer-2d, rpg-topdown, "
+            "third-person-3d, or action-3d (a third-person action game with "
+            "high-end graphics: textured terrain, grass, fire, mist, a "
+            "warrior and a boss; start every 3D action, Souls-like or "
+            "great-looking 3D game from it). Write .gd scripts and .tscn scenes with "
             "write_file/edit_file. check runs Godot headless and lists every "
             "script error, missing file and warning (file and line): run it "
             "after every change and fix them all. frames plays the game for a "

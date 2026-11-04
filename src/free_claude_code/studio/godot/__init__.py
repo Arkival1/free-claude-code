@@ -11,7 +11,8 @@ Repo vault), Godot's own demo projects to learn from, and starters.
   `art/demo-art-NN.zip`, listed with SHA-256 checksums in `art/art.json.gz`,
   so `demo_project` copies a whole demo that opens and runs.
 - Starters in `starters/`: platformer-2d and rpg-topdown (Kenney art, CC0,
-  from FCC's game library) and third-person-3d (shapes only).
+  from FCC's game library), third-person-3d (shapes only) and action-3d
+  (FCC's own high-end look in code: noise-drawn materials, shaders, fire).
 See `vendor/godot/`.
 """
 
@@ -51,6 +52,7 @@ STARTER_ART: dict[str, dict[str, tuple[str, str]]] = {
         "assets/LICENSE-kenney.txt": ("tiny-town", "License.txt"),
     },
     "third-person-3d": {},
+    "action-3d": {},
 }
 """Each starter's art: project path -> (Kenney pack, file in the pack)."""
 STARTER_NOTES = {
@@ -60,6 +62,13 @@ STARTER_NOTES = {
     "quest with a key and a chest; the map is a text map.",
     "third-person-3d": "A 3D third-person game: mouse-look camera on a spring "
     "arm, walk, run, jump, orbs to collect, sun, sky and shadows.",
+    "action-3d": "A third-person action game with high-end graphics (Forward+): "
+    "an ember temple at dusk (textured terrain, wind-blown grass, burning "
+    "trees, fire, embers, volumetric mist, a pond, a pagoda), a jointed "
+    "warrior with stamina, dodge roll, light and heavy attacks, a flask and "
+    "lock-on, and a horned boss with telegraphed blows and a second phase; "
+    "bonfire checkpoint; Low/Medium/High/Ultra graphics (F2); keyboard, mouse "
+    "and gamepad.",
 }
 STARTER_TITLE = "Game Name"
 
