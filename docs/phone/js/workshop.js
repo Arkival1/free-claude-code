@@ -13,6 +13,9 @@ export const ROOM_NAMES = { chemistry: "Chemistry", electronics: "Electronics", 
 export const BLUEPRINT_KINDS = { chip: "Chip", mixture: "Mixture", invention: "Invention" };
 const MAX_BLUEPRINTS = 200;
 const MAX_VERSIONS = 30;
+const isKind = (kind) => typeof kind === "string" && Object.hasOwn(BLUEPRINT_KINDS, kind);
+/** A yes from a model or a form: true or "true" only ("false" is no). */
+const yes = (value) => value === true || value === "true";
 const LED_TINT = { "led-red": "#ff4d4d", "led-green": "#4dff7a", "led-blue": "#4d7dff", "led-white": "#f4f8ff" };
 
 /** Where Jarvis is and what he's doing (the Lab box walks him there). */
@@ -93,6 +96,7 @@ export async function setBoard(parts, { series, sun, powered } = {}) {
   if (series !== undefined) bench.series = Boolean(series);
   if (sun !== undefined) bench.sun = Boolean(sun);
   if (powered !== undefined) bench.powered = Boolean(powered);
+  if (!parts.length) bench.powered = false;
   bench.result = bench.powered && parts.length ? simulateBuild(parts, { series: bench.series, sun: bench.sun }) : null;
   await keepBench();
   return bench.result;
@@ -160,6 +164,17 @@ function colourOf(kind, data) {
   }
 }
 
+/** A blueprint by its id or its exact name (for adding a version: never a guess). */
+export function exactBlueprint(idOrName) {
+  const wanted = String(idOrName || "").trim().toLowerCase();
+  if (!wanted) return null;
+  return state.blueprints.find((print) => print.id === wanted || print.name.toLowerCase() === wanted) || null;
+}
+
+/** A version's number (older saves kept none: their place in the list). */
+export const versionNumber = (print, version) => version.number || print.versions.indexOf(version) + 1;
+export const nextVersion = (print) => versionNumber(print, print.versions.at(-1)) + 1;
+
 export function findBlueprint(idOrName) {
   const wanted = String(idOrName || "").trim().toLowerCase();
   if (!wanted) return null;
@@ -167,20 +182,27 @@ export function findBlueprint(idOrName) {
 }
 
 /** Save what's on the benches as a blueprint, or as the next version of one. */
-export async function saveBlueprint({ name, kind = "chip", notes = "", by = "you", onto = "" } = {}) {
-  const sort = kind in BLUEPRINT_KINDS ? kind : "invention";
+export async function saveBlueprint({ name, kind = "", notes = "", by = "you", onto = "" } = {}) {
+  const existing = onto ? exactBlueprint(onto) : null;
+  if (onto && !existing) throw new Error(`No blueprint with the id or name ${onto}: the blueprints action lists them (leave id out to save a new one).`);
+  const { chemistry, electronics } = state.bench;
+  const guess = electronics.parts.length && chemistry.items.length ? "invention" : chemistry.items.length ? "mixture" : "chip";
+  const sort = isKind(kind) ? kind : existing ? existing.kind : guess;
   const data = JSON.parse(JSON.stringify(benchData(sort)));
   const version = { at: Date.now(), by, notes: String(notes || "").trim().slice(0, 2000), data, summary: summarise(sort, data) };
-  const existing = onto ? findBlueprint(onto) : null;
   if (existing) {
     if (existing.kind !== sort) throw new Error(`${existing.name} is a ${existing.kind}; save a ${sort} as its own blueprint.`);
+    version.number = nextVersion(existing);
     existing.versions.push(version);
+    // Past the cap the oldest versions after the first make room; each
+    // version keeps its own number, so the numbers never shift.
     if (existing.versions.length > MAX_VERSIONS) existing.versions.splice(1, existing.versions.length - MAX_VERSIONS);
     Object.assign(existing, { updated_at: version.at, summary: version.summary, colour: colourOf(sort, data), notes: version.notes || existing.notes });
     state.blueprints = [existing, ...state.blueprints.filter((print) => print.id !== existing.id)];
   } else {
     if (state.blueprints.length >= MAX_BLUEPRINTS) throw new Error(`The blueprint shelf is full (${MAX_BLUEPRINTS}): delete some first.`);
     const title = String(name || "").trim().slice(0, 60) || `${BLUEPRINT_KINDS[sort]} ${state.blueprints.length + 1}`;
+    version.number = 1;
     state.blueprints.unshift({ id: uid(), kind: sort, name: title, notes: version.notes, by, colour: colourOf(sort, data), summary: version.summary, created_at: version.at, updated_at: version.at, versions: [version] });
   }
   const print = existing || state.blueprints[0];
@@ -189,7 +211,7 @@ export async function saveBlueprint({ name, kind = "chip", notes = "", by = "you
   await save.blueprints();
   await keepBench();
   changed("blueprints");
-  feed(by === "you" ? "You" : by, `${existing ? `Saved version ${print.versions.length} of` : "Saved the blueprint"} ${print.name}`);
+  feed(by === "you" ? "You" : by, `${existing ? `Saved version ${version.number} of` : "Saved the blueprint"} ${print.name}`);
   if (by !== "you") jarvisWorks("blueprints", `filing ${print.name}`);
   return print;
 }
@@ -198,7 +220,8 @@ export async function saveBlueprint({ name, kind = "chip", notes = "", by = "you
 export async function loadBlueprint(idOrName, { version = 0, by = "you" } = {}) {
   const print = findBlueprint(idOrName);
   if (!print) throw new Error(`No blueprint called ${idOrName}. The blueprints action lists them.`);
-  const chosen = print.versions[(version > 0 ? Math.min(version, print.versions.length) : print.versions.length) - 1];
+  const wanted = Math.trunc(Number(version));
+  const chosen = (Number.isFinite(wanted) && wanted >= 1 && print.versions.find((item) => versionNumber(print, item) === wanted)) || print.versions.at(-1);
   const data = chosen.data;
   const chip = print.kind === "chip" ? data : print.kind === "invention" ? data.circuit : null;
   const brew = print.kind === "mixture" ? data : print.kind === "invention" ? data.mix : null;
@@ -212,7 +235,7 @@ export async function loadBlueprint(idOrName, { version = 0, by = "you" } = {}) 
   }
   if (by !== "you") jarvisWorks(chip ? "electronics" : "chemistry", `loading ${print.name}`);
   await keepBench();
-  return { print, version: print.versions.indexOf(chosen) + 1 };
+  return { print, version: versionNumber(print, chosen) };
 }
 
 /** Drop a saved chip into the circuit on the board (its parts join the build). */
@@ -238,7 +261,7 @@ export async function removeBlueprint(id) {
 
 export function searchBlueprints(query = "", kind = "") {
   const words = String(query).toLowerCase().split(/\s+/).filter(Boolean);
-  return state.blueprints.filter((print) => (!kind || print.kind === kind) && words.every((word) => `${print.name} ${print.notes} ${print.summary} ${print.kind}`.toLowerCase().includes(word)));
+  return state.blueprints.filter((print) => (!isKind(kind) || print.kind === kind) && words.every((word) => `${print.name} ${print.notes} ${print.summary} ${print.kind}`.toLowerCase().includes(word)));
 }
 
 /* ----------------------------------------------------------- the Library */
@@ -264,13 +287,13 @@ export function searchTutorials(query = "", topic = "", limit = 40) {
 export async function useWorkshop(args, agent) {
   const by = agent ? agent.name : "you";
   const action = String(args.action || "");
-  if (action === "mix") return describeMix(await mix(args.items, { heat: Boolean(args.heat), flame: Boolean(args.flame), by }));
+  if (action === "mix") return describeMix(await mix(args.items, { heat: yes(args.heat), flame: yes(args.flame), by }));
   if (action === "shelf") {
     const found = searchChemicals(String(args.query || ""), 25);
     jarvisWorks("chemistry", "checking the shelf");
     return found.length ? found.map((chemical) => `${chemical.id}: ${chemical.name} ${chemical.formula} (${chemical.kind}, ${chemical.state})`).join("\n") : "Nothing on the shelf matches. Any element works by its symbol too (Na, Mg, Cu...).";
   }
-  if (action === "circuit") return describeCircuit(await circuit(args.parts, { series: args.series !== false, sun: args.sun !== false, by }));
+  if (action === "circuit") return describeCircuit(await circuit(args.parts, { series: args.series !== false && args.series !== "false", sun: args.sun !== false && args.sun !== "false", by }));
   if (action === "parts") {
     const words = String(args.query || "").toLowerCase().split(/\s+/).filter(Boolean);
     const found = PARTS.filter((part) => words.every((word) => `${part.id} ${part.name} ${part.kind}`.toLowerCase().includes(word)));
@@ -279,16 +302,16 @@ export async function useWorkshop(args, agent) {
   }
   if (action === "save") {
     const print = await saveBlueprint({ name: args.name, kind: args.kind, notes: args.notes, by, onto: args.id });
-    return `Saved ${print.name} (${print.kind}, id ${print.id}, version ${print.versions.length}). ${print.summary}`;
+    return `Saved ${print.name} (${print.kind}, id ${print.id}, version ${versionNumber(print, print.versions.at(-1))}). ${print.summary}`;
   }
   if (action === "blueprints") {
-    const found = searchBlueprints(String(args.query || ""), args.kind in BLUEPRINT_KINDS ? args.kind : "");
+    const found = searchBlueprints(String(args.query || ""), isKind(args.kind) ? args.kind : "");
     jarvisWorks("blueprints", "reading the blueprints");
     return found.length ? found.slice(0, 20).map((print) => `${print.id}: ${print.name} (${print.kind}, ${print.versions.length} version${print.versions.length === 1 ? "" : "s"}) ${print.summary}${print.notes ? ` Notes: ${print.notes.slice(0, 160)}` : ""}`).join("\n") : "No blueprints saved yet.";
   }
   if (action === "load") {
     const { print, version } = await loadBlueprint(args.id || args.name, { version: Number(args.version) || 0, by });
-    const lines = [`Loaded ${print.name} version ${version} of ${print.versions.length} onto the bench.`];
+    const lines = [`Loaded ${print.name} version ${version} (the newest is ${versionNumber(print, print.versions.at(-1))}) onto the bench.`];
     if (state.bench.electronics.result && print.kind !== "mixture") lines.push(describeCircuit(state.bench.electronics.result));
     if (state.bench.chemistry.result && print.kind !== "chip") lines.push(describeMix(state.bench.chemistry.result));
     lines.push("To improve it: change it (mix or circuit), then save with id set to this blueprint's id, which adds a version.");

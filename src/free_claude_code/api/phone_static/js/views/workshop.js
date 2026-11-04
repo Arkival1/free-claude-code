@@ -119,14 +119,15 @@ export function render(view) {
 
   const saveSheet = (kind) => {
     const fromId = kind === "mixture" ? state.bench.from.chemistry : state.bench.from.electronics;
-    const from = fromId ? shop.findBlueprint(fromId) : null;
+    const from = fromId ? shop.exactBlueprint(fromId) : null;
     const name = el("input", { "aria-label": "Blueprint name", placeholder: kind === "chip" ? "Night light chip" : kind === "mixture" ? "Blue copper mix" : "Solar plant waterer" });
     const notes = el("textarea", { rows: 3, "aria-label": "Notes", placeholder: "What it does, how it works, what changed" });
     const save = async (onto) => {
       try {
         const print = await shop.saveBlueprint({ name: name.value, kind, notes: notes.value, onto });
         closeSheet();
-        notify(`Saved ${print.name}${print.versions.length > 1 ? ` (version ${print.versions.length})` : ""}.`);
+        const number = shop.versionNumber(print, print.versions.at(-1));
+        notify(`Saved ${print.name}${number > 1 ? ` (version ${number})` : ""}.`);
         drawPanel();
       } catch (error) {
         notify(error.message);
@@ -136,7 +137,7 @@ export function render(view) {
       el("label", {}, ["Name", name]),
       el("label", {}, ["Notes", notes]),
       el("div", { class: "row" }, [
-        from && from.kind === kind ? button(`Save as version ${from.versions.length + 1} of ${from.name}`, () => save(from.id), { class: "primary" }) : null,
+        from && from.kind === kind ? button(`Save as version ${shop.nextVersion(from)} of ${from.name}`, () => save(from.id), { class: "primary" }) : null,
         button(from && from.kind === kind ? "Save as a new blueprint" : "Save", () => save(""), { class: from && from.kind === kind ? "" : "primary" }),
       ]),
     ]);
@@ -370,7 +371,10 @@ export function render(view) {
       print.versions.length > 1
         ? el("details", {}, [
             el("summary", { text: "Versions" }),
-            ...print.versions.map((version, index) => el("div", { class: "lab-row" }, [el("span", { class: "grow small", text: `v${index + 1} · ${new Date(version.at).toLocaleDateString()} · ${version.by}${version.notes ? `: ${version.notes.slice(0, 80)}` : ""}` }), button("Load", () => run(() => shop.loadBlueprint(print.id, { version: index + 1 })))])),
+            ...print.versions.map((version) => {
+              const number = shop.versionNumber(print, version);
+              return el("div", { class: "lab-row" }, [el("span", { class: "grow small", text: `v${number} · ${new Date(version.at).toLocaleDateString()} · ${version.by}${version.notes ? `: ${version.notes.slice(0, 80)}` : ""}` }), button("Load", () => run(() => shop.loadBlueprint(print.id, { version: number })))]);
+            }),
           ])
         : null,
     ]);

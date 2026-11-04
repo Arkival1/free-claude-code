@@ -498,7 +498,7 @@ export function makeWorld(canvas, { onPick = () => {}, onFocus = () => {} } = {}
     });
     const shown = selected || list[0];
     sheet.dispose();
-    sheet = shown ? blueprintSheet(shown.name, `${shown.kind} · version ${shown.versions.length}`, [shown.summary || ""]) : blueprintSheet("Blueprints", "Save a chip, a mixture or an invention", []);
+    sheet = shown ? blueprintSheet(shown.name, `${shown.kind} · version ${shown.versions.at(-1).number || shown.versions.length}`, [shown.summary || ""]) : blueprintSheet("Blueprints", "Save a chip, a mixture or an invention", []);
     sheetMaterial.map = sheet;
     sheetMaterial.needsUpdate = true;
   }

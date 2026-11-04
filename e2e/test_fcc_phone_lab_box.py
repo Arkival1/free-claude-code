@@ -287,3 +287,60 @@ def test_jarvis_works_the_lab_himself(page: Page, admin_base_url: str) -> None:
         for call in message.get("tool_calls") or []
     ]
     assert set(called) == {"lab"}
+
+
+def test_blueprint_versions_are_exact_and_model_arguments_are_safe(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    result = page.evaluate(
+        """async () => {
+            const shop = await import('./js/workshop.js');
+            const { runTool } = await import('./js/tools.js');
+            const jarvis = window.fccPhone.state.agents.find((a) => a.id === 'jarvis');
+            const tool = (args) => runTool(jarvis, { name: 'lab', arguments: args }, { depth: 0, chain: [], built: new Set() });
+            const out = {};
+            await shop.circuit([{ id: 'solar' }, { id: 'fan' }]);
+            const fan = await shop.saveBlueprint({ name: 'Solar fan', kind: 'chip' });
+            // A partial name never adds a version to another blueprint.
+            out.partial = await tool({ action: 'save', id: 'fan', kind: 'chip' });
+            out.fanVersions = fan.versions.length;
+            // A version of a mixture with no kind given keeps the mixture's kind.
+            await tool({ action: 'mix', items: [{ name: 'vinegar', amount: 30 }], heat: 'false' });
+            out.heat = window.fccPhone.state.bench.chemistry.heat;
+            const brew = await shop.saveBlueprint({ name: 'Sour', kind: 'mixture' });
+            await shop.mix([{ id: 'acetic-acid', amount: 30 }, { id: 'sodium-bicarbonate', amount: 3 }]);
+            out.versioned = await tool({ action: 'save', id: brew.id });
+            out.brewKind = shop.findBlueprint(brew.id).kind;
+            // An odd kind falls back to what the benches hold.
+            const odd = await shop.saveBlueprint({ name: 'Odd', kind: 'constructor' });
+            out.oddKind = odd.kind;
+            // A fractional version loads that version, not a crash.
+            out.loaded = (await shop.loadBlueprint(brew.id, { version: 1.5 })).version;
+            // Past the cap of 30, numbers never shift.
+            for (let i = 0; i < 32; i += 1) await shop.saveBlueprint({ kind: 'chip', onto: fan.id });
+            const kept = shop.findBlueprint(fan.id);
+            out.kept = kept.versions.length;
+            out.newest = shop.versionNumber(kept, kept.versions.at(-1));
+            out.next = shop.nextVersion(kept);
+            out.loadNewest = (await shop.loadBlueprint(fan.id, { version: out.newest })).version;
+            // Emptying the board switches the power off.
+            await shop.setBoard([{ id: 'aa' }], { powered: true });
+            await shop.setBoard([]);
+            out.powered = window.fccPhone.state.bench.electronics.powered;
+            return out;
+        }"""
+    )
+    assert "No blueprint with the id or name fan" in result["partial"]
+    assert result["fanVersions"] == 1
+    assert result["heat"] is False
+    assert (
+        result["versioned"].startswith("Saved Sour (mixture")
+        and "version 2" in result["versioned"]
+    )
+    assert result["brewKind"] == "mixture"
+    assert result["oddKind"] == "invention"
+    assert result["loaded"] == 1
+    assert result["kept"] == 30 and result["newest"] == 33 and result["next"] == 34
+    assert result["loadNewest"] == 33
+    assert result["powered"] is False
