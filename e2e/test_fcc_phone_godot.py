@@ -6,6 +6,7 @@ game that wants too much memory is told no in its box; the probe lists what
 Godot can do here; and the AI makes and checks a Godot game with the tool."""
 
 import json
+import struct
 
 import pytest
 from playwright.sync_api import ConsoleMessage, Page, Route, expect
@@ -164,6 +165,8 @@ def test_the_godot_box_has_no_internet_no_page_access_and_a_memory_cap(
         '\t\tprint("NET %d %d" % [answer[0], answer[1]])\n'
         '\tvar value: Variant = JavaScriptBridge.eval("parent.document.title", true)\n'
         '\tprint("JS %s" % [value])\n'
+        "\tvar peer := WebRTCPeerConnection.new()\n"
+        '\tprint("RTC %d" % peer.initialize({"iceServers": [{"urls": ["stun:127.0.0.1:3478"]}]}))\n'
         "\tvar big := PackedByteArray()\n"
         '\tprint("BIG %d" % big.resize(1536 * 1024 * 1024))\n'
         '\tprint("DONE")\n'
@@ -177,6 +180,9 @@ def test_the_godot_box_has_no_internet_no_page_access_and_a_memory_cap(
     # RESULT_SUCCESS is 0: anything else means the request never got through.
     assert net != "NET 0 200", lines
     assert "JS <null>" in lines, lines
+    # WebRTC isn't covered by the content policy, so the box switches it off.
+    rtc = next(line for line in lines if line.startswith("RTC"))
+    assert rtc != "RTC 0", lines
     assert any(line.startswith("BIG") and line != "BIG 0" for line in lines), lines
     assert "DONE" in lines
     assert "said no" in result["memory"]
@@ -253,3 +259,88 @@ def test_the_ai_starts_and_checks_a_godot_game_with_the_tool(
     assert "starter is one of" in result["bad"]
     assert "No errors" in result["check"], result["check"]
     assert {"project.godot", "main.gd", "main.tscn"} <= set(result["files"])
+
+
+def test_the_box_guards_hold_and_the_pack_is_godots_format(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(GODOT_WAIT)
+    open_phone(page, admin_base_url)
+    found = page.evaluate(
+        r"""async () => {
+            const godot = await import('./js/godot.js');
+            const { makePack } = await import('./godot/pack.js');
+            const loops = {
+                nested: 'func _ready():\n\twhile true:\n\t\tfor i in 3:\n\t\t\tbreak\n',
+                inline: 'func _ready():\n\twhile true:\n\t\tfor i in 3: break\n',
+                breaks: 'func _ready():\n\twhile true:\n\t\tfor i in 3:\n\t\t\tpass\n\t\tbreak\n',
+                waits: 'func _ready():\n\twhile true:\n\t\tfor i in 3:\n\t\t\tawait get_tree().process_frame\n',
+                one_line: 'func _ready():\n\twhile true: break\n',
+            };
+            const out = { loops: {} };
+            for (const [name, text] of Object.entries(loops)) out.loops[name] = godot.endlessLoops(text);
+            // The plain-JS SHA-256 (for plain http) agrees with the browser's.
+            out.sums = [];
+            for (const size of [0, 3, 55, 56, 63, 64, 65, 1000, 1048577]) {
+                const bytes = new Uint8Array(size).map((_, i) => (i * 31 + size) & 255);
+                const theirs = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+                out.sums.push(godot.sha256Hex(bytes.buffer) === theirs);
+            }
+            // One game at a time: a second run closes the first; a stop before
+            // the engine is in leaves nothing behind.
+            const files = { 'project.godot': 'run/main_scene="res://main.tscn"\n', 'main.tscn': '', 'main.gd': '' };
+            const first = godot.runGodot({ name: 'First', files }, { mode: 'check' });
+            const second = godot.runGodot({ name: 'Second', files }, { mode: 'check' });
+            out.first = (await first.done).stopped;
+            second.stop('Closed.');
+            const done = await second.done;
+            out.second = [done.stopped, done.started];
+            out.boxes = document.querySelectorAll('iframe.godot-box').length;
+            // A message that isn't from the box changes nothing.
+            const third = godot.runGodot({ name: 'Third', files }, { mode: 'check' });
+            window.postMessage({ type: 'crash', text: 'Aborted' }, '*');
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            third.stop('Closed.');
+            const spoofed = await third.done;
+            out.spoofed = [spoofed.crash, spoofed.stopped];
+            out.pack = [...new Uint8Array(makePack({ 'project.godot': 'x', 'a/b.gd': 'hello', 'c.txt': 'abcd' }))];
+            return out;
+        }"""
+    )
+    assert found["loops"] == {
+        "nested": [2],
+        "inline": [2],
+        "breaks": [],
+        "waits": [],
+        "one_line": [],
+    }
+    assert all(found["sums"]), found["sums"]
+    assert found["first"] == "Another Godot game started, so this one was closed."
+    assert found["second"] == ["Closed.", False]
+    assert found["boxes"] == 0
+    assert found["spoofed"] == ["", "Closed."]
+    pack = bytes(found["pack"])
+    magic, version, major, minor, patch, flags = struct.unpack_from("<6I", pack, 0)
+    base, directory = struct.unpack_from("<2Q", pack, 24)
+    assert (magic, version, (major, minor, patch), flags) == (
+        0x43504447,
+        4,
+        (4, 7, 2),
+        2,
+    )
+    assert base == 104 and directory <= len(pack)
+    count = struct.unpack_from("<I", pack, directory)[0]
+    at, entries = directory + 4, {}
+    for _ in range(count):
+        size = struct.unpack_from("<I", pack, at)[0]
+        name = pack[at + 4 : at + 4 + size].rstrip(b"\0").decode()
+        offset, length = struct.unpack_from("<2Q", pack, at + 4 + size)
+        entries[name] = pack[base + offset : base + offset + length]
+        assert offset % 4 == 0
+        at += 4 + size + 16 + 16 + 4
+    assert entries == {
+        "res://project.godot": b"x",
+        "res://a/b.gd": b"hello",
+        "res://c.txt": b"abcd",
+        "res://.godot/global_script_class_cache.cfg": b"list=[]\n",
+    }

@@ -16,7 +16,10 @@ export const GODOT_VERSION = "4.7.2";
 export const MEMORY_MB = 1024;
 /** Sharper than this costs frames for little gain on a phone screen. */
 const PIXEL_RATIO = 2;
+/** From the engine being ready (not counting its first download) to the game's first frames. */
 const START_LIMIT_S = 120;
+/** The engine's first download (10 MB) on a slow connection. */
+const LOAD_LIMIT_S = 900;
 const QUIET_LIMIT_S = 20;
 const FILES = {
   script: ["godot/godot.js", "ffc3898b59fba6f5af0c02f76e5ee526cc061e65c7d2d6f4f98186876cea15c4"],
@@ -37,6 +40,52 @@ const ABORT = /\bAborted\b|RuntimeError|unreachable|out of memory|memory access 
 const NOISE = /^Failed to assign PWA callback/;
 
 const hex = (buffer) => [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+const ROUND = new Uint32Array([0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
+const rotate = (value, bits) => (value >>> bits) | (value << (32 - bits));
+
+/** SHA-256 in plain JS, for when the browser's own isn't there (plain http
+ * from the PC on the home network), so the engine is always checked. */
+export function sha256Hex(buffer) {
+  const data = new Uint8Array(buffer);
+  const blocks = Math.ceil((data.length + 9) / 64);
+  const padded = new Uint8Array(blocks * 64);
+  padded.set(data);
+  padded[data.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 8, Math.floor(data.length / 0x20000000));
+  view.setUint32(padded.length - 4, (data.length * 8) >>> 0);
+  const state = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  const w = new Uint32Array(64);
+  for (let block = 0; block < blocks; block += 1) {
+    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(block * 64 + i * 4);
+    for (let i = 16; i < 64; i += 1) {
+      const s0 = rotate(w[i - 15], 7) ^ rotate(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotate(w[i - 2], 17) ^ rotate(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    let [a, b, c, d, e, f, g, h] = state;
+    for (let i = 0; i < 64; i += 1) {
+      const t1 = (h + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25)) + ((e & f) ^ (~e & g)) + ROUND[i] + w[i]) | 0;
+      const t2 = ((rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + t1) | 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (t1 + t2) | 0;
+    }
+    [a, b, c, d, e, f, g, h].forEach((value, i) => (state[i] += value));
+  }
+  return [...state].map((word) => word.toString(16).padStart(8, "0")).join("");
+}
+
+async function digest(bytes) {
+  if (globalThis.crypto && crypto.subtle) return hex(await crypto.subtle.digest("SHA-256", bytes));
+  return sha256Hex(bytes);
+}
 
 async function fetchChecked([path, sum], onProgress) {
   const response = await fetch(new URL(`../${path}`, import.meta.url));
@@ -64,8 +113,7 @@ async function fetchChecked([path, sum], onProgress) {
   } else {
     bytes = await response.arrayBuffer();
   }
-  // crypto.subtle exists only on https (and localhost); the app is served there.
-  if (globalThis.crypto && crypto.subtle && hex(await crypto.subtle.digest("SHA-256", bytes)) !== sum) {
+  if ((await digest(bytes)) !== sum) {
     // Drop the bad copy, so the next try fetches it again.
     if (globalThis.caches) await caches.open(GODOT_CACHE).then((cache) => cache.delete(response.url)).catch(() => false);
     throw new Error(`Godot's ${path.split("/").pop()} isn't the file FCC shipped (its checksum is wrong), so it wasn't run. Reload the app to fetch it again.`);
@@ -129,6 +177,15 @@ function boxMain() {
       const ratio = Math.min(window.devicePixelRatio || 1, job.pixelRatio);
       Object.defineProperty(window, "devicePixelRatio", { get: () => ratio, configurable: true });
       const wasm = await new Response(new Blob([job.wasm]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+      // WebRTC isn't covered by the content policy, so it's switched off here.
+      for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection"]) {
+        Object.defineProperty(window, name, {
+          value: function Blocked() {
+            throw new Error("The game box has no internet.");
+          },
+          configurable: false,
+        });
+      }
       // The only thing the engine may fetch is its own code, from memory.
       window.fetch = (input) =>
         /\.wasm$/.test(String((input && input.url) || input))
@@ -204,22 +261,33 @@ const RES_PATH = /(?:preload|load)\(\s*"res:\/\/([^"]+)"\s*\)/g;
 const EXT_PATH = /\[ext_resource\b[^\]]*\bpath="res:\/\/([^"]+)"/g;
 const IMPORTED = /\.(png|jpe?g|webp|svg|bmp|tga|ogg|wav|mp3|glb|gltf|obj|fbx|blend|ttf|otf|woff2?)$/i;
 
-/** Blocks of `while true:` with nothing inside that leaves (break, return, await). */
-function endlessLoops(text) {
+/**
+ * Lines of `while true:` loops with no way out: return, await or quit
+ * anywhere inside, or a break that isn't inside an inner loop (that break
+ * only leaves the inner loop).
+ */
+export function endlessLoops(text) {
   const lines = text.split("\n");
+  const width = (row) => row.match(/^\s*/)[0].replace(/\t/g, "    ").length;
   const found = [];
   lines.forEach((line, index) => {
-    const head = line.match(/^(\s*)while\s+(?:true|1|\(true\))\s*:\s*(.*)$/);
+    const head = line.match(/^\s*while\s+(?:true|1|\(true\))\s*:\s*(.*)$/);
     if (!head) return;
-    const indent = head[1].replace(/\t/g, "    ").length;
-    const body = [head[2]];
-    for (let next = index + 1; next < lines.length; next += 1) {
+    const indent = width(line);
+    const inline = head[1].replace(/#.*$/, "");
+    let exits = /\b(break|return|await|quit)\b/.test(inline);
+    const inner = [];
+    for (let next = index + 1; next < lines.length && !exits; next += 1) {
       const row = lines[next];
       if (!row.trim() || /^\s*#/.test(row)) continue;
-      if (row.match(/^\s*/)[0].replace(/\t/g, "    ").length <= indent) break;
-      body.push(row);
+      const depth = width(row);
+      if (depth <= indent) break;
+      while (inner.length && depth <= inner[inner.length - 1]) inner.pop();
+      const code = row.replace(/#.*$/, "");
+      if (/^\s*(for|while)\b/.test(code)) inner.push(depth);
+      if (/\b(return|await|quit)\b/.test(code) || (/\bbreak\b/.test(code) && !inner.length)) exits = true;
     }
-    if (!/\b(break|return|await|quit)\b/.test(body.join("\n"))) found.push(index + 1);
+    if (!exits) found.push(index + 1);
   });
   return found;
 }
@@ -315,6 +383,7 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
   // build its world before that), and counted from there.
   let startedFrames = 0;
   let playingAt = 0;
+  let readyAt = 0;
   let firstFrames = 0;
   let closed = false;
   if (busy) busy.stop("Another Godot game started, so this one was closed.");
@@ -345,6 +414,7 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
         loadGodot(onProgress)
           .then((engine) => {
             if (closed) return;
+            readyAt = Date.now();
             onEvent({ type: "engine" });
             frame.contentWindow.postMessage({ type: "run", script: engine.script, wasm: engine.wasm, worklets: engine.worklets, pack, args, memoryMb: MEMORY_MB, pixelRatio: PIXEL_RATIO }, "*");
           })
@@ -361,7 +431,7 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
         if (result.started && !playingAt && frames >= startedFrames + 3) {
           playingAt = Date.now();
           firstFrames = frames;
-          result.startSeconds = Math.round((playingAt - started) / 100) / 10;
+          result.startSeconds = Math.round((playingAt - readyAt) / 100) / 10;
           onEvent({ type: "playing" });
         }
         break;
@@ -429,10 +499,12 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
     if (document.hidden || now - lastTick > 3000) {
       lastWord = now;
       lastFrame = now;
+      if (readyAt && !playingAt) readyAt += now - lastTick;
     }
     lastTick = now;
     if (document.hidden) return;
-    if (!playingAt && now - started > START_LIMIT_S * 1000) stop(`The game didn't show a frame within ${START_LIMIT_S} s, so the box was closed.`);
+    if (!readyAt && now - started > LOAD_LIMIT_S * 1000) stop("Godot's engine didn't finish downloading, so the box was closed. Try again with a better connection.");
+    else if (readyAt && !playingAt && now - readyAt > START_LIMIT_S * 1000) stop(`The game didn't show a frame within ${START_LIMIT_S} s, so the box was closed.`);
     else if (result.started && now - lastWord > QUIET_LIMIT_S * 1000) stop(`The game stopped answering for ${QUIET_LIMIT_S} s (a script stuck in a loop?), so the box was closed.`);
     else if (playingAt && now - lastFrame > QUIET_LIMIT_S * 1000) stop(`The game stopped drawing for ${QUIET_LIMIT_S} s, so the box was closed.`);
     else if (mode === "check" && playingAt && now - playingAt >= seconds * 1000) stop("");
