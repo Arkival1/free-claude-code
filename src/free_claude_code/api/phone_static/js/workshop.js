@@ -291,7 +291,7 @@ export async function saveProgram(code, by = "you") {
 export function cantRun() {
   const { parts, powered, result } = state.bench.electronics;
   const wire = wiring(parts);
-  if (!wire.brain) return "There's no board computer on the board: add an Arduino, ESP32 or Raspberry Pi.";
+  if (!wire.brain) return "There's no board computer on the board: add an Orange Pi (a single-board computer), an Arduino, an ESP32 or a Raspberry Pi.";
   if (!powered || !result) return "The board is switched off: power it on first.";
   const brain = result.parts.find((row) => row.id === wire.brain);
   if (brain && !["on", "weak", "ok"].includes(brain.state)) return `The board computer is ${brain.state}${brain.reason ? ` (${brain.reason})` : ""}: fix the power first.`;

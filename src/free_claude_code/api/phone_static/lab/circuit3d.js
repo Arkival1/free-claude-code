@@ -15,7 +15,7 @@ const RAIL_PLUS = -2.45;
 const RAIL_MINUS = -2.1;
 const MAX_COPIES = 4;
 const LED_COLOURS = { "led-red": "#ff2d2d", "led-green": "#36ff5c", "led-blue": "#2f6bff", "led-white": "#eef4ff", "led-power": "#fff1c2", bulb: "#ffcf7a" };
-const OFF_BOARD = new Set(["motor", "fan", "servo", "pump", "vibration", "speaker", "bulb", "raspberry-pi", "wheels", "chassis", "case", "motor-driver", "led-strip", "led-power", "soil-sensor", "wire", "solar", "relay"]);
+const OFF_BOARD = new Set(["motor", "fan", "servo", "pump", "vibration", "speaker", "bulb", "raspberry-pi", "orange-pi", "wheels", "chassis", "case", "motor-driver", "led-strip", "led-power", "soil-sensor", "wire", "solar", "relay"]);
 const LEVEL = { on: 1, weak: 0.65, dim: 0.25, idle: 0.12, ok: 1, off: 0, burnt: 0 };
 
 function breadboardTexture() {
@@ -381,6 +381,40 @@ function makers(m) {
       root.add(block(0.9, 0.04, 2.3, standard("#c08a2c", 0.4, 0.6), 2.2, 1.01, 0));
       const tick = boardLeds(root, [["#ff3030", -1.8, 1.05, -0.9, false], ["#3a7bff", -1.8, 1.05, 0.9, true]]);
       return { root, plus: new THREE.Vector3(-2.3, 0, -1.25), minus: new THREE.Vector3(-2.0, 0, -1.25), tick: (t, dt, level) => tick(t, level) };
+    },
+    // Orange Pi 5, to scale (1 unit = 10 mm: a 100 x 62 mm board): the
+    // RK3588S under a finned heatsink, LPDDR4X RAM, the 26-pin header, and the
+    // ports along one edge (USB-C power, HDMI, two USB-A stacked, Ethernet).
+    "orange-pi": () => {
+      const root = new THREE.Group();
+      const steel = metal("#c7cbd0", 0.3);
+      for (const [x, z] of [[-4.6, -2.7], [4.6, -2.7], [-4.6, 2.7], [4.6, 2.7]]) root.add(post(0.25, 0.3, metal("#b08d57", 0.3), x, 0, z, 10));
+      root.add(pcb(10.0, 6.2, "#1d1f22", "Orange Pi 5", 0.3));
+      root.add(chip(2.3, 2.3, -0.6, 0.46, -0.2, "RK3588S"));
+      const sink = new THREE.Group();
+      sink.position.set(-0.6, 0.58, -0.2);
+      sink.add(block(2.4, 0.15, 2.4, metal("#9aa3ad", 0.35), 0, 0, 0));
+      for (let i = 0; i < 7; i += 1) sink.add(block(0.12, 0.65, 2.4, metal("#a9b2bc", 0.35), -1.08 + i * 0.36, 0.15, 0));
+      root.add(sink);
+      root.add(chip(1.4, 1.1, 1.9, 0.46, -1.2, "LPDDR4X"), chip(1.4, 1.1, 1.9, 0.46, 0.6, "LPDDR4X"));
+      // The 26-pin GPIO header: two rows of 13 gold pins in a black base.
+      root.add(block(3.4, 0.25, 0.55, m.black, 0.8, 0.46, -2.65));
+      for (let row = 0; row < 2; row += 1) for (let i = 0; i < 13; i += 1) root.add(block(0.06, 0.6, 0.06, m.gold, -0.72 + i * 0.254, 0.71, -2.78 + row * 0.254));
+      // Ports along the front edge.
+      root.add(block(0.9, 0.32, 0.75, steel, -4.0, 0.46, 2.75));
+      root.add(block(1.5, 0.6, 1.1, steel, -2.4, 0.46, 2.6), block(1.1, 0.25, 0.1, m.black, -2.4, 0.62, 3.16));
+      const usb = new THREE.Group();
+      usb.position.set(0.2, 0.46, 2.35);
+      usb.add(block(1.45, 1.55, 1.7, steel, 0, 0, 0));
+      usb.add(block(1.1, 0.12, 0.1, standard("#1f5fd6", 0.4), 0, 0.45, 0.86), block(1.1, 0.12, 0.1, m.black, 0, 1.15, 0.86));
+      root.add(usb);
+      const lan = new THREE.Group();
+      lan.position.set(2.6, 0.46, 2.15);
+      lan.add(block(1.6, 1.35, 2.1, steel, 0, 0, 0), block(1.2, 0.85, 0.1, m.black, 0, 0.2, 1.06));
+      root.add(lan);
+      root.add(block(1.2, 0.15, 1.2, steel, 4.6, 0.46, 0.2));
+      const tick = boardLeds(root, [["#ff3030", 4.4, 0.5, -1.6, false], ["#36ff5c", 4.4, 0.5, -1.2, true]]);
+      return { root, plus: new THREE.Vector3(-4.0, 0.6, 2.4), minus: new THREE.Vector3(-3.7, 0.6, 2.4), tick: (t, dt, level) => tick(t, level) };
     },
     "raspberry-pi": () => {
       const root = new THREE.Group();

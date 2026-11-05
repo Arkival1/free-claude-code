@@ -22,6 +22,7 @@ const TRY_MIXES = {
 const TRY_BUILDS = {
   "LED torch": [{ id: "aa", count: 2 }, { id: "led-white", count: 1 }, { id: "switch", count: 1 }],
   "Night light": [{ id: "usb", count: 1 }, { id: "arduino", count: 1 }, { id: "light-sensor", count: 1 }, { id: "led-blue", count: 2 }],
+  "Orange Pi desk": [{ id: "usb", count: 1 }, { id: "orange-pi", count: 1 }, { id: "temp-sensor", count: 1 }, { id: "light-sensor", count: 1 }, { id: "fan", count: 1 }, { id: "led-green", count: 1 }],
   "Solar fan": [{ id: "solar", count: 1 }, { id: "fan", count: 1 }],
   "Robot car": [{ id: "18650", count: 1 }, { id: "tp4056", count: 1 }, { id: "boost-5v", count: 1 }, { id: "motor-driver", count: 1 }, { id: "wheels", count: 1 }, { id: "arduino", count: 1 }, { id: "distance-sensor", count: 1 }],
   "Burn test": [{ id: "9v", count: 1 }, { id: "vibration", count: 1 }, { id: "led-red", count: 1 }],

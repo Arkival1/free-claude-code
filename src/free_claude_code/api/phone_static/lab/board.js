@@ -9,7 +9,9 @@
 // not the phone.
 import { findPart } from "./science.js";
 
-export const BRAINS = new Set(["arduino", "esp32", "raspberry-pi"]);
+export const BRAINS = new Set(["orange-pi", "arduino", "esp32", "raspberry-pi"]);
+/** Board computers with a monitor (HDMI): single-board computers. */
+export const SBCS = new Set(["orange-pi", "raspberry-pi"]);
 const ROLES = {
   "led-red": "led", "led-green": "led", "led-blue": "led", "led-white": "led", "led-power": "led", "led-strip": "led", bulb: "led",
   motor: "motor", fan: "motor", pump: "motor", vibration: "motor", servo: "servo", buzzer: "buzzer", speaker: "buzzer", relay: "relay",
@@ -78,7 +80,7 @@ export function constantsOf(wire) {
 const pinText = (pin) => (pin >= 14 ? `A${pin - 14}` : String(pin));
 
 export function wiringText(wire) {
-  if (!wire.brain) return "No board computer on the board (add an Arduino, ESP32 or Raspberry Pi).";
+  if (!wire.brain) return "No board computer on the board (add an Orange Pi, Arduino, ESP32 or Raspberry Pi).";
   const rows = wire.wires.map((item) => (item.role === "display" ? `display (OLED screen): ${item.name}` : `${item.constant} = pin ${pinText(item.pin)}: ${item.name}${item.input ? " (input)" : ""}`));
   return rows.length ? rows.join("\n") : "Nothing is wired to the board computer yet: add LEDs, motors, a buzzer, sensors, a button or a screen.";
 }
@@ -111,8 +113,8 @@ export function starterProgram(wire) {
   for (const item of motors) lines.push(`  analogWrite(${item.constant}, ${has("temp") ? "readTemperature() > 25 ? 255 : 0" : "180"}); // 0-255 speed`);
   if (servo) lines.push("  servo.write((millis() / 20) % 180);");
   if (buzzer) lines.push(`  if (${has("motion") ? "digitalRead(MOTION)" : has("button") ? "digitalRead(BUTTON)" : "false"}) tone(${buzzer.constant}, 880, 200);`);
-  if (wire.brain === "raspberry-pi") {
-    // A Pi has a monitor (HDMI): draw a small dashboard on it.
+  if (SBCS.has(wire.brain)) {
+    // A single-board computer has a monitor (HDMI): draw a small dashboard on it.
     lines.push(
       '  monitor.clear("#0d1b2a");',
       '  monitor.text(16, 34, "FCC single-board computer", "#7fe3ff", 18);',

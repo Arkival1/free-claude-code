@@ -398,6 +398,19 @@ PARTS: tuple[Part, ...] = (
         price=15.0,
     ),
     _p(
+        "orange-pi",
+        "Orange Pi 5 (8-core, 8 GB)",
+        "brain",
+        "🍊",
+        volts=5.0,
+        volts_max=5.25,
+        milliamps=1500,
+        grams=46,
+        price=95.0,
+        note="A single-board computer: Rockchip RK3588S, 26-pin GPIO, HDMI, "
+        "USB 3, Ethernet, USB-C power (5 V, up to 4 A under full load).",
+    ),
+    _p(
         "temp-sensor",
         "Temperature + humidity sensor (DHT22)",
         "sensor",
@@ -659,7 +672,7 @@ def simulate_build(
             rail, efficiency, regulated = 5.0, 0.85, "boost-5v"
     elif "regulator-3v3" in ids and volts >= 3.6:
         rail, efficiency, regulated = 3.3, 3.3 / volts, "regulator-3v3"
-    has_controller = bool(ids & {"arduino", "esp32", "raspberry-pi"})
+    has_controller = bool(ids & {"arduino", "esp32", "raspberry-pi", "orange-pi"})
     has_driver = bool(ids & {"motor-driver", "transistor", "relay"})
     rows: list[LabData] = []
     resistors: list[LabData] = []

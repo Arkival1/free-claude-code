@@ -1345,7 +1345,7 @@ export function simulateBuild(entries, { series = true, sun = true } = {}) {
     if (volts < 0.9) warnings.push("The boost converter needs at least 0.9 V to start.");
     else [rail, efficiency, regulated] = [5.0, 0.85, "boost-5v"];
   } else if (ids.has("regulator-3v3") && volts >= 3.6) [rail, efficiency, regulated] = [3.3, 3.3 / volts, "regulator-3v3"];
-  const hasController = ["arduino", "esp32", "raspberry-pi"].some((id) => ids.has(id));
+  const hasController = ["arduino", "esp32", "raspberry-pi", "orange-pi"].some((id) => ids.has(id));
   const hasDriver = ["motor-driver", "transistor", "relay"].some((id) => ids.has(id));
   const rows = [];
   const resistors = [];

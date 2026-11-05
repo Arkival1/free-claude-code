@@ -32,6 +32,7 @@ const SHELL = [
   "lab/chem3d.js",
   "lab/jarvis3d.js",
   "lab/world3d.js",
+  "lab/board.js",
   "web/kit.css",
   "web/kit.js",
   "web/sections.js",
