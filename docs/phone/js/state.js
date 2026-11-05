@@ -149,7 +149,9 @@ export const defaultSettings = () => ({
   plugins: {},
   // hud: the command centre and the whole team; playground: one main AI does
   // the work with its own hands and the others advise (Manus-like).
-  look: "hud",
+  // The Manus-like Playground look by default (owner); lookSet: the user picked one in Settings.
+  look: "playground",
+  lookSet: false,
   // Plugin APIs: the master switch over every plugin's own switch.
   pluginsOn: true,
   // In the Playground the main AI thinks on this phone's own model when one is ready.
@@ -165,6 +167,9 @@ export function defaultBench() {
     electronics: { parts: [], series: true, sun: true, powered: false, result: null },
     from: { chemistry: "", electronics: "" },
     jarvis: { room: "", doing: "", at: 0 },
+    // What happened at the benches, newest last: the user's steps and
+    // Jarvis's, so he can see what the user is working on.
+    log: [],
   };
 }
 
@@ -213,6 +218,9 @@ export const save = {
 export async function load() {
   const settings = await store.get("settings", {});
   state.settings = Object.assign(defaultSettings(), settings);
+  // Until the user picks a look in Settings, the Playground (Manus-like) look;
+  // a link with ?look=hud opens the HUD instead.
+  if (!state.settings.lookSet) state.settings.look = new URLSearchParams(location.search).get("look") === "hud" ? "hud" : "playground";
   const fresh = defaultSettings();
   state.settings.keys = Object.assign(fresh.keys, settings.keys);
   state.settings.models = Object.assign(fresh.models, settings.models);
@@ -234,7 +242,9 @@ export async function load() {
   const bench = await store.get("bench", {});
   const blank = defaultBench();
   state.bench = { ...blank, ...bench };
-  for (const key of Object.keys(blank)) state.bench[key] = { ...blank[key], ...(bench[key] || {}) };
+  for (const key of Object.keys(blank)) {
+    state.bench[key] = Array.isArray(blank[key]) ? (Array.isArray(bench[key]) ? bench[key] : []) : { ...blank[key], ...(bench[key] || {}) };
+  }
   // A study or job cut short when the app closed is picked up as stopped.
   for (const study of state.studies) if (study.status === "learning") study.status = "stopped";
   for (const task of state.tasks) if (task.status === "planning" || task.status === "working") task.status = "stopped";

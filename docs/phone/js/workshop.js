@@ -29,6 +29,36 @@ async function keepBench() {
   changed("bench");
 }
 
+const MAX_LOG = 40;
+const nameOfChemical = (id) => (resolveChemical(id) || { name: id }).name;
+const nameOfPart = (id) => (findPart(id) || { name: id }).name;
+
+/** One step at a bench (by "you" or an agent's name), kept for Jarvis to see. */
+export function logStep(by, room, text) {
+  if (!Array.isArray(state.bench.log)) state.bench.log = [];
+  state.bench.log.push({ by: String(by || "you"), room, text: String(text).slice(0, 220), at: Date.now() });
+  if (state.bench.log.length > MAX_LOG) state.bench.log.splice(0, state.bench.log.length - MAX_LOG);
+}
+
+/** What changed between two lists ([{id, amount|count}]), in words. */
+function changes(before, after, nameOf, unitOf) {
+  const amountOf = (entry) => entry.amount ?? entry.count ?? 1;
+  const was = new Map(before.map((entry) => [entry.id, amountOf(entry)]));
+  const now = new Map(after.map((entry) => [entry.id, amountOf(entry)]));
+  const said = [];
+  for (const [id, amount] of now) {
+    if (!was.has(id)) said.push(`added ${nameOf(id)}${unitOf(id, amount)}`);
+    else if (was.get(id) !== amount) said.push(`changed ${nameOf(id)} to${unitOf(id, amount) || ` ${amount}`}`);
+  }
+  for (const id of was.keys()) if (!now.has(id)) said.push(`took out ${nameOf(id)}`);
+  return said.join(", ");
+}
+const chemUnit = (id, amount) => {
+  const chemical = resolveChemical(id);
+  return amount === undefined ? "" : ` ${amount} ${chemical && chemical.state === "solid" ? "g" : "mL"}`;
+};
+const partUnit = (_id, count) => (count > 1 ? ` ×${count}` : "");
+
 /* ------------------------------------------------------------ chemistry */
 
 /** Items as the beaker keeps them: a shelf id (or the name as typed) and an amount. */
@@ -44,8 +74,13 @@ function cleanItems(items) {
 }
 
 /** Put things in the beaker without mixing yet (the user adding bottles). */
-export async function setBeaker(items, { heat, flame } = {}) {
+export async function setBeaker(items, { heat, flame, by = "you" } = {}) {
   const bench = state.bench.chemistry;
+  const said = changes(bench.items, items, nameOfChemical, chemUnit);
+  if (!items.length && bench.items.length) logStep(by, "chemistry", "cleaned the beaker");
+  else if (said) logStep(by, "chemistry", `${said} in the beaker`);
+  if (heat !== undefined && Boolean(heat) !== bench.heat) logStep(by, "chemistry", heat ? "lit the burner" : "turned the burner off");
+  if (flame !== undefined && Boolean(flame) !== bench.flame) logStep(by, "chemistry", flame ? "set up a flame test" : "stopped the flame test");
   bench.items = items;
   if (heat !== undefined) bench.heat = Boolean(heat);
   if (flame !== undefined) bench.flame = Boolean(flame);
@@ -58,6 +93,7 @@ export async function mix(items, { heat = false, flame = false, by = "you" } = {
   const clean = cleanItems(items);
   const result = simulate(clean, { heat, flame });
   state.bench.chemistry = { items: clean, heat: Boolean(heat), flame: Boolean(flame), result };
+  logStep(by, "chemistry", `mixed ${result.ingredients.map((item) => item.name).join(" + ")}${heat ? " over heat" : ""}: ${result.summary}`);
   if (by !== "you") jarvisWorks("chemistry", `mixing ${result.ingredients.map((item) => item.name.toLowerCase()).join(" + ")}`);
   await keepBench();
   return result;
@@ -90,14 +126,22 @@ function cleanParts(parts) {
 }
 
 /** Put parts on the board; with power on, the bench works out what happens. */
-export async function setBoard(parts, { series, sun, powered } = {}) {
+export async function setBoard(parts, { series, sun, powered, by = "you" } = {}) {
   const bench = state.bench.electronics;
+  const wasOn = bench.powered;
+  const said = changes(bench.parts, parts, nameOfPart, partUnit);
+  if (!parts.length && bench.parts.length) logStep(by, "electronics", "cleared the board");
+  else if (said) logStep(by, "electronics", `${said} on the board`);
+  if (series !== undefined && Boolean(series) !== bench.series) logStep(by, "electronics", series ? "put the batteries in series" : "put the batteries side by side");
+  if (sun !== undefined && Boolean(sun) !== bench.sun) logStep(by, "electronics", sun ? "put the solar panel in the sun" : "put the solar panel in the shade");
   bench.parts = parts;
   if (series !== undefined) bench.series = Boolean(series);
   if (sun !== undefined) bench.sun = Boolean(sun);
   if (powered !== undefined) bench.powered = Boolean(powered);
   if (!parts.length) bench.powered = false;
   bench.result = bench.powered && parts.length ? simulateBuild(parts, { series: bench.series, sun: bench.sun }) : null;
+  if (bench.powered && (!wasOn || said)) logStep(by, "electronics", `powered it: ${bench.result.works ? "it works" : "it doesn't work yet"}`);
+  else if (wasOn && !bench.powered && parts.length) logStep(by, "electronics", "switched the power off");
   await keepBench();
   return bench.result;
 }
@@ -107,6 +151,7 @@ export async function circuit(parts, { series = true, sun = true, by = "you" } =
   const clean = cleanParts(parts);
   const result = simulateBuild(clean, { series, sun });
   state.bench.electronics = { parts: clean, series: Boolean(series), sun: Boolean(sun), powered: true, result };
+  logStep(by, "electronics", `built ${clean.map((entry) => `${nameOfPart(entry.id)}${partUnit(entry.id, entry.count)}`).join(", ")} and powered it: ${result.works ? "it works" : "it doesn't work yet"}`);
   if (by !== "you") jarvisWorks("electronics", `wiring ${clean.map((entry) => findPart(entry.id).name).join(", ")}`);
   await keepBench();
   return result;
@@ -123,6 +168,85 @@ export function describeCircuit(result) {
   if (result.tips.length) lines.push(`Tips: ${result.tips.join(" ")}`);
   lines.push(`About ${result.grams} g, about US$${result.price}.`);
   return lines.join("\n");
+}
+
+/* ------------------------------------------------------- what's on now */
+
+const ago = (at) => {
+  const minutes = Math.round((Date.now() - at) / 60000);
+  return minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
+};
+
+/** The benches as they stand, in words (full: with the last steps and readings). */
+export function benchNow({ full = true, steps = 8 } = {}) {
+  const { chemistry, electronics } = state.bench;
+  const lines = [];
+  if (chemistry.items.length) {
+    lines.push(`Chemistry bench: in the beaker ${chemistry.items.map((item) => `${nameOfChemical(item.id)}${chemUnit(item.id, item.amount)}`).join(", ")}${chemistry.heat ? "; burner on" : ""}${chemistry.flame ? "; flame test" : ""}.`);
+    if (chemistry.result) lines.push(full ? describeMix(chemistry.result) : `Last mix: ${chemistry.result.summary}`);
+    else lines.push("Not mixed yet.");
+  } else lines.push("Chemistry bench: the beaker is clean.");
+  if (electronics.parts.length) {
+    lines.push(`Electronics bench: on the board ${electronics.parts.map((entry) => `${nameOfPart(entry.id)}${partUnit(entry.id, entry.count)}`).join(", ")}; batteries ${electronics.series ? "in series" : "side by side"}; power ${electronics.powered ? "on" : "off"}.`);
+    if (electronics.result && electronics.powered) lines.push(full ? describeCircuit(electronics.result) : `${electronics.result.works ? "It works" : "It doesn't work yet"}: ${electronics.result.parts.map((row) => `${row.name} ${row.state}`).join(", ")}.`);
+  } else lines.push("Electronics bench: the board is empty.");
+  const log = (state.bench.log || []).slice(-steps);
+  if (log.length) lines.push(`Last steps at the benches:\n${log.map((step) => `- ${step.by === "you" ? "The user" : step.by} ${step.text} (${ROOM_NAMES[step.room] || step.room}, ${ago(step.at)})`).join("\n")}`);
+  return lines.join("\n");
+}
+
+/** True when something is on a bench or the user worked there in the last day. */
+export function benchBusy() {
+  const { chemistry, electronics, log } = state.bench;
+  const last = Array.isArray(log) && log.length ? log.at(-1).at : 0;
+  return chemistry.items.length > 0 || electronics.parts.length > 0 || Date.now() - last < 86_400_000;
+}
+
+/** Add to what's already on a bench (Jarvis building on the user's work). */
+async function addTo(args, by) {
+  if (Array.isArray(args.parts) && args.parts.length) {
+    const board = state.bench.electronics.parts.map((entry) => ({ ...entry }));
+    for (const entry of cleanParts(args.parts)) {
+      const same = board.find((item) => item.id === entry.id);
+      if (same) same.count = Math.min(50, same.count + entry.count);
+      else board.push(entry);
+    }
+    jarvisWorks("electronics", `adding ${args.parts.map((entry) => nameOfPart(String(entry.id || entry.name || ""))).join(", ")}`);
+    const result = await setBoard(board, { powered: true, by });
+    return `On the board now: ${board.map((entry) => `${nameOfPart(entry.id)}${partUnit(entry.id, entry.count)}`).join(", ")}.\n${describeCircuit(result)}`;
+  }
+  if (Array.isArray(args.items) && args.items.length) {
+    const beaker = [...state.bench.chemistry.items, ...cleanItems(args.items)];
+    return describeMix(await mix(beaker, { heat: state.bench.chemistry.heat, flame: state.bench.chemistry.flame, by }));
+  }
+  throw new Error("Say what to add: parts [{id, count}] for the board, or items [{name, amount}] for the beaker.");
+}
+
+/** Take things off a bench (by id or name). */
+async function takeFrom(args, by) {
+  const wanted = (list) => new Set((Array.isArray(list) ? list : []).map((entry) => String((entry && (entry.id || entry.name)) || entry).trim().toLowerCase()).filter(Boolean));
+  const parts = wanted(args.parts);
+  if (parts.size) {
+    const ids = new Set([...parts].map((name) => (findPart(name) || { id: name }).id));
+    const board = state.bench.electronics.parts.filter((entry) => !ids.has(entry.id));
+    if (board.length === state.bench.electronics.parts.length) return "None of those are on the board.";
+    jarvisWorks("electronics", "taking parts off the board");
+    const result = await setBoard(board, { by });
+    return board.length ? `On the board now: ${board.map((entry) => nameOfPart(entry.id)).join(", ")}.${result ? `\n${describeCircuit(result)}` : ""}` : "The board is empty now.";
+  }
+  const items = wanted(args.items);
+  if (items.size) {
+    const ids = new Set([...items].map((name) => (resolveChemical(name) || { id: name }).id));
+    const beaker = state.bench.chemistry.items.filter((item) => !ids.has(item.id));
+    if (beaker.length === state.bench.chemistry.items.length) return "None of those are in the beaker.";
+    jarvisWorks("chemistry", "taking something out of the beaker");
+    if (!beaker.length) {
+      await setBeaker([], { by });
+      return "The beaker is clean now.";
+    }
+    return describeMix(await mix(beaker, { heat: state.bench.chemistry.heat, flame: state.bench.chemistry.flame, by }));
+  }
+  throw new Error("Say what to take off: parts [{id}] or items [{name}].");
 }
 
 /* ------------------------------------------------------------ blueprints */
@@ -234,6 +358,7 @@ export async function loadBlueprint(idOrName, { version = 0, by = "you" } = {}) 
     state.bench.from.chemistry = print.id;
   }
   if (by !== "you") jarvisWorks(chip ? "electronics" : "chemistry", `loading ${print.name}`);
+  logStep(by, chip ? "electronics" : "chemistry", `loaded the blueprint ${print.name} (version ${versionNumber(print, chosen)})`);
   await keepBench();
   return { print, version: versionNumber(print, chosen) };
 }
@@ -287,6 +412,13 @@ export function searchTutorials(query = "", topic = "", limit = 40) {
 export async function useWorkshop(args, agent) {
   const by = agent ? agent.name : "you";
   const action = String(args.action || "");
+  if (action === "look") {
+    jarvisWorks(state.bench.jarvis.room || "electronics", "looking at the benches");
+    return benchNow();
+  }
+  // add with parts or items is the bench; add on its own is the Game kit (js/lab.js).
+  if (action === "add" && (Array.isArray(args.parts) || Array.isArray(args.items))) return await addTo(args, by);
+  if (action === "remove") return await takeFrom(args, by);
   if (action === "mix") return describeMix(await mix(args.items, { heat: yes(args.heat), flame: yes(args.flame), by }));
   if (action === "shelf") {
     const found = searchChemicals(String(args.query || ""), 25);

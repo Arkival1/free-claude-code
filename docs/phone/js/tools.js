@@ -38,15 +38,15 @@ export const SPECS = {
   },
   lab: {
     description:
-      "The Lab, which you work yourself (you walk to the room in the user's Lab box; never hand Lab work to another agent). Chemistry: mix (items [{name, amount in mL or g}], heat, flame: the PC Lab's real chemistry: reactions, colour, gas, precipitate, pH, temperature, hazards), shelf (search the chemical shelf; any element works by symbol). Electronics: circuit (parts [{id, count}], series, sun: volts, current, what lights or burns out, resistor values, runtime), parts (search the parts bin). Blueprints: save (name, kind chip|mixture|invention, notes; id of an existing blueprint saves a new version of it), blueprints (search saved ones), load (id or name, version: put it back on the benches to reuse or improve). Library: tutorials (query or topic: build-your-own-x's step-by-step tutorials for building technologies from scratch, with links). 3D games: guide, list, add (the Game Lab kit; new 3D games start from start_project template game3d).",
+      "The Lab, which you work yourself (you walk to the room in the user's Lab box; never hand Lab work to another agent). The benches are shared with the user: look (what is on both benches now, the readings, and the user's last steps; use it when the user asks about what they are working on), add (put parts [{id, count}] on the board or items [{name, amount}] in the beaker on top of what is there, then power or mix it), remove (take parts or items off by id or name). Chemistry: mix (items [{name, amount in mL or g}], heat, flame: the PC Lab's real chemistry: reactions, colour, gas, precipitate, pH, temperature, hazards), shelf (search the chemical shelf; any element works by symbol). Electronics: circuit (parts [{id, count}], series, sun: volts, current, what lights or burns out, resistor values, runtime), parts (search the parts bin). Blueprints: save (name, kind chip|mixture|invention, notes; id of an existing blueprint saves a new version of it), blueprints (search saved ones), load (id or name, version: put it back on the benches to reuse or improve). Library: tutorials (query or topic: build-your-own-x's step-by-step tutorials for building technologies from scratch, with links). 3D games: guide, list, add (the Game Lab kit; new 3D games start from start_project template game3d).",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["mix", "shelf", "circuit", "parts", "save", "blueprints", "load", "tutorials", "guide", "list", "add"] },
-        items: { type: "array", description: "mix: what goes in the beaker.", items: { type: "object", properties: { name: text("A chemical (shelf id, name, formula or element)."), amount: { type: "number", description: "mL for liquids, g for solids." } }, required: ["name"] } },
+        action: { type: "string", enum: ["look", "add", "remove", "mix", "shelf", "circuit", "parts", "save", "blueprints", "load", "tutorials", "guide", "list"] },
+        items: { type: "array", description: "mix: what goes in the beaker (all of it); add or remove: what to put in or take out.", items: { type: "object", properties: { name: text("A chemical (shelf id, name, formula or element)."), amount: { type: "number", description: "mL for liquids, g for solids." } }, required: ["name"] } },
         heat: { type: "boolean", description: "mix: heat it over the burner." },
         flame: { type: "boolean", description: "mix: a flame test." },
-        parts: { type: "array", description: "circuit: the parts on the board, with a power source.", items: { type: "object", properties: { id: text("A part id from the parts bin (aa, 9v, led-red, arduino...)."), count: { type: "number" } }, required: ["id"] } },
+        parts: { type: "array", description: "circuit: the parts on the board, with a power source (all of them); add or remove: what to put on or take off.", items: { type: "object", properties: { id: text("A part id from the parts bin (aa, 9v, led-red, arduino...)."), count: { type: "number" } }, required: ["id"] } },
         series: { type: "boolean", description: "circuit: batteries in series (true, volts add) or side by side (false)." },
         sun: { type: "boolean", description: "circuit: full sun for a solar panel." },
         name: text("save: the blueprint's name; load: its name."),
@@ -303,7 +303,7 @@ export async function runTool(agent, call, ctx) {
         return useLibrary(args);
       case "lab": {
         if (ctx.partsOnly && args.action === "add") return partsOnly("lab/kit.js");
-        if (ctx.partsOnly && ["mix", "circuit", "save", "load"].includes(args.action)) return "The Lab benches are the main AI's: as a helper you can read the shelf, parts, blueprints and tutorials, and write your part under parts/.";
+        if (ctx.partsOnly && ["mix", "circuit", "save", "load", "remove"].includes(args.action)) return "The Lab benches are the main AI's: as a helper you can read the shelf, parts, blueprints and tutorials, and write your part under parts/.";
         const done = await useWorkshop(args, agent);
         if (done !== null) return done;
         return await useLab(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));

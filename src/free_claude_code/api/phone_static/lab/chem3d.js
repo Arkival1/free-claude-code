@@ -6,7 +6,7 @@
 // result from science.js (the PC Lab's rules).
 import { THREE, mesh, block, post, standard, metal, canvasTexture, label, glowSprite, dispose, pickable, puffTexture } from "./look3d.js";
 import { fireMaterial } from "./kit.js";
-import { indicatorColour } from "./science.js";
+import { indicatorColour, resolveChemical } from "./science.js";
 
 const RADIUS = 4.3;
 const HEIGHT = 11.5;
@@ -58,6 +58,105 @@ function labelTexture(name, formula, colour) {
     paint.fillStyle = "#555";
     paint.fillText(formula || "", 10, h - 14);
   });
+}
+
+/** What's on the shelf behind the bench whatever is in the beaker. */
+export const STOCK = ["water", "acetic-acid", "hydrochloric-acid", "sodium-hydroxide", "ammonia", "copper-sulfate", "silver-nitrate", "potassium-iodide", "hydrogen-peroxide-strong", "phenolphthalein", "ethanol", "sodium-bicarbonate", "sodium-chloride", "magnesium"];
+
+/** One stock bottle: brown glass for solutions, a white jar for solids, a clear
+ * bottle for plain liquids, each with its label; tap it to read about it. */
+function stockBottle(chemical) {
+  const holder = new THREE.Group();
+  const solid = chemical.state === "solid";
+  const plain = chemical.state === "liquid";
+  const width = solid ? 1.7 : 1.45;
+  const height = solid ? 3.4 : 5.4;
+  const glass = solid
+    ? standard("#f3f2ee", 0.55)
+    : new THREE.MeshPhysicalMaterial({ color: plain ? "#e9f3fb" : "#7a4313", transparent: true, opacity: plain ? 0.35 : 0.78, roughness: 0.08, clearcoat: 1, depthWrite: !plain });
+  holder.add(post(width, height, glass, 0, 0, 0, 24));
+  if (!solid) {
+    holder.add(post(width * 0.55, 0.9, glass, 0, height, 0, 20));
+    if (plain) holder.add(post(width - 0.2, height * 0.6, standard(chemical.colour, 0.2, 0, { transparent: true, opacity: 0.6 }), 0, 0.12, 0, 20));
+  }
+  holder.add(post(solid ? width + 0.06 : width * 0.62, solid ? 0.9 : 1.1, standard(solid ? "#1f2a44" : "#202326", 0.45), 0, solid ? height : height + 0.9, 0, 20));
+  const tag = mesh(new THREE.CylinderGeometry(width + 0.03, width + 0.03, solid ? 1.9 : 2.3, 24, 1, true, -0.65, 1.3), new THREE.MeshStandardMaterial({ map: labelTexture(chemical.name, chemical.formula, chemical.colour), roughness: 0.85, side: THREE.DoubleSide }), 0, height * 0.42, 0);
+  tag.castShadow = false;
+  holder.add(tag);
+  pickable(holder, { type: "stock", id: chemical.id, name: chemical.name });
+  return holder;
+}
+
+/** The bench around the beaker: a reagent shelf of labelled stock bottles, a
+ * test-tube rack, a conical flask, a wash bottle, goggles and a notebook. */
+function benchDressing() {
+  const dressing = new THREE.Group();
+  const wood = standard("#b9844f", 0.55);
+  const steel = metal("#aab0b6", 0.35);
+  // The shelf on the wall behind the bench, two rows of bottles.
+  const shelf = new THREE.Group();
+  shelf.position.set(0, 13, -16.5);
+  for (const row of [0, 9]) {
+    shelf.add(block(54, 0.6, 5, wood, 0, row, 0));
+    for (const x of [-25, 25]) shelf.add(block(0.5, 2.4, 4, steel, x, row - 2.4, -0.5));
+  }
+  STOCK.map((id) => resolveChemical(id)).filter(Boolean).forEach((chemical, i) => {
+    const bottle = stockBottle(chemical);
+    const row = i < 7 ? 0 : 9;
+    bottle.position.set(-22 + (i % 7) * 7.3, row + 0.6, 0);
+    shelf.add(bottle);
+  });
+  dressing.add(shelf);
+  // A test-tube rack with coloured tubes.
+  const rack = new THREE.Group();
+  rack.position.set(12.5, 0, -6.5);
+  rack.add(block(11, 0.5, 3, wood, 0, 0, 0), block(11, 0.4, 3, wood, 0, 3.4, 0));
+  for (const x of [-5.2, 5.2]) rack.add(block(0.4, 3.8, 3, wood, x, 0, 0));
+  const tubeGlass = new THREE.MeshPhysicalMaterial({ color: "#f2f8ff", transparent: true, opacity: 0.32, roughness: 0.04, clearcoat: 1, depthWrite: false });
+  ["#2f7cf6", "#3fbf6a", "#f06292", "#f5c542", "#e8eef5"].forEach((colour, i) => {
+    const x = -4 + i * 2;
+    rack.add(post(0.62, 7.5, tubeGlass, x, 0.5, 0, 16));
+    rack.add(post(0.52, 2.2 + (i % 3), standard(colour, 0.2, 0, { transparent: true, opacity: 0.85 }), x, 0.6, 0, 16));
+  });
+  dressing.add(rack);
+  // A conical flask with a green solution.
+  const flask = new THREE.Group();
+  flask.position.set(-12.5, 0, -2);
+  const cone = [[0, 0], [3.2, 0], [3.3, 0.3], [1.0, 6.2], [1.0, 8.2], [1.2, 8.4], [0.85, 8.4], [0.85, 6.3], [2.95, 0.4], [0, 0.4]].map(([x, y]) => new THREE.Vector2(x, y));
+  const flaskGlass = new THREE.MeshPhysicalMaterial({ color: "#f2f8ff", transparent: true, opacity: 0.28, roughness: 0.03, clearcoat: 1, side: THREE.DoubleSide, depthWrite: false });
+  const glassBody = mesh(new THREE.LatheGeometry(cone, 40), flaskGlass);
+  glassBody.renderOrder = 3;
+  flask.add(glassBody);
+  const fill = [[0, 0.4], [2.9, 0.4], [1.9, 3.0], [0, 3.0]].map(([x, y]) => new THREE.Vector2(x, y));
+  flask.add(mesh(new THREE.LatheGeometry(fill, 40), standard("#46c27a", 0.15, 0, { transparent: true, opacity: 0.75 })));
+  dressing.add(flask);
+  // A wash bottle with its bent spout.
+  const wash = new THREE.Group();
+  wash.position.set(-18, 0, 4);
+  wash.add(post(1.9, 6, standard("#f4f6f8", 0.35, 0, { transparent: true, opacity: 0.92 }), 0, 0, 0, 24));
+  wash.add(post(1.0, 1.0, standard("#2b6fd6", 0.4), 0, 6, 0, 18));
+  const spout = mesh(new THREE.CylinderGeometry(0.16, 0.16, 5, 8), standard("#f4f6f8", 0.4), 1.2, 8.6, 0);
+  spout.rotation.z = -0.9;
+  wash.add(spout);
+  dressing.add(wash);
+  // Goggles and a lab notebook on the bench.
+  const goggles = new THREE.Group();
+  goggles.position.set(17, 0.5, 6);
+  goggles.rotation.y = -0.5;
+  const lens = new THREE.MeshPhysicalMaterial({ color: "#d9f0ff", transparent: true, opacity: 0.45, roughness: 0.05, clearcoat: 1 });
+  for (const x of [-1.6, 1.6]) {
+    const eye = mesh(new THREE.CylinderGeometry(1.5, 1.5, 0.8, 24), lens, x, 0.4, 0);
+    eye.rotation.x = Math.PI / 2;
+    goggles.add(eye);
+  }
+  goggles.add(mesh(new THREE.TorusGeometry(2.6, 0.18, 8, 30, Math.PI), standard("#20242a", 0.5), 0, 0.5, -0.8).rotateX(-Math.PI / 2));
+  dressing.add(goggles);
+  const notebook = new THREE.Group();
+  notebook.position.set(9, 0, 7);
+  notebook.rotation.y = 0.25;
+  notebook.add(block(7, 0.4, 9, standard("#24476b", 0.7), 0, 0, 0), block(6.6, 0.12, 8.6, standard("#f7f4ea", 0.9), 0.1, 0.4, 0));
+  dressing.add(notebook);
+  return dressing;
 }
 
 export function makeChemBench() {
@@ -164,6 +263,7 @@ export function makeChemBench() {
   group.add(fireLight);
   const bottles = new THREE.Group();
   group.add(bottles);
+  group.add(benchDressing());
 
   let result = null;
   let started = 0;

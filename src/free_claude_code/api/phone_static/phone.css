@@ -1993,3 +1993,145 @@ body[data-look="playground"] .sheet-head h2 {
 .pg-file {
   padding-left: 22px;
 }
+
+/* The Lab's parts menu (on the bench / in stock) and the steps at the benches. */
+.lab-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  margin: 0 0 12px;
+  border-radius: 12px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.06));
+}
+
+.lab-seg button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 14px;
+}
+
+.lab-seg button[aria-selected="true"] {
+  background: var(--surface, #0b1620);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  font-weight: 600;
+}
+
+.lab-stock {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.lab-group summary {
+  padding: 8px 2px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lab-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+.lab-item[aria-pressed="true"] {
+  border-color: var(--good, #2e9d5b);
+}
+
+.lab-add {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  font-weight: 700;
+}
+
+.lab-item[aria-pressed="true"] .lab-add {
+  background: var(--good, #2e9d5b);
+  border-color: var(--good, #2e9d5b);
+  color: #fff;
+}
+
+.lab-steps {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.lab-steps li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.lab-who {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+}
+
+.lab-who.ai {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+/* The Lab in the Manus look: daylight studio, quiet chips, ink buttons. */
+body[data-look="playground"] .lab-viewport {
+  background: radial-gradient(120% 90% at 30% 15%, #ffffff 0%, #efece5 55%, #e2ddd2 100%);
+  box-shadow: 0 1px 2px rgba(29, 27, 22, 0.06), 0 8px 24px rgba(29, 27, 22, 0.08);
+  border: 1px solid var(--line-soft);
+}
+
+body[data-look="playground"] .lab-overlay-button,
+body[data-look="playground"] .lab-where {
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  border: 1px solid var(--line-soft);
+  box-shadow: 0 1px 3px rgba(29, 27, 22, 0.1);
+}
+
+body[data-look="playground"] .lab-room,
+body[data-look="playground"] .lab-chip {
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-weight: 500;
+}
+
+body[data-look="playground"] .lab-room[aria-pressed="true"] {
+  background: var(--text);
+  border-color: var(--text);
+  color: #fff;
+}
+
+body[data-look="playground"] .lab-seg {
+  background: var(--surface-2);
+}
+
+body[data-look="playground"] .lab-seg button[aria-selected="true"] {
+  background: #fff;
+}
+
+body[data-look="playground"] .lab-item {
+  background: #fff;
+  border: 1px solid var(--line-soft);
+}

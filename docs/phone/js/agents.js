@@ -4,6 +4,7 @@ import { think, brainOf, isPrivate, pinBrain, PROVIDERS, modelOf } from "./brain
 import { specsFor, runTool, recall, setHooks, pcMemoryAllowed, canRead } from "./tools.js";
 import { startStudy } from "./learn.js";
 import { words } from "./ui.js";
+import { benchNow, benchBusy } from "./workshop.js";
 
 const HISTORY_TURNS = 20;
 const MAX_HANDOFF_DEPTH = 2;
@@ -28,7 +29,11 @@ export function systemPrompt(agent, question, ctx = {}) {
   if (agent.role === "main") {
     const team = state.agents.filter((item) => item.id !== agent.id).map((item) => `${item.name} (${item.role})`);
     if (team.length) parts.push(`Your team on this phone: ${team.join(", ")}.`);
-    if (toolsFor(agent, ctx).includes("lab")) parts.push("The Lab is yours to work in person: when the user asks you to mix, wire, build or invent something, or to save, reload or improve a chip, mixture, invention or blueprint, do it yourself with the lab tool (you walk to that room in the Lab box). Don't hand Lab work to another agent.");
+    if (toolsFor(agent, ctx).includes("lab")) {
+      parts.push("The Lab is yours to work in person: when the user asks you to mix, wire, build or invent something, or to save, reload or improve a chip, mixture, invention or blueprint, do it yourself with the lab tool (you walk to that room in the Lab box). Don't hand Lab work to another agent. The benches are shared: build on what the user has there (lab add or remove) unless they ask for something new.");
+      // What the user is working on in the Lab, so "what do you think of my circuit?" just works.
+      if (benchBusy()) parts.push(`The Lab benches right now (lab look gives the full readout):\n${benchNow({ full: false, steps: 5 })}`);
+    }
   }
   if (ctx.project) {
     const files = Object.keys(ctx.project.files);

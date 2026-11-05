@@ -194,9 +194,11 @@ def test_the_lab_box_rooms_benches_and_blueprints(
     page.get_by_role("button", name="Royal blue").click()
     expect(page.get_by_role("heading", name="What happens")).to_be_visible()
     expect(page.locator(".lab-summary")).to_contain_text("complex")
-    page.get_by_label("Find a chemical").fill("sodium chloride")
-    page.locator(".lab-chips").get_by_role(
-        "button", name="Sodium chloride"
+    # The parts menu: the Shelf tab, searched, a tap adds the bottle.
+    page.get_by_role("tab", name=re.compile(r"^Shelf")).click()
+    page.get_by_label("Search the shelf").fill("sodium chloride")
+    page.locator(".lab-stock").get_by_role(
+        "button", name=re.compile(r"^Add .*sodium chloride", re.IGNORECASE)
     ).first.click()
     items = page.evaluate("() => window.fccPhone.state.bench.chemistry.items")
     assert [item["id"] for item in items][-1] == "sodium-chloride"

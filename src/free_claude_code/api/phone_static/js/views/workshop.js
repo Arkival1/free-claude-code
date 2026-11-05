@@ -4,7 +4,7 @@
 import { state, onChange } from "../state.js";
 import { el, button, card, notify, go, openSheet, closeSheet } from "../ui.js";
 import { answer } from "../agents.js";
-import { resolveChemical, searchChemicals, findPart, PARTS, resistorBands, MAX_ITEMS, HAZARDS } from "../../lab/science.js";
+import { resolveChemical, searchChemicals, findPart, PARTS, CHEMICALS, resistorBands, MAX_ITEMS, HAZARDS } from "../../lab/science.js";
 import * as shop from "../workshop.js";
 
 const ROOM_ORDER = ["chemistry", "electronics", "blueprints", "library"];
@@ -38,6 +38,9 @@ export function render(view) {
   let query = "";
   let reply = "";
   let labels = true;
+  // Each bench's parts menu: what's on the bench, or the stock to add from.
+  const menuTab = { chemistry: "bench", electronics: "bench" };
+  let stockQuery = "";
   const canvas = el("canvas", { class: "lab-world", "aria-label": "The Lab box in 3D: drag to turn, pinch to zoom, tap a room" });
   const where = el("div", { class: "lab-where" });
   const back = el("button", { class: "lab-overlay-button", type: "button", text: "⟵ Box", hidden: true, onclick: () => world && world.focus(null) });
@@ -187,34 +190,32 @@ export function render(view) {
         el("button", { class: "lab-x", type: "button", "aria-label": `Take out ${chemical ? chemical.name : item.id}`, text: "✕", onclick: () => update(items.filter((_, i) => i !== index)) }),
       ]);
     });
-    const search = el("input", { type: "search", "aria-label": "Find a chemical", placeholder: "Find a chemical: vinegar, copper, NaCl, Mg…", value: query });
-    const found = el("div", { class: "lab-chips" });
-    const drawFound = () => {
-      const hits = query.trim() ? searchChemicals(query, 14) : [];
-      const element = query.trim() && !hits.length ? resolveChemical(query.trim()) : null;
-      found.replaceChildren(
-        ...[...hits, ...(element ? [element] : [])].map((chemical) =>
-          el("button", { class: "lab-chip", type: "button", text: chemical.name, onclick: () => {
-            if (items.length >= MAX_ITEMS) return notify(`The beaker holds up to ${MAX_ITEMS} things.`);
-            query = "";
-            update([...items, { id: chemical.id, amount: chemical.state === "solid" ? 2 : 20 }]);
-          } })
-        )
-      );
-    };
-    search.addEventListener("input", () => {
-      query = search.value;
-      drawFound();
-    });
-    drawFound();
     const heat = el("input", { type: "checkbox", checked: bench.heat, onchange: (event) => run(() => shop.setBeaker(items, { heat: event.target.checked })) });
     const flame = el("input", { type: "checkbox", checked: bench.flame, onchange: (event) => run(() => shop.setBeaker(items, { flame: event.target.checked })) });
     const result = bench.result;
+    const addChemical = (chemical) => {
+      if (items.some((item) => item.id === chemical.id)) return notify(`${chemical.name} is already in the beaker.`);
+      if (items.length >= MAX_ITEMS) return notify(`The beaker holds up to ${MAX_ITEMS} things.`);
+      update([...items, { id: chemical.id, amount: chemical.state === "solid" ? 2 : 20 }]);
+    };
+    const inBeaker = new Set(items.map((item) => item.id));
     return [
+      partsMenu({
+        room: "chemistry",
+        benchLabel: "In the beaker",
+        stockLabel: "Shelf",
+        rows,
+        empty: "The beaker is clean. Open the Shelf to add something, or try one below.",
+        stock: CHEMICALS,
+        groupOf: (chemical) => chemical.kind,
+        nameOf: (chemical) => chemical.name,
+        noteOf: (chemical) => chemical.formula,
+        swatchOf: (chemical) => chemical.colour,
+        has: (chemical) => inBeaker.has(chemical.id),
+        search: (text) => searchChemicals(text, 60),
+        add: addChemical,
+      }),
       card("Chemistry bench", [
-        rows.length ? el("div", { class: "lab-list" }, rows) : el("p", { class: "muted", text: "The beaker is clean. Find something on the shelf, or try one below." }),
-        search,
-        found,
         el("div", { class: "row lab-toggles" }, [el("label", { class: "check" }, [heat, " Heat it"]), el("label", { class: "check" }, [flame, " Flame test"])]),
         el("div", { class: "row" }, [
           button("Mix", () => run(() => shop.mix(items, { heat: bench.heat, flame: bench.flame })), { class: "primary", disabled: items.length ? null : true }),
@@ -227,7 +228,7 @@ export function render(view) {
         )),
       ]),
       result ? resultCard(result) : null,
-      picked && picked.type === "bottle" ? chemicalCard(picked.id) : null,
+      picked && (picked.type === "bottle" || picked.type === "stock") ? chemicalCard(picked.id, picked.type === "stock" ? () => addChemical(resolveChemical(picked.id)) : null) : null,
     ];
   }
 
@@ -243,10 +244,11 @@ export function render(view) {
     ]);
   };
 
-  const chemicalCard = (id) => {
+  const chemicalCard = (id, addIt = null) => {
     const chemical = resolveChemical(id);
     if (!chemical) return null;
     return card(chemical.name, [
+      addIt ? el("div", { class: "row" }, [button("Add to the beaker", addIt, { class: "primary" })]) : null,
       el("p", { class: "small", text: `${chemical.formula || ""} · ${chemical.kind} · ${chemical.state}${chemical.molarMass ? ` · ${chemical.molarMass} g/mol` : ""}` }),
       chemical.note ? el("p", { text: chemical.note }) : null,
       ...chemical.hazards.map((code) => el("p", { class: "lab-hazard caution", text: HAZARDS[code] || code })),
@@ -272,18 +274,33 @@ export function render(view) {
       const same = parts.find((item) => item.id === id);
       update(same ? parts.map((item) => (item.id === id ? { ...item, count: Math.min(50, item.count + 1) } : item)) : [...parts, { id, count: 1 }]);
     };
-    const groups = Object.entries(KIND_NAMES)
-      .map(([kind, name]) => [name, PARTS.filter((part) => part.kind === kind)])
-      .filter(([, list]) => list.length);
     const series = el("input", { type: "checkbox", checked: bench.series, onchange: (event) => update(parts, { series: event.target.checked }) });
     const sun = el("input", { type: "checkbox", checked: bench.sun, onchange: (event) => update(parts, { sun: event.target.checked }) });
     const showLabels = el("input", { type: "checkbox", checked: labels, onchange: (event) => {
       labels = event.target.checked;
       if (world) world.setLabels(labels);
     } });
+    const onBoard = new Set(parts.map((entry) => entry.id));
     return [
+      partsMenu({
+        room: "electronics",
+        benchLabel: "On the board",
+        stockLabel: "Drawers",
+        rows,
+        empty: "The board is empty. Open the Drawers to add a power source and some parts, or try one below.",
+        stock: PARTS,
+        groupOf: (part) => KIND_NAMES[part.kind] || part.kind,
+        nameOf: (part) => `${part.icon} ${part.name}`,
+        noteOf: (part) => [part.volts ? `${part.volts} V` : "", part.milliamps ? `${part.milliamps} mA` : ""].filter(Boolean).join(" · "),
+        swatchOf: () => "",
+        has: (part) => onBoard.has(part.id),
+        search: (text) => {
+          const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+          return PARTS.filter((part) => words.every((word) => `${part.id} ${part.name} ${part.kind} ${KIND_NAMES[part.kind] || ""}`.toLowerCase().includes(word)));
+        },
+        add: (part) => add(part.id),
+      }),
       card("Electronics bench", [
-        rows.length ? el("div", { class: "lab-list" }, rows) : el("p", { class: "muted", text: "The board is empty. Add a power source and some parts, or try one below." }),
         el("div", { class: "row lab-toggles" }, [el("label", { class: "check" }, [series, " Batteries in series"]), el("label", { class: "check" }, [sun, " Sunny"]), el("label", { class: "check" }, [showLabels, " Labels"])]),
         el("div", { class: "row" }, [
           button(bench.powered ? "Power off" : "Power on", () => update(parts, { powered: !bench.powered }), { class: "primary", disabled: parts.length ? null : true }),
@@ -292,10 +309,6 @@ export function render(view) {
         ]),
         el("p", { class: "small muted", text: "Try one:" }),
         el("div", { class: "lab-chips" }, Object.entries(TRY_BUILDS).map(([name, build]) => el("button", { class: "lab-chip", type: "button", text: name, onclick: () => run(() => shop.circuit(build)) }))),
-        el("details", { class: "lab-bin" }, [
-          el("summary", { text: "Parts bin" }),
-          ...groups.map(([name, list]) => el("div", {}, [el("p", { class: "small muted", text: name }), el("div", { class: "lab-chips" }, list.map((part) => el("button", { class: "lab-chip", type: "button", text: `${part.icon} ${part.name}`, onclick: () => add(part.id) })))])),
-        ]),
       ]),
       bench.result && bench.powered ? readingsCard(bench.result) : null,
       picked && (picked.type === "part" || picked.type === "resistor") ? partCard(picked) : null,
@@ -404,9 +417,82 @@ export function render(view) {
     ];
   }
 
+  /** A bench's parts menu: what's on the bench now (with its controls), or the
+   * stock, grouped and searchable, where a tap adds to the bench. */
+  function partsMenu(menu) {
+    const tab = menuTab[menu.room];
+    const setTab = (next) => {
+      menuTab[menu.room] = next;
+      stockQuery = "";
+      drawPanel();
+    };
+    const tabs = el("div", { class: "lab-seg", role: "tablist", "aria-label": "Parts" }, [
+      el("button", { type: "button", role: "tab", "aria-selected": String(tab === "bench"), text: `${menu.benchLabel} (${menu.rows.length})`, onclick: () => setTab("bench") }),
+      el("button", { type: "button", role: "tab", "aria-selected": String(tab === "stock"), text: `${menu.stockLabel} (${menu.stock.length})`, onclick: () => setTab("stock") }),
+    ]);
+    if (tab === "bench") {
+      return card("Parts", [tabs, menu.rows.length ? el("div", { class: "lab-list" }, menu.rows) : el("p", { class: "muted", text: menu.empty })], { class: "lab-parts" });
+    }
+    const list = el("div", { class: "lab-stock" });
+    const drawStock = () => {
+      const shown = stockQuery.trim() ? menu.search(stockQuery) : menu.stock;
+      const groups = new Map();
+      for (const thing of shown) {
+        const name = menu.groupOf(thing) || "Other";
+        if (!groups.has(name)) groups.set(name, []);
+        groups.get(name).push(thing);
+      }
+      list.replaceChildren(
+        ...(groups.size
+          ? [...groups].map(([name, things]) =>
+              el("details", { class: "lab-group", open: stockQuery.trim() || groups.size === 1 ? true : null }, [
+                el("summary", { text: `${name[0].toUpperCase()}${name.slice(1)} (${things.length})` }),
+                el("div", { class: "lab-list" }, things.map((thing) => {
+                  const there = menu.has(thing);
+                  return el("button", { class: "lab-item", type: "button", "aria-pressed": String(there), "aria-label": `${there ? "On the bench: " : "Add "}${menu.nameOf(thing)}`, onclick: () => menu.add(thing) }, [
+                    menu.swatchOf(thing) ? el("span", { class: "lab-swatch", style: { background: menu.swatchOf(thing) } }) : null,
+                    el("span", { class: "grow", text: menu.nameOf(thing) }),
+                    menu.noteOf(thing) ? el("span", { class: "small muted", text: menu.noteOf(thing) }) : null,
+                    el("span", { class: "lab-add", "aria-hidden": "true", text: there ? "✓" : "+" }),
+                  ]);
+                })),
+              ])
+            )
+          : [el("p", { class: "muted", text: "Nothing matches." })])
+      );
+    };
+    const search = el("input", { type: "search", "aria-label": `Search the ${menu.stockLabel.toLowerCase()}`, placeholder: `Search the ${menu.stockLabel.toLowerCase()}`, value: stockQuery });
+    search.addEventListener("input", () => {
+      stockQuery = search.value;
+      drawStock();
+    });
+    drawStock();
+    return card("Parts", [tabs, search, list], { class: "lab-parts" });
+  }
+
+  /** The last steps at the benches, the user's and Jarvis's (like a work log). */
+  function stepsCard() {
+    const log = (state.bench.log || []).slice(-6).reverse();
+    if (!log.length) return null;
+    const minutes = (at) => {
+      const gone = Math.round((Date.now() - at) / 60000);
+      return gone < 1 ? "now" : gone < 60 ? `${gone} min` : `${Math.round(gone / 60)} h`;
+    };
+    return card("At the benches", [
+      el("ol", { class: "lab-steps" }, log.map((step) =>
+        el("li", {}, [
+          el("span", { class: `lab-who ${step.by === "you" ? "you" : "ai"}`, text: step.by === "you" ? "You" : step.by }),
+          el("span", { class: "grow", text: `${step.text}` }),
+          el("span", { class: "small muted", text: minutes(step.at) }),
+        ])
+      )),
+      el("p", { class: "small muted", text: `${jarvisOf() ? jarvisOf().name : "Jarvis"} sees this too: ask him about it in any chat.` }),
+    ], { class: "lab-log" });
+  }
+
   function drawPanel() {
     const sections = room === "chemistry" ? chemistryPanel() : room === "electronics" ? electronicsPanel() : room === "blueprints" ? blueprintsPanel() : room === "library" ? libraryPanel() : overviewPanel();
-    panel.replaceChildren(...sections.filter(Boolean), jarvisCard());
+    panel.replaceChildren(...sections.filter(Boolean), stepsCard(), jarvisCard());
   }
 
   view.replaceChildren(
@@ -444,7 +530,7 @@ export function render(view) {
             else drawPanel();
             return;
           }
-          const target = what.type === "bottle" || what.type === "beaker" ? "chemistry" : "electronics";
+          const target = ["bottle", "beaker", "stock"].includes(what.type) ? "chemistry" : "electronics";
           if (room !== target) world.focus(target);
           picked = what;
           drawPanel();

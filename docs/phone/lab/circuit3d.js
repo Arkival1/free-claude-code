@@ -630,6 +630,90 @@ function resistorModel(ohms, length, m) {
   return root;
 }
 
+/** The meter's screen: big digits like a real multimeter's LCD. */
+function drawMeter(paint, w, h, text) {
+  paint.fillStyle = "#b9c7a3";
+  paint.fillRect(0, 0, w, h);
+  paint.fillStyle = "rgba(0,0,0,0.08)";
+  paint.fillRect(0, h - 18, w, 18);
+  paint.fillStyle = "#1d2416";
+  paint.font = "bold 64px ui-monospace, Menlo, monospace";
+  paint.textAlign = "right";
+  paint.textBaseline = "middle";
+  paint.fillText(text, w - 16, h / 2 + 4);
+}
+
+/** The bench around the board: a multimeter reading the supply, a soldering
+ * station, reels of hook-up wire and a parts tray. Returns { group, read }. */
+function benchTools() {
+  const group = new THREE.Group();
+  // The multimeter, front right, with its probes.
+  const meter = new THREE.Group();
+  meter.position.set(17.5, 0, 6.5);
+  meter.rotation.y = -0.35;
+  meter.add(block(6.2, 1.6, 10.5, standard("#f2b705", 0.55), 0, 0, 0));
+  meter.add(block(5.2, 1.0, 9.5, standard("#2a2d31", 0.6), 0, 0.9, 0));
+  let reading = "0.00";
+  const screen = canvasTexture(320, 150, (paint, w, h) => drawMeter(paint, w, h, reading));
+  meter.add(mesh(new THREE.PlaneGeometry(4.4, 2.1), new THREE.MeshStandardMaterial({ map: screen, roughness: 0.35 }), 0, 1.95, -2.7).rotateX(-Math.PI / 2));
+  const dial = post(1.4, 0.5, standard("#1b1d20", 0.4), 0, 1.9, 1.2, 28);
+  meter.add(dial);
+  meter.add(block(0.25, 0.1, 1.2, standard("#f2f2f2", 0.4), 0, 2.4, 0.8));
+  for (const [x, colour] of [[-1.4, "#d32f2f"], [1.4, "#1e1e1e"]]) {
+    meter.add(post(0.32, 0.4, metal("#c9ccd1", 0.3), x, 1.9, 3.9, 12));
+    const [lead] = tube([new THREE.Vector3(x, 2.2, 3.9), new THREE.Vector3(x * 2, 1.2, 7), new THREE.Vector3(x * 3 - 4, 0.3, 8.5), new THREE.Vector3(x * 4 - 7, 0.3, 6)], 0.12, standard(colour, 0.45), 32);
+    meter.add(lead);
+  }
+  group.add(meter);
+  // The soldering station: a base with a knob, the iron in its coil holder.
+  const station = new THREE.Group();
+  station.position.set(-18, 0, 6);
+  station.rotation.y = 0.4;
+  station.add(block(6, 2.6, 5, standard("#30363d", 0.5), 0, 0, 0));
+  station.add(mesh(new THREE.PlaneGeometry(2.2, 1.0), new THREE.MeshBasicMaterial({ color: "#ff5a36" }), -1.2, 1.6, 2.51));
+  station.add(post(0.7, 0.6, standard("#c9ccd1", 0.3, 0.8), 1.5, 1.0, 2.5, 20).rotateX(Math.PI / 2));
+  const coil = new THREE.Group();
+  coil.position.set(0, 2.6, -0.5);
+  for (let i = 0; i < 6; i += 1) coil.add(mesh(new THREE.TorusGeometry(1.1, 0.12, 8, 24), metal("#b8bec6", 0.3), 0, 0.5 + i * 0.5, 0).rotateX(Math.PI / 2));
+  coil.rotation.x = 0.7;
+  station.add(coil);
+  const iron = new THREE.Group();
+  iron.position.set(0, 4.3, 1.2);
+  iron.rotation.x = 0.7;
+  iron.add(post(0.6, 5, standard("#1f2328", 0.6), 0, 0, 0, 16), post(0.25, 2.2, metal("#d7dbe0", 0.25), 0, -2.2, 0, 12), mesh(new THREE.ConeGeometry(0.25, 1.2, 12), metal("#9aa0a6", 0.3), 0, -2.8, 0).rotateX(Math.PI));
+  station.add(iron);
+  group.add(station);
+  // Reels of hook-up wire.
+  ["#d32f2f", "#1e1e1e", "#f2c94c", "#2f80ed"].forEach((colour, i) => {
+    const reel = new THREE.Group();
+    reel.position.set(-21 + i * 4.2, 1.6, -8.5);
+    reel.rotation.z = Math.PI / 2;
+    const flange = standard("#e9e6df", 0.6);
+    reel.add(post(1.6, 0.25, flange, 0, -1.3, 0, 24), post(1.6, 0.25, flange, 0, 1.05, 0, 24), post(1.15, 2.1, standard(colour, 0.45), 0, -1.05, 0, 24));
+    group.add(reel);
+  });
+  // A tray of loose parts: a few resistors, LEDs and capacitors.
+  const tray = new THREE.Group();
+  tray.position.set(12, 0, -8.5);
+  tray.add(block(9, 0.4, 5, standard("#d8dde3", 0.5), 0, 0, 0));
+  for (const x of [-4.4, -0.2, 4.4]) tray.add(block(0.2, 1, 5, standard("#c9cfd6", 0.5), x, 0.4, 0));
+  ["#d32f2f", "#36a852", "#2f6bff"].forEach((colour, i) => tray.add(post(0.32, 0.8, standard(colour, 0.25, 0, { transparent: true, opacity: 0.9 }), -3 + i * 0.9, 0.4, 1.2, 12)));
+  for (let i = 0; i < 4; i += 1) {
+    const body = post(0.22, 1.1, standard("#d9c49a", 0.5), 1 + i * 0.7, 0.6, -1.2, 10);
+    body.rotation.z = Math.PI / 2;
+    tray.add(body);
+  }
+  tray.add(post(0.5, 1.2, standard("#2b4c9a", 0.4), 3.6, 0.4, 1.4, 16), post(0.4, 0.9, standard("#2b4c9a", 0.4), 2.5, 0.4, 1.6, 16));
+  group.add(tray);
+  const read = (text) => {
+    if (text === reading) return;
+    reading = text;
+    drawMeter(screen.image.getContext("2d"), screen.image.width, screen.image.height, reading);
+    screen.needsUpdate = true;
+  };
+  return { group, read };
+}
+
 export function makeCircuitBench() {
   const group = new THREE.Group();
   const m = {
@@ -649,6 +733,8 @@ export function makeCircuitBench() {
   group.add(board);
   const build = new THREE.Group();
   group.add(build);
+  const tools = benchTools();
+  group.add(tools.group);
   const labels = new THREE.Group();
   group.add(labels);
   const make = makers(m);
@@ -695,6 +781,8 @@ export function makeCircuitBench() {
   /** Lay out a build: entries [{id, count}], result from simulateBuild. */
   function update(entries, result, powered) {
     clear();
+    // The meter reads the supply while the power is on.
+    tools.read(powered && result && result.volts ? Number(result.volts).toFixed(2) : "0.00");
     if (!entries.length) return;
     const rows = new Map((result ? result.parts : []).map((row) => [row.id, row]));
     const supply = entries.find((entry) => (findPart(entry.id) || {}).kind === "power") || entries.find((entry) => entry.id === "solar");

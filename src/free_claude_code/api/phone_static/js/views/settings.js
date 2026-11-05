@@ -30,7 +30,8 @@ function lookCard() {
   const settings = state.settings;
   const current = settings.look === "playground" ? "playground" : "hud";
   const pick = async (look) => {
-    if (current === look) return;
+    settings.lookSet = true;
+    if (current === look) return save.settings();
     settings.look = look;
     await save.settings();
     notify(look === "playground" ? "Playground: one main AI does the work, the others advise." : "HUD: the command centre and your whole team.");

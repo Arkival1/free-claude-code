@@ -12,9 +12,12 @@ GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai"
 CORS = {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
 
 
-def open_phone(page: Page, admin_base_url: str, route: str = "home") -> None:
+def open_phone(
+    page: Page, admin_base_url: str, route: str = "home", look: str = "hud"
+) -> None:
     page.set_viewport_size(IPHONE_12_PRO)
-    page.goto(f"{admin_base_url}/phone/#{route}")
+    # The HUD (?look=hud): most tests drive its tabs; the Playground is the default.
+    page.goto(f"{admin_base_url}/phone/?look={look}#{route}")
     expect(page.locator(".tabs")).to_be_visible()
     # Wait for saved data to load, so a test's changes aren't loaded over.
     page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")

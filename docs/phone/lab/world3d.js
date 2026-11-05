@@ -11,8 +11,8 @@ import { makeChemBench } from "./chem3d.js";
 import { makeJarvis } from "./jarvis3d.js";
 
 export const ROOMS = {
-  chemistry: { name: "Chemistry", floor: 0, x: -3.45, spot: [-3.45, -1.5], face: Math.PI, view: { target: [-3.45, 1.5, -2.4], distance: 1.7, azimuth: 0.2, polar: 1.08 } },
-  electronics: { name: "Electronics", floor: 0, x: 3.45, spot: [3.0, -1.45], face: Math.PI, view: { target: [3.3, 1.22, -2.4], distance: 1.45, azimuth: -0.12, polar: 0.95 } },
+  chemistry: { name: "Chemistry", floor: 0, x: -3.45, spot: [-3.45, -1.5], face: Math.PI, view: { target: [-3.45, 1.62, -2.55], distance: 2.35, azimuth: 0.18, polar: 1.12 } },
+  electronics: { name: "Electronics", floor: 0, x: 3.45, spot: [3.0, -1.45], face: Math.PI, view: { target: [3.45, 1.22, -2.4], distance: 2.0, azimuth: -0.1, polar: 0.92 } },
   blueprints: { name: "Blueprints", floor: 1, x: -3.45, spot: [-3.4, -0.35], face: Math.PI, view: { target: [-3.45, 5.0, -0.9], distance: 7.6, azimuth: 0.15, polar: 1.3 } },
   library: { name: "Library", floor: 1, x: 3.45, spot: [3.2, -1.2], face: Math.PI, view: { target: [3.45, 5.0, -0.9], distance: 7.6, azimuth: -0.15, polar: 1.3 } },
 };
