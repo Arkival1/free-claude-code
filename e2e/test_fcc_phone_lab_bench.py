@@ -94,3 +94,47 @@ def test_the_phone_opens_in_the_manus_look_unless_asked(
     page.reload()
     page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
     assert page.evaluate("() => document.body.dataset.look") == "hud"
+
+
+def test_jarvis_takes_off_what_is_on_the_bench_and_logs_it_plainly(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url, "lab")
+    done = page.evaluate(
+        """async () => {
+            const shop = await import('./js/workshop.js');
+            const { runTool } = await import('./js/tools.js');
+            const jarvis = window.fccPhone.state.agents.find((a) => a.role === 'main');
+            const ctx = { depth: 0, chain: [], built: new Set() };
+            const call = (args) => runTool(jarvis, { name: 'lab', arguments: args }, ctx);
+            const out = {};
+            // A partial name finds the battery that is on the board.
+            await shop.setBoard([{ id: '9v', count: 1 }, { id: 'led-red', count: 1 }], { powered: true });
+            out.battery = await call({ action: 'remove', parts: [{ name: 'battery' }] });
+            out.board = window.fccPhone.state.bench.electronics.parts.map((p) => p.id);
+            out.missing = await call({ action: 'remove', parts: [{ name: 'servo' }] });
+            // Burner on, Jarvis empties the beaker: it starts over with the burner off.
+            await shop.setBeaker([{ id: 'water', amount: 50 }], { heat: true });
+            out.clean = await call({ action: 'remove', items: [{ name: 'water' }] });
+            out.heat = window.fccPhone.state.bench.chemistry.heat;
+            await call({ action: 'add', items: [{ name: 'vinegar', amount: 20 }] });
+            await call({ action: 'add', items: [{ name: 'baking soda', amount: 2 }] });
+            await call({ action: 'remove', items: [{ name: 'vinegar' }] });
+            out.log = window.fccPhone.state.bench.log.map((s) => `${s.by}: ${s.text}`);
+            for (let i = 0; i < 45; i += 1) shop.logStep('you', 'chemistry', `step ${i}`);
+            out.kept = window.fccPhone.state.bench.log.length;
+            out.last = window.fccPhone.state.bench.log.at(-1).text;
+            return out;
+        }"""
+    )
+    assert "9v" not in done["board"] and "led-red" in done["board"], done
+    assert done["missing"].startswith("None of those are on the board. On it:")
+    assert done["clean"] == "The beaker is clean now." and done["heat"] is False
+    log = done["log"]
+    assert any(
+        line.startswith("Jarvis: added Vinegar") and "to the beaker" in line
+        for line in log
+    ), log
+    assert any(line.startswith("Jarvis: took out Vinegar") for line in log), log
+    assert not any(line.startswith("Jarvis: mixed") for line in log), log
+    assert done["kept"] == 40 and done["last"] == "step 44"

@@ -302,8 +302,9 @@ export async function runTool(agent, call, ctx) {
       case "library":
         return useLibrary(args);
       case "lab": {
-        if (ctx.partsOnly && args.action === "add") return partsOnly("lab/kit.js");
-        if (ctx.partsOnly && ["mix", "circuit", "save", "load", "remove"].includes(args.action)) return "The Lab benches are the main AI's: as a helper you can read the shelf, parts, blueprints and tutorials, and write your part under parts/.";
+        const benchAdd = args.action === "add" && (Array.isArray(args.parts) || Array.isArray(args.items));
+        if (ctx.partsOnly && args.action === "add" && !benchAdd) return partsOnly("lab/kit.js");
+        if (ctx.partsOnly && (benchAdd || ["mix", "circuit", "save", "load", "remove"].includes(args.action))) return "The Lab benches are the main AI's: as a helper you can read the shelf, parts, blueprints and tutorials, and write your part under parts/.";
         const done = await useWorkshop(args, agent);
         if (done !== null) return done;
         return await useLab(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));

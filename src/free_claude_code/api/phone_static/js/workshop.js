@@ -89,11 +89,11 @@ export async function setBeaker(items, { heat, flame, by = "you" } = {}) {
 }
 
 /** Mix: run the PC Lab's rules on what's in the beaker. */
-export async function mix(items, { heat = false, flame = false, by = "you" } = {}) {
+export async function mix(items, { heat = false, flame = false, by = "you", step = "" } = {}) {
   const clean = cleanItems(items);
   const result = simulate(clean, { heat, flame });
   state.bench.chemistry = { items: clean, heat: Boolean(heat), flame: Boolean(flame), result };
-  logStep(by, "chemistry", `mixed ${result.ingredients.map((item) => item.name).join(" + ")}${heat ? " over heat" : ""}: ${result.summary}`);
+  logStep(by, "chemistry", `${step || `mixed ${result.ingredients.map((item) => item.name).join(" + ")}${heat ? " over heat" : ""}`}: ${result.summary}`);
   if (by !== "you") jarvisWorks("chemistry", `mixing ${result.ingredients.map((item) => item.name.toLowerCase()).join(" + ")}`);
   await keepBench();
   return result;
@@ -216,8 +216,10 @@ async function addTo(args, by) {
     return `On the board now: ${board.map((entry) => `${nameOfPart(entry.id)}${partUnit(entry.id, entry.count)}`).join(", ")}.\n${describeCircuit(result)}`;
   }
   if (Array.isArray(args.items) && args.items.length) {
-    const beaker = [...state.bench.chemistry.items, ...cleanItems(args.items)];
-    return describeMix(await mix(beaker, { heat: state.bench.chemistry.heat, flame: state.bench.chemistry.flame, by }));
+    const adding = cleanItems(args.items);
+    const beaker = [...state.bench.chemistry.items, ...adding];
+    const step = `added ${adding.map((item) => `${nameOfChemical(item.id)}${chemUnit(item.id, item.amount)}`).join(", ")} to the beaker`;
+    return describeMix(await mix(beaker, { heat: state.bench.chemistry.heat, flame: state.bench.chemistry.flame, by, step }));
   }
   throw new Error("Say what to add: parts [{id, count}] for the board, or items [{name, amount}] for the beaker.");
 }
@@ -225,26 +227,34 @@ async function addTo(args, by) {
 /** Take things off a bench (by id or name). */
 async function takeFrom(args, by) {
   const wanted = (list) => new Set((Array.isArray(list) ? list : []).map((entry) => String((entry && (entry.id || entry.name)) || entry).trim().toLowerCase()).filter(Boolean));
+  // What's on the bench first (its ids and names), the catalogue's guess only after.
+  const match = (names, onBench, nameOf, lookUp) =>
+    new Set([...names].map((name) => {
+      const here = onBench.find((id) => id === name || nameOf(id).toLowerCase() === name) || onBench.find((id) => nameOf(id).toLowerCase().includes(name));
+      return here || (lookUp(name) || { id: name }).id;
+    }));
   const parts = wanted(args.parts);
   if (parts.size) {
-    const ids = new Set([...parts].map((name) => (findPart(name) || { id: name }).id));
+    const ids = match(parts, state.bench.electronics.parts.map((entry) => entry.id), nameOfPart, findPart);
     const board = state.bench.electronics.parts.filter((entry) => !ids.has(entry.id));
-    if (board.length === state.bench.electronics.parts.length) return "None of those are on the board.";
+    if (board.length === state.bench.electronics.parts.length) return `None of those are on the board. On it: ${state.bench.electronics.parts.map((entry) => nameOfPart(entry.id)).join(", ") || "nothing"}.`;
     jarvisWorks("electronics", "taking parts off the board");
     const result = await setBoard(board, { by });
     return board.length ? `On the board now: ${board.map((entry) => nameOfPart(entry.id)).join(", ")}.${result ? `\n${describeCircuit(result)}` : ""}` : "The board is empty now.";
   }
   const items = wanted(args.items);
   if (items.size) {
-    const ids = new Set([...items].map((name) => (resolveChemical(name) || { id: name }).id));
+    const ids = match(items, state.bench.chemistry.items.map((item) => item.id), nameOfChemical, resolveChemical);
     const beaker = state.bench.chemistry.items.filter((item) => !ids.has(item.id));
-    if (beaker.length === state.bench.chemistry.items.length) return "None of those are in the beaker.";
+    if (beaker.length === state.bench.chemistry.items.length) return `None of those are in the beaker. In it: ${state.bench.chemistry.items.map((item) => nameOfChemical(item.id)).join(", ") || "nothing"}.`;
     jarvisWorks("chemistry", "taking something out of the beaker");
+    const gone = state.bench.chemistry.items.filter((item) => ids.has(item.id)).map((item) => nameOfChemical(item.id)).join(", ");
     if (!beaker.length) {
-      await setBeaker([], { by });
+      // An empty beaker starts over, burner off, like Clean the beaker.
+      await setBeaker([], { heat: false, flame: false, by });
       return "The beaker is clean now.";
     }
-    return describeMix(await mix(beaker, { heat: state.bench.chemistry.heat, flame: state.bench.chemistry.flame, by }));
+    return describeMix(await mix(beaker, { heat: state.bench.chemistry.heat, flame: state.bench.chemistry.flame, by, step: `took out ${gone}` }));
   }
   throw new Error("Say what to take off: parts [{id}] or items [{name}].");
 }
