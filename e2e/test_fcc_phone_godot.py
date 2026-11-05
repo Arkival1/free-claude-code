@@ -276,6 +276,12 @@ def test_the_box_guards_hold_and_the_pack_is_godots_format(
                 breaks: 'func _ready():\n\twhile true:\n\t\tfor i in 3:\n\t\t\tpass\n\t\tbreak\n',
                 waits: 'func _ready():\n\twhile true:\n\t\tfor i in 3:\n\t\t\tawait get_tree().process_frame\n',
                 one_line: 'func _ready():\n\twhile true: break\n',
+                hash_break: 'func _ready():\n\twhile true:\n\t\tif c == "#": break\n',
+                hash_text: 'func _ready():\n\twhile true:\n\t\tprint("#")\n',
+                word_in_text: 'func _ready():\n\twhile true:\n\t\tvar s = "quit"\n\t\tprint(s)\n',
+                lambda_return: 'func _ready():\n\twhile true:\n\t\tvar f = func(): return 1\n\t\tprint(f.call())\n',
+                lambda_block: 'func _ready():\n\twhile true:\n\t\tvar f = func():\n\t\t\treturn 1\n\t\tprint(f.call())\n',
+                after_lambda: 'func _ready():\n\twhile true:\n\t\tvar f = func():\n\t\t\treturn 1\n\t\tif f.call() == 1:\n\t\t\tbreak\n',
             };
             const out = { loops: {} };
             for (const [name, text] of Object.entries(loops)) out.loops[name] = godot.endlessLoops(text);
@@ -313,6 +319,12 @@ def test_the_box_guards_hold_and_the_pack_is_godots_format(
         "breaks": [],
         "waits": [],
         "one_line": [],
+        "hash_break": [],
+        "hash_text": [2],
+        "word_in_text": [2],
+        "lambda_return": [2],
+        "lambda_block": [2],
+        "after_lambda": [],
     }
     assert all(found["sums"]), found["sums"]
     assert found["first"] == "Another Godot game started, so this one was closed."

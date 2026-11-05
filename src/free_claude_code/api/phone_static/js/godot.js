@@ -261,31 +261,41 @@ const RES_PATH = /(?:preload|load)\(\s*"res:\/\/([^"]+)"\s*\)/g;
 const EXT_PATH = /\[ext_resource\b[^\]]*\bpath="res:\/\/([^"]+)"/g;
 const IMPORTED = /\.(png|jpe?g|webp|svg|bmp|tga|ogg|wav|mp3|glb|gltf|obj|fbx|blend|ttf|otf|woff2?)$/i;
 
+/** A line's code: strings emptied (a "#" or a keyword inside one is only text), then the comment cut. */
+const codeOf = (row) => row.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""').replace(/#.*$/, "");
+
 /**
  * Lines of `while true:` loops with no way out: return, await or quit
- * anywhere inside, or a break that isn't inside an inner loop (that break
- * only leaves the inner loop).
+ * anywhere inside (but not in a lambda, whose return leaves only the
+ * lambda), or a break that isn't inside an inner loop (that break only
+ * leaves the inner loop).
  */
 export function endlessLoops(text) {
   const lines = text.split("\n");
   const width = (row) => row.match(/^\s*/)[0].replace(/\t/g, "    ").length;
+  const leaves = (code, looped) => /\b(return|await|quit)\b/.test(code) || (/\bbreak\b/.test(code) && !looped);
   const found = [];
   lines.forEach((line, index) => {
-    const head = line.match(/^\s*while\s+(?:true|1|\(true\))\s*:\s*(.*)$/);
+    const head = codeOf(line).match(/^\s*while\s+(?:true|1|\(true\))\s*:\s*(.*)$/);
     if (!head) return;
     const indent = width(line);
-    const inline = head[1].replace(/#.*$/, "");
-    let exits = /\b(break|return|await|quit)\b/.test(inline);
-    const inner = [];
+    // A lambda's body (the rest of its line, and lines under it) doesn't count.
+    const before = (code) => code.split(/\bfunc\b/)[0];
+    let exits = leaves(before(head[1]), false);
+    const loops = [];
+    const lambdas = [];
     for (let next = index + 1; next < lines.length && !exits; next += 1) {
       const row = lines[next];
       if (!row.trim() || /^\s*#/.test(row)) continue;
       const depth = width(row);
       if (depth <= indent) break;
-      while (inner.length && depth <= inner[inner.length - 1]) inner.pop();
-      const code = row.replace(/#.*$/, "");
-      if (/^\s*(for|while)\b/.test(code)) inner.push(depth);
-      if (/\b(return|await|quit)\b/.test(code) || (/\bbreak\b/.test(code) && !inner.length)) exits = true;
+      while (loops.length && depth <= loops[loops.length - 1]) loops.pop();
+      while (lambdas.length && depth <= lambdas[lambdas.length - 1]) lambdas.pop();
+      if (lambdas.length) continue;
+      const code = codeOf(row);
+      if (/^\s*(for|while)\b/.test(code)) loops.push(depth);
+      if (/\bfunc\b/.test(code)) lambdas.push(depth);
+      if (leaves(before(code), loops.length > 0)) exits = true;
     }
     if (!exits) found.push(index + 1);
   });
@@ -490,6 +500,7 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
   };
   addEventListener("message", listen);
   let lastTick = Date.now();
+  let loadFrom = started;
   const watch = setInterval(() => {
     const now = Date.now();
     // The box left the page (the screen changed): nothing is playing any more.
@@ -500,10 +511,11 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
       lastWord = now;
       lastFrame = now;
       if (readyAt && !playingAt) readyAt += now - lastTick;
+      if (!readyAt) loadFrom += now - lastTick;
     }
     lastTick = now;
     if (document.hidden) return;
-    if (!readyAt && now - started > LOAD_LIMIT_S * 1000) stop("Godot's engine didn't finish downloading, so the box was closed. Try again with a better connection.");
+    if (!readyAt && now - loadFrom > LOAD_LIMIT_S * 1000) stop("Godot's engine didn't finish downloading, so the box was closed. Try again with a better connection.");
     else if (readyAt && !playingAt && now - readyAt > START_LIMIT_S * 1000) stop(`The game didn't show a frame within ${START_LIMIT_S} s, so the box was closed.`);
     else if (result.started && now - lastWord > QUIET_LIMIT_S * 1000) stop(`The game stopped answering for ${QUIET_LIMIT_S} s (a script stuck in a loop?), so the box was closed.`);
     else if (playingAt && now - lastFrame > QUIET_LIMIT_S * 1000) stop(`The game stopped drawing for ${QUIET_LIMIT_S} s, so the box was closed.`);
