@@ -177,7 +177,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.111.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.112.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -305,10 +305,32 @@ Notes carried over from the long session that built FCC Studio (LCC).
   a time); `js/views/godot.js` (Play, Check, the probe), the `godot` tool
   (tools version 9: main, builder, tester); the phone's starters and FCC's
   probe (`studio/godot/probe`) are generated into `godot/starters.js`. The
-  starters have touch controls (`touch.gd`). Not on the phone: threads,
-  GDExtension, C#, Forward+ effects, Godot's importer (pictures load at run
-  time). On iPhone in Australia every browser is WebKit, so Opera, Chrome
-  and the rest run Godot the same as Safari.
+  starters have touch controls (`touch.gd`; the 2D starters `touch_pad.gd`).
+  Pictures are imported on the phone (`godot/pack.js importPictures`: each
+  becomes a `.ctex` with its `.import` remap, so preload works); a game's
+  `user://` saves are kept per project in the phone's `fcc-godot-saves`
+  store (an in-box IndexedDB stand-in hands them over; play only, checks
+  start clean; Projects has Start over). Not on the phone: threads,
+  GDExtension, C#, Forward+ effects. On iPhone in Australia every browser is
+  WebKit, so Opera, Chrome and the rest run Godot the same as Safari.
+- The phone Lab's board computer (owner: single-board computers, Orange Pi
+  not Raspberry Pi; "test my designs ... a monitor to see"): `lab/board.js`
+  runs Arduino-style JavaScript in a sealed box on a virtual clock, with
+  fixed wiring per build (each sensor its own analog pin), a monitor
+  (`monitor.*`), and every loop counted (`guardLoops`, a small scanner) so
+  an endless loop stops instead of freezing the phone. Orange Pi 5 is the
+  main SBC (`studio/lab/tech.py`, mirrored in `lab/science.js`). Agreed
+  next phases: robot bodies on a test floor, then uploading blueprints and
+  3D models.
+- FCC Linux (owner: "FCC LINUX CUSTOM ... runs locally ... Jarvis can
+  interact with it"): Alpine 3.21 x86 built by `scripts/linux/build_fcc_linux.py`
+  without running anything downloaded (signed index, SHA-1 and SHA-256
+  checks, Python's library precompiled by the build machine's Python 3.12),
+  run by v86 in a sealed box (`js/linux.js`, `js/views/linux.js`, Lab, FCC
+  Linux), 192 MB, no network, snapshots in the phone's `fcc-linux` store
+  (first boot ~13 s, then ~2 s). bash marks idle/busy, so commands (the
+  `linux` tool, tools version 10) only run at the prompt and are never typed
+  into an open program. Rebuilding: see `vendor/fcc-linux/README.md`.
 - Godot on the PC (owner: "getting godot working and making SSS tier games
   with graphics"): FCC's install/check/frames/export path was checked end
   to end with real Godot 4.7.2; the `action-3d` starter

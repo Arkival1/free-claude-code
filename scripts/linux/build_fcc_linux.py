@@ -19,8 +19,6 @@ writes `fcc-linux.kernel`, `fcc-linux.initrd` (zstd) and `fcc-linux.json`
 by default. See vendor/fcc-linux/README.md.
 """
 
-from __future__ import annotations
-
 import argparse
 import base64
 import hashlib

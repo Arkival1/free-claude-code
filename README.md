@@ -2849,7 +2849,8 @@ account, and costs nothing.
 - **Godot games on the phone**: real Godot 4.7.2 (its official web player,
   `vendor/godot-web`) runs on the phone. **Projects, Godot games** starts
   the action game (touch controls: left thumb moves, right thumb turns the
-  camera, buttons for the rest) or the third-person game; a Godot project
+  camera, buttons for the rest), the third-person game, the 2D platformer
+  or the 2D RPG village (Kenney art, a touch pad); a Godot project
   has **Play** (full screen), **Check it** (plays it for 8 seconds and
   reports script errors with file and line, crashes and frame rate) and a
   .zip that opens in Godot on a computer. Games run in a sealed box: an
@@ -2863,6 +2864,29 @@ account, and costs nothing.
   Forward+ effects, system fonts) and what the box blocks on purpose. The
   AI uses the `godot` tool (guide, starters, start, check, probe); the
   engine (10 MB) downloads on the first game and stays on the phone.
+  Pictures in a project (PNG, JPEG, WebP, GIF, BMP) are imported on the
+  phone the way Godot's editor would, so `preload("res://art/hero.png")`
+  works. A game's saves (`user://`) stay on the phone between plays, per
+  game, up to 16 MB; the game's page shows the save and **Start over**
+  forgets it.
+- **FCC Linux**: Lab, **FCC Linux** runs FCC's own small Linux (Alpine 3.21,
+  32-bit x86) on the phone in the v86 emulator, in a sealed box with no
+  network: bash, Python 3.12, Lua, nano, tmux, SQLite, jq, bc, make, htop
+  and lynx, in a terminal sized to the phone with keys a phone keyboard
+  lacks (Esc, Tab, Ctrl-C, arrows). The first start downloads 28 MB and
+  boots in about 15 s; after that it opens in about 2 s from a snapshot,
+  and **Keep my session** brings back your files and history next time.
+  Jarvis uses the same machine with the `linux` tool (run, write, read,
+  info, keep, interrupt); his commands only run at the prompt, so nothing
+  is ever typed into a program you have open. It is built by
+  `scripts/linux/build_fcc_linux.py` without running anything downloaded
+  (see `vendor/fcc-linux/README.md`).
+- **Board computer**: an Orange Pi 5, Arduino, ESP32 or Raspberry Pi on the
+  Electronics bench runs a program you or Jarvis write (Arduino-style
+  JavaScript: `setup()`, `loop()`, `digitalWrite`, `analogRead`, sensors,
+  a servo, a buzzer, an OLED and a monitor to draw on) live or as a 10 s
+  test, with sensor sliders; every loop is counted, so an endless loop
+  stops the program, not the phone.
 - **Game kit (3D)**: the Lab's **Game kit** room shows the kit live in 3D: textures
   (stone, wood, grass, metal, lava, sand, bark, ice: drawn from seeded noise
   with normal maps), shaders (fire, embers, water, glow, toon, dissolve, sky),
