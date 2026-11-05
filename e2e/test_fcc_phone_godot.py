@@ -411,3 +411,72 @@ def test_pictures_load_in_godot_and_the_2d_starters_check_clean(
     report = page.locator(".godot-report")
     expect(report).to_contain_text("No errors", timeout=GODOT_WAIT)
     assert errors == [], errors
+
+
+COUNTER_GAME = """extends Node
+
+
+func _ready() -> void:
+\tvar count := 0
+\tif FileAccess.file_exists("user://count.txt"):
+\t\tcount = int(FileAccess.get_file_as_string("user://count.txt"))
+\tcount += 1
+\tvar file := FileAccess.open("user://count.txt", FileAccess.WRITE)
+\tfile.store_string(str(count))
+\tfile.close()
+\tawait get_tree().create_timer(1.5).timeout
+\tprint("COUNT %d %s" % [count, OS.is_userfs_persistent()])
+"""
+
+
+def test_a_games_saves_are_kept_on_the_phone_between_plays(
+    page: Page, admin_base_url: str
+) -> None:
+    """user:// survives closing the game: the box hands saves to the page,
+    which keeps them per project and hands them back next time it's played.
+    Checks start clean, and forgetting the saves starts the game over."""
+    page.set_default_timeout(GODOT_WAIT)
+    open_phone(page, admin_base_url)
+    counts = page.evaluate(
+        """async (files) => {
+            const godot = await import('./js/godot.js');
+            const project = { id: 'saves-test', name: 'Counter', files };
+            const play = async (mode) => {
+                const run = godot.runGodot(project, { mode, seconds: 60, untilPrint: /^COUNT/ });
+                const result = await run.done;
+                return (result.prints.find((line) => line.startsWith('COUNT')) || result.crash || 'none').trim();
+            };
+            await godot.forgetSaves('saves-test');
+            const out = [await play('play'), await play('play'), await play('check')];
+            out.push(String(await godot.savesSize('saves-test') > 0));
+            await godot.forgetSaves('saves-test');
+            out.push(await play('play'));
+            await godot.forgetSaves('saves-test');
+            return out;
+        }""",
+        project_files(COUNTER_GAME),
+    )
+    # The game's page shows the save and can forget it.
+    page.evaluate(
+        """async (files) => {
+            const projects = await import('./js/projects.js');
+            const godot = await import('./js/godot.js');
+            const project = await projects.createProject('Counter game', 'you');
+            for (const [path, body] of Object.entries(files)) await projects.writeFile(project, path, body, 'you');
+            await godot.runGodot(project, { mode: 'play', seconds: 60, untilPrint: /^COUNT/ }).done;
+            await new Promise((done) => setTimeout(done, 500));
+            window.location.hash = '#projects/' + project.id;
+        }""",
+        project_files(COUNTER_GAME),
+    )
+    expect(page.get_by_text("Saved game on this phone:")).to_be_visible()
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.get_by_role("button", name="Start over (forget the save)").click()
+    expect(page.get_by_text("Saved game on this phone:")).to_have_count(0)
+    assert counts == [
+        "COUNT 1 true",
+        "COUNT 2 true",
+        "COUNT 1 true",
+        "true",
+        "COUNT 1 true",
+    ], counts

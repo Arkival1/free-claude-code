@@ -7,7 +7,7 @@ const ENGINE_CACHE = "fcc-phone-engine-3.6.1";
 // kept on the phone across app updates (js/godot.js checks its checksums).
 const GODOT_CACHE = "fcc-phone-godot-4.7.2";
 // FCC Linux (about 25 MB): fetched the first time it starts, then kept.
-const LINUX_CACHE = "fcc-phone-linux-1.0";
+const LINUX_CACHE = "fcc-phone-linux-1.1";
 const LINUX_FILES = [
   "linux/libv86.js",
   "linux/v86.wasm",
@@ -60,6 +60,7 @@ const SHELL = [
   "js/views/workshop.js",
   "js/webkit.js",
   "js/godot.js",
+  "js/sha256.js",
   "js/linux.js",
   "js/views/linux.js",
   "linux/fcc-linux.json",

@@ -7,8 +7,10 @@
 // later it opens in about a second; "Keep my session" saves where you are.
 // Jarvis runs commands through the same serial line (lab/linux tool).
 
-export const LINUX_VERSION = "1.0";
-const MEMORY_MB = 128;
+import { digest } from "./sha256.js";
+
+export const LINUX_VERSION = "1.1";
+const MEMORY_MB = 192;
 // rootfstype=ramfs: the system lives in memory without tmpfs's half-of-RAM cap
 // (its files alone take most of that); init_on_free=1 zeroes freed memory, so
 // snapshots compress well.
@@ -21,11 +23,17 @@ const FILES = {
   xterm: ["linux/xterm.js", "1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495"],
   xtermCss: ["linux/xterm.css", "ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6"],
   kernel: ["linux/fcc-linux.kernel", "1c3ff14102200692a49019d091262ade97dcb6fc7ae1bd56ae2f94fae4033b2d"],
-  initrd: ["linux/fcc-linux.initrd", "2cfa451d8b4f32d7f5a1b97d190bc63ac43f316f126d40d1b565ee3def4db5f6"],
+  initrd: ["linux/fcc-linux.initrd", "1f5b5f0215908d8459b923fe5e3f7cf55206e3dd91e2e3d57a911a555a4cdb32"],
 };
-/** Snapshots belong to this exact system and engine. */
-const SNAPSHOT_KEY = `${FILES.kernel[1].slice(0, 12)}-${FILES.initrd[1].slice(0, 12)}-${FILES.wasm[1].slice(0, 12)}`;
-export const DOWNLOAD_BYTES = 25_100_000;
+/** A short hash of text (FNV-1a), for keys. */
+function shortHash(text) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return hash.toString(16).padStart(8, "0");
+}
+/** Snapshots belong to this exact system, engine, memory and kernel options. */
+const SNAPSHOT_KEY = `${LINUX_VERSION}-${MEMORY_MB}-${shortHash(CMDLINE)}-${FILES.kernel[1].slice(0, 12)}-${FILES.initrd[1].slice(0, 12)}-${FILES.wasm[1].slice(0, 12)}`;
+export const DOWNLOAD_BYTES = 27_863_582;
 
 /** Base64 of text (UTF-8), in pieces, so big files don't overflow the stack. */
 function base64(text) {
@@ -36,8 +44,6 @@ function base64(text) {
 }
 /** The terminal takes lines of about 4,000 characters: longer data goes in pieces. */
 const LINE = 3000;
-
-const hex = (buffer) => [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 
 async function fetchChecked([path, sum], onBytes) {
   const response = await fetch(new URL(`../${path}`, import.meta.url));
@@ -58,8 +64,9 @@ async function fetchChecked([path, sum], onBytes) {
     bytes.set(chunk, at);
     at += chunk.length;
   }
-  if (globalThis.crypto && crypto.subtle && hex(await crypto.subtle.digest("SHA-256", bytes)) !== sum) {
-    if (globalThis.caches) await caches.open("fcc-phone-linux-1.0").then((cache) => cache.delete(response.url)).catch(() => false);
+  // Always checked: the browser's SHA-256, or plain JS where it has none.
+  if ((await digest(bytes)) !== sum) {
+    if (globalThis.caches) await caches.open(`fcc-phone-linux-${LINUX_VERSION}`).then((cache) => cache.delete(response.url)).catch(() => false);
     throw new Error(`FCC Linux's ${path.split("/").pop()} isn't the file FCC shipped (its checksum is wrong), so it wasn't run. Reload the app to fetch it again.`);
   }
   return bytes.buffer;
@@ -121,18 +128,32 @@ async function readSnapshot(kind) {
 }
 async function writeSnapshot(kind, buffer) {
   const packed = await zip(buffer, "in");
-  // Snapshots of an older system or engine are dropped: they can't be restored.
   await dbDo("readwrite", (store) => store.put(packed, `${kind}:${SNAPSHOT_KEY}`));
+  // Snapshots of an older system or engine can't be restored: drop them.
+  try {
+    const keys = await dbDo("readonly", (store) => store.getAllKeys());
+    for (const key of keys) if (!String(key).endsWith(`:${SNAPSHOT_KEY}`)) await dbDo("readwrite", (store) => store.delete(key));
+  } catch {
+    // They go next time.
+  }
   return packed.byteLength;
 }
-export async function forgetSession() {
+async function forget(kind) {
   try {
-    await dbDo("readwrite", (store) => store.delete(`session:${SNAPSHOT_KEY}`));
+    await dbDo("readwrite", (store) => store.delete(`${kind}:${SNAPSHOT_KEY}`));
   } catch {
     // Nothing kept.
   }
 }
-export const hasSession = async () => Boolean(await readSnapshot("session"));
+export const forgetSession = () => forget("session");
+/** Is a session kept? (Counts it; doesn't unpack it.) */
+export async function hasSession() {
+  try {
+    return (await dbDo("readonly", (store) => store.count(`session:${SNAPSHOT_KEY}`))) > 0;
+  } catch {
+    return false;
+  }
+}
 
 /* ------------------------------------------------------------- the box */
 
@@ -240,7 +261,21 @@ export const runningLinux = () => current;
  * ready for commands: { frame, run(command), write(path, text), send(keys),
  * keep(), stop(), booted ("snapshot" | "session" | "boot"), seconds }.
  */
-export async function startLinux(host, { onProgress, onStatus = () => {}, fresh = false } = {}) {
+export async function startLinux(host, options = {}) {
+  for (let tries = 0; ; tries += 1) {
+    try {
+      return await startOnce(host, options);
+    } catch (error) {
+      // A kept session (or the saved start) that doesn't answer is dropped,
+      // and FCC Linux opens from the next best: the saved start, or a boot.
+      if (!error.restoreFailed || tries >= 2) throw error;
+      await forget(error.restoreFailed);
+      (options.onStatus || (() => {}))(error.restoreFailed === "session" ? "Your kept session didn't answer, so it was cleared; opening FCC Linux fresh…" : "The saved start didn't answer, so FCC Linux is booting from scratch…");
+    }
+  }
+}
+
+async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false } = {}) {
   if (current) current.stop();
   const started = Date.now();
   onStatus("Getting FCC Linux…");
@@ -259,6 +294,37 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
   const nextId = () => `${tag}${(ids += 1)}`;
   const waiting = new Map();
   let closed = false;
+  // Is the shell at its prompt? bash says so with markers (PROMPT_COMMAND:
+  // idle, PS0: busy). Kept and saved machines were kept at their prompt.
+  const idleWaiters = new Set();
+  const setIdle = (value) => {
+    machine.idle = value;
+    if (!value) return;
+    for (const done of [...idleWaiters]) done(true);
+    applySize();
+  };
+  const waitIdle = (ms) =>
+    machine.idle
+      ? Promise.resolve(true)
+      : new Promise((resolve) => {
+          const done = (value) => {
+            clearTimeout(timer);
+            idleWaiters.delete(done);
+            resolve(value);
+          };
+          const timer = setTimeout(() => done(false), ms);
+          idleWaiters.add(done);
+        });
+  // Tell Linux the terminal's size (so htop, nano and tmux draw to fit), only
+  // at the prompt: typed into a program, stty would land in it.
+  let sizeSet = "";
+  const applySize = () => {
+    if (!machine.ready || !machine.idle || !machine.size) return;
+    const want = `${machine.size.cols}x${machine.size.rows}`;
+    if (want === sizeSet) return;
+    sizeSet = want;
+    machine.run(`stty cols ${machine.size.cols} rows ${machine.size.rows}`).catch(() => (sizeSet = ""));
+  };
   let resolveReady;
   let rejectReady;
   const ready = new Promise((resolve, reject) => {
@@ -277,18 +343,25 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
     } else if (message.type === "out") {
       output += message.text;
       if (output.length > 400_000) output = output.slice(-200_000);
+      const fresh = output.slice(-(String(message.text).length + 16));
+      const idleAt = fresh.lastIndexOf("\x1b]fcc;idle\x07");
+      const busyAt = fresh.lastIndexOf("\x1b]fcc;busy\x07");
       settle();
+      if (idleAt >= 0 || busyAt >= 0) setIdle(idleAt > busyAt);
       // A fresh boot is ready at its first prompt; a restored one answers a command instead.
       if (!machine.ready && !state && /fcc\x1b\[0m:/.test(output)) markReady("boot");
     } else if (message.type === "ready") {
       if (message.restored) {
         // A restored machine is already at its prompt: say hello to check.
-        machine.run("true").then(() => markReady(session ? "session" : "snapshot"), () => {});
+        // No answer (it was kept mid-program?) → start from the next best.
+        machine.run("true", { timeoutMs: 20000 }).then(
+          () => markReady(session ? "session" : "snapshot"),
+          () => rejectReady(Object.assign(new Error("FCC Linux's saved state didn't answer."), { restoreFailed: session ? "session" : "clean" })),
+        );
       }
     } else if (message.type === "size") {
-      // Tell Linux the terminal's size, so htop, nano and tmux draw to fit.
       machine.size = { cols: Number(message.cols) || 80, rows: Number(message.rows) || 24 };
-      if (machine.ready) machine.run(`stty cols ${machine.size.cols} rows ${machine.size.rows}`).catch(() => {});
+      applySize();
     } else if (message.type === "state") {
       const job = waiting.get(`save:${message.id}`);
       if (job) job(message.state);
@@ -302,16 +375,16 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
     machine.booted = how;
     machine.seconds = Math.round((Date.now() - started) / 100) / 10;
     resolveReady(machine);
-    if (machine.size) machine.run(`stty cols ${machine.size.cols} rows ${machine.size.rows}`).catch(() => {});
     if (how === "boot") {
-      // Keep the fresh machine, so next time it opens in about a second.
+      // Keep the fresh machine at its prompt, so next time it opens in about
+      // a second (the terminal's size is set after, so it isn't mid-command).
       try {
-        await new Promise((resolve) => setTimeout(resolve, 800));
-        await writeSnapshot("clean", await machine.capture());
+        if (machine.idle) await writeSnapshot("clean", await machine.capture());
       } catch {
         // Next time boots again.
       }
     }
+    applySize();
   };
   // Command results: output between the markers __fcc_run prints.
   const settle = () => {
@@ -340,36 +413,17 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
     booted: "",
     seconds: 0,
     send: (keys) => post({ type: "send", text: String(keys) }),
-    /** Run a shell command; resolves { code, text } (the output, plain text). */
+    idle: Boolean(state),
+    waitIdle,
+    /** Run a shell command; resolves { code, text } (the output, plain text).
+     * Commands go one at a time, and only when the shell is at its prompt. */
     run(command, { timeoutMs = 60000 } = {}) {
-      const id = nextId();
-      const encoded = base64(command);
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          waiting.delete(`run:${id}`);
-          reject(new Error(`No answer within ${Math.round(timeoutMs / 1000)} s (is something still running? Ctrl-C stops it).`));
-        }, timeoutMs);
-        waiting.set(`run:${id}`, (result) => {
-          clearTimeout(timer);
-          resolve(result);
-        });
-        if (encoded.length <= LINE) post({ type: "send", text: ` __fcc_run ${id} ${encoded}\n` });
-        else {
-          // One piece at a time, each acknowledged, so the terminal's input
-          // buffer never overflows.
-          (async () => {
-            for (let at = 0, n = 0; at < encoded.length; at += LINE, n += 1) {
-              const ack = `${id}p${n}`;
-              await new Promise((done) => {
-                waiting.set(`ack:${ack}`, done);
-                post({ type: "send", text: ` printf %s '${encoded.slice(at, at + LINE)}' >> /tmp/.fcc-b64-${id}; printf '\\033]fcc;ack;${ack}\\a\\n'\n` });
-              });
-              if (closed) return;
-            }
-            post({ type: "send", text: ` __fcc_run ${id} "$(cat /tmp/.fcc-b64-${id}; rm -f /tmp/.fcc-b64-${id})"\n` });
-          })();
-        }
-      });
+      const job = queue.then(() => runNow(String(command), timeoutMs));
+      queue = job.then(
+        () => {},
+        () => {},
+      );
+      return job;
     },
     /** Write a text file inside FCC Linux. */
     async write(path, text) {
@@ -390,6 +444,8 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
       }),
     /** Keep this session (files, programs, history) for next time. */
     async keep() {
+      // Kept at its prompt, so it opens ready for commands.
+      if (!(await waitIdle(3000))) throw new Error("Something is running in FCC Linux (nano, htop, python, tmux…). Close it so the terminal is back at its prompt, then Keep.");
       return writeSnapshot("session", await machine.capture());
     },
     stop() {
@@ -402,6 +458,55 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
       waiting.clear();
       if (!machine.ready) rejectReady(new Error("FCC Linux was closed."));
     },
+  };
+  let queue = Promise.resolve();
+  const runNow = async (command, timeoutMs) => {
+    if (closed) return { code: -1, text: "FCC Linux was closed." };
+    if (!(await waitIdle(3000))) throw new Error("FCC Linux's terminal is busy: a program is open in it (nano, htop, python, tmux…). Close it (Ctrl-C or its quit key), or use the linux tool's interrupt, then try again.");
+    const id = nextId();
+    const encoded = base64(command);
+    // Ctrl-E Ctrl-U first: anything half-typed at the prompt is cleared, not run with it.
+    const line = (text) => post({ type: "send", text: `\x05\x15 ${text}\n` });
+    return new Promise((resolve, reject) => {
+      let over = false;
+      const finish = (error, result) => {
+        if (over) return;
+        over = true;
+        clearTimeout(timer);
+        waiting.delete(`run:${id}`);
+        if (error) reject(error);
+        else resolve(result);
+      };
+      const timer = setTimeout(() => finish(new Error(`No answer within ${Math.round(timeoutMs / 1000)} s (is something still running? Ctrl-C stops it).`)), timeoutMs);
+      waiting.set(`run:${id}`, (result) => finish(null, result));
+      if (encoded.length <= LINE) {
+        line(`__fcc_run ${id} ${encoded}`);
+        return;
+      }
+      // One piece at a time, each acknowledged, so the terminal's input
+      // buffer never overflows; a time-out or a stop ends the sending.
+      (async () => {
+        for (let at = 0, n = 0; at < encoded.length; at += LINE, n += 1) {
+          if (closed || over) return;
+          // Each piece only at the prompt (a program opened meanwhile isn't typed into).
+          if (n > 0 && !(await waitIdle(3000))) return finish(new Error("FCC Linux's terminal got busy while the command was being sent, so it was stopped."));
+          const ack = `${id}p${n}`;
+          const taken = await new Promise((done) => {
+            const wait = setTimeout(() => {
+              waiting.delete(`ack:${ack}`);
+              done(false);
+            }, 15000);
+            waiting.set(`ack:${ack}`, () => {
+              clearTimeout(wait);
+              done(true);
+            });
+            line(`printf %s '${encoded.slice(at, at + LINE)}' >> /tmp/.fcc-b64-${id}; printf '\\033]fcc;ack;${ack}\\a\\n'`);
+          });
+          if (!taken) return finish(new Error("FCC Linux stopped taking the command (its terminal isn't reading)."));
+        }
+        if (!closed && !over) line(`__fcc_run ${id} "$(cat /tmp/.fcc-b64-${id}; rm -f /tmp/.fcc-b64-${id})"`);
+      })();
+    });
   };
   current = machine;
   addEventListener("message", listen);
@@ -421,10 +526,11 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
 
 /** Terminal text without colours, cursor moves or the echoed command line. */
 export function plain(text) {
-  return String(text)
+  const clean = String(text)
     .replace(/\x1b\][^\x07]*\x07/g, "")
     .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
     .replace(/\r/g, "")
-    .replace(/^\n+/, "")
-    .slice(0, 20000);
+    .replace(/^\n+/, "");
+  // The end matters most (errors, results), so a long output keeps its end.
+  return clean.length > 20000 ? `… (${clean.length - 20000} earlier characters left out) …\n${clean.slice(-20000)}` : clean;
 }

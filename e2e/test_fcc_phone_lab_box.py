@@ -143,6 +143,7 @@ def test_the_lab_box_rooms_benches_and_blueprints(
             "Electronics",
             "Blueprints",
             "Library",
+            "FCC Linux",
             "Web kit",
             "Game kit",
         ]

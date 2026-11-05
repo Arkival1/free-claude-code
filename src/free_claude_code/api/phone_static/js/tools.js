@@ -82,12 +82,12 @@ export const SPECS = {
     },
   },
   linux: {
-    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time). It has python3, lua5.4, bash, nano, tmux, sqlite3, jq, bc, make, htop and lynx; files live in /root. Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
+    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time), interrupt (Ctrl-C: stop what's running so the terminal is back at its prompt). Commands only run at the prompt: if the user has a program open (nano, htop), say so instead of interrupting it. It has python3, lua5.4, bash, nano, tmux, sqlite3, jq, bc, make, htop and lynx; files live in /root. Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["run", "write", "read", "info", "keep"] },
-        command: text("run: the shell command (sh)."),
+        action: { type: "string", enum: ["run", "write", "read", "info", "keep", "interrupt"] },
+        command: text("run: the shell command (bash; no keyboard input: it reads nothing)."),
         path: text("write or read: the file's path, e.g. /root/hello.py."),
         content: text("write: the file's whole text."),
         seconds: { type: "number", description: "run: the longest to wait (default 60, at most 300)." },
@@ -359,7 +359,12 @@ export async function runTool(agent, call, ctx) {
           const bytes = await machine.keep();
           return `Kept the session (${(bytes / 1048576).toFixed(1)} MB on the phone): its files are there next time.`;
         }
-        return "action is run, write, read, info or keep.";
+        if (action === "interrupt") {
+          machine.send("\x03");
+          feed(agent.name, "Pressed Ctrl-C in FCC Linux.");
+          return (await machine.waitIdle(3000)) ? "Sent Ctrl-C: the terminal is back at its prompt." : "Sent Ctrl-C, but something still holds the terminal (a program that ignores Ctrl-C, like nano or htop: its quit key is Ctrl-X or q). Ask the user to close it.";
+        }
+        return "action is run, write, read, info, keep or interrupt.";
       }
       case "godot": {
         if (args.project) ctx.project = projects.findProject(String(args.project)) || ctx.project;

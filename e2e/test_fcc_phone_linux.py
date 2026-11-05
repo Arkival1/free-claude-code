@@ -50,7 +50,7 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
         }"""
     )
     assert done["tools"]
-    assert "FCC Linux 1.0" in done["info"] and "Python 3.12" in done["info"]
+    assert "FCC Linux 1.1" in done["info"] and "Python 3.12" in done["info"]
     assert done["wrote"].startswith("Wrote /root/hello.py")
     assert done["ran"].startswith("exit code 0") and '{"sum": 5050}' in done["ran"]
     assert "1024" in done["ran"]
@@ -59,6 +59,40 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
     # Only the loopback: no network card in the emulated PC.
     assert re.search(r"exit code \d+\nlo\n", done["network"]), done["network"]
     assert "Network is unreachable" in done["network"] or "Error" in done["network"]
+
+    # Commands run in bash with no keyboard input; a half-typed line at the
+    # prompt is cleared, not run; a program left open (cat reading the
+    # keyboard) is never typed into: Jarvis is told, Keep waits, and
+    # interrupt (Ctrl-C) brings the prompt back.
+    guarded = page.evaluate(
+        """async () => {
+            const { runTool } = await import('./js/tools.js');
+            const { runningLinux } = await import('./js/linux.js');
+            const jarvis = window.fccPhone.state.agents.find((a) => a.role === 'main');
+            const ctx = { depth: 0, chain: [], built: new Set() };
+            const call = (args) => runTool(jarvis, { name: 'linux', arguments: args }, ctx);
+            const machine = runningLinux();
+            const out = {};
+            out.bash = await call({ action: 'run', command: 'nums=(4 5 6); echo "count ${#nums[@]}"; python3; echo "python $?"' });
+            machine.send('echo HALF-TYPED');
+            out.cleared = await call({ action: 'run', command: 'echo clean' });
+            machine.send('cat\\n');
+            await new Promise((done) => setTimeout(done, 1500));
+            out.idleWhileOpen = machine.idle;
+            out.busy = await call({ action: 'run', command: 'echo should-not-run' }).catch((error) => 'error: ' + error.message);
+            out.keep = await machine.keep().then(() => 'kept', (error) => 'error: ' + error.message);
+            out.interrupt = await call({ action: 'interrupt' });
+            out.after = await call({ action: 'run', command: 'echo back' });
+            return out;
+        }"""
+    )
+    assert "count 3" in guarded["bash"] and "python 0" in guarded["bash"], guarded
+    assert guarded["cleared"].rstrip() == "exit code 0\nclean", guarded
+    assert guarded["idleWhileOpen"] is False
+    assert "busy" in guarded["busy"] and "should-not-run" not in guarded["busy"]
+    assert guarded["keep"].startswith("error: Something is running")
+    assert "back at its prompt" in guarded["interrupt"], guarded
+    assert guarded["after"].rstrip() == "exit code 0\nback", guarded
 
     # Keep the session, close, and come back to it in seconds.
     page.get_by_role("button", name="Keep my session").click()

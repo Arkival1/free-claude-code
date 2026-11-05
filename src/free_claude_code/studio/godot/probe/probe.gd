@@ -209,7 +209,7 @@ func _files() -> void:
 	elif _web() and not OS.is_userfs_persistent():
 		_add("Files", "Saving (user://)", "limited", "Works while the game is open; it starts fresh each time (FCC's box keeps no game files).")
 	else:
-		_add("Files", "Saving (user://)", "works", "Saves stay between runs." if OS.is_userfs_persistent() else "Works.")
+		_add("Files", "Saving (user://)", "works", "Kept between plays (on a phone, FCC keeps each game's saves)." if OS.is_userfs_persistent() else "Works.")
 	_add("Files", "Game files (res://)", "works" if FileAccess.file_exists("res://probe.gd") else "limited", "Scripts, scenes and data read from the game's pack.")
 
 

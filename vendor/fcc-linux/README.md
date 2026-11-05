@@ -1,6 +1,6 @@
 # FCC Linux (FCC Phone's own small Linux)
 
-FCC Linux 1.0 is Alpine Linux 3.21.9 (32-bit x86, what v86 emulates) with
+FCC Linux 1.1 is Alpine Linux 3.21.9 (32-bit x86, what v86 emulates) with
 FCC's additions, built by `scripts/linux/build_fcc_linux.py` without running
 anything downloaded. `contents.json` lists exactly what is inside: the 15
 base packages of Alpine's minimal root filesystem, the 35 packages FCC adds
@@ -11,13 +11,22 @@ tests and GUI kits).
 - Inputs, pinned by SHA-256 (`SHA256SUMS`): `alpine-minirootfs-3.21.9-x86.tar.gz`
   and `alpine-netboot-3.21.9-x86.tar.gz` (for the kernel, `vmlinuz-lts`,
   Linux 6.12) from https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86/;
-  every package is checked against Alpine's signed package index (SHA-1 of
-  its control part).
+  the package index's RSA signature is checked with Alpine's keys from that
+  (pinned) minimal root, every package's control part with the index's
+  SHA-1, and its files with the SHA-256 (`datahash`) its control part names.
+  Nothing downloaded is run, and a check that can't be made stops the build.
+- Python's library is compiled to bytecode at build time by the build
+  machine's own Python 3.12 (`compile()` only parses the sources; nothing
+  downloaded is run), as unchecked-hash `.pyc` files, so the first `python3`
+  on the phone starts in about 4 s instead of 15. The build needs
+  `python3.12` (`uv python install 3.12`) and gives the same bytes each run.
 - Outputs, in `src/free_claude_code/api/phone_static/linux/`:
   `fcc-linux.kernel`, `fcc-linux.initrd` (zstd) and `fcc-linux.json`.
 - FCC's own files inside: `/init`, `/etc/inittab`, `/etc/fcc/` (boot and
   login), `/etc/profile.d/fcc.sh` (the prompt and the `__fcc_run` bridge
-  the phone and Jarvis use over the serial line), `/etc/motd`,
+  the phone and Jarvis use over the serial line: commands run in bash with
+  no keyboard input, and the prompt tells the phone when the shell is idle
+  or busy, so nothing is typed into an open program), `/etc/motd`,
   `/etc/os-release` and `fcc-info`.
 
 ## Licences and sources

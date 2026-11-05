@@ -3,9 +3,11 @@ emulator in a sealed box on the phone.
 
 It is Alpine Linux 3.21 (32-bit x86, the machine v86 emulates) with FCC's own
 additions, built without running anything that was downloaded: the minimal
-root filesystem and each package are fetched, checked (SHA-256 for the
-release files, the package index's SHA-1 for every package), and unpacked by
-this script; FCC's start-up files are written in; and the whole system is
+root filesystem and each package are fetched, checked, and unpacked by this
+script. The checks chain from the pinned SHA-256 of Alpine's release files:
+the package index's RSA signature is checked with Alpine's keys from the
+(pinned) minimal root filesystem, each package's control part with the
+index's SHA-1, and its files with the SHA-256 the control part names; FCC's start-up files are written in; and the whole system is
 packed into one compressed in-memory root (an initramfs) next to Alpine's
 kernel. Package scripts are not run: what they would do (shells, links) is
 done here.
@@ -22,11 +24,16 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import hmac
 import io
 import json
+import shutil
 import stat
+import struct
+import subprocess
 import sys
 import tarfile
+import tempfile
 import urllib.request
 import zlib
 from compression import zstd
@@ -79,6 +86,7 @@ LEAVE_OUT = (
     "usr/lib/python3.12/turtledemo/",
     "usr/lib/python3.12/ensurepip/",
     "usr/lib/python3.12/lib2to3/",
+    "usr/lib/python3.12/lib-dynload/_test",
 )
 """Parts left out to keep the phone's download small (manuals, Python's own
 tests and GUI kits that can't run without a screen server)."""
@@ -112,12 +120,90 @@ def gzip_members(data: bytes) -> list[bytes]:
     return members
 
 
-def read_index() -> dict[str, dict[str, str]]:
+def _der(data: bytes, at: int) -> tuple[bytes, int]:
+    """One DER item at `at`: (its contents, where the next item starts)."""
+    length = data[at + 1]
+    at += 2
+    if length & 0x80:
+        size = length & 0x7F
+        length = int.from_bytes(data[at : at + size], "big")
+        at += size
+    return data[at : at + length], at + length
+
+
+def rsa_key(pem: bytes) -> tuple[int, int]:
+    """(n, e) of an RSA public key in PEM (SubjectPublicKeyInfo)."""
+    der = base64.b64decode(
+        b"".join(line for line in pem.splitlines() if not line.startswith(b"-----"))
+    )
+    info, _ = _der(der, 0)
+    _, at = _der(info, 0)  # the algorithm
+    bits, _ = _der(info, at)
+    key, _ = _der(bits, 1)  # after the unused-bits byte
+    n, at = _der(key, 0)
+    e, _ = _der(key, at)
+    return int.from_bytes(n, "big"), int.from_bytes(e, "big")
+
+
+DIGEST_INFO = {
+    "sha1": bytes.fromhex("3021300906052b0e03021a05000414"),
+    "sha256": bytes.fromhex("3031300d060960864801650304020105000420"),
+}
+
+
+def rsa_verify(key: tuple[int, int], signature: bytes, data: bytes, how: str) -> bool:
+    """RSA PKCS#1 v1.5 (what apk signs with): does `signature` sign `data`?"""
+    n, e = key
+    size = (n.bit_length() + 7) // 8
+    if len(signature) != size:
+        return False
+    plain = pow(int.from_bytes(signature, "big"), e, n).to_bytes(size, "big")
+    tail = DIGEST_INFO[how] + hashlib.new(how, data).digest()
+    expected = b"\x00\x01" + b"\xff" * (size - 3 - len(tail)) + b"\x00" + tail
+    return hmac.compare_digest(plain, expected)
+
+
+def alpine_keys(root) -> dict[str, tuple[int, int]]:
+    """Alpine's signing keys, from the (checksum-pinned) minimal root."""
+    keys = {}
+    for name, (info, body) in root.items():
+        if name.startswith(("etc/apk/keys/", "usr/share/apk/keys/")) and info.isreg():
+            keys[name.rsplit("/", 1)[1]] = rsa_key(body or b"")
+    if not keys:
+        raise SystemExit("The minimal root has no Alpine keys to check the index with.")
+    return keys
+
+
+def verified_index(raw: bytes, keys: dict[str, tuple[int, int]], repo: str) -> bytes:
+    """The index's own data, after checking Alpine signed it."""
+    members = gzip_members(raw)
+    if len(members) < 2:
+        raise SystemExit(f"{repo}: the package index isn't signed.")
+    with tarfile.open(
+        fileobj=io.BytesIO(zlib.decompress(members[0], 16 + zlib.MAX_WBITS))
+    ) as bundle:
+        signs = [info for info in bundle if info.name.startswith(".SIGN.RSA")]
+        if not signs:
+            raise SystemExit(f"{repo}: the package index isn't signed.")
+        handle = bundle.extractfile(signs[0])
+        signature = handle.read() if handle else b""
+    kind, _, key_name = (
+        signs[0].name.partition(".rsa.pub")[0].partition(".SIGN.")[2].partition(".")
+    )
+    how = "sha256" if kind == "RSA256" else "sha1"
+    key = keys.get(f"{key_name}.rsa.pub")
+    signed = b"".join(members[1:])
+    if key is None or not rsa_verify(key, signature, signed, how):
+        raise SystemExit(f"{repo}: the package index's signature doesn't check out.")
+    return signed
+
+
+def read_index(keys: dict[str, tuple[int, int]]) -> dict[str, dict[str, str]]:
     """Every package in main and community: name -> its index fields."""
     packages: dict[str, dict[str, str]] = {}
     for repo in ("main", "community"):
-        raw = fetch(f"{MIRROR}/{repo}/x86/APKINDEX.tar.gz")
-        with tarfile.open(fileobj=io.BytesIO(raw)) as bundle:
+        raw = verified_index(fetch(f"{MIRROR}/{repo}/x86/APKINDEX.tar.gz"), keys, repo)
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as bundle:
             member = bundle.extractfile("APKINDEX")
             assert member is not None
             text = member.read().decode()
@@ -178,7 +264,7 @@ def unpack(
     added = 0
     with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as bundle:
         for info in bundle:
-            name = info.name.lstrip("./")
+            name = clean_name(info.name)
             if not name or (name.startswith(".") and "/" not in name):
                 continue  # .PKGINFO, .SIGN..., the package's own bookkeeping
             if any(name.startswith(prefix) for prefix in skip):
@@ -191,6 +277,112 @@ def unpack(
             info.name = name
             root[name] = (info, body)
     return added
+
+
+def clean_name(name: str) -> str:
+    """A path in the archive without a leading ./ or / (dot files keep their dot)."""
+    while name.startswith("./"):
+        name = name[2:]
+    return name.lstrip("/")
+
+
+def package_data_hash(control: bytes) -> str:
+    """The SHA-256 the package's .PKGINFO gives for its files (datahash)."""
+    with tarfile.open(
+        fileobj=io.BytesIO(zlib.decompress(control, 16 + zlib.MAX_WBITS))
+    ) as bundle:
+        handle = bundle.extractfile(".PKGINFO")
+        text = handle.read().decode() if handle else ""
+    for line in text.splitlines():
+        key, _, value = line.partition(" = ")
+        if key.strip() == "datahash":
+            return value.strip()
+    return ""
+
+
+# Compiles (parses, never runs) Python sources into bytecode files, read from
+# stdin and written to stdout as (name, bytes) records. Unchecked-hash .pyc
+# files carry no times, so the build stays the same each run, and Python
+# uses them as they are.
+COMPILER = r"""
+import importlib._bootstrap_external as external
+import importlib.util
+import struct
+import sys
+
+data = sys.stdin.buffer.read()
+out = bytearray()
+at = 0
+while at < len(data):
+    name_size, body_size = struct.unpack_from("<II", data, at)
+    at += 8
+    name = data[at : at + name_size].decode()
+    at += name_size
+    source = data[at : at + body_size]
+    at += body_size
+    try:
+        code = compile(source, "/" + name, "exec", dont_inherit=True)
+    except (SyntaxError, ValueError):
+        continue
+    pyc = external._code_to_hash_pyc(code, importlib.util.source_hash(source), False)
+    out += struct.pack("<II", len(name.encode()), len(pyc)) + name.encode() + pyc
+sys.stdout.buffer.write(bytes(out))
+"""
+
+
+def precompile_python(root) -> int:
+    """Add __pycache__/*.cpython-312.pyc for Python's own library, so the
+    first python3 on the phone starts in seconds instead of compiling its
+    library inside the emulator (about 15 s). Needs Python 3.12 here (the
+    same bytecode as Alpine's 3.12): `uv python install 3.12`."""
+    python = shutil.which("python3.12")
+    if not python:
+        raise SystemExit(
+            "Precompiling Python needs Python 3.12: uv python install 3.12"
+        )
+    sources = {
+        name: body or b""
+        for name, (info, body) in root.items()
+        if name.startswith("usr/lib/python3.12/")
+        and name.endswith(".py")
+        and info.isreg()
+    }
+    records = b"".join(
+        struct.pack("<II", len(name.encode()), len(body)) + name.encode() + body
+        for name, body in sorted(sources.items())
+    )
+    with tempfile.TemporaryDirectory() as empty:
+        done = subprocess.run(
+            [python, "-I", "-S", "-c", COMPILER],
+            input=records,
+            capture_output=True,
+            cwd=empty,
+            timeout=900,
+            check=True,
+        )
+    data, at, count = done.stdout, 0, 0
+    while at < len(data):
+        name_size, body_size = struct.unpack_from("<II", data, at)
+        at += 8
+        name = data[at : at + name_size].decode()
+        at += name_size
+        folder, file = name.rsplit("/", 1)
+        add_bytes(
+            root,
+            f"{folder}/__pycache__/{file[:-3]}.cpython-312.pyc",
+            data[at : at + body_size],
+        )
+        at += body_size
+        count += 1
+    return count
+
+
+def add_bytes(root, path: str, data: bytes, mode: int = 0o644) -> None:
+    info = tarfile.TarInfo(path)
+    info.size = len(data)
+    info.mode = mode
+    info.mtime = 0
+    root[path] = (info, data)
 
 
 def add_text(root, path: str, text: str, mode: int = 0o644) -> None:
@@ -264,7 +456,12 @@ def cpio(root) -> bytes:
         elif info.issym():
             entry(name, stat.S_IFLNK | 0o777, info.linkname.encode())
         elif info.islnk():
-            target = root.get(info.linkname.lstrip("./"))
+            # A hard link (maybe to another hard link): the file it names.
+            target = root.get(clean_name(info.linkname))
+            for _ in range(8):
+                if not target or not target[0].islnk():
+                    break
+                target = root.get(clean_name(target[0].linkname))
             entry(
                 name,
                 stat.S_IFREG | (info.mode & 0o7777),
@@ -327,13 +524,23 @@ exec /bin/bash -l
 export PS1='\[\e[38;5;208m\]fcc\[\e[0m\]:\[\e[36m\]\w\[\e[0m\]\$ '
 export EDITOR=nano PAGER=less
 alias ll='ls -la'
+# FCC Phone's commands start with a space: keep them out of the history.
+export HISTCONTROL=ignoreboth
+# Tell FCC Phone when the shell is at its prompt (idle) and when a command
+# runs (busy), so it never types into a program that's open (nano, htop...).
+PROMPT_COMMAND='printf "\033]fcc;idle\a"'
+PS0='\e]fcc;busy\a'
 # Run a command sent by FCC Phone (base64, so any text survives the serial
-# line); its output sits between two markers the phone looks for.
+# line) in bash, with no keyboard input; its output sits between two markers
+# the phone looks for.
 __fcc_run() {
+  local file="/tmp/.fcc-cmd-$1" code
   printf '\033]fcc;begin;%s\a\n' "$1"
-  printf '%s' "$2" | base64 -d > /tmp/.fcc-cmd 2>/dev/null
-  sh /tmp/.fcc-cmd 2>&1
-  printf '\033]fcc;end;%s;%s\a\n' "$1" "$?"
+  printf '%s' "$2" | base64 -d > "$file" 2>/dev/null
+  bash "$file" < /dev/null 2>&1
+  code=$?
+  rm -f "$file"
+  printf '\033]fcc;end;%s;%s\a\n' "$1" "$code"
 }
 # Write a file sent by FCC Phone (base64).
 __fcc_put() {
@@ -356,8 +563,8 @@ __fcc_put() {
         """NAME="FCC Linux"
 ID=fcc-linux
 ID_LIKE=alpine
-VERSION_ID=1.0
-PRETTY_NAME="FCC Linux 1.0 (Alpine 3.21 base)"
+VERSION_ID=1.1
+PRETTY_NAME="FCC Linux 1.1 (Alpine 3.21 base)"
 HOME_URL="https://github.com/arkival1/free-claude-code"
 """,
     ),
@@ -379,9 +586,9 @@ echo "No network in the box: files you make stay inside it while it's open."
 
 
 def build(out: Path) -> dict:
-    index = read_index()
     root: dict[str, tuple[tarfile.TarInfo, bytes | None]] = {}
     base_size = unpack(fetch(*MINIROOTFS), root)
+    index = read_index(alpine_keys(root))
     installed = (root.get("lib/apk/db/installed") or (None, b""))[1] or b""
     have = {
         line[2:] for line in installed.decode().splitlines() if line.startswith("P:")
@@ -395,10 +602,12 @@ def build(out: Path) -> dict:
         members = gzip_members(data)
         control = members[-2]
         expected = fields.get("C", "")
-        if expected.startswith("Q1"):
-            digest = base64.b64encode(hashlib.sha1(control).digest()).decode()
-            if digest != expected[2:]:
-                raise SystemExit(f"{name}: its checksum doesn't match Alpine's index.")
+        digest = base64.b64encode(hashlib.sha1(control).digest()).decode()
+        if not expected.startswith("Q1") or digest != expected[2:]:
+            raise SystemExit(f"{name}: its checksum doesn't match Alpine's index.")
+        data_hash = package_data_hash(control)
+        if not data_hash or hashlib.sha256(members[-1]).hexdigest() != data_hash:
+            raise SystemExit(f"{name}: its files don't match its own checksum.")
         size = unpack(zlib.decompress(members[-1], 16 + zlib.MAX_WBITS), root)
         added.append(
             {
@@ -417,6 +626,7 @@ def build(out: Path) -> dict:
     add_text(root, "etc/shells", "/bin/sh\n/bin/ash\n/bin/bash\n")
     if "usr/bin/python3" not in root and "usr/bin/python3.12" in root:
         add_link(root, "usr/bin/python3", "python3.12")
+    compiled = precompile_python(root)
     out.mkdir(parents=True, exist_ok=True)
     # zstd: the kernel unpacks it several times faster than xz inside the
     # emulator, for a slightly bigger download.
@@ -428,12 +638,13 @@ def build(out: Path) -> dict:
     (out / "fcc-linux.kernel").write_bytes(kernel)
     (out / "fcc-linux.initrd").write_bytes(initrd)
     report = {
-        "name": "FCC Linux 1.0",
+        "name": "FCC Linux 1.1",
         "base": f"Alpine Linux {RELEASE} (x86)",
         "base_packages": sorted(have),
         "base_bytes": base_size,
         "added": added,
         "left_out": list(LEAVE_OUT),
+        "python_precompiled": compiled,
         "kernel": {
             "from": KERNEL_IN_NETBOOT,
             "bytes": len(kernel),

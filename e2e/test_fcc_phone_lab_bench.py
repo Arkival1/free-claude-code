@@ -182,3 +182,47 @@ def test_jarvis_programs_and_tests_the_board_computer(
     assert "endless loop" in done["endless"]
     assert "while (true)" in done["program"]
     assert done["boxes"] == 0
+
+
+def test_the_board_computer_guards_every_loop_and_wires_each_sensor(
+    page: Page, admin_base_url: str
+) -> None:
+    """Endless loops stop whatever their shape (no braces, do…while, inside
+    strings or classes left alone); a program with no loop() ends after its
+    setup in live mode; two sensors of one kind get two pins."""
+    open_phone(page, admin_base_url, "lab")
+    checked = page.evaluate(
+        r"""async () => {
+            const board = await import('./lab/board.js');
+            const parts = [{ id: 'arduino' }, { id: 'led-red' }, { id: 'light-sensor', count: 2 }];
+            const run = async (code, live = false) => (await board.runBoard(code, parts, { live, seconds: 3 }).done);
+            const divided = [board.guardLoops('a = b++ / 2; while (q) {}'), board.guardLoops('a = n-- / 2;\nwhile (q) {}')];
+            const guarded = board.guardLoops('const s = "while (x) {"; class A extends mix(B) { go() { while (a) b(); } } for (;;) break; do n++; while (n < 3);');
+            const endless = await run('function setup() { let n = 0; while (true) n++; }');
+            const doEndless = await run('function setup() { let n = 0; do n++; while (n > 0); }');
+            const fine = await run('function setup() { let total = 0; for (let i = 0; i < 1000; i++) total += i; Serial.println("total " + total); }\nfunction loop() { delay(500); }');
+            const live = await Promise.race([run('function setup() { digitalWrite(LED_RED, HIGH); Serial.println("set up"); }', true), new Promise((done) => setTimeout(() => done('still running'), 8000))]);
+            const wire = board.wiring(parts);
+            return {
+                guarded,
+                divided,
+                endless: endless.error,
+                doEndless: doEndless.error,
+                fine: [fine.error, fine.state.serial.join('\n')],
+                live: live === 'still running' ? live : [live.error, live.state.serial.join('\n')],
+                pins: wire.wires.filter((item) => item.role === 'light').map((item) => item.pin),
+            };
+        }"""
+    )
+    assert '"while (x) {"' in checked["guarded"]
+    assert "while (__tick() && (a)) b();" in checked["guarded"]
+    assert "for (; __tick();) break;" in checked["guarded"]
+    assert "while (__tick() && (n < 3));" in checked["guarded"]
+    # x++ / 2 divides (it doesn't start a regex), so the loop after it is guarded.
+    assert all("while (__tick() && (q))" in code for code in checked["divided"])
+    assert "endless loop" in checked["endless"]
+    assert "endless loop" in checked["doEndless"]
+    assert checked["fine"][0] == "" and "total 499500" in checked["fine"][1]
+    assert checked["live"] != "still running", "a setup-only live program never ended"
+    assert checked["live"][0] == "" and "set up" in checked["live"][1]
+    assert checked["pins"] == [14, 15]  # A0, then the next free analog pin

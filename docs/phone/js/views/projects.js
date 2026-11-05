@@ -4,7 +4,7 @@ import { el, button, card, go, notify, openSheet, closeSheet, ago } from "../ui.
 import * as projects from "../projects.js";
 import { runTask, isBusy } from "../agents.js";
 import { addPhoto, setNote, removePhoto, photoData } from "../photos.js";
-import { isGodotProject, starterFiles } from "../godot.js";
+import { isGodotProject, starterFiles, savesSize, forgetSaves } from "../godot.js";
 import { playGodot, checkInto, showProbe } from "./godot.js";
 
 export function render(view, id) {
@@ -219,7 +219,25 @@ function renderGodotProject(view, project) {
   const out = el("pre", { class: "godot-report", role: "status" });
   const ask = el("textarea", { "aria-label": "Change request", placeholder: "Make the boss faster and add a second arena" });
   let checking = false;
+  // The game's saves (user://) stay on this phone between plays.
+  const saves = el("div", { class: "row godot-saves" });
+  const showSaves = async () => {
+    const bytes = await savesSize(project.id);
+    saves.replaceChildren(
+      ...(bytes
+        ? [
+            el("span", { class: "muted small", text: `Saved game on this phone: ${bytes < 1048576 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1048576).toFixed(1)} MB`}` }),
+            button("Start over (forget the save)", async () => {
+              if (!confirm(`Forget ${project.name}'s saved game? It starts from the beginning next time.`)) return;
+              await forgetSaves(project.id);
+              showSaves();
+            }),
+          ]
+        : []),
+    );
+  };
   const draw = () => {
+    showSaves();
     const names = Object.keys(project.files);
     const builder = agentById("builder") || state.agents.find((agent) => agent.role === "builder");
     const busy = builder && isBusy(builder);
@@ -227,7 +245,7 @@ function renderGodotProject(view, project) {
       card(project.name, [
         el("p", { class: "muted", text: `Godot game · ${names.length} files · changed ${ago(project.updated_at)}${busy ? " · the Builder is working on it" : ""}` }),
         el("div", { class: "row" }, [
-          button("▶ Play", () => playGodot(project), { class: "primary", "aria-label": `Play ${project.name}` }),
+          button("▶ Play", () => playGodot(project).done.then(() => setTimeout(showSaves, 500)), { class: "primary", "aria-label": `Play ${project.name}` }),
           button("Check it", async () => {
             if (checking) return;
             checking = true;
@@ -241,6 +259,7 @@ function renderGodotProject(view, project) {
         ]),
         box,
         out,
+        saves,
         el("p", { class: "muted small", text: "The .zip opens in Godot 4.7 on a computer (Import, then pick project.godot)." }),
       ]),
       card("Change it", [

@@ -8,6 +8,7 @@
 // memory is capped, a watchdog closes it when it stops answering, and a crash
 // closes only the box. The engine's files ship with FCC and are checked
 // against their SHA-256 sums before they run.
+import { sha256Hex, digest } from "./sha256.js";
 import { makePack, importPictures, isGodotProject } from "../godot/pack.js";
 
 export { isGodotProject };
@@ -37,55 +38,9 @@ let runtime = null;
 let busy = null;
 const ABORT = /\bAborted\b|RuntimeError|unreachable|out of memory|memory access out of bounds/i;
 /** Lines the web player prints that say nothing about the game. */
+export { sha256Hex };
+
 const NOISE = /^Failed to assign PWA callback/;
-
-const hex = (buffer) => [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-
-const ROUND = new Uint32Array([0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]);
-const rotate = (value, bits) => (value >>> bits) | (value << (32 - bits));
-
-/** SHA-256 in plain JS, for when the browser's own isn't there (plain http
- * from the PC on the home network), so the engine is always checked. */
-export function sha256Hex(buffer) {
-  const data = new Uint8Array(buffer);
-  const blocks = Math.ceil((data.length + 9) / 64);
-  const padded = new Uint8Array(blocks * 64);
-  padded.set(data);
-  padded[data.length] = 0x80;
-  const view = new DataView(padded.buffer);
-  view.setUint32(padded.length - 8, Math.floor(data.length / 0x20000000));
-  view.setUint32(padded.length - 4, (data.length * 8) >>> 0);
-  const state = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
-  const w = new Uint32Array(64);
-  for (let block = 0; block < blocks; block += 1) {
-    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(block * 64 + i * 4);
-    for (let i = 16; i < 64; i += 1) {
-      const s0 = rotate(w[i - 15], 7) ^ rotate(w[i - 15], 18) ^ (w[i - 15] >>> 3);
-      const s1 = rotate(w[i - 2], 17) ^ rotate(w[i - 2], 19) ^ (w[i - 2] >>> 10);
-      w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-    }
-    let [a, b, c, d, e, f, g, h] = state;
-    for (let i = 0; i < 64; i += 1) {
-      const t1 = (h + (rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25)) + ((e & f) ^ (~e & g)) + ROUND[i] + w[i]) | 0;
-      const t2 = ((rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
-      h = g;
-      g = f;
-      f = e;
-      e = (d + t1) | 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (t1 + t2) | 0;
-    }
-    [a, b, c, d, e, f, g, h].forEach((value, i) => (state[i] += value));
-  }
-  return [...state].map((word) => word.toString(16).padStart(8, "0")).join("");
-}
-
-async function digest(bytes) {
-  if (globalThis.crypto && crypto.subtle) return hex(await crypto.subtle.digest("SHA-256", bytes));
-  return sha256Hex(bytes);
-}
 
 async function fetchChecked([path, sum], onProgress) {
   const response = await fetch(new URL(`../${path}`, import.meta.url));
@@ -186,6 +141,81 @@ function boxMain() {
           configurable: false,
         });
       }
+      // Saves (user://): Godot keeps them in IndexedDB, which the box can't
+      // open (it has no origin of its own). This stand-in holds them in
+      // memory, starts from the saves the page hands in (play only), and
+      // hands every change back to the page, which keeps them per game.
+      const saves = new Map(Object.entries(job.saves || {}));
+      const later = (work) => setTimeout(work, 0);
+      const fire = (target, name, event) => typeof target[name] === "function" && target[name](event);
+      const transaction = (mode) => {
+        const tx = { mode, pending: 0, over: false, onerror: null, onabort: null, oncomplete: null };
+        const settle = () =>
+          later(() => {
+            if (tx.over || tx.pending) return;
+            tx.over = true;
+            if (mode === "readwrite") send({ type: "saves", files: Object.fromEntries(saves) });
+            fire(tx, "oncomplete", { target: tx });
+          });
+        const request = (work) => {
+          const req = { result: undefined, error: null, onsuccess: null, onerror: null };
+          tx.pending += 1;
+          later(() => {
+            try {
+              req.result = work();
+              fire(req, "onsuccess", { target: req });
+            } catch (error) {
+              req.error = error;
+              fire(req, "onerror", { target: req, preventDefault() {} });
+            }
+            tx.pending -= 1;
+            settle();
+          });
+          return req;
+        };
+        const writable = () => {
+          if (mode !== "readwrite") throw new Error("read-only");
+        };
+        const store = {
+          indexNames: { contains: () => true },
+          createIndex() {},
+          get: (key) => request(() => (saves.has(String(key)) ? structuredClone(saves.get(String(key))) : undefined)),
+          put: (value, key) => request(() => (writable(), saves.set(String(key), structuredClone(value)), key)),
+          delete: (key) => request(() => (writable(), saves.delete(String(key)), undefined)),
+          index: () => ({
+            openKeyCursor() {
+              const keys = [...saves.keys()];
+              const req = { result: null, onsuccess: null, onerror: null };
+              let at = 0;
+              const next = () => {
+                tx.pending += 1;
+                later(() => {
+                  const key = keys[at++];
+                  req.result = key === undefined ? null : { primaryKey: key, key: saves.has(key) ? saves.get(key).timestamp : null, continue: next };
+                  fire(req, "onsuccess", { target: req });
+                  tx.pending -= 1;
+                  settle();
+                });
+              };
+              next();
+              return req;
+            },
+          }),
+        };
+        tx.objectStore = () => store;
+        return tx;
+      };
+      const db = { objectStoreNames: { contains: () => true }, createObjectStore: () => transaction("readwrite").objectStore(), transaction: (names, mode) => transaction(mode), close() {} };
+      Object.defineProperty(window, "indexedDB", {
+        value: {
+          open() {
+            const req = { result: db, error: null, onsuccess: null, onerror: null, onupgradeneeded: null };
+            later(() => fire(req, "onsuccess", { target: req }));
+            return req;
+          },
+        },
+        configurable: true,
+      });
       // The only thing the engine may fetch is its own code, from memory.
       window.fetch = (input) =>
         /\.wasm$/.test(String((input && input.url) || input))
@@ -213,7 +243,7 @@ function boxMain() {
       if (missing.length) throw new Error(`This browser can't run Godot: ${missing.join(", ")}`);
       const engine = new Godot({
         executable: "godot",
-        persistentPaths: [],
+        persistentPaths: ["/userfs"],
         canvas: document.getElementById("canvas"),
         canvasResizePolicy: 2,
         onPrint: (...parts) => {
@@ -382,6 +412,7 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
   }
   // Pictures are imported as the editor would (async: JPEG and WebP become PNG).
   const packing = importPictures(project.files).then((imported) => makePack(project.files, imported));
+  const keeps = mode === "play" && typeof project.id === "string" && project.id !== "";
   const frame = document.createElement("iframe");
   // Scripts, and the mouse lock a 3D game asks for on a computer (Esc frees it).
   frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock");
@@ -422,12 +453,13 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
     const text = typeof message.text === "string" ? message.text : "";
     switch (message.type) {
       case "ready":
-        Promise.all([loadGodot(onProgress), packing])
-          .then(([engine, pack]) => {
+        // Saves only come in (and go back) when the user plays; checks start clean.
+        Promise.all([loadGodot(onProgress), packing, keeps ? readSaves(project.id) : {}])
+          .then(([engine, pack, saves]) => {
             if (closed) return;
             readyAt = Date.now();
             onEvent({ type: "engine" });
-            frame.contentWindow.postMessage({ type: "run", script: engine.script, wasm: engine.wasm, worklets: engine.worklets, pack, args, memoryMb: MEMORY_MB, pixelRatio: PIXEL_RATIO }, "*");
+            frame.contentWindow.postMessage({ type: "run", script: engine.script, wasm: engine.wasm, worklets: engine.worklets, pack, args, saves, memoryMb: MEMORY_MB, pixelRatio: PIXEL_RATIO }, "*");
           })
           .catch((error) => {
             result.crash = error.message;
@@ -474,6 +506,13 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
       case "memory":
         result.memory = text;
         break;
+      case "saves":
+        if (keeps) {
+          keepSaves(project.id, message.files).then((problem) => {
+            if (problem && !result.warnings.includes(problem)) result.warnings.push(problem);
+          });
+        }
+        return;
       case "crash":
         // A stray browser error may leave the game running; an engine abort doesn't.
         if (!ABORT.test(text)) {
@@ -576,7 +615,7 @@ One thread: Thread doesn't run on its own and long work freezes the game. Build 
 Pictures: put them in the project (use_photo or find_images): PNG, JPEG, WebP, GIF or BMP. FCC imports them as Godot's editor would, so preload("res://art/hero.png") and textures in scenes work. Sound is loaded at run time: AudioStreamOggVorbis.load_from_buffer(FileAccess.get_file_as_bytes(path)) or AudioStreamWAV.load_from_buffer(...).
 Text: the built-in font has letters, digits and punctuation only; symbols and emoji show as empty boxes, so use words or draw shapes.
 Touch: a phone has no keyboard or mouse. Give every action an on-screen control (TouchScreenButton with action set, a joystick from InputEventScreenTouch and InputEventScreenDrag) shown when DisplayServer.is_touchscreen_available().
-Saving: user:// works while the game is open and starts fresh each time.
+Saving: user:// (FileAccess, ConfigFile, ResourceSaver) is kept on this phone between plays, per game, up to 16 MB; the user can clear it in Projects (Start over). Checks start with no saves, so a game must also work from nothing.
 Not here: C#, GDExtension (native code), the internet (HTTPRequest and WebSocket fail on purpose), JavaScriptBridge.
 Never write while true without break, return or await inside: it would freeze the phone (check refuses to run it).
 How to make one: start_project, then godot start with a starter (godot starters lists them), or write project.godot (with run/main_scene="res://main.tscn"), main.tscn and main.gd yourself; building the scene in code in _ready is easier to get right than long .tscn files. Then godot check, fix every error it shows (file and line), and check again until it says No errors.`;
@@ -588,6 +627,78 @@ export function starterFiles(starters, name, title) {
   const files = { ...starters[name].files };
   files["project.godot"] = files["project.godot"].replace(/config\/name="[^"]*"/, `config/name=${JSON.stringify(String(title || "My game").slice(0, 60))}`);
   return files;
+}
+
+/* ---------------------------------------------------------------- saves */
+
+// A game's saves (its user:// files), kept on the phone per project, apart
+// from the backups. They're the game's own data, handed back only to it.
+const SAVES_DB = "fcc-godot-saves";
+const SAVES_MAX = 16 * 1048576;
+function savesDo(mode, work) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(SAVES_DB, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("saves");
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const request = work(db.transaction("saves", mode).objectStore("saves"));
+      request.onsuccess = () => {
+        db.close();
+        resolve(request.result);
+      };
+      request.onerror = () => {
+        db.close();
+        reject(request.error);
+      };
+    };
+  });
+}
+/** A game's saves ({ path: { timestamp, mode, contents } }), or none. */
+export async function readSaves(id) {
+  try {
+    const row = await savesDo("readonly", (store) => store.get(String(id)));
+    return (row && row.files) || {};
+  } catch {
+    return {};
+  }
+}
+/** Keep what the box handed back; returns a problem to show, or "". */
+async function keepSaves(id, files) {
+  if (!files || typeof files !== "object") return "";
+  const clean = {};
+  let bytes = 0;
+  for (const [path, entry] of Object.entries(files)) {
+    if (!path.startsWith("/userfs") || !entry || typeof entry !== "object" || typeof entry.mode !== "number") continue;
+    // Godot's file system hands file bytes over as typed arrays (Int8Array here).
+    if (entry.contents !== undefined && !ArrayBuffer.isView(entry.contents)) continue;
+    bytes += path.length + (entry.contents ? entry.contents.byteLength : 0);
+    clean[path] = { timestamp: entry.timestamp instanceof Date ? entry.timestamp : new Date(Number(entry.timestamp) || 0), mode: entry.mode, ...(entry.contents ? { contents: entry.contents } : {}) };
+  }
+  if (bytes > SAVES_MAX) return `The game's saves are over ${SAVES_MAX / 1048576} MB, so the newest ones weren't kept.`;
+  try {
+    await savesDo("readwrite", (store) => store.put({ files: clean, bytes, at: Date.now() }, String(id)));
+    return "";
+  } catch {
+    return "The game's saves couldn't be kept on this phone.";
+  }
+}
+/** Forget a game's saves (Start over). */
+export async function forgetSaves(id) {
+  try {
+    await savesDo("readwrite", (store) => store.delete(String(id)));
+  } catch {
+    // Nothing kept.
+  }
+}
+/** How big a game's saves are (bytes), without unpacking them. */
+export async function savesSize(id) {
+  try {
+    const row = await savesDo("readonly", (store) => store.get(String(id)));
+    return row ? Number(row.bytes) || 0 : 0;
+  } catch {
+    return 0;
+  }
 }
 
 let lastProbe = null;

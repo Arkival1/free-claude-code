@@ -22,6 +22,8 @@ const NAMES = { "light-sensor": "LIGHT", "temp-sensor": "TEMP", "soil-sensor": "
 const PWM = [9, 10, 6, 5, 3, 11];
 const DIGITAL = [13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 9];
 const ANALOG = { light: 14, temp: 15, soil: 16, distance: 17 };
+/** Analog pins A0-A5: each sensor gets its own (a second light sensor takes a free one). */
+const ANALOG_PINS = [14, 15, 16, 17, 18, 19];
 const DIGITAL_IN = { motion: 2, button: 4, switch: 5 };
 const MAX_COPIES = 4;
 /** Sensor readings the user sets with sliders (and a test starts from). */
@@ -39,6 +41,7 @@ const label = (id) => NAMES[id] || id.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
 export function wiring(parts) {
   const brain = parts.find((entry) => BRAINS.has(entry.id));
   const wires = [];
+  const unwired = [];
   const used = new Set();
   const take = (pool) => {
     const pin = pool.find((candidate) => !used.has(candidate));
@@ -46,6 +49,16 @@ export function wiring(parts) {
     return pin;
   };
   Object.values(DIGITAL_IN).forEach((pin) => used.add(pin));
+  // First copies of each sensor keep their usual pin (light A0, temp A1...);
+  // extra copies take the free analog pins after them.
+  const analogUsed = new Set();
+  const reserved = new Set(parts.map((entry) => ANALOG[ROLES[entry.id]]).filter((pin) => pin !== undefined));
+  const analogPin = (role, copy) => {
+    const usual = ANALOG[role];
+    const pin = copy === 0 && !analogUsed.has(usual) ? usual : ANALOG_PINS.find((candidate) => !analogUsed.has(candidate) && !reserved.has(candidate));
+    if (pin !== undefined) analogUsed.add(pin);
+    return pin;
+  };
   const order = (role) => (role === "motor" || role === "servo" ? 0 : role === "buzzer" ? 1 : 2);
   const outputs = [];
   for (const entry of parts) {
@@ -56,7 +69,11 @@ export function wiring(parts) {
       const part = findPart(entry.id);
       const name = `${part ? part.name : entry.id}${copies > 1 ? ` ${copy + 1}` : ""}`;
       const constant = `${label(entry.id)}${copy ? `_${copy + 1}` : ""}`;
-      if (role in ANALOG) wires.push({ id: entry.id, copy, role, name, constant, pin: ANALOG[role] + copy * 0, input: true });
+      if (role in ANALOG) {
+        const pin = analogPin(role, copy);
+        if (pin !== undefined) wires.push({ id: entry.id, copy, role, name, constant, pin, input: true });
+        else unwired.push(name);
+      }
       else if (role in DIGITAL_IN) wires.push({ id: entry.id, copy, role, name, constant, pin: DIGITAL_IN[role], input: true });
       else if (role === "display") wires.push({ id: entry.id, copy, role, name, constant: "DISPLAY", pin: null, input: false });
       else outputs.push({ id: entry.id, copy, role, name, constant });
@@ -66,8 +83,9 @@ export function wiring(parts) {
   for (const wire of outputs) {
     const pin = wire.role === "motor" || wire.role === "servo" ? take(PWM) ?? take(DIGITAL) : wire.role === "buzzer" ? (used.has(8) ? take(DIGITAL) : (used.add(8), 8)) : take(DIGITAL) ?? take(PWM);
     if (pin !== undefined) wires.push({ ...wire, pin, input: false });
+    else unwired.push(wire.name);
   }
-  return { brain: brain ? brain.id : "", wires };
+  return { brain: brain ? brain.id : "", wires, unwired };
 }
 
 /** The wiring as the program's names: LED_RED = 13, LIGHT = A0... */
@@ -82,6 +100,7 @@ const pinText = (pin) => (pin >= 14 ? `A${pin - 14}` : String(pin));
 export function wiringText(wire) {
   if (!wire.brain) return "No board computer on the board (add an Orange Pi, Arduino, ESP32 or Raspberry Pi).";
   const rows = wire.wires.map((item) => (item.role === "display" ? `display (OLED screen): ${item.name}` : `${item.constant} = pin ${pinText(item.pin)}: ${item.name}${item.input ? " (input)" : ""}`));
+  if (wire.unwired && wire.unwired.length) rows.push(`Not wired (no free pin left): ${wire.unwired.join(", ")}`);
   return rows.length ? rows.join("\n") : "Nothing is wired to the board computer yet: add LEDs, motors, a buzzer, sensors, a button or a screen.";
 }
 
@@ -138,6 +157,7 @@ function boardBox() {
   let budget = 0;
   let events = [];
   let inputs = {};
+  let analogRoles = {};
   let line = "";
   let screen = [];
   let canvas = [];
@@ -151,6 +171,7 @@ function boardBox() {
   const tick = () => {
     budget += 1;
     if (budget > LIMIT) throw new Error("A loop ran millions of times without stopping, so the program was stopped (an endless loop?).");
+    return true;
   };
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const sensor = (name) => Number(inputs[name] ?? 0);
@@ -172,7 +193,7 @@ function boardBox() {
     },
     analogRead(pin) {
       tick();
-      const role = { 14: "light", 15: "temp", 16: "soil", 17: "distance" }[pin];
+      const role = analogRoles[pin];
       if (role === "light") return Math.round((sensor("light") / 100) * 1023);
       if (role === "temp") return Math.round(((0.5 + sensor("temp") / 100) / 5) * 1023);
       if (role === "soil") return Math.round(1023 - (sensor("soil") / 100) * 700);
@@ -297,6 +318,7 @@ function boardBox() {
     const job = event.data;
     if (event.source !== parent || !job || dead) return;
     if (job.type === "load") {
+      analogRoles = job.analogRoles || {};
       Object.assign(window, api, job.constants);
       const script = document.createElement("script");
       script.textContent = `${job.code}\n;window.__fcc = { setup: typeof setup === "function" ? setup : null, loop: typeof loop === "function" ? loop : null };`;
@@ -341,10 +363,150 @@ const BOX_HTML = `<!doctype html><html><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
 </head><body><script>(${boardBox.toString()})();</script></body></html>`;
 
-/** Count every loop's turns: `) {` and `do {` get a tick, so an endless
- * loop stops the program instead of freezing the phone. Lines stay put. */
+/** Where the code's strings, comments and regular expressions are, so the
+ * loop guard only ever looks at code. Returns a function: is this index code? */
+function codeMap(code) {
+  const skip = new Uint8Array(code.length);
+  const stack = []; // open template literals: the brace depth each ${ began at
+  let depth = 0;
+  let last = ""; // the last code character that wasn't a space
+  let before = ""; // the one before it (x++ / 2 divides; it isn't a regex)
+  let word = ""; // the last word, for regexes after return/typeof/...
+  let i = 0;
+  const mark = (from, to) => skip.fill(1, from, Math.min(to, code.length));
+  const regexCanStart = () => !((last === "+" || last === "-") && before === last) && (!last || "(,=:[!&|?{};+-*%<>~^".includes(last) || /^(return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/.test(word));
+  const template = (from) => {
+    // From inside a template literal to its end or its next ${.
+    let at = from;
+    while (at < code.length) {
+      if (code[at] === "\\") at += 2;
+      else if (code[at] === "`") return [at + 1, false];
+      else if (code[at] === "$" && code[at + 1] === "{") return [at + 2, true];
+      else at += 1;
+    }
+    return [at, false];
+  };
+  while (i < code.length) {
+    const c = code[i];
+    if (c === "/" && code[i + 1] === "/") {
+      const stop = code.indexOf("\n", i);
+      const to = stop < 0 ? code.length : stop;
+      mark(i, to);
+      i = to;
+    } else if (c === "/" && code[i + 1] === "*") {
+      const stop = code.indexOf("*/", i + 2);
+      const to = stop < 0 ? code.length : stop + 2;
+      mark(i, to);
+      i = to;
+    } else if (c === "'" || c === '"') {
+      let at = i + 1;
+      while (at < code.length && code[at] !== c && code[at] !== "\n") at += code[at] === "\\" ? 2 : 1;
+      mark(i, at + 1);
+      i = at + 1;
+      before = last;
+      last = c;
+      word = "";
+    } else if (c === "`" || (c === "}" && stack.length && stack[stack.length - 1] === depth)) {
+      if (c === "}") stack.pop();
+      const [to, opened] = template(i + 1);
+      mark(i, to);
+      if (opened) stack.push(depth);
+      i = to;
+      last = opened ? "{" : "`";
+      word = "";
+    } else if (c === "/" && regexCanStart()) {
+      let at = i + 1;
+      let inClass = false;
+      while (at < code.length && code[at] !== "\n") {
+        if (code[at] === "\\") at += 1;
+        else if (code[at] === "[") inClass = true;
+        else if (code[at] === "]") inClass = false;
+        else if (code[at] === "/" && !inClass) break;
+        at += 1;
+      }
+      while (/[a-z]/i.test(code[at + 1] || "")) at += 1;
+      mark(i, at + 1);
+      i = at + 1;
+      last = "/";
+      word = "";
+    } else {
+      if (c === "{") depth += 1;
+      else if (c === "}") depth -= 1;
+      if (/[A-Za-z_$0-9]/.test(c)) {
+        const match = /^[A-Za-z_$0-9]+/.exec(code.slice(i, i + 64));
+        word = match[0];
+        before = last;
+        last = word[word.length - 1];
+        i += word.length;
+        continue;
+      }
+      if (!/\s/.test(c)) {
+        before = last;
+        last = c;
+        word = "";
+      }
+      i += 1;
+    }
+  }
+  return (at) => !skip[at];
+}
+
+/** The index of the ")" closing the "(" at `open` (code only), or -1. */
+function closing(code, open, isCode) {
+  let depth = 0;
+  for (let at = open; at < code.length; at += 1) {
+    if (!isCode(at)) continue;
+    if ("([{".includes(code[at])) depth += 1;
+    else if (")]}".includes(code[at]) && --depth === 0) return code[at] === ")" ? at : -1;
+  }
+  return -1;
+}
+
+/** Count every loop's turns: each while/for condition calls __tick() first
+ * (for (a; b; c) → for (a; __tick() && (b); c)), so an endless loop stops
+ * the program instead of freezing the phone, whatever its shape (braces or
+ * none, do…while). Strings, comments and regexes are left alone; lines stay
+ * put. for…of/for…in walk a list, so they need none. */
 export function guardLoops(code) {
-  return String(code).replace(/\)\s*\{/g, (match) => `${match}__tick();`).replace(/\bdo\s*\{/g, (match) => `${match}__tick();`);
+  code = String(code);
+  const isCode = codeMap(code);
+  const edits = []; // [at, remove, insert]
+  const loop = /\b(while|for)\b/g;
+  let found;
+  while ((found = loop.exec(code))) {
+    const at = found.index;
+    if (!isCode(at) || /[.$\w]/.test(code[at - 1] || "")) continue;
+    let open = at + found[0].length;
+    while (/\s/.test(code[open] || "")) open += 1;
+    if (found[1] === "for" && code.startsWith("await", open)) {
+      open += 5;
+      while (/\s/.test(code[open] || "")) open += 1;
+    }
+    if (code[open] !== "(") continue;
+    const close = closing(code, open, isCode);
+    if (close < 0) continue;
+    if (found[1] === "while") {
+      if (!code.slice(open + 1, close).trim()) continue;
+      edits.push([open + 1, 0, "__tick() && ("], [close, 0, ")"]);
+      continue;
+    }
+    // for: the condition sits between the two top-level semicolons.
+    const semis = [];
+    let depth = 0;
+    for (let k = open + 1; k < close; k += 1) {
+      if (!isCode(k)) continue;
+      if ("([{".includes(code[k])) depth += 1;
+      else if (")]}".includes(code[k])) depth -= 1;
+      else if (code[k] === ";" && depth === 0) semis.push(k);
+    }
+    if (semis.length !== 2) continue; // for…of / for…in
+    const condition = code.slice(semis[0] + 1, semis[1]);
+    if (condition.trim()) edits.push([semis[0] + 1, 0, " __tick() && ("], [semis[1], 0, ")"]);
+    else edits.push([semis[0] + 1, 0, " __tick()"]);
+  }
+  edits.sort((a, b) => b[0] - a[0]);
+  for (const [at, remove, insert] of edits) code = code.slice(0, at) + insert + code.slice(at + remove);
+  return code;
 }
 
 /** What the outputs are doing now, from the events played so far. */
@@ -436,7 +598,8 @@ export function runBoard(code, parts, { host = document.body, live = true, secon
     const message = event.data;
     lastWord = Date.now();
     if (message.type === "ready") {
-      frame.contentWindow.postMessage({ type: "load", code: guardLoops(code), constants: constantsOf(wire) }, "*");
+      const analogRoles = Object.fromEntries(wire.wires.filter((item) => item.input && item.role in ANALOG).map((item) => [item.pin, item.role]));
+      frame.contentWindow.postMessage({ type: "load", code: guardLoops(code), constants: constantsOf(wire), analogRoles }, "*");
     } else if (message.type === "loaded") {
       started = Date.now();
       advance(live ? 1000 : 2000);
@@ -448,8 +611,11 @@ export function runBoard(code, parts, { host = document.body, live = true, secon
       waiting = false;
       const events = Array.isArray(message.events) ? message.events.slice(0, 20000) : [];
       boxTime = Number(message.vt) || boxTime;
-      if (live) pending.push(...events);
-      else {
+      if (live) {
+        pending.push(...events);
+        // A program with no loop() ends after setup: play what it did, then stop.
+        if (message.ended) boxTime = Infinity;
+      } else {
         for (const item of events) {
           apply(state, item);
           if (all.length < 50000) all.push(item);

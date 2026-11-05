@@ -1,5 +1,5 @@
 {
- "name": "FCC Linux 1.0",
+ "name": "FCC Linux 1.1",
  "base": "Alpine Linux 3.21.9 (x86)",
  "base_packages": [
   "alpine-baselayout",
@@ -138,7 +138,7 @@
    "name": "python3",
    "version": "3.12.16-r0",
    "repo": "main",
-   "bytes": 20879542
+   "bytes": 20338534
   },
   {
    "name": "lua5.4-libs",
@@ -240,15 +240,17 @@
   "usr/lib/python3.12/tkinter/",
   "usr/lib/python3.12/turtledemo/",
   "usr/lib/python3.12/ensurepip/",
-  "usr/lib/python3.12/lib2to3/"
+  "usr/lib/python3.12/lib2to3/",
+  "usr/lib/python3.12/lib-dynload/_test"
  ],
+ "python_precompiled": 515,
  "kernel": {
   "from": "boot/vmlinuz-lts",
   "bytes": 8233472,
   "sha256": "1c3ff14102200692a49019d091262ade97dcb6fc7ae1bd56ae2f94fae4033b2d"
  },
  "initrd": {
-  "bytes": 14261046,
-  "sha256": "2cfa451d8b4f32d7f5a1b97d190bc63ac43f316f126d40d1b565ee3def4db5f6"
+  "bytes": 16800482,
+  "sha256": "1f5b5f0215908d8459b923fe5e3f7cf55206e3dd91e2e3d57a911a555a4cdb32"
  }
 }

@@ -34,6 +34,7 @@ export function playGodot(project) {
     const trouble = result.problems.some((problem) => problem.stop) || result.crash || result.errors.length || (result.stopped && !["Closed.", "exit"].includes(result.stopped));
     if (trouble) showReport(`${project.name}: what happened`, describeRun(result));
   });
+  return run;
 }
 
 function showReport(title, text) {
