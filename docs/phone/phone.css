@@ -617,8 +617,8 @@ pre.notes {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
 
-/* Godot: the game's sealed box, full screen; Close top left, clear of the
-   game's own touch controls at the bottom. */
+/* Godot: the game's sealed box, full screen; Close top right, clear of the
+   game's own touch controls at the bottom and its score at the top left. */
 .godot-layer .godot-box {
   position: absolute;
   inset: 0;
@@ -631,7 +631,8 @@ pre.notes {
 .godot-layer .close-full {
   top: calc(10px + var(--safe-top));
   bottom: auto;
-  left: calc(10px + env(safe-area-inset-left, 0px));
+  left: auto;
+  right: calc(10px + env(safe-area-inset-right, 0px));
   transform: none;
   z-index: 2;
   padding: 6px 12px;
