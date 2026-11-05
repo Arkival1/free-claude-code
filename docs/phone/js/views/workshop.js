@@ -92,6 +92,7 @@ export function render(view) {
     bar.replaceChildren(
       el("button", { class: "lab-room", type: "button", "aria-pressed": String(!room), text: "Box", onclick: () => world ? world.focus(null) : setRoom(null) }),
       ...ROOM_ORDER.map((id) => el("button", { class: "lab-room", type: "button", "aria-pressed": String(room === id), text: shop.ROOM_NAMES[id], onclick: () => (world ? world.focus(id) : setRoom(id)) })),
+      el("button", { class: "lab-room", type: "button", text: "FCC Linux", onclick: () => go("lab/linux") }),
       el("button", { class: "lab-room", type: "button", text: "Web kit", onclick: () => go("lab/web") }),
       el("button", { class: "lab-room", type: "button", text: "Game kit", onclick: () => go("lab/game") })
     );
@@ -584,6 +585,7 @@ export function render(view) {
       ]),
       el("p", { class: "small muted", text: "Monitor" }),
       screen,
+      brain && ["orange-pi", "raspberry-pi"].includes(brain.id) ? el("div", { class: "row" }, [button("Open FCC Linux (its operating system)", () => go("lab/linux"))]) : null,
       sensorRows.length ? el("div", { class: "board-sensors" }, [el("p", { class: "small muted", text: "Sensors (move them while it runs):" }), ...sensorRows]) : null,
       live || serial.textContent ? el("div", {}, [el("p", { class: "small muted", text: "Serial monitor" }), serial]) : null,
       testReport ? el("pre", { class: "board-report", text: testReport }) : null,

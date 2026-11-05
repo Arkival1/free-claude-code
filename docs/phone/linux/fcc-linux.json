@@ -1,0 +1,254 @@
+{
+ "name": "FCC Linux 1.0",
+ "base": "Alpine Linux 3.21.9 (x86)",
+ "base_packages": [
+  "alpine-baselayout",
+  "alpine-baselayout-data",
+  "alpine-keys",
+  "alpine-release",
+  "apk-tools",
+  "busybox",
+  "busybox-binsh",
+  "ca-certificates-bundle",
+  "libcrypto3",
+  "libssl3",
+  "musl",
+  "musl-utils",
+  "scanelf",
+  "ssl_client",
+  "zlib"
+ ],
+ "base_bytes": 6648051,
+ "added": [
+  {
+   "name": "ncurses-terminfo-base",
+   "version": "6.5_p20241006-r3",
+   "repo": "main",
+   "bytes": 98074
+  },
+  {
+   "name": "libncursesw",
+   "version": "6.5_p20241006-r3",
+   "repo": "main",
+   "bytes": 333828
+  },
+  {
+   "name": "readline",
+   "version": "8.2.13-r0",
+   "repo": "main",
+   "bytes": 255652
+  },
+  {
+   "name": "bash",
+   "version": "5.2.37-r0",
+   "repo": "main",
+   "bytes": 1268911
+  },
+  {
+   "name": "nano",
+   "version": "8.2-r0",
+   "repo": "main",
+   "bytes": 305446
+  },
+  {
+   "name": "less",
+   "version": "668-r0",
+   "repo": "main",
+   "bytes": 223076
+  },
+  {
+   "name": "libevent",
+   "version": "2.1.13-r0",
+   "repo": "main",
+   "bytes": 666480
+  },
+  {
+   "name": "tmux",
+   "version": "3.5a-r0",
+   "repo": "main",
+   "bytes": 742396
+  },
+  {
+   "name": "ncurses",
+   "version": "6.5_p20241006-r3",
+   "repo": "main",
+   "bytes": 214486
+  },
+  {
+   "name": "libexpat",
+   "version": "2.10.0-r0",
+   "repo": "main",
+   "bytes": 144660
+  },
+  {
+   "name": "libbz2",
+   "version": "1.0.8-r6",
+   "repo": "main",
+   "bytes": 78080
+  },
+  {
+   "name": "libffi",
+   "version": "3.4.7-r0",
+   "repo": "main",
+   "bytes": 30124
+  },
+  {
+   "name": "gdbm",
+   "version": "1.24-r0",
+   "repo": "main",
+   "bytes": 72252
+  },
+  {
+   "name": "xz-libs",
+   "version": "5.8.4-r0",
+   "repo": "main",
+   "bytes": 263632
+  },
+  {
+   "name": "libgcc",
+   "version": "14.2.0-r4",
+   "repo": "main",
+   "bytes": 210312
+  },
+  {
+   "name": "libstdc++",
+   "version": "14.2.0-r4",
+   "repo": "main",
+   "bytes": 2807492
+  },
+  {
+   "name": "mpdecimal",
+   "version": "4.0.0-r0",
+   "repo": "main",
+   "bytes": 187260
+  },
+  {
+   "name": "libpanelw",
+   "version": "6.5_p20241006-r3",
+   "repo": "main",
+   "bytes": 17584
+  },
+  {
+   "name": "sqlite-libs",
+   "version": "3.48.0-r4",
+   "repo": "main",
+   "bytes": 1734828
+  },
+  {
+   "name": "python3",
+   "version": "3.12.16-r0",
+   "repo": "main",
+   "bytes": 20879542
+  },
+  {
+   "name": "lua5.4-libs",
+   "version": "5.4.7-r0",
+   "repo": "main",
+   "bytes": 222496
+  },
+  {
+   "name": "lua5.4",
+   "version": "5.4.7-r0",
+   "repo": "main",
+   "bytes": 170608
+  },
+  {
+   "name": "make",
+   "version": "4.4.1-r2",
+   "repo": "main",
+   "bytes": 220581
+  },
+  {
+   "name": "sqlite",
+   "version": "3.48.0-r4",
+   "repo": "main",
+   "bytes": 2141660
+  },
+  {
+   "name": "oniguruma",
+   "version": "6.9.9-r0",
+   "repo": "main",
+   "bytes": 536616
+  },
+  {
+   "name": "jq",
+   "version": "1.7.1-r0",
+   "repo": "main",
+   "bytes": 699160
+  },
+  {
+   "name": "bc",
+   "version": "1.07.1-r5",
+   "repo": "main",
+   "bytes": 121852
+  },
+  {
+   "name": "libmagic",
+   "version": "5.46-r2",
+   "repo": "main",
+   "bytes": 10492044
+  },
+  {
+   "name": "file",
+   "version": "5.46-r2",
+   "repo": "main",
+   "bytes": 22100
+  },
+  {
+   "name": "tree",
+   "version": "2.2.1-r0",
+   "repo": "main",
+   "bytes": 63508
+  },
+  {
+   "name": "htop",
+   "version": "3.3.0-r0",
+   "repo": "main",
+   "bytes": 279452
+  },
+  {
+   "name": "figlet",
+   "version": "2.2.5-r3",
+   "repo": "community",
+   "bytes": 651912
+  },
+  {
+   "name": "gzip",
+   "version": "1.13-r1",
+   "repo": "main",
+   "bytes": 118084
+  },
+  {
+   "name": "libintl",
+   "version": "0.22.5-r0",
+   "repo": "main",
+   "bytes": 66852
+  },
+  {
+   "name": "lynx",
+   "version": "2.9.2-r0",
+   "repo": "main",
+   "bytes": 1422753
+  }
+ ],
+ "left_out": [
+  "usr/share/man/",
+  "usr/share/doc/",
+  "usr/share/info/",
+  "usr/lib/python3.12/test/",
+  "usr/lib/python3.12/idlelib/",
+  "usr/lib/python3.12/tkinter/",
+  "usr/lib/python3.12/turtledemo/",
+  "usr/lib/python3.12/ensurepip/",
+  "usr/lib/python3.12/lib2to3/"
+ ],
+ "kernel": {
+  "from": "boot/vmlinuz-lts",
+  "bytes": 8233472,
+  "sha256": "1c3ff14102200692a49019d091262ade97dcb6fc7ae1bd56ae2f94fae4033b2d"
+ },
+ "initrd": {
+  "bytes": 14261046,
+  "sha256": "2cfa451d8b4f32d7f5a1b97d190bc63ac43f316f126d40d1b565ee3def4db5f6"
+ }
+}

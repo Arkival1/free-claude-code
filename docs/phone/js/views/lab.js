@@ -43,6 +43,17 @@ function startGameSheet() {
 export function render(view, param) {
   if (param === "game") return renderGameKit(view);
   if (param === "web") return renderWebKit(view);
+  if (param === "linux") {
+    let undo = null;
+    let gone = false;
+    import("./linux.js").then((screen) => {
+      if (!gone) undo = screen.render(view);
+    });
+    return () => {
+      gone = true;
+      if (undo) undo();
+    };
+  }
   return renderBox(view);
 }
 

@@ -25,3 +25,6 @@ llama_cache
 .playwright-cli/
 # Graphify knowledge graph (rebuilt on each PC)
 graphify-out/
+
+# FCC Linux build downloads (scripts/linux/build_fcc_linux.py)
+/.cache/

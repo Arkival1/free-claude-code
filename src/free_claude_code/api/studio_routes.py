@@ -3881,6 +3881,12 @@ _PHONE_TYPES = {
     ".txt": "text/plain; charset=utf-8",
     # Godot's web player: its engine, gzipped (js/godot.js unpacks it).
     ".gz": "application/gzip",
+    # FCC Linux: the v86 emulator, its BIOS, the kernel and the system.
+    ".wasm": "application/wasm",
+    ".bin": "application/octet-stream",
+    ".kernel": "application/octet-stream",
+    ".initrd": "application/octet-stream",
+    ".json": "application/json",
 }
 
 

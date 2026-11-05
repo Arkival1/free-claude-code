@@ -2182,3 +2182,48 @@ body[data-look="playground"] .lab-item {
   border: 6px solid #16181b;
   background: #000;
 }
+
+/* FCC Linux: the machine's dock (a terminal under the controls). */
+.linux-dock {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  top: calc(205px + var(--safe-top));
+  bottom: calc(84px + var(--safe-bottom));
+  z-index: 3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0b0f14;
+  visibility: hidden;
+}
+
+.linux-dock.shown {
+  visibility: visible;
+}
+
+.linux-dock .linux-box {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.linux-card {
+  position: relative;
+  z-index: 4;
+}
+
+.linux-keys {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.linux-keys button {
+  flex: none;
+  min-width: 44px;
+  min-height: 38px;
+  padding: 4px 10px;
+  font: 600 14px ui-monospace, Menlo, monospace;
+}

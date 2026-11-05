@@ -6,6 +6,18 @@ const ENGINE_CACHE = "fcc-phone-engine-3.6.1";
 // Godot's web player (about 10 MB): fetched the first time a game runs, then
 // kept on the phone across app updates (js/godot.js checks its checksums).
 const GODOT_CACHE = "fcc-phone-godot-4.7.2";
+// FCC Linux (about 25 MB): fetched the first time it starts, then kept.
+const LINUX_CACHE = "fcc-phone-linux-1.0";
+const LINUX_FILES = [
+  "linux/libv86.js",
+  "linux/v86.wasm",
+  "linux/seabios.bin",
+  "linux/vgabios.bin",
+  "linux/xterm.js",
+  "linux/xterm.css",
+  "linux/fcc-linux.kernel",
+  "linux/fcc-linux.initrd",
+];
 const GODOT_FILES = [
   "godot/godot.js",
   "godot/godot.wasm.gz",
@@ -48,6 +60,9 @@ const SHELL = [
   "js/views/workshop.js",
   "js/webkit.js",
   "js/godot.js",
+  "js/linux.js",
+  "js/views/linux.js",
+  "linux/fcc-linux.json",
   "js/views/godot.js",
   "godot/pack.js",
   "godot/starters.js",
@@ -111,7 +126,7 @@ self.addEventListener("activate", (event) => {
       .then((names) =>
         Promise.all(
           names
-            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE].includes(name))
+            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE, LINUX_CACHE].includes(name))
             .map((name) => caches.delete(name))
         )
       )
@@ -139,9 +154,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (url.origin !== self.location.origin || url.pathname.includes("/studio/api/")) return;
-  if (GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`))) {
+  const heavy = GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? GODOT_CACHE : LINUX_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? LINUX_CACHE : "";
+  if (heavy) {
     event.respondWith(
-      caches.open(GODOT_CACHE).then((cache) =>
+      caches.open(heavy).then((cache) =>
         cache.match(request, { ignoreSearch: true }).then(
           (cached) =>
             cached ||

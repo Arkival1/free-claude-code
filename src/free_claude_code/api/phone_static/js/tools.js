@@ -81,6 +81,20 @@ export const SPECS = {
       required: ["action"],
     },
   },
+  linux: {
+    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time). It has python3, lua5.4, bash, nano, tmux, sqlite3, jq, bc, make, htop and lynx; files live in /root. Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["run", "write", "read", "info", "keep"] },
+        command: text("run: the shell command (sh)."),
+        path: text("write or read: the file's path, e.g. /root/hello.py."),
+        content: text("write: the file's whole text."),
+        seconds: { type: "number", description: "run: the longest to wait (default 60, at most 300)." },
+      },
+      required: ["action"],
+    },
+  },
   godot: {
     description: "Godot 4.7 games that run on this phone in the official Godot web player, sealed in a box with no internet: guide (how to make a Godot game that runs here, and what the phone's Godot can't do; read it before your first Godot game), starters (the ready-made games), start (put a starter in the current project), check (run the project's game for a few seconds and report script errors with file and line, crashes and frame rate), probe (test what Godot can do on this phone).",
     parameters: {
@@ -314,6 +328,39 @@ export async function runTool(agent, call, ctx) {
       }
       case "web_kit":
         return await useWebKit(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
+      case "linux": {
+        if (ctx.partsOnly) return "FCC Linux is the main AI's; as a helper, write your part under parts/.";
+        const { ensureLinux } = await import("./views/linux.js");
+        const machine = await ensureLinux();
+        const action = String(args.action || "run");
+        const clip = (value) => (value.length > 8000 ? `${value.slice(0, 3000)}\n… (${value.length - 6000} characters left out) …\n${value.slice(-3000)}` : value);
+        if (action === "run") {
+          const command = String(args.command || "").trim();
+          if (!command) return "Say the command to run.";
+          const result = await machine.run(command, { timeoutMs: Math.min(300, Math.max(1, Number(args.seconds) || 60)) * 1000 });
+          feed(agent.name, `Ran in FCC Linux: ${command.slice(0, 80)}`);
+          return `exit code ${result.code}\n${clip(result.text) || "(no output)"}`;
+        }
+        if (action === "write") {
+          const path = String(args.path || "").trim();
+          if (!path.startsWith("/")) return "Give the whole path, like /root/hello.py.";
+          const result = await machine.write(path, String(args.content ?? ""));
+          feed(agent.name, `Wrote ${path} in FCC Linux.`);
+          return result.code === 0 ? `Wrote ${path} (${String(args.content ?? "").length} characters).` : `Couldn't write ${path}: ${result.text}`;
+        }
+        if (action === "read") {
+          const path = String(args.path || "").trim();
+          const quoted = `'${path.replace(/'/g, "'\\''")}'`;
+          const result = await machine.run(`cat ${quoted}`);
+          return result.code === 0 ? clip(result.text) : `Couldn't read ${path}: ${result.text}`;
+        }
+        if (action === "info") return (await machine.run("fcc-info; echo; df -h / | tail -1; ls /root")).text;
+        if (action === "keep") {
+          const bytes = await machine.keep();
+          return `Kept the session (${(bytes / 1048576).toFixed(1)} MB on the phone): its files are there next time.`;
+        }
+        return "action is run, write, read, info or keep.";
+      }
       case "godot": {
         if (args.project) ctx.project = projects.findProject(String(args.project)) || ctx.project;
         if (!ctx.project && args.action === "check") ctx.project = state.projects.find((project) => isGodotProject(project)) || null;
