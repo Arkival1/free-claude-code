@@ -45,6 +45,12 @@ const KEYS = [
 export function render(view) {
   const status = el("p", { class: "small muted linux-status", role: "status" });
   const host = dock();
+  // The terminal fills the screen under the controls.
+  const place = () => {
+    const card = view.querySelector(".linux-card");
+    if (card) host.style.top = `${Math.round(card.getBoundingClientRect().bottom + 8)}px`;
+  };
+  addEventListener("resize", place);
   const draw = async () => {
     const machine = runningLinux();
     const on = Boolean(machine && machine.ready);
@@ -84,6 +90,7 @@ export function render(view) {
     );
     host.classList.toggle("shown", on);
     host.setAttribute("aria-hidden", String(!on));
+    place();
     if (!on && !starting) status.textContent = kept ? "Your kept session is waiting: Start opens it where you left off." : "A small Linux of FCC's own, on this phone: Python, Lua, bash, nano, tmux, SQLite, htop. No internet inside, so nothing it runs can reach anything else.";
   };
   const start = async () => {
@@ -102,6 +109,7 @@ export function render(view) {
   };
   draw();
   return () => {
+    removeEventListener("resize", place);
     host.classList.remove("shown");
     host.setAttribute("aria-hidden", "true");
   };

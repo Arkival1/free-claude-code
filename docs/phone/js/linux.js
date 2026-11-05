@@ -182,7 +182,33 @@ function linuxBox() {
         else Object.assign(options, { bzimage: { buffer: job.files.kernel }, initrd: { buffer: job.files.initrd }, cmdline: job.cmdline });
         emulator = new V86(options);
         emulator.add_listener("serial0-output-byte", (byte) => (pending += String.fromCharCode(byte)));
-        emulator.add_listener("emulator-ready", () => send({ type: "ready", restored: Boolean(job.state) }));
+        emulator.add_listener("emulator-ready", () => {
+          fit();
+          send({ type: "ready", restored: Boolean(job.state) });
+        });
+        // A phone-sized terminal: a 12 px font, as many columns and rows as fit.
+        let size = "";
+        const fit = () => {
+          const term = emulator.serial_adapter && emulator.serial_adapter.term;
+          const box = document.getElementById("term");
+          if (!term || !box.clientWidth) return;
+          term.options.fontSize = job.fontSize;
+          const probe = document.createElement("span");
+          probe.style.cssText = `position:absolute;visibility:hidden;font:${job.fontSize}px monospace;white-space:pre`;
+          probe.textContent = "W".repeat(40);
+          document.body.append(probe);
+          const cellW = probe.getBoundingClientRect().width / 40;
+          const cellH = job.fontSize * 1.2;
+          probe.remove();
+          const cols = Math.max(30, Math.floor((box.clientWidth - 8) / cellW));
+          const rows = Math.max(10, Math.floor((box.clientHeight - 8) / cellH));
+          term.resize(cols, rows);
+          if (`${cols}x${rows}` !== size) {
+            size = `${cols}x${rows}`;
+            send({ type: "size", cols, rows });
+          }
+        };
+        addEventListener("resize", () => setTimeout(fit, 100));
       } else if (job.type === "send" && emulator) {
         emulator.serial0_send(String(job.text));
       } else if (job.type === "save" && emulator) {
@@ -247,7 +273,7 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
       // Copies: the box keeps its own; ours stay for the next start.
       const files = { ...parts, wasm: parts.wasm.slice(0), bios: parts.bios.slice(0), vgaBios: parts.vgaBios.slice(0), kernel: state ? null : parts.kernel.slice(0), initrd: state ? null : parts.initrd.slice(0) };
       onStatus(state ? "Opening FCC Linux…" : "Starting FCC Linux for the first time (about 15–40 s; after this it opens in a second)…");
-      post({ type: "boot", files, state, memoryMb: MEMORY_MB, cmdline: CMDLINE });
+      post({ type: "boot", files, state, memoryMb: MEMORY_MB, cmdline: CMDLINE, fontSize: 12 });
     } else if (message.type === "out") {
       output += message.text;
       if (output.length > 400_000) output = output.slice(-200_000);
@@ -259,6 +285,10 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
         // A restored machine is already at its prompt: say hello to check.
         machine.run("true").then(() => markReady(session ? "session" : "snapshot"), () => {});
       }
+    } else if (message.type === "size") {
+      // Tell Linux the terminal's size, so htop, nano and tmux draw to fit.
+      machine.size = { cols: Number(message.cols) || 80, rows: Number(message.rows) || 24 };
+      if (machine.ready) machine.run(`stty cols ${machine.size.cols} rows ${machine.size.rows}`).catch(() => {});
     } else if (message.type === "state") {
       const job = waiting.get(`save:${message.id}`);
       if (job) job(message.state);
@@ -272,6 +302,7 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
     machine.booted = how;
     machine.seconds = Math.round((Date.now() - started) / 100) / 10;
     resolveReady(machine);
+    if (machine.size) machine.run(`stty cols ${machine.size.cols} rows ${machine.size.rows}`).catch(() => {});
     if (how === "boot") {
       // Keep the fresh machine, so next time it opens in about a second.
       try {
@@ -305,6 +336,7 @@ export async function startLinux(host, { onProgress, onStatus = () => {}, fresh 
   const machine = {
     frame,
     ready: false,
+    size: null,
     booted: "",
     seconds: 0,
     send: (keys) => post({ type: "send", text: String(keys) }),
