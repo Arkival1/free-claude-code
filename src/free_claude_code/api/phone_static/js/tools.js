@@ -12,6 +12,7 @@ import { useLibrary, LIBRARY_KINDS } from "./library.js";
 import { game3dFiles, useLab, GAME3D_ABOUT } from "./lab.js";
 import { useWorkshop } from "./workshop.js";
 import { useWebKit } from "./webkit.js";
+import { useGodot, isGodotProject } from "./godot.js";
 import { SKILLS } from "./skills.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
@@ -73,6 +74,19 @@ export const SPECS = {
         fonts: { type: "string", enum: ["modern", "editorial", "warm", "tech", "friendly", "luxury", "bold"], description: "page: a font pair instead of the look's own." },
         description: text("page: one line for search engines and link previews."),
         replace: { type: "boolean", description: "page: true to start index.html over when the project already has one." },
+      },
+      required: ["action"],
+    },
+  },
+  godot: {
+    description: "Godot 4.7 games that run on this phone in the official Godot web player, sealed in a box with no internet: guide (how to make a Godot game that runs here, and what the phone's Godot can't do; read it before your first Godot game), starters (the ready-made games), start (put a starter in the current project), check (run the project's game for a few seconds and report script errors with file and line, crashes and frame rate), probe (test what Godot can do on this phone).",
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["guide", "starters", "start", "check", "probe"] },
+        starter: { type: "string", enum: ["action-3d", "third-person-3d"], description: "start: which starter." },
+        project: text("check: the project's name (the current project if left out)."),
+        seconds: { type: "number", description: "check: how long to run it once it shows its first frame (3 to 30, default 8)." },
       },
       required: ["action"],
     },
@@ -296,6 +310,11 @@ export async function runTool(agent, call, ctx) {
       }
       case "web_kit":
         return await useWebKit(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
+      case "godot": {
+        if (args.project) ctx.project = projects.findProject(String(args.project)) || ctx.project;
+        if (!ctx.project && args.action === "check") ctx.project = state.projects.find((project) => isGodotProject(project)) || null;
+        return await useGodot(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
+      }
       case "use_plugin":
         return await usePlugin(args);
       case "start_task": {

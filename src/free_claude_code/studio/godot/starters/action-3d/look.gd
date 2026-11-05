@@ -50,8 +50,10 @@ static func ramp(colors: Array) -> Gradient:
 static func texture(kind: String, seed_value: int, use: String, size := 512) -> NoiseTexture2D:
 	var recipe: Dictionary = SURFACES[kind]
 	var made := NoiseTexture2D.new()
-	made.width = size
-	made.height = size
+	# A phone's browser draws them on one thread: smaller there.
+	var side := mini(size, 192) if OS.has_feature("web") else size
+	made.width = side
+	made.height = side
 	made.seamless = true
 	made.noise = noise(seed_value, recipe["frequency"])
 	if use == "normal":

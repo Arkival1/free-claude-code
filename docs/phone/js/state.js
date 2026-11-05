@@ -1,7 +1,7 @@
 // Everything the app knows, loaded from the phone and saved back as it changes.
 import { store } from "./store.js";
 
-export const VERSION = "2.10.0";
+export const VERSION = "2.11.0";
 
 export const PHONE_TOOLS = {
   remember: "Memory",
@@ -35,6 +35,7 @@ export const PHONE_TOOLS = {
   library: "Library",
   lab: "Lab",
   web_kit: "Web kit",
+  godot: "Godot games",
 };
 export const ALL_TOOLS = Object.keys(PHONE_TOOLS);
 export const MAIN_ONLY = new Set(["team_status"]);
@@ -60,11 +61,11 @@ const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_fi
 const DESIGN = ["find_images", "polish_check", "look_at_site"];
 const PHOTOS = ["list_photos", "use_photo"];
 export const ROLE_TOOLS = {
-  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library", "lab", "web_kit"],
-  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library", "lab", "web_kit"],
+  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library", "lab", "web_kit", "godot"],
+  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library", "lab", "web_kit", "godot"],
   researcher: ["wikipedia", "read_page", "web_search", "remember", "recall", "calculate", "use_plugin", "skill"],
   helper: ["remember", "recall", "calculate", "todo", "weather", "wikipedia", "skill"],
-  tester: ["list_files", "read_file", "check_project", "look_at_site", "polish_check", "edit_file", "write_file", "restore_file", "remember", "recall", "skill"],
+  tester: ["list_files", "read_file", "check_project", "look_at_site", "polish_check", "edit_file", "write_file", "restore_file", "remember", "recall", "skill", "godot"],
   assistant: ["remember", "recall", "calculate", "weather", "wikipedia"],
 };
 
@@ -109,8 +110,9 @@ const TOOLS_ADDED = {
   6: { main: ["use_plugin", "start_task"], researcher: ["use_plugin", "skill"], builder: ["use_plugin"], tester: ["skill"], helper: ["skill"] },
   7: { main: ["library", "lab"], builder: ["library", "lab"] },
   8: { main: ["web_kit"], builder: ["web_kit"] },
+  9: { main: ["godot"], builder: ["godot"], tester: ["godot"] },
 };
-const TOOLS_VERSION = 8;
+const TOOLS_VERSION = 9;
 
 export const DEFAULT_TEAM = [
   { id: "jarvis", name: "Jarvis", role: "main" },

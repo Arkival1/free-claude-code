@@ -3879,6 +3879,8 @@ _PHONE_TYPES = {
     ".webmanifest": "application/manifest+json",
     ".png": "image/png",
     ".txt": "text/plain; charset=utf-8",
+    # Godot's web player: its engine, gzipped (js/godot.js unpacks it).
+    ".gz": "application/gzip",
 }
 
 

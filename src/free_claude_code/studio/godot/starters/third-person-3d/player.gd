@@ -51,17 +51,23 @@ func _ready() -> void:
 	pivot.add_child(arm)
 	var camera := Camera3D.new()
 	arm.add_child(camera)
-	if DisplayServer.get_name() != "headless":
+	# The mouse turns the camera on a computer; a phone uses touch.gd instead.
+	if DisplayServer.get_name() != "headless" and not DisplayServer.is_touchscreen_available():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## Turn the camera (radians): from the mouse, or the right thumb on a phone.
+func look(turn: Vector2) -> void:
+	pivot.rotation.y -= turn.x
+	arm.rotation.x = clampf(arm.rotation.x - turn.y, deg_to_rad(-70), deg_to_rad(20))
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		pivot.rotation.y -= event.relative.x * MOUSE
-		arm.rotation.x = clampf(arm.rotation.x - event.relative.y * MOUSE, deg_to_rad(-70), deg_to_rad(20))
+		look(event.relative * MOUSE)
 	if event is InputEventKey and event.keycode == KEY_ESCAPE:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	if event is InputEventMouseButton and event.pressed:
+	if event is InputEventMouseButton and event.pressed and not DisplayServer.is_touchscreen_available():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 

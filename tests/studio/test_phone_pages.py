@@ -79,6 +79,10 @@ async def test_the_pc_serves_the_phone_app(make_studio):
             assert engine.status_code == 200 and "Wllama" in engine.text
             manifest = await client.get("/phone/manifest.webmanifest")
             assert manifest.headers["content-type"] == "application/manifest+json"
+            # Godot's web player, gzipped as shipped (the phone unpacks it).
+            godot = await client.get("/phone/godot/godot.wasm.gz")
+            assert godot.headers["content-type"] == "application/gzip"
+            assert godot.content[:2] == b"\x1f\x8b"
             for bad in (
                 "/phone/secret.txt",
                 "/phone/..%2Fstudio_static%2Fstudio.js",

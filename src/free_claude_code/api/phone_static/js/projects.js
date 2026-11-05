@@ -4,11 +4,13 @@ import { state, save, changed, feed } from "./state.js";
 import { uid } from "./ui.js";
 import { STARTER_TEXT } from "./templates.js";
 import { SAMPLE_TEXT, SAMPLE_NAMES } from "../web/sections.js";
+import { godotProblems, isGodotProject } from "./godot.js";
 
 export const MAX_FILE_CHARS = 200_000;
 /** Earlier versions kept of each file, so restore_file can undo a change. */
 export const MAX_VERSIONS = 5;
-export const TEXT_TYPES = /\.(html?|css|js|mjs|json|txt|md|svg|xml|csv)$/i;
+/** Text files the phone keeps: web pages and Godot games (scripts, scenes, shaders, settings). */
+export const TEXT_TYPES = /\.(html?|css|js|mjs|json|txt|md|svg|xml|csv|gd|gdshader|gdshaderinc|tscn|tres|godot|cfg)$/i;
 
 const slug = (name) =>
   String(name || "project")
@@ -46,7 +48,7 @@ export function cleanPath(path) {
     .filter((part) => part && part !== "." && part !== "..")
     .join("/");
   if (!clean) throw new Error("Give the file a name, like index.html.");
-  if (!TEXT_TYPES.test(clean)) throw new Error("Only text files (html, css, js, json, md, svg, txt) can be written here.");
+  if (!TEXT_TYPES.test(clean)) throw new Error("Only text files (html, css, js, json, md, svg, txt, and Godot's gd, tscn, tres, gdshader, godot, cfg) can be written here.");
   return clean.slice(0, 120);
 }
 
@@ -280,6 +282,8 @@ export function checkProject(project) {
   const problems = [];
   const names = Object.keys(project.files);
   if (!names.length) return ["The project has no files yet."];
+  // A Godot game: its own checks (godot check runs it).
+  if (isGodotProject(project)) return godotProblems(project).map((problem) => (problem.stop ? problem.text : `Note: ${problem.text}`));
   const pages = names.filter((name) => /\.html?$/i.test(name));
   if (!pages.length) problems.push("There is no HTML page; add index.html.");
   else if (!project.files["index.html"]) problems.push("There is no index.html, so the project has no front page.");

@@ -1,8 +1,17 @@
 /* FCC Phone service worker: the app, and the on-phone engine once fetched,
    open with no connection. AI, weather, and PC calls are never cached. */
-const VERSION = "2.10.0";
+const VERSION = "2.11.0";
 const CACHE = `fcc-phone-${VERSION}`;
 const ENGINE_CACHE = "fcc-phone-engine-3.6.1";
+// Godot's web player (about 10 MB): fetched the first time a game runs, then
+// kept on the phone across app updates (js/godot.js checks its checksums).
+const GODOT_CACHE = "fcc-phone-godot-4.7.2";
+const GODOT_FILES = [
+  "godot/godot.js",
+  "godot/godot.wasm.gz",
+  "godot/godot.audio.worklet.js",
+  "godot/godot.audio.position.worklet.js",
+];
 const SHELL = [
   "./",
   "index.html",
@@ -37,6 +46,10 @@ const SHELL = [
   "js/workshop.js",
   "js/views/workshop.js",
   "js/webkit.js",
+  "js/godot.js",
+  "js/views/godot.js",
+  "godot/pack.js",
+  "godot/starters.js",
   "js/views/webkit.js",
   "js/plugins.js",
   "js/apis.js",
@@ -97,7 +110,7 @@ self.addEventListener("activate", (event) => {
       .then((names) =>
         Promise.all(
           names
-            .filter((name) => name.startsWith("fcc-phone-") && name !== CACHE && name !== ENGINE_CACHE)
+            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE].includes(name))
             .map((name) => caches.delete(name))
         )
       )
@@ -125,6 +138,21 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (url.origin !== self.location.origin || url.pathname.includes("/studio/api/")) return;
+  if (GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`))) {
+    event.respondWith(
+      caches.open(GODOT_CACHE).then((cache) =>
+        cache.match(request, { ignoreSearch: true }).then(
+          (cached) =>
+            cached ||
+            fetch(request).then((response) => {
+              if (response.ok) cache.put(request, response.clone());
+              return response;
+            })
+        )
+      )
+    );
+    return;
+  }
   // The newest app when online; the saved copy when not.
   event.respondWith(
     fetch(request)

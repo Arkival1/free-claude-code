@@ -65,7 +65,10 @@ func _ready() -> void:
 	help.position = Vector2(-470, 30)
 	help.size = Vector2(440, 200)
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	help.text = "WASD move · Shift run · Space roll\nLeft click or J light · Right click or K heavy\nArrows or mouse look · Q lock on · F flask\nE rest at the bonfire · Click grabs the mouse, Esc frees it\nF2 graphics · F3 info · a gamepad works too"
+	if DisplayServer.is_touchscreen_available():
+		help.text = "Left thumb: move (push far to run)\nRight thumb: turn the camera\nHIT, HEAVY, ROLL, HEAL, LOCK, REST"
+	else:
+		help.text = "WASD move - Shift run - Space roll\nLeft click or J light - Right click or K heavy\nArrows or mouse look - Q lock on - F flask\nE rest at the bonfire - Click grabs the mouse, Esc frees it\nF2 graphics - F3 info - a gamepad works too"
 	add_child(help)
 	var fade := create_tween()
 	fade.tween_interval(9.0)
@@ -106,7 +109,7 @@ func show_player(hp: float, max_hp: float, stamina_now: float, max_stamina: floa
 	health.value = hp
 	stamina.max_value = max_stamina
 	stamina.value = stamina_now
-	flasks.text = "Flask  " + "◆ ".repeat(flasks_left) + "◇ ".repeat(maxi(0, flasks_max - flasks_left))
+	flasks.text = "Flask  %d / %d" % [flasks_left, flasks_max]
 
 
 func show_boss(title: String, hp: float, max_hp: float, visible_now: bool) -> void:

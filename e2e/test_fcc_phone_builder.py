@@ -311,18 +311,19 @@ def test_older_phone_agents_get_the_new_tools_once(
         "library",
         "lab",
         "web_kit",
+        "godot",
     ]
     assert "find_images" in upgraded["instructions"]
     assert "list_photos" in upgraded["instructions"]
     assert "cafe-warm" in upgraded["instructions"]
     assert "skill tool" in upgraded["instructions"]
-    assert upgraded["toolsVersion"] == 8
+    assert upgraded["toolsVersion"] == 9
 
     # A tool the user turned off afterwards stays off; an edited prompt stays.
     again = page.evaluate(
         """() => window.fccPhone.upgradeAgent({
             id: 'b', name: 'B', role: 'builder', instructions: 'Mine',
-            tools: ['write_file'], toolsVersion: 8})"""
+            tools: ['write_file'], toolsVersion: 9})"""
     )
     assert again["tools"] == ["write_file"] and again["instructions"] == "Mine"
     # Agents saved before plugins came get the skill tool once, prompt kept.
@@ -338,8 +339,9 @@ def test_older_phone_agents_get_the_new_tools_once(
         "library",
         "lab",
         "web_kit",
+        "godot",
     ]
-    assert plugins["instructions"] == "Mine" and plugins["toolsVersion"] == 8
+    assert plugins["instructions"] == "Mine" and plugins["toolsVersion"] == 9
     builder = page.evaluate(
         "() => window.fccPhone.state.agents.find((a) => a.id === 'builder')"
     )

@@ -177,7 +177,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.109.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.110.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -288,6 +288,19 @@ Notes carried over from the long session that built FCC Studio (LCC).
   room in `js/views/webkit.js`). Websites start from `web_kit page` (a
   recipe or sections, a look); `check_project` flags the kit's
   `SAMPLE_TEXT` and `.art` stand-ins (role="img") until replaced.
+- Godot on the phone (owner: "make it work like that on phone", and find
+  "what's not there"): Godot 4.7.2's web player (`vendor/godot-web`, the
+  single-threaded debug build, SHA-256 checked by the phone) runs games in
+  a sealed box (`js/godot.js`: sandbox allow-scripts allow-pointer-lock,
+  no-network content policy, engine and `.pck` handed in by message,
+  `godot/pack.js` writes the pack, 1 GB memory cap, watchdog, one game at
+  a time); `js/views/godot.js` (Play, Check, the probe), the `godot` tool
+  (tools version 9: main, builder, tester); the phone's starters and FCC's
+  probe (`studio/godot/probe`) are generated into `godot/starters.js`. The
+  starters have touch controls (`touch.gd`). Not on the phone: threads,
+  GDExtension, C#, Forward+ effects, Godot's importer (pictures load at run
+  time). On iPhone in Australia every browser is WebKit, so Opera, Chrome
+  and the rest run Godot the same as Safari.
 - Godot on the PC (owner: "getting godot working and making SSS tier games
   with graphics"): FCC's install/check/frames/export path was checked end
   to end with real Godot 4.7.2; the `action-3d` starter

@@ -54,7 +54,7 @@ export const KINDS = {
     glyph: "◇",
     placeholder: "A game where… (the goal, the controls, the feel you want)",
     engineering:
-      "Game engineering, step by step. For a 3D game (3D, third-person, Souls-like, a boss fight, an open world), start_project with template game3d (it already plays: a warrior, a boss, a bonfire, fire and fog) and read the lab tool's guide; make it the user's world with the Lab kit, and make your own textures, shaders, models and animation the same way. For a 2D game: 1. Read the game-design skill, and search the library (library tool) for approved game references. 2. Design: one clear goal, a core loop that is fun in 30 seconds, touch controls first, rising difficulty, score and feedback on every hit. 3. Start from the game template (start_project with template game) and build it in game.js (your helpers' parts are in parts/: read them and use them). 4. Playtest with look_at_site, fix what breaks, and balance the difficulty. Draw original art (shapes, SVG, canvas); never copy someone else's game or art.",
+      "Game engineering, step by step. When the user asks for Godot (or a Godot game), make it in Godot: read godot guide, start_project, godot start with the closest starter (action-3d, third-person-3d) or write the project yourself, then godot check and fix every error it shows until it says No errors; the user plays it from Projects. Otherwise, for a 3D game (3D, third-person, Souls-like, a boss fight, an open world), start_project with template game3d (it already plays: a warrior, a boss, a bonfire, fire and fog) and read the lab tool's guide; make it the user's world with the Lab kit, and make your own textures, shaders, models and animation the same way. For a 2D game: 1. Read the game-design skill, and search the library (library tool) for approved game references. 2. Design: one clear goal, a core loop that is fun in 30 seconds, touch controls first, rising difficulty, score and feedback on every hit. 3. Start from the game template (start_project with template game) and build it in game.js (your helpers' parts are in parts/: read them and use them). 4. Playtest with look_at_site, fix what breaks, and balance the difficulty. Draw original art (shapes, SVG, canvas); never copy someone else's game or art.",
   },
 };
 
@@ -103,6 +103,7 @@ export const HANDS_TOOLS = [
   "library",
   "lab",
   "web_kit",
+  "godot",
   "ask_agent",
 ];
 /** Helpers build their part in the main AI's project; they never start a
@@ -126,6 +127,7 @@ export const HELPER_TOOLS = [
   "library",
   "lab",
   "web_kit",
+  "godot",
 ];
 /** Advisers look and think; they never change anything. */
 export const ADVISER_TOOLS = [

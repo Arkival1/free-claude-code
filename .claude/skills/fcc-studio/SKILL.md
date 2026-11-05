@@ -84,7 +84,10 @@ src/free_claude_code/
                   (generated, like lab/tutorials-data.js from
                   build-your-own-x); #lab/game is the Game kit (js/views/lab.js);
                   #lab/web is the Web kit (web/kit.css, kit.js, sections.js,
-                  js/webkit.js = web_kit tool, js/views/webkit.js)
+                  js/webkit.js = web_kit tool, js/views/webkit.js); Godot:
+                  js/godot.js (sealed box, godot tool), js/views/godot.js
+                  (Play, Check, probe), godot/ (web player, pack.js,
+                  starters.js generated from studio/godot)
   api/admin_static/   Admin page UI
   studio/         Studio back end (below)
   providers/, core/, application/, runtime/, harnesses/, messaging/, config/,

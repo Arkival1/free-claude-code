@@ -39,6 +39,9 @@ func _ready() -> void:
 	hud.add_theme_constant_override("outline_size", 6)
 	layer.add_child(hud)
 	add_child(layer)
+	var touch: CanvasLayer = preload("res://touch.gd").new()
+	touch.set("player", player)
+	add_child(touch)
 	_update_hud()
 
 
@@ -48,9 +51,11 @@ func collect() -> void:
 
 
 func _update_hud() -> void:
-	hud.text = "Orbs: %d / %d   (WASD move, mouse look, Space jump, Shift run)" % [collected, ORBS]
+	var touch := DisplayServer.is_touchscreen_available()
+	var help := "left thumb move, right thumb look, JUMP" if touch else "WASD move, mouse look, Space jump, Shift run"
+	hud.text = "Orbs: %d / %d   (%s)" % [collected, ORBS, help]
 	if collected == ORBS:
-		hud.text = "All orbs found! Press R to play again."
+		hud.text = "All orbs found! %s to play again." % ("Tap AGAIN" if touch else "Press R")
 
 
 func _unhandled_input(event: InputEvent) -> void:

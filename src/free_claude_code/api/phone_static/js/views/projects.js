@@ -4,6 +4,8 @@ import { el, button, card, go, notify, openSheet, closeSheet, ago } from "../ui.
 import * as projects from "../projects.js";
 import { runTask, isBusy } from "../agents.js";
 import { addPhoto, setNote, removePhoto, photoData } from "../photos.js";
+import { isGodotProject, starterFiles } from "../godot.js";
+import { playGodot, checkInto, showProbe } from "./godot.js";
 
 export function render(view, id) {
   if (id) return renderProject(view, id);
@@ -34,10 +36,36 @@ export function render(view, id) {
             )
           : [el("p", { class: "empty", text: "No projects yet." })]
       ),
+      godotCard(),
       photosCard()
     );
   draw();
   return onChange((what) => (what === "projects" || what === "photos") && draw());
+}
+
+/** Godot games: real Godot 4.7.2 on the phone, in a sealed box. */
+function godotCard() {
+  const status = el("p", { class: "muted", role: "status" });
+  const make = async (name, title) => {
+    try {
+      const { GODOT_STARTERS } = await import("../../godot/starters.js");
+      const project = await projects.createProject(title, "you");
+      if (Object.keys(project.files).length) return go(`projects/${project.id}`);
+      for (const [path, body] of Object.entries(starterFiles(GODOT_STARTERS, name, title))) await projects.writeFile(project, path, body, "you");
+      go(`projects/${project.id}`);
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  };
+  return card("Godot games", [
+    el("p", { class: "muted", text: "Real Godot 4.7.2 runs on this phone, sealed in a box: no internet, no way into your keys, chats or files, and a crash closes only the game. Ask the Builder for a Godot game, or start from one of these." }),
+    el("div", { class: "row" }, [
+      button("Action game (3D)", () => make("action-3d", "Godot action game"), { class: "primary" }),
+      button("Third-person (3D)", () => make("third-person-3d", "Godot third-person game")),
+    ]),
+    el("div", { class: "row" }, [button("What can Godot do on this phone?", () => showProbe())]),
+    status,
+  ]);
 }
 
 /** Photos of the user's real business, each with a note the agents read. */
@@ -93,6 +121,7 @@ function renderProject(view, id) {
     go("projects");
     return null;
   }
+  if (isGodotProject(project)) return renderGodotProject(view, project);
   const ask = el("textarea", { "aria-label": "Change request", placeholder: "Make the header teal and add a contact form" });
   const frame = el("iframe", { class: "preview", title: `${project.name} preview`, sandbox: SANDBOX });
   let page = "index.html";
@@ -178,6 +207,69 @@ function renderProject(view, id) {
     stopFollowing();
     stopWatching();
   };
+}
+
+/** A Godot game: play it full screen, check it, change it, its files. */
+function renderGodotProject(view, project) {
+  const box = el("div", { class: "godot-check-host" });
+  const out = el("pre", { class: "godot-report", role: "status" });
+  const ask = el("textarea", { "aria-label": "Change request", placeholder: "Make the boss faster and add a second arena" });
+  let checking = false;
+  const draw = () => {
+    const names = Object.keys(project.files);
+    const builder = agentById("builder") || state.agents.find((agent) => agent.role === "builder");
+    const busy = builder && isBusy(builder);
+    view.replaceChildren(
+      card(project.name, [
+        el("p", { class: "muted", text: `Godot game · ${names.length} files · changed ${ago(project.updated_at)}${busy ? " · the Builder is working on it" : ""}` }),
+        el("div", { class: "row" }, [
+          button("▶ Play", () => playGodot(project), { class: "primary", "aria-label": `Play ${project.name}` }),
+          button("Check it", async () => {
+            if (checking) return;
+            checking = true;
+            try {
+              await checkInto(project, box, out);
+            } finally {
+              checking = false;
+            }
+          }),
+          button("Save all files (.zip)", () => projects.download(`${project.slug}.zip`, projects.zipProject(project))),
+        ]),
+        box,
+        out,
+        el("p", { class: "muted small", text: "The .zip opens in Godot 4.7 on a computer (Import, then pick project.godot)." }),
+      ]),
+      card("Change it", [
+        ask,
+        el("div", { class: "row" }, [
+          button("Ask the Builder", () => {
+            if (!builder || !ask.value.trim()) return notify("Say what to change.");
+            runTask(builder, `In the Godot project ${project.name}: ${ask.value.trim()} Then run godot check and fix what it finds.`, { project, by: "you" });
+            ask.value = "";
+            notify("The Builder is on it.");
+          }, { class: "primary", disabled: !builder }),
+        ]),
+      ]),
+      card("Files", [
+        ...names.map((name) =>
+          el("div", { class: "item" }, [
+            el("div", { class: "grow" }, [el("strong", { text: name }), el("small", { text: projects.isPicture(project.files[name]) ? "picture" : `${project.files[name].length.toLocaleString()} characters` })]),
+            projects.isPicture(project.files[name]) ? null : button("Open", () => fileSheet(project, name), { "aria-label": `Open ${name}` }),
+          ])
+        ),
+        el("div", { class: "row" }, [
+          button("New file", () => fileSheet(project, "")),
+          button("Delete project", async () => {
+            if (!confirm(`Delete ${project.name} and its files?`)) return;
+            await projects.deleteProject(project);
+            go("projects");
+          }, { class: "danger" }),
+        ]),
+      ])
+    );
+  };
+  draw();
+  return onChange((what) => (what === "projects" || what === "team") && !checking && draw());
 }
 
 // Previews may run their scripts and open links in a new tab, but can't reach

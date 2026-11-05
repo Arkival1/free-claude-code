@@ -2846,6 +2846,23 @@ account, and costs nothing.
   way (the `web_kit` tool: guide, list, section, page, add) and reads its
   design-engineering guide; `check_project` lists the kit's sample words and
   gradient stand-ins until real words and photos replace them.
+- **Godot games on the phone**: real Godot 4.7.2 (its official web player,
+  `vendor/godot-web`) runs on the phone. **Projects, Godot games** starts
+  the action game (touch controls: left thumb moves, right thumb turns the
+  camera, buttons for the rest) or the third-person game; a Godot project
+  has **Play** (full screen), **Check it** (plays it for 8 seconds and
+  reports script errors with file and line, crashes and frame rate) and a
+  .zip that opens in Godot on a computer. Games run in a sealed box: an
+  iframe with an origin of its own, no network at all (its content policy
+  allows none), no pop-ups and no way into FCC's keys, chats or files; a
+  1 GB memory cap, a watchdog that closes a game that stops answering or
+  drawing, and a refusal to run `while true` loops with no way out, so a
+  bad game closes itself, not the phone. **What can Godot do on this
+  phone?** runs FCC's probe (`studio/godot/probe`) on the phone and lists
+  what works, what is limited, what is missing (threads, GDExtension,
+  Forward+ effects, system fonts) and what the box blocks on purpose. The
+  AI uses the `godot` tool (guide, starters, start, check, probe); the
+  engine (10 MB) downloads on the first game and stays on the phone.
 - **Game kit (3D)**: the Lab's **Game kit** room shows the kit live in 3D: textures
   (stone, wood, grass, metal, lava, sand, bark, ice: drawn from seeded noise
   with normal maps), shaders (fire, embers, water, glow, toon, dissolve, sky),

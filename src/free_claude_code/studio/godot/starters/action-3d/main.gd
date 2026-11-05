@@ -11,6 +11,7 @@ const PlayerScript := preload("res://player.gd")
 const BossScript := preload("res://boss.gd")
 const RigScript := preload("res://camera_rig.gd")
 const HudScript := preload("res://hud.gd")
+const TouchScript := preload("res://touch.gd")
 
 const WORLD := {
 	"size": 170.0,
@@ -29,7 +30,8 @@ const WORLD := {
 }
 const GRAPHICS := ["Low", "Medium", "High", "Ultra"]
 
-var graphics := 2
+## High on a PC; Medium in a phone's browser (one thread, the simpler renderer).
+var graphics := 1 if OS.has_feature("web") else 2
 var height_noise := Look.noise(5, 0.012, 4)
 var environment: Environment
 var sun: DirectionalLight3D
@@ -77,6 +79,9 @@ func _ready() -> void:
 	rig.call("follow", player)
 	hud = HudScript.new()
 	add_child(hud)
+	var touch := TouchScript.new()
+	touch.set("rig", rig)
+	add_child(touch)
 	sparks = Look.sparks()
 	add_child(sparks)
 	player.connect("changed", _on_player_changed)
@@ -389,7 +394,8 @@ func _add_grass() -> void:
 	var spots: Array[Transform3D] = []
 	var tints: Array[Color] = []
 	var tries := 0
-	while spots.size() < 60000 and tries < 200000:
+	var wanted := 18000 if OS.has_feature("web") else 60000
+	while spots.size() < wanted and tries < 200000:
 		tries += 1
 		# Thick where you walk and fight, thinner out in the hills.
 		var reach := 46.0 if tries % 3 else 72.0
@@ -608,10 +614,11 @@ func apply_graphics() -> void:
 	environment.ssr_enabled = forward and graphics >= 3
 	environment.glow_enabled = graphics >= 1
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS if graphics >= 2 else DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	grass.multimesh.visible_instance_count = [12000, 30000, -1, -1][graphics]
+	var blades: int = [12000, 30000, -1, -1][graphics]
+	grass.multimesh.visible_instance_count = -1 if blades < 0 or blades >= grass.multimesh.instance_count else blades
 	get_viewport().msaa_3d = [Viewport.MSAA_DISABLED, Viewport.MSAA_2X, Viewport.MSAA_2X, Viewport.MSAA_4X][graphics]
 	if hud:
-		hud.get("info").text = "Graphics: %s · renderer %s · F2 to change" % [GRAPHICS[graphics], RenderingServer.get_current_rendering_method()]
+		hud.get("info").text = "Graphics: %s - renderer %s - F2 to change" % [GRAPHICS[graphics], RenderingServer.get_current_rendering_method()]
 
 
 # ------------------------------------------------------------------ the game
@@ -649,7 +656,7 @@ func _lock(on: bool) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseButton and (event as InputEventMouseButton).pressed and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED and not DisplayServer.is_touchscreen_available():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	elif event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

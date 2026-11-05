@@ -1,0 +1,26 @@
+; FCC's Godot probe: tries the engine's parts on the device it runs on and
+; reports what works, what is limited and what is missing. FCC Phone runs it
+; in its Godot box (What can Godot do on this phone?).
+
+config_version=5
+
+[application]
+
+config/name="FCC Godot probe"
+run/main_scene="res://probe.tscn"
+config/features=PackedStringArray("4.7")
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[audio]
+
+general/text_to_speech=true
