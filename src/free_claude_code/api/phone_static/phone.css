@@ -2172,3 +2172,13 @@ body[data-look="playground"] .lab-item {
   align-items: center;
   gap: 8px;
 }
+
+.board-monitor {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin: 6px 0 4px;
+  border-radius: 8px;
+  border: 6px solid #16181b;
+  background: #000;
+}

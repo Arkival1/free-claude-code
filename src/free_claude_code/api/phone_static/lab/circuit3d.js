@@ -6,6 +6,7 @@
 // science.js (the PC Lab's rules), so what you see is what the maths says.
 import { THREE, mesh, block, post, standard, metal, glow, canvasTexture, boardTexture, label, glowSprite, tube, dispose, pickable, puffTexture } from "./look3d.js";
 import { resistorBands, findPart } from "./science.js";
+import { paintMonitor } from "./board.js";
 
 const BOARD_W = 16.5;
 const BOARD_D = 5.5;
@@ -725,13 +726,32 @@ function benchTools() {
   }
   tray.add(post(0.5, 1.2, standard("#2b4c9a", 0.4), 3.6, 0.4, 1.4, 16), post(0.4, 0.9, standard("#2b4c9a", 0.4), 2.5, 0.4, 1.6, 16));
   group.add(tray);
+  // A monitor for the board computer (its HDMI screen), back left: a terminal
+  // of its output, or what its program draws; dark when nothing runs.
+  const monitor = new THREE.Group();
+  monitor.position.set(-13.5, 0, -6);
+  monitor.rotation.y = 0.35;
+  const bezel = standard("#16181b", 0.4);
+  monitor.add(block(4.5, 0.4, 3.2, bezel, 0, 0, 0), block(0.9, 4.6, 0.6, bezel, 0, 0.4, -0.4));
+  let view = undefined;
+  const screenTexture = canvasTexture(480, 360, (paint, w, h) => paintMonitor(paint, w, h, null));
+  const panel = new THREE.MeshStandardMaterial({ color: "#ffffff", map: screenTexture, emissive: "#ffffff", emissiveMap: screenTexture, emissiveIntensity: 0.15, roughness: 0.25 });
+  monitor.add(mesh(new THREE.BoxGeometry(12.4, 9.4, 0.7), [bezel, bezel, bezel, bezel, panel, bezel], 0, 8.6, 0));
+  group.add(monitor);
+  const show = (next) => {
+    if (next === view) return;
+    view = next;
+    paintMonitor(screenTexture.image.getContext("2d"), screenTexture.image.width, screenTexture.image.height, next || null);
+    screenTexture.needsUpdate = true;
+    panel.emissiveIntensity = next ? 0.9 : 0.15;
+  };
   const read = (text) => {
     if (text === reading) return;
     reading = text;
     drawMeter(screen.image.getContext("2d"), screen.image.width, screen.image.height, reading);
     screen.needsUpdate = true;
   };
-  return { group, read };
+  return { group, read, show };
 }
 
 export function makeCircuitBench() {
@@ -910,6 +930,7 @@ export function makeCircuitBench() {
       const run = running && running[key];
       if (model.tick) model.tick(t, dt, run ? run.level : level, run ? run.state : row.state, run);
     }
+    tools.show(running ? running.monitor : null);
     let used = 0;
     for (const flow of flows) {
       for (let i = 0; i < flow.count && used < dotCount; i += 1) {

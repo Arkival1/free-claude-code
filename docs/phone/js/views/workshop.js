@@ -6,7 +6,7 @@ import { el, button, card, notify, go, openSheet, closeSheet } from "../ui.js";
 import { answer } from "../agents.js";
 import { resolveChemical, searchChemicals, findPart, PARTS, CHEMICALS, resistorBands, MAX_ITEMS, HAZARDS } from "../../lab/science.js";
 import * as shop from "../workshop.js";
-import { wiring, wiringText, starterProgram, runBoard, SENSOR_DEFAULTS, SENSOR_RANGES } from "../../lab/board.js";
+import { wiring, wiringText, starterProgram, runBoard, paintMonitor, SENSOR_DEFAULTS, SENSOR_RANGES } from "../../lab/board.js";
 
 const ROOM_ORDER = ["chemistry", "electronics", "blueprints", "library"];
 const KIND_NAMES = { power: "Power", charger: "Charging", regulator: "Regulators", light: "Lights", motion: "Motion", sound: "Sound", brain: "Brains", sensor: "Sensors", display: "Displays", control: "Switches", passive: "Passives", structure: "Body" };
@@ -51,6 +51,10 @@ export function render(view) {
   let sensors = { ...SENSOR_DEFAULTS };
   let testReport = "";
   const serial = el("pre", { class: "board-serial", "aria-live": "polite", "aria-label": "Serial monitor" });
+  // The board computer's monitor, as on the bench, big enough to read.
+  const screen = el("canvas", { class: "board-monitor", width: "640", height: "480", "aria-label": "The board computer's monitor" });
+  const paintScreen = (view) => paintMonitor(screen.getContext("2d"), screen.width, screen.height, view);
+  paintScreen(null);
   const stopBoard = () => {
     if (boardRun) boardRun.stop("Stopped.");
   };
@@ -523,6 +527,7 @@ export function render(view) {
         sensors: () => sensors,
         onState: (now, parts) => {
           if (world) world.setRun(parts);
+          paintScreen(parts.monitor);
           serial.textContent = now.serial.slice(-40).join("\n");
           serial.scrollTop = serial.scrollHeight;
         },
@@ -576,6 +581,8 @@ export function render(view) {
           if (goal) tellJarvis(`Write the board computer's program on the electronics bench so it does this: ${goal}. Use lab program with the code, then lab run to test it, and fix it until it works.`);
         }),
       ]),
+      el("p", { class: "small muted", text: "Monitor" }),
+      screen,
       sensorRows.length ? el("div", { class: "board-sensors" }, [el("p", { class: "small muted", text: "Sensors (move them while it runs):" }), ...sensorRows]) : null,
       live || serial.textContent ? el("div", {}, [el("p", { class: "small muted", text: "Serial monitor" }), serial]) : null,
       testReport ? el("pre", { class: "board-report", text: testReport }) : null,

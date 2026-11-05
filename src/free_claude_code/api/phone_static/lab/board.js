@@ -111,6 +111,16 @@ export function starterProgram(wire) {
   for (const item of motors) lines.push(`  analogWrite(${item.constant}, ${has("temp") ? "readTemperature() > 25 ? 255 : 0" : "180"}); // 0-255 speed`);
   if (servo) lines.push("  servo.write((millis() / 20) % 180);");
   if (buzzer) lines.push(`  if (${has("motion") ? "digitalRead(MOTION)" : has("button") ? "digitalRead(BUTTON)" : "false"}) tone(${buzzer.constant}, 880, 200);`);
+  if (wire.brain === "raspberry-pi") {
+    // A Pi has a monitor (HDMI): draw a small dashboard on it.
+    lines.push(
+      '  monitor.clear("#0d1b2a");',
+      '  monitor.text(16, 34, "FCC single-board computer", "#7fe3ff", 18);',
+      '  monitor.text(16, 70, "Up " + Math.floor(millis() / 1000) + " s", "#ffffff", 16);'
+    );
+    if (has("light")) lines.push('  monitor.rect(16, 96, readLight() * 2.8, 18, "#ffd166");', '  monitor.text(16, 140, "Light " + readLight() + " %", "#ffd166", 16);');
+    if (has("temp")) lines.push('  monitor.text(16, 170, "Temp " + readTemperature() + " C", "#ef476f", 16);');
+  }
   lines.push("  delay(500);", "}");
   return lines.join("\n");
 }
@@ -128,6 +138,8 @@ function boardBox() {
   let inputs = {};
   let line = "";
   let screen = [];
+  let canvas = [];
+  let drawn = false;
   let started = false;
   let dead = false;
   const out = (kind, pin, value) => {
@@ -221,6 +233,32 @@ function boardBox() {
       display() {},
       show() {},
     },
+    // The monitor (320 x 240): draw, then it shows at the end of loop() or on show().
+    monitor: {
+      width: 320,
+      height: 240,
+      clear(colour = "#000000") {
+        tick();
+        canvas = [["clear", String(colour)]];
+        drawn = true;
+      },
+      rect(x, y, w, h, colour = "#ffffff") {
+        draw(["rect", +x, +y, +w, +h, String(colour)]);
+      },
+      circle(x, y, r, colour = "#ffffff") {
+        draw(["circle", +x, +y, +r, String(colour)]);
+      },
+      line(x1, y1, x2, y2, colour = "#ffffff", width = 2) {
+        draw(["line", +x1, +y1, +x2, +y2, String(colour), +width]);
+      },
+      text(x, y, value, colour = "#ffffff", size = 16) {
+        draw(["text", +x, +y, String(value).slice(0, 80), String(colour), Math.max(6, Math.min(64, +size || 16))]);
+      },
+      show() {
+        if (drawn) out("screen", null, canvas.slice());
+        drawn = false;
+      },
+    },
     servo: {
       pin: 9,
       attach(pin) {
@@ -231,6 +269,15 @@ function boardBox() {
         out("servo", this.pin, clamp(Number(angle) || 0, 0, 180));
       },
     },
+  };
+  function draw(command) {
+    tick();
+    if (canvas.length < 800) canvas.push(command);
+    drawn = true;
+  }
+  const flush = () => {
+    if (drawn) out("screen", null, canvas.slice());
+    drawn = false;
   };
   const fail = (error) => {
     dead = true;
@@ -266,11 +313,13 @@ function boardBox() {
         if (!started) {
           started = true;
           if (window.__fcc.setup) window.__fcc.setup();
+          flush();
         }
         let calls = 0;
         while (window.__fcc.loop && vt < job.until && calls < 100000 && performance.now() - wall < 250) {
           const before = vt;
           window.__fcc.loop();
+          flush();
           if (vt === before) vt += 1;
           calls += 1;
         }
@@ -298,7 +347,7 @@ export function guardLoops(code) {
 
 /** What the outputs are doing now, from the events played so far. */
 function blankState() {
-  return { pins: {}, tones: {}, servos: {}, display: [], serial: [] };
+  return { pins: {}, tones: {}, servos: {}, display: [], serial: [], screen: null };
 }
 
 function apply(state, event) {
@@ -306,6 +355,7 @@ function apply(state, event) {
   else if (event.kind === "tone") state.tones[event.pin] = event.value;
   else if (event.kind === "servo") state.servos[event.pin] = event.value;
   else if (event.kind === "display") state.display = event.value;
+  else if (event.kind === "screen") state.screen = Array.isArray(event.value) ? event.value : null;
   else if (event.kind === "serial") {
     state.serial.push(`${(event.t / 1000).toFixed(1)}s  ${event.value}`);
     if (state.serial.length > 200) state.serial.shift();
@@ -329,6 +379,7 @@ export function partsNow(wire, state) {
     }
   }
   if (wire.brain) now[`${wire.brain}#0`] = { state: "on", level: 1 };
+  now.monitor = { screen: state.screen, serial: state.serial };
   return now;
 }
 
@@ -437,6 +488,49 @@ export function runBoard(code, parts, { host = document.body, live = true, secon
   return { stop, done, wire };
 }
 
+/** Paint the monitor: the program's drawing, or a terminal of its Serial lines. */
+export function paintMonitor(paint, width, height, view) {
+  const scale = Math.min(width / 320, height / 240);
+  paint.save();
+  paint.fillStyle = "#000000";
+  paint.fillRect(0, 0, width, height);
+  if (view && view.screen) {
+    paint.scale(scale, scale);
+    for (const [kind, ...args] of view.screen.slice(0, 800)) {
+      if (kind === "clear") {
+        paint.fillStyle = args[0];
+        paint.fillRect(0, 0, 320, 240);
+      } else if (kind === "rect") {
+        paint.fillStyle = args[4];
+        paint.fillRect(args[0], args[1], args[2], args[3]);
+      } else if (kind === "circle") {
+        paint.fillStyle = args[3];
+        paint.beginPath();
+        paint.arc(args[0], args[1], Math.max(0, args[2]), 0, Math.PI * 2);
+        paint.fill();
+      } else if (kind === "line") {
+        paint.strokeStyle = args[4];
+        paint.lineWidth = args[5] || 2;
+        paint.beginPath();
+        paint.moveTo(args[0], args[1]);
+        paint.lineTo(args[2], args[3]);
+        paint.stroke();
+      } else if (kind === "text") {
+        paint.fillStyle = args[3];
+        paint.font = `${args[4]}px ui-monospace, Menlo, monospace`;
+        paint.fillText(args[2], args[0], args[1]);
+      }
+    }
+  } else {
+    const lines = view && view.serial ? view.serial.slice(-11) : [];
+    paint.fillStyle = "#39ff88";
+    paint.font = `${Math.round(17 * scale)}px ui-monospace, Menlo, monospace`;
+    const rows = lines.length ? lines : ["FCC board computer", "", "Waiting for a program..."];
+    rows.forEach((row, i) => paint.fillText(String(row).slice(0, 34), 10 * scale, (24 + i * 20) * scale));
+  }
+  paint.restore();
+}
+
 /** A test run in plain words: what each output did, the serial output, the screen. */
 export function describeRun(result) {
   const { wire, events, state, error, seconds } = result;
@@ -464,6 +558,10 @@ export function describeRun(result) {
     lines.push(`${item.name} (${item.constant}, pin ${pinText(item.pin)}): ${turnsOn ? `on ${turnsOn} time${turnsOn === 1 ? "" : "s"}, ${share}% of the time${turnsOn > 1 ? ` (about ${(turnsOn / seconds).toFixed(2)} times a second)` : ""}` : "stayed off"}${level > 0 && level < 255 && item.role === "motor" ? `, ended at speed ${level}/255` : ""}.`);
   }
   if (state.display.length) lines.push(`The screen shows: ${state.display.join(" | ")}`);
+  if (state.screen) {
+    const words = state.screen.filter(([kind]) => kind === "text").map((command) => command[3]);
+    lines.push(`The monitor shows a drawing (${state.screen.length} shapes)${words.length ? ` with the text: ${words.slice(0, 12).join(" | ")}` : ""}.`);
+  }
   if (state.serial.length) lines.push(`Serial output (last ${Math.min(12, state.serial.length)}):`, ...state.serial.slice(-12).map((text) => `  ${text}`));
   else lines.push("Nothing was printed to Serial.");
   return lines.join("\n");
