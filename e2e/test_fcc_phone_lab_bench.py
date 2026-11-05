@@ -113,6 +113,11 @@ def test_jarvis_takes_off_what_is_on_the_bench_and_logs_it_plainly(
             out.battery = await call({ action: 'remove', parts: [{ name: 'battery' }] });
             out.board = window.fccPhone.state.bench.electronics.parts.map((p) => p.id);
             out.missing = await call({ action: 'remove', parts: [{ name: 'servo' }] });
+            // Two LEDs: "led" is unclear, so nothing comes off; one letter matches nothing.
+            await shop.setBoard([{ id: 'aa', count: 2 }, { id: 'led-red', count: 1 }, { id: 'led-blue', count: 1 }], { powered: true });
+            out.unclear = await call({ action: 'remove', parts: [{ name: 'led' }] });
+            out.short = await call({ action: 'remove', parts: [{ name: 'r' }] });
+            out.still = window.fccPhone.state.bench.electronics.parts.length;
             // Burner on, Jarvis empties the beaker: it starts over with the burner off.
             await shop.setBeaker([{ id: 'water', amount: 50 }], { heat: true });
             out.clean = await call({ action: 'remove', items: [{ name: 'water' }] });
@@ -129,6 +134,9 @@ def test_jarvis_takes_off_what_is_on_the_bench_and_logs_it_plainly(
     )
     assert "9v" not in done["board"] and "led-red" in done["board"], done
     assert done["missing"].startswith("None of those are on the board. On it:")
+    assert done["unclear"].startswith("Which one?") and "led-red" in done["unclear"]
+    assert done["short"].startswith("None of those are on the board.")
+    assert done["still"] == 3
     assert done["clean"] == "The beaker is clean now." and done["heat"] is False
     log = done["log"]
     assert any(

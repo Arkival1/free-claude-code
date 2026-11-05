@@ -228,14 +228,23 @@ async function addTo(args, by) {
 async function takeFrom(args, by) {
   const wanted = (list) => new Set((Array.isArray(list) ? list : []).map((entry) => String((entry && (entry.id || entry.name)) || entry).trim().toLowerCase()).filter(Boolean));
   // What's on the bench first (its ids and names), the catalogue's guess only after.
+  // Exact ids and names at any length; part of a name from 3 letters, and only
+  // when it fits one thing on the bench (two fits: ask which, change nothing).
+  const unclear = [];
   const match = (names, onBench, nameOf, lookUp) =>
     new Set([...names].map((name) => {
-      const here = onBench.find((id) => id === name || nameOf(id).toLowerCase() === name) || onBench.find((id) => nameOf(id).toLowerCase().includes(name));
-      return here || (lookUp(name) || { id: name }).id;
+      const exact = onBench.find((id) => id === name || nameOf(id).toLowerCase() === name);
+      if (exact) return exact;
+      const partly = name.length >= 3 ? onBench.filter((id) => nameOf(id).toLowerCase().includes(name)) : [];
+      if (partly.length > 1) unclear.push(`"${name}" could be ${partly.map((id) => `${nameOf(id)} (${id})`).join(" or ")}`);
+      if (partly.length === 1) return partly[0];
+      return partly.length ? "" : (lookUp(name) || { id: name }).id;
     }));
+  const ask = () => `Which one? ${unclear.join("; ")}. Say the id; nothing was taken off.`;
   const parts = wanted(args.parts);
   if (parts.size) {
     const ids = match(parts, state.bench.electronics.parts.map((entry) => entry.id), nameOfPart, findPart);
+    if (unclear.length) return ask();
     const board = state.bench.electronics.parts.filter((entry) => !ids.has(entry.id));
     if (board.length === state.bench.electronics.parts.length) return `None of those are on the board. On it: ${state.bench.electronics.parts.map((entry) => nameOfPart(entry.id)).join(", ") || "nothing"}.`;
     jarvisWorks("electronics", "taking parts off the board");
@@ -245,6 +254,7 @@ async function takeFrom(args, by) {
   const items = wanted(args.items);
   if (items.size) {
     const ids = match(items, state.bench.chemistry.items.map((item) => item.id), nameOfChemical, resolveChemical);
+    if (unclear.length) return ask();
     const beaker = state.bench.chemistry.items.filter((item) => !ids.has(item.id));
     if (beaker.length === state.bench.chemistry.items.length) return `None of those are in the beaker. In it: ${state.bench.chemistry.items.map((item) => nameOfChemical(item.id)).join(", ") || "nothing"}.`;
     jarvisWorks("chemistry", "taking something out of the beaker");

@@ -177,7 +177,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.110.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.111.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -288,6 +288,14 @@ Notes carried over from the long session that built FCC Studio (LCC).
   room in `js/views/webkit.js`). Websites start from `web_kit page` (a
   recipe or sections, a look); `check_project` flags the kit's
   `SAMPLE_TEXT` and `.art` stand-ins (role="img") until replaced.
+- The phone Lab benches (owner: realistic 3D parts, a parts menu, "Jarvis
+  can use it ... and see what I'm working on"; and the Manus look): props on
+  both benches (`chem3d.js` STOCK shelf, `circuit3d.js benchTools`), a parts
+  menu per bench (on the bench / shelf or drawers), `state.bench.log` (every
+  step, the user's and Jarvis's), the main AI's prompt carries the benches
+  (`benchNow`), and the lab tool's look/add/remove share the user's bench.
+  The phone opens in the Playground (Manus-like) look unless the user picks
+  the HUD in Settings (`lookSet`; `?look=hud` for tests).
 - Godot on the phone (owner: "make it work like that on phone", and find
   "what's not there"): Godot 4.7.2's web player (`vendor/godot-web`, the
   single-threaded debug build, SHA-256 checked by the phone) runs games in
