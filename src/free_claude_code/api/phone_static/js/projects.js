@@ -90,6 +90,11 @@ export async function putPicture(project, path, data, agentName) {
   return name;
 }
 
+/** Put a file in: a picture (data address) or a text file, e.g. a starter's. */
+export function putFile(project, path, body, agentName) {
+  return PICTURE_TYPES.test(String(path)) && isPicture(body) ? putPicture(project, path, body, agentName) : writeFile(project, path, body, agentName);
+}
+
 export async function deleteFile(project, path, agentName) {
   const name = cleanPath(path);
   if (!(name in project.files)) throw new Error(`There is no ${name} in ${project.name}.`);

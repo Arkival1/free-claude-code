@@ -51,7 +51,7 @@ function godotCard() {
       const { GODOT_STARTERS } = await import("../../godot/starters.js");
       const project = await projects.createProject(title, "you");
       if (Object.keys(project.files).length) return go(`projects/${project.id}`);
-      for (const [path, body] of Object.entries(starterFiles(GODOT_STARTERS, name, title))) await projects.writeFile(project, path, body, "you");
+      for (const [path, body] of Object.entries(starterFiles(GODOT_STARTERS, name, title))) await projects.putFile(project, path, body, "you");
       go(`projects/${project.id}`);
     } catch (error) {
       status.textContent = error.message;
@@ -62,6 +62,10 @@ function godotCard() {
     el("div", { class: "row" }, [
       button("Action game (3D)", () => make("action-3d", "Godot action game"), { class: "primary" }),
       button("Third-person (3D)", () => make("third-person-3d", "Godot third-person game")),
+    ]),
+    el("div", { class: "row" }, [
+      button("Platformer (2D)", () => make("platformer-2d", "Godot platformer")),
+      button("RPG village (2D)", () => make("rpg-topdown", "Godot RPG village")),
     ]),
     el("div", { class: "row" }, [button("What can Godot do on this phone?", () => showProbe())]),
     status,

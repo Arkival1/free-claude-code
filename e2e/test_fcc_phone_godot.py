@@ -356,3 +356,58 @@ def test_the_box_guards_hold_and_the_pack_is_godots_format(
         "res://c.txt": b"abcd",
         "res://.godot/global_script_class_cache.cfg": b"list=[]\n",
     }
+
+
+PICTURE_GAME = """extends Node
+
+
+func _ready() -> void:
+\tvar png: Texture2D = preload("res://art/dot.png")
+\tvar jpeg: Texture2D = preload("res://art/photo.jpg")
+\tprint("SIZES %d %d %d %d" % [png.get_width(), png.get_height(), jpeg.get_width(), jpeg.get_height()])
+\tprint("DONE")
+"""
+
+
+def test_pictures_load_in_godot_and_the_2d_starters_check_clean(
+    page: Page, admin_base_url: str
+) -> None:
+    """Godot's own importer isn't on the phone, so the phone imports a
+    project's pictures itself: preload works for PNG and JPEG, at their
+    real sizes, and the 2D starters (with their art) check clean."""
+    page.set_default_timeout(GODOT_WAIT)
+    errors = watch_errors(page)
+    open_phone(page, admin_base_url)
+    pictures = page.evaluate(
+        """async () => {
+            const url = async (type, width, height) => {
+                const canvas = new OffscreenCanvas(width, height);
+                const draw = canvas.getContext('2d');
+                draw.fillStyle = '#e94';
+                draw.fillRect(0, 0, width, height);
+                const blob = await canvas.convertToBlob({ type });
+                return await new Promise((done) => {
+                    const reader = new FileReader();
+                    reader.onload = () => done(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            };
+            return { png: await url('image/png', 7, 5), jpeg: await url('image/jpeg', 12, 9) };
+        }"""
+    )
+    files = {
+        **project_files(PICTURE_GAME),
+        "art/dot.png": pictures["png"],
+        "art/photo.jpg": pictures["jpeg"],
+    }
+    result = run_in_box(page, files)
+    assert any("SIZES 7 5 12 9" in line for line in result["prints"]), result["report"]
+    assert not result["errors"], result["report"]
+
+    go(page, "projects")
+    page.get_by_role("button", name="Platformer (2D)").click()
+    expect(page.get_by_role("heading", name="Godot platformer")).to_be_visible()
+    page.get_by_role("button", name="Check it").click()
+    report = page.locator(".godot-report")
+    expect(report).to_contain_text("No errors", timeout=GODOT_WAIT)
+    assert errors == [], errors

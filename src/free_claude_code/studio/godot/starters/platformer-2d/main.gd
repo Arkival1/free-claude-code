@@ -30,6 +30,11 @@ var start := Vector2.ZERO
 func _ready() -> void:
 	Input.set_use_accumulated_input(false)
 	_add_inputs()
+	# Touch controls on a phone (hidden on a computer).
+	var touch: CanvasLayer = preload("res://touch_pad.gd").new()
+	touch.set("buttons", [["jump", "JUMP", Vector2(-120, -140), 62.0], ["restart", "AGAIN", Vector2(-110, -300), 36.0]])
+	touch.set("vertical", false)
+	add_child(touch)
 	RenderingServer.set_default_clear_color(Color("#87c4ff"))
 	var tiles := TileMapLayer.new()
 	tiles.tile_set = _make_tile_set()

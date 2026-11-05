@@ -8,6 +8,7 @@ the Builder's web starter templates from studio/templates.py and FCC's own
 website designs from studio/site_layouts.
 """
 
+import base64
 import json
 import re
 import shutil
@@ -290,10 +291,16 @@ PHONE_GODOT_STARTERS = {
     "turns the camera, buttons for the rest).",
     "third-person-3d": "A 3D third-person game: a camera on a spring arm, "
     "walk, run and jump, orbs to collect, sun, sky and shadows.",
+    "platformer-2d": "A 2D platformer with Kenney pixel art: run, variable "
+    "jump, coins, spikes, an enemy to stomp, a finish flag; touch stick and "
+    "JUMP on the phone.",
+    "rpg-topdown": "A top-down RPG village with Kenney art: walk, talk to "
+    "people, a fetch quest with a key and a chest; touch stick and TALK on "
+    "the phone.",
 }
-"""The PC starters that run in the phone's Godot player (shapes and code only:
-the 2D starters' Kenney art needs Godot's importer)."""
-GODOT_TEXT = (".gd", ".gdshader", ".tscn", ".tres", ".godot", ".cfg")
+"""The PC starters that run in the phone's Godot player (their pictures go
+in as data addresses; the phone imports them as Godot's editor would)."""
+GODOT_TEXT = (".gd", ".gdshader", ".tscn", ".tres", ".godot", ".cfg", ".txt")
 
 
 def _godot_files(folder: Path) -> dict[str, str]:
@@ -306,8 +313,21 @@ def _godot_files(folder: Path) -> dict[str, str]:
 
 def godot_js() -> str:
     """The phone's Godot starters and FCC's probe, from studio/godot."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from free_claude_code.studio import godot
+
+    def starter(name: str) -> dict[str, str]:
+        files: dict[str, str] = {}
+        for path, data in godot.starter_files(name).items():
+            if path.endswith(".png"):
+                encoded = base64.b64encode(data).decode()
+                files[path] = f"data:image/png;base64,{encoded}"
+            elif path.endswith(GODOT_TEXT):
+                files[path] = data.decode("utf-8")
+        return files
+
     starters = {
-        name: {"about": about, "files": _godot_files(GODOT_DIR / "starters" / name)}
+        name: {"about": about, "files": starter(name)}
         for name, about in PHONE_GODOT_STARTERS.items()
     }
     body = json.dumps(starters, ensure_ascii=False, indent=None, separators=(",", ":"))

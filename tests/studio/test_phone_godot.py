@@ -76,14 +76,25 @@ def test_the_phone_starters_and_probe_come_from_studio_godot():
     found = re.search(r"export const GODOT_STARTERS = (\{.*\});\n", text)
     assert found is not None
     starters = json.loads(found.group(1))
-    assert set(starters) == {"action-3d", "third-person-3d"}
+    assert set(starters) == {
+        "action-3d",
+        "third-person-3d",
+        "platformer-2d",
+        "rpg-topdown",
+    }
     for starter in starters.values():
         files = starter["files"]
         # Every phone starter plays by touch on a phone.
-        assert "touch.gd" in files
+        assert "touch.gd" in files or "touch_pad.gd" in files
         assert "emulate_mouse_from_touch=false" in files["project.godot"]
         assert 'run/main_scene="res://main.tscn"' in files["project.godot"]
-        assert not any(name.endswith((".png", ".import")) for name in files)
+        # Pictures go in as data addresses; the phone imports them.
+        assert all(
+            files[name].startswith("data:image/png;base64,")
+            for name in files
+            if name.endswith(".png")
+        )
+        assert not any(name.endswith(".import") for name in files)
 
 
 @pytest.mark.skipif(not REAL_GODOT, reason="set FCC_GODOT_BIN to a Godot 4.7.2 program")

@@ -101,7 +101,7 @@ export const SPECS = {
       type: "object",
       properties: {
         action: { type: "string", enum: ["guide", "starters", "start", "check", "probe"] },
-        starter: { type: "string", enum: ["action-3d", "third-person-3d"], description: "start: which starter." },
+        starter: { type: "string", enum: ["action-3d", "third-person-3d", "platformer-2d", "rpg-topdown"], description: "start: which starter." },
         project: text("check: the project's name (the current project if left out)."),
         seconds: { type: "number", description: "check: how long to run it once it shows its first frame (3 to 30, default 8)." },
       },
@@ -364,7 +364,7 @@ export async function runTool(agent, call, ctx) {
       case "godot": {
         if (args.project) ctx.project = projects.findProject(String(args.project)) || ctx.project;
         if (!ctx.project && args.action === "check") ctx.project = state.projects.find((project) => isGodotProject(project)) || null;
-        return await useGodot(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));
+        return await useGodot(args, ctx, (project, path, body) => projects.putFile(project, path, body, agent.name));
       }
       case "use_plugin":
         return await usePlugin(args);

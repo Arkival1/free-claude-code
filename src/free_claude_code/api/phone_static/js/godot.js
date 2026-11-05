@@ -8,7 +8,7 @@
 // memory is capped, a watchdog closes it when it stops answering, and a crash
 // closes only the box. The engine's files ship with FCC and are checked
 // against their SHA-256 sums before they run.
-import { makePack, isGodotProject } from "../godot/pack.js";
+import { makePack, importPictures, isGodotProject } from "../godot/pack.js";
 
 export { isGodotProject };
 export const GODOT_VERSION = "4.7.2";
@@ -328,7 +328,7 @@ export function godotProblems(project) {
       if (ref.startsWith(".godot/")) continue;
       if (!(ref in files)) {
         out.push({ text: `${name} loads res://${ref}, which isn't in the project.`, stop: /preload\(|ext_resource/.test(body.slice(0, body.indexOf(ref))) });
-      } else if (IMPORTED.test(ref) && !/\.(png|jpe?g|webp)$/i.test(ref)) {
+      } else if (IMPORTED.test(ref) && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(ref)) {
         out.push({ text: `${name} loads res://${ref}: the phone has no importer for that kind of file, so load it at run time (for sound: AudioStreamOggVorbis.load_from_buffer or AudioStreamWAV.load_from_buffer on FileAccess.get_file_as_bytes).`, stop: false });
       }
     }
@@ -372,15 +372,16 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
     settle(finish(result));
     return { frame: null, stop: () => {}, done };
   }
-  let pack;
   try {
-    pack = makePack(project.files);
+    makePack(project.files);
   } catch (error) {
     result.stopped = "not run";
     result.problems.push({ text: error.message, stop: true });
     settle(finish(result));
     return { frame: null, stop: () => {}, done };
   }
+  // Pictures are imported as the editor would (async: JPEG and WebP become PNG).
+  const packing = importPictures(project.files).then((imported) => makePack(project.files, imported));
   const frame = document.createElement("iframe");
   // Scripts, and the mouse lock a 3D game asks for on a computer (Esc frees it).
   frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock");
@@ -421,8 +422,8 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
     const text = typeof message.text === "string" ? message.text : "";
     switch (message.type) {
       case "ready":
-        loadGodot(onProgress)
-          .then((engine) => {
+        Promise.all([loadGodot(onProgress), packing])
+          .then(([engine, pack]) => {
             if (closed) return;
             readyAt = Date.now();
             onEvent({ type: "engine" });
@@ -572,7 +573,7 @@ export const GODOT_GUIDE = `Godot ${GODOT_VERSION} on this phone: the official G
 What runs: GDScript, scenes (.tscn), resources (.tres), shaders (.gdshader), 2D and 3D, physics, particles, sound.
 How it draws: the Compatibility renderer (WebGL 2). Lights, shadows, glow, fog, particles and your own shaders work; Forward+ effects (SDFGI, VoxelGI, volumetric fog, screen-space reflections, SSAO, SSIL) and compute shaders don't.
 One thread: Thread doesn't run on its own and long work freezes the game. Build big things in steps (await get_tree().process_frame between them), keep generated textures small (256 or less), and keep instance counts modest.
-Pictures: put them in the project (use_photo or find_images) and load them at run time: var texture := ImageTexture.create_from_image(Image.load_from_file("res://art/hero.png")). preload("res://x.png") needs Godot's importer, which the phone doesn't have. Sound the same way: AudioStreamOggVorbis.load_from_buffer(FileAccess.get_file_as_bytes(path)) or AudioStreamWAV.load_from_buffer(...).
+Pictures: put them in the project (use_photo or find_images): PNG, JPEG, WebP, GIF or BMP. FCC imports them as Godot's editor would, so preload("res://art/hero.png") and textures in scenes work. Sound is loaded at run time: AudioStreamOggVorbis.load_from_buffer(FileAccess.get_file_as_bytes(path)) or AudioStreamWAV.load_from_buffer(...).
 Text: the built-in font has letters, digits and punctuation only; symbols and emoji show as empty boxes, so use words or draw shapes.
 Touch: a phone has no keyboard or mouse. Give every action an on-screen control (TouchScreenButton with action set, a joystick from InputEventScreenTouch and InputEventScreenDrag) shown when DisplayServer.is_touchscreen_available().
 Saving: user:// works while the game is open and starts fresh each time.

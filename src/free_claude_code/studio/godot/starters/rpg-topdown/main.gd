@@ -36,6 +36,11 @@ var chest: Sprite2D
 
 func _ready() -> void:
 	_add_inputs()
+	# Touch controls on a phone (hidden on a computer).
+	var touch: CanvasLayer = preload("res://touch_pad.gd").new()
+	touch.set("buttons", [["talk", "TALK", Vector2(-120, -140), 60.0]])
+	touch.set("vertical", true)
+	add_child(touch)
 	var tile_set := _make_tile_set()
 	var ground := TileMapLayer.new()
 	ground.tile_set = tile_set
