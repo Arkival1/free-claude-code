@@ -38,11 +38,11 @@ export const SPECS = {
   },
   lab: {
     description:
-      "The Lab, which you work yourself (you walk to the room in the user's Lab box; never hand Lab work to another agent). The benches are shared with the user: look (what is on both benches now, the readings, and the user's last steps; use it when the user asks about what they are working on), add (put parts [{id, count}] on the board or items [{name, amount}] in the beaker on top of what is there, then power or mix it), remove (take parts or items off by id or name). Chemistry: mix (items [{name, amount in mL or g}], heat, flame: the PC Lab's real chemistry: reactions, colour, gas, precipitate, pH, temperature, hazards), shelf (search the chemical shelf; any element works by symbol). Electronics: circuit (parts [{id, count}], series, sun: volts, current, what lights or burns out, resistor values, runtime), parts (search the parts bin). Blueprints: save (name, kind chip|mixture|invention, notes; id of an existing blueprint saves a new version of it), blueprints (search saved ones), load (id or name, version: put it back on the benches to reuse or improve). Library: tutorials (query or topic: build-your-own-x's step-by-step tutorials for building technologies from scratch, with links). 3D games: guide, list, add (the Game Lab kit; new 3D games start from start_project template game3d).",
+      "The Lab, which you work yourself (you walk to the room in the user's Lab box; never hand Lab work to another agent). The benches are shared with the user: look (what is on both benches now, the readings, and the user's last steps; use it when the user asks about what they are working on), add (put parts [{id, count}] on the board or items [{name, amount}] in the beaker on top of what is there, then power or mix it), remove (take parts or items off by id or name), program (with code: save the board computer's program, Arduino-style JavaScript, and test it; without: show the wiring, the API and the saved program), run (test the program for seconds of board time with sensors {light, temp, soil, distance, motion, button}: what each LED, motor, servo and buzzer did, the screen and the Serial output). Chemistry: mix (items [{name, amount in mL or g}], heat, flame: the PC Lab's real chemistry: reactions, colour, gas, precipitate, pH, temperature, hazards), shelf (search the chemical shelf; any element works by symbol). Electronics: circuit (parts [{id, count}], series, sun: volts, current, what lights or burns out, resistor values, runtime), parts (search the parts bin). Blueprints: save (name, kind chip|mixture|invention, notes; id of an existing blueprint saves a new version of it), blueprints (search saved ones), load (id or name, version: put it back on the benches to reuse or improve). Library: tutorials (query or topic: build-your-own-x's step-by-step tutorials for building technologies from scratch, with links). 3D games: guide, list, add (the Game Lab kit; new 3D games start from start_project template game3d).",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["look", "add", "remove", "mix", "shelf", "circuit", "parts", "save", "blueprints", "load", "tutorials", "guide", "list"] },
+        action: { type: "string", enum: ["look", "add", "remove", "program", "run", "mix", "shelf", "circuit", "parts", "save", "blueprints", "load", "tutorials", "guide", "list"] },
         items: { type: "array", description: "mix: what goes in the beaker (all of it); add or remove: what to put in or take out.", items: { type: "object", properties: { name: text("A chemical (shelf id, name, formula or element)."), amount: { type: "number", description: "mL for liquids, g for solids." } }, required: ["name"] } },
         heat: { type: "boolean", description: "mix: heat it over the burner." },
         flame: { type: "boolean", description: "mix: a flame test." },
@@ -55,6 +55,9 @@ export const SPECS = {
         id: text("save: a blueprint id to add a version to; load: the blueprint's id."),
         version: { type: "number", description: "load: which version (newest if left out)." },
         query: text("shelf, parts, blueprints, tutorials: words to search for."),
+        code: text("program: the board computer's whole program (setup() and loop())."),
+        seconds: { type: "number", description: "run: seconds of board time to test (1-120, default 10)." },
+        sensors: { type: "object", description: "run: sensor readings, e.g. {light: 10, temp: 30, distance: 15, motion: true, button: true}." },
         topic: text("tutorials: a topic (3D Renderer, Database, Emulator / Virtual Machine, Game, Git, Neural Network, Operating System...)."),
       },
       required: ["action"],
@@ -304,7 +307,7 @@ export async function runTool(agent, call, ctx) {
       case "lab": {
         const benchAdd = args.action === "add" && (Array.isArray(args.parts) || Array.isArray(args.items));
         if (ctx.partsOnly && args.action === "add" && !benchAdd) return partsOnly("lab/kit.js");
-        if (ctx.partsOnly && (benchAdd || ["mix", "circuit", "save", "load", "remove"].includes(args.action))) return "The Lab benches are the main AI's: as a helper you can read the shelf, parts, blueprints and tutorials, and write your part under parts/.";
+        if (ctx.partsOnly && (benchAdd || ["mix", "circuit", "save", "load", "remove", "program", "run"].includes(args.action))) return "The Lab benches are the main AI's: as a helper you can read the shelf, parts, blueprints and tutorials, and write your part under parts/.";
         const done = await useWorkshop(args, agent);
         if (done !== null) return done;
         return await useLab(args, ctx, (project, path, body) => projects.writeFile(project, path, body, agent.name));

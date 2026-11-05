@@ -6,6 +6,7 @@ import { el, button, card, notify, go, openSheet, closeSheet } from "../ui.js";
 import { answer } from "../agents.js";
 import { resolveChemical, searchChemicals, findPart, PARTS, CHEMICALS, resistorBands, MAX_ITEMS, HAZARDS } from "../../lab/science.js";
 import * as shop from "../workshop.js";
+import { wiring, wiringText, starterProgram, runBoard, SENSOR_DEFAULTS, SENSOR_RANGES } from "../../lab/board.js";
 
 const ROOM_ORDER = ["chemistry", "electronics", "blueprints", "library"];
 const KIND_NAMES = { power: "Power", charger: "Charging", regulator: "Regulators", light: "Lights", motion: "Motion", sound: "Sound", brain: "Brains", sensor: "Sensors", display: "Displays", control: "Switches", passive: "Passives", structure: "Body" };
@@ -41,6 +42,18 @@ export function render(view) {
   // Each bench's parts menu: what's on the bench, or the stock to add from.
   const menuTab = { chemistry: "bench", electronics: "bench" };
   let stockQuery = "";
+  // The board computer: the program being edited, a live run, sensor values,
+  // the serial monitor and the last test's report (kept across redraws).
+  let draft = null;
+  let draftFrom = null;
+  let edited = false;
+  let boardRun = null;
+  let sensors = { ...SENSOR_DEFAULTS };
+  let testReport = "";
+  const serial = el("pre", { class: "board-serial", "aria-live": "polite", "aria-label": "Serial monitor" });
+  const stopBoard = () => {
+    if (boardRun) boardRun.stop("Stopped.");
+  };
   const canvas = el("canvas", { class: "lab-world", "aria-label": "The Lab box in 3D: drag to turn, pinch to zoom, tap a room" });
   const where = el("div", { class: "lab-where" });
   const back = el("button", { class: "lab-overlay-button", type: "button", text: "⟵ Box", hidden: true, onclick: () => world && world.focus(null) });
@@ -311,6 +324,7 @@ export function render(view) {
         el("div", { class: "lab-chips" }, Object.entries(TRY_BUILDS).map(([name, build]) => el("button", { class: "lab-chip", type: "button", text: name, onclick: () => run(() => shop.circuit(build)) }))),
       ]),
       bench.result && bench.powered ? readingsCard(bench.result) : null,
+      boardCard(),
       picked && (picked.type === "part" || picked.type === "resistor") ? partCard(picked) : null,
     ];
   }
@@ -470,6 +484,104 @@ export function render(view) {
     return card("Parts", [tabs, search, list], { class: "lab-parts" });
   }
 
+  /** The board computer: wiring, the program, Run (live on the 3D board),
+   * a test run, sensor controls and the serial monitor. */
+  function boardCard() {
+    const bench = state.bench.electronics;
+    const wire = wiring(bench.parts);
+    if (!wire.brain) return null;
+    const brain = findPart(wire.brain);
+    // A program Jarvis saved replaces the editor's text, unless the user changed it since.
+    if (draft === null || (bench.program !== draftFrom && !edited)) {
+      draft = bench.program || starterProgram(wire);
+      draftFrom = bench.program;
+    }
+    const editor = el("textarea", { class: "board-code", rows: 14, spellcheck: "false", autocapitalize: "off", autocomplete: "off", "aria-label": "The board computer's program", value: draft });
+    editor.value = draft;
+    editor.addEventListener("input", () => {
+      draft = editor.value;
+      edited = true;
+    });
+    const saved = () => {
+      edited = false;
+      draftFrom = editor.value;
+    };
+    const save = () => run(async () => {
+      await shop.saveProgram(editor.value);
+      saved();
+    });
+    const live = Boolean(boardRun);
+    const start = async () => {
+      const why = shop.cantRun();
+      if (why) return notify(why);
+      await shop.saveProgram(editor.value);
+      saved();
+      serial.textContent = "";
+      testReport = "";
+      boardRun = runBoard(editor.value, bench.parts, {
+        live: true,
+        sensors: () => sensors,
+        onState: (now, parts) => {
+          if (world) world.setRun(parts);
+          serial.textContent = now.serial.slice(-40).join("\n");
+          serial.scrollTop = serial.scrollHeight;
+        },
+      });
+      shop.logStep("you", "electronics", "ran the board computer's program");
+      drawPanel();
+      const result = await boardRun.done;
+      boardRun = null;
+      if (world) world.setRun(null);
+      if (result.error && result.error !== "Stopped.") testReport = `Stopped: ${result.error}`;
+      drawPanel();
+    };
+    const test = async () => {
+      const why = shop.cantRun();
+      if (why) return notify(why);
+      await shop.saveProgram(editor.value);
+      saved();
+      testReport = "Testing 10 seconds of board time…";
+      drawPanel();
+      testReport = await shop.testProgram({ seconds: 10, sensors });
+      drawPanel();
+    };
+    const sensorRows = wire.wires.filter((item) => item.input).map((item) => {
+      if (item.role in SENSOR_RANGES) {
+        const range = SENSOR_RANGES[item.role];
+        const value = el("span", { class: "small muted", text: `${sensors[item.role]} ${range.unit}` });
+        const slider = el("input", { type: "range", min: String(range.min), max: String(range.max), step: String(range.step), value: String(sensors[item.role]), "aria-label": range.name, oninput: (event) => {
+          sensors[item.role] = Number(event.target.value);
+          value.textContent = `${sensors[item.role]} ${range.unit}`;
+        } });
+        return el("label", { class: "board-sensor" }, [el("span", { text: range.name }), slider, value]);
+      }
+      const box = el("input", { type: "checkbox", checked: Boolean(sensors[item.role]), onchange: (event) => (sensors[item.role] = event.target.checked) });
+      return el("label", { class: "check" }, [box, ` ${item.role === "motion" ? "Someone moves" : item.role === "button" ? "Button held down" : "Switch on"}`]);
+    });
+    return card(`Board computer · ${brain ? brain.name : wire.brain}`, [
+      el("p", { class: "small muted", text: "Its program runs here on the phone and drives the parts on the board. Arduino style: setup() once, loop() again and again." }),
+      el("details", { class: "board-wiring" }, [el("summary", { text: `Wiring (${wire.wires.length})` }), el("pre", { text: wiringText(wire) })]),
+      editor,
+      el("div", { class: "row" }, [
+        live ? button("■ Stop", stopBoard, { class: "primary" }) : button("▶ Run", start, { class: "primary" }),
+        button("Test 10 s", test, { disabled: live ? true : null }),
+        button("Save", save),
+        button("Start over", () => {
+          draft = starterProgram(wire);
+          edited = true;
+          drawPanel();
+        }, { disabled: live ? true : null }),
+        button(`Ask ${jarvisOf() ? jarvisOf().name : "Jarvis"} to write it`, () => {
+          const goal = prompt("What should the board do?", "Turn the LEDs on when it gets dark");
+          if (goal) tellJarvis(`Write the board computer's program on the electronics bench so it does this: ${goal}. Use lab program with the code, then lab run to test it, and fix it until it works.`);
+        }),
+      ]),
+      sensorRows.length ? el("div", { class: "board-sensors" }, [el("p", { class: "small muted", text: "Sensors (move them while it runs):" }), ...sensorRows]) : null,
+      live || serial.textContent ? el("div", {}, [el("p", { class: "small muted", text: "Serial monitor" }), serial]) : null,
+      testReport ? el("pre", { class: "board-report", text: testReport }) : null,
+    ], { class: "board-card" });
+  }
+
   /** The last steps at the benches, the user's and Jarvis's (like a work log). */
   function stepsCard() {
     const log = (state.bench.log || []).slice(-6).reverse();
@@ -559,6 +671,7 @@ export function render(view) {
   });
   return () => {
     stopped = true;
+    stopBoard();
     unsubscribe();
     if (world) world.stop();
   };

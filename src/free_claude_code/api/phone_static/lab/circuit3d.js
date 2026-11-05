@@ -302,8 +302,9 @@ function makers(m) {
       horn.add(post(0.3, 0.3, standard("#f5f5f5", 0.4), 0, 0, 0, 14));
       horn.add(block(2.0, 0.12, 0.3, standard("#f5f5f5", 0.4), 0.7, 0.18, 0));
       root.add(horn);
-      return { root, plus: new THREE.Vector3(-1.15, 0.6, -0.2), minus: new THREE.Vector3(-1.15, 0.4, 0.2), tick: (t, dt, level, state) => {
-        horn.rotation.y = state === "on" ? Math.sin(t * 1.6) * 1.1 : horn.rotation.y;
+      return { root, plus: new THREE.Vector3(-1.15, 0.6, -0.2), minus: new THREE.Vector3(-1.15, 0.4, 0.2), tick: (t, dt, level, state, run) => {
+        if (run && run.angle !== undefined) horn.rotation.y += ((((run.angle - 90) * Math.PI) / 180) - horn.rotation.y) * Math.min(1, dt * 8);
+        else horn.rotation.y = state === "on" ? Math.sin(t * 1.6) * 1.1 : horn.rotation.y;
       } };
     },
     pump: () => {
@@ -464,7 +465,7 @@ function makers(m) {
       const root = new THREE.Group();
       root.add(header(1.1, 0, 0, -1.2));
       root.add(pcb(2.7, 2.8, "#1b4f9c", "", 0.85));
-      const screen = canvasTexture(256, 160, (paint) => {
+      const idle = (paint) => {
         paint.fillStyle = "#03080d";
         paint.fillRect(0, 0, 256, 160);
         paint.fillStyle = "#7fe3ff";
@@ -473,11 +474,30 @@ function makers(m) {
         paint.font = "22px monospace";
         paint.fillText("Jarvis: ready", 30, 95);
         paint.fillText("~ ~ ~ ~ ~ ~", 46, 135);
-      });
+      };
+      const screen = canvasTexture(256, 160, idle);
+      let shown = "";
+      // The program's lines (display.println), up to six, like a 128x64 OLED.
+      const write = (lines) => {
+        const text = lines ? lines.join("\n") : "";
+        if (text === shown) return;
+        shown = text;
+        const paint = screen.image.getContext("2d");
+        if (!lines) idle(paint);
+        else {
+          paint.fillStyle = "#03080d";
+          paint.fillRect(0, 0, 256, 160);
+          paint.fillStyle = "#9eefff";
+          paint.font = "bold 22px monospace";
+          lines.slice(-6).forEach((row, i) => paint.fillText(String(row).slice(0, 18), 8, 24 + i * 25));
+        }
+        screen.needsUpdate = true;
+      };
       const glass = new THREE.MeshStandardMaterial({ color: "#05070a", emissive: "#ffffff", emissiveMap: screen, emissiveIntensity: 0, roughness: 0.15, map: screen });
       const side = standard("#05070a", 0.2);
       root.add(mesh(new THREE.BoxGeometry(2.5, 0.12, 1.9), [side, side, glass, side, side, side], 0, 1.07, 0.2));
-      return { root, plus: new THREE.Vector3(-0.3, 0, -1.2), minus: new THREE.Vector3(0.3, 0, -1.2), tick: (t, dt, level, state) => {
+      return { root, plus: new THREE.Vector3(-0.3, 0, -1.2), minus: new THREE.Vector3(0.3, 0, -1.2), tick: (t, dt, level, state, run) => {
+        write(run && run.lines ? run.lines : null);
         glass.emissiveIntensity = state === "on" ? 1.4 : 0;
         glass.color.set(state === "on" ? "#ffffff" : "#05070a");
       } };
@@ -745,6 +765,8 @@ export function makeCircuitBench() {
   group.add(dots);
   const smokeTexture = puffTexture();
   let live = [];
+  // While a program runs on the board computer: each part's state from it.
+  let running = null;
   let flows = [];
   let smoke = [];
   const matrix = new THREE.Matrix4();
@@ -853,7 +875,7 @@ export function makeCircuitBench() {
         segments.push(new THREE.LineCurve3(plus, minus));
         segments.push(jumper(minus, new THREE.Vector3(offBoard ? Math.max(-7.5, Math.min(7.5, x)) + 0.4 : x + 0.3, TOP, RAIL_MINUS), m.blackWire, offBoard ? 2.0 : 0.9));
         if (level > 0 && row.state !== "ok" && row.milliamps > 0) addFlow(segments, row.milliamps);
-        live.push({ model, row, level });
+        live.push({ model, row, level, key: `${entry.id}#${copy}` });
         if (row.state === "burnt" && powered) smoke.push(addSmoke(model.root.position.clone().add(new THREE.Vector3(0, size.y + 0.5, 0))));
         if (copy === 0) tag(`${part.name}${powered && row.state ? ` · ${row.state}` : ""}`, new THREE.Vector3(model.root.position.x, (offBoard ? 0 : TOP) + size.y + 1.4, model.root.position.z));
       }
@@ -884,7 +906,10 @@ export function makeCircuitBench() {
   }
 
   function tick(t, dt) {
-    for (const { model, row, level } of live) if (model.tick) model.tick(t, dt, level, row.state);
+    for (const { model, row, level, key } of live) {
+      const run = running && running[key];
+      if (model.tick) model.tick(t, dt, run ? run.level : level, run ? run.state : row.state, run);
+    }
     let used = 0;
     for (const flow of flows) {
       for (let i = 0; i < flow.count && used < dotCount; i += 1) {
@@ -911,6 +936,7 @@ export function makeCircuitBench() {
     update,
     tick,
     setLabels: (on) => (labels.visible = on),
+    setRun: (states) => (running = states),
     stop: () => {
       clear();
       dispose(group);

@@ -8,6 +8,7 @@ import { state, save, changed, feed } from "./state.js";
 import { uid } from "./ui.js";
 import { simulate, simulateBuild, resolveChemical, searchChemicals, findPart, PARTS, MAX_ITEMS } from "../lab/science.js";
 import { TUTORIALS } from "../lab/tutorials-data.js";
+import { wiring, wiringText, starterProgram, runBoard, describeRun as describeBoardRun, SENSOR_DEFAULTS, SENSOR_RANGES } from "../lab/board.js";
 
 export const ROOM_NAMES = { chemistry: "Chemistry", electronics: "Electronics", blueprints: "Blueprints", library: "Library" };
 export const BLUEPRINT_KINDS = { chip: "Chip", mixture: "Mixture", invention: "Invention" };
@@ -150,7 +151,7 @@ export async function setBoard(parts, { series, sun, powered, by = "you" } = {})
 export async function circuit(parts, { series = true, sun = true, by = "you" } = {}) {
   const clean = cleanParts(parts);
   const result = simulateBuild(clean, { series, sun });
-  state.bench.electronics = { parts: clean, series: Boolean(series), sun: Boolean(sun), powered: true, result };
+  state.bench.electronics = { parts: clean, series: Boolean(series), sun: Boolean(sun), powered: true, result, program: state.bench.electronics.program || "" };
   logStep(by, "electronics", `built ${clean.map((entry) => `${nameOfPart(entry.id)}${partUnit(entry.id, entry.count)}`).join(", ")} and powered it: ${result.works ? "it works" : "it doesn't work yet"}`);
   if (by !== "you") jarvisWorks("electronics", `wiring ${clean.map((entry) => findPart(entry.id).name).join(", ")}`);
   await keepBench();
@@ -189,6 +190,7 @@ export function benchNow({ full = true, steps = 8 } = {}) {
   if (electronics.parts.length) {
     lines.push(`Electronics bench: on the board ${electronics.parts.map((entry) => `${nameOfPart(entry.id)}${partUnit(entry.id, entry.count)}`).join(", ")}; batteries ${electronics.series ? "in series" : "side by side"}; power ${electronics.powered ? "on" : "off"}.`);
     if (electronics.result && electronics.powered) lines.push(full ? describeCircuit(electronics.result) : `${electronics.result.works ? "It works" : "It doesn't work yet"}: ${electronics.result.parts.map((row) => `${row.name} ${row.state}`).join(", ")}.`);
+    if (electronics.program) lines.push(`Board computer program: ${electronics.program.split("\n").length} lines saved (lab program shows it, lab run tests it).`);
   } else lines.push("Electronics bench: the board is empty.");
   const log = (state.bench.log || []).slice(-steps);
   if (log.length) lines.push(`Last steps at the benches:\n${log.map((step) => `- ${step.by === "you" ? "The user" : step.by} ${step.text} (${ROOM_NAMES[step.room] || step.room}, ${ago(step.at)})`).join("\n")}`);
@@ -269,11 +271,64 @@ async function takeFrom(args, by) {
   throw new Error("Say what to take off: parts [{id}] or items [{name}].");
 }
 
+/* ------------------------------------------------------ board computer */
+
+export const MAX_PROGRAM = 20000;
+export const boardWiring = () => wiring(state.bench.electronics.parts);
+
+/** Save the board computer's program (the user's editor or Jarvis). */
+export async function saveProgram(code, by = "you") {
+  const text = String(code ?? "");
+  if (text.length > MAX_PROGRAM) throw new Error(`The program is too long for the board (${MAX_PROGRAM.toLocaleString()} characters at most).`);
+  const bench = state.bench.electronics;
+  if (bench.program === text) return;
+  bench.program = text;
+  logStep(by, "electronics", text.trim() ? `wrote the board computer's program (${text.split("\n").length} lines)` : "cleared the board computer's program");
+  await keepBench();
+}
+
+/** Why the board computer can't run now, or "". */
+export function cantRun() {
+  const { parts, powered, result } = state.bench.electronics;
+  const wire = wiring(parts);
+  if (!wire.brain) return "There's no board computer on the board: add an Arduino, ESP32 or Raspberry Pi.";
+  if (!powered || !result) return "The board is switched off: power it on first.";
+  const brain = result.parts.find((row) => row.id === wire.brain);
+  if (brain && !["on", "weak", "ok"].includes(brain.state)) return `The board computer is ${brain.state}${brain.reason ? ` (${brain.reason})` : ""}: fix the power first.`;
+  return "";
+}
+
+/** Run the program as a test (board time, as fast as it goes) and say what happened. */
+export async function testProgram({ seconds = 10, sensors = {}, by = "you" } = {}) {
+  const why = cantRun();
+  if (why) return why;
+  const code = state.bench.electronics.program || starterProgram(boardWiring());
+  const reading = { ...SENSOR_DEFAULTS, ...cleanSensors(sensors) };
+  const run = runBoard(code, state.bench.electronics.parts, { live: false, seconds: Math.max(1, Math.min(120, Number(seconds) || 10)), sensors: () => reading });
+  const result = await run.done;
+  logStep(by, "electronics", `tested the program for ${result.seconds} s${result.error ? `: error, ${result.error.slice(0, 80)}` : ""}`);
+  await keepBench();
+  return `${state.bench.electronics.program ? "" : "(No program saved yet, so this ran the starter program.)\n"}Sensors: ${Object.entries(reading).map(([name, value]) => `${name} ${value}`).join(", ")}.\n${describeBoardRun(result)}`;
+}
+
+/** Sensor values from a model or a form, kept inside their real ranges. */
+export function cleanSensors(sensors) {
+  const out = {};
+  for (const [name, value] of Object.entries(sensors || {})) {
+    if (name in SENSOR_RANGES) {
+      const range = SENSOR_RANGES[name];
+      const number = Number(value);
+      if (Number.isFinite(number)) out[name] = Math.max(range.min, Math.min(range.max, number));
+    } else if (["motion", "button", "switch"].includes(name)) out[name] = value === true || value === "true" || value === 1;
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------ blueprints */
 
 function benchData(kind) {
   const { chemistry, electronics } = state.bench;
-  const chip = { parts: electronics.parts, series: electronics.series, sun: electronics.sun };
+  const chip = { parts: electronics.parts, series: electronics.series, sun: electronics.sun, ...(electronics.program ? { program: electronics.program } : {}) };
   const mixture = { items: chemistry.items, heat: chemistry.heat, flame: chemistry.flame };
   if (kind === "chip") {
     if (!electronics.parts.length) throw new Error("The electronics bench is empty: build a circuit first.");
@@ -370,7 +425,7 @@ export async function loadBlueprint(idOrName, { version = 0, by = "you" } = {}) 
   const chip = print.kind === "chip" ? data : print.kind === "invention" ? data.circuit : null;
   const brew = print.kind === "mixture" ? data : print.kind === "invention" ? data.mix : null;
   if (chip) {
-    state.bench.electronics = { parts: chip.parts, series: chip.series, sun: chip.sun, powered: true, result: simulateBuild(chip.parts, chip) };
+    state.bench.electronics = { parts: chip.parts, series: chip.series, sun: chip.sun, powered: true, result: simulateBuild(chip.parts, chip), program: chip.program || "" };
     state.bench.from.electronics = print.id;
   }
   if (brew) {
@@ -432,6 +487,23 @@ export function searchTutorials(query = "", topic = "", limit = 40) {
 export async function useWorkshop(args, agent) {
   const by = agent ? agent.name : "you";
   const action = String(args.action || "");
+  if (action === "program") {
+    if (typeof args.code === "string" && args.code.trim()) {
+      jarvisWorks("electronics", "programming the board computer");
+      await saveProgram(args.code, by);
+    }
+    const wire = boardWiring();
+    return [
+      `Wiring (use these names in the program):\n${wiringText(wire)}`,
+      `The program (Arduino style, in JavaScript): function setup() runs once, function loop() runs again and again. pinMode, digitalWrite(pin, HIGH/LOW), analogWrite(pin, 0-255), digitalRead(pin), analogRead(pin) (0-1023), readLight() (0-100 %), readTemperature() (°C), readSoil() (% wet), readDistance() (cm), delay(ms), millis(), tone(pin, Hz, ms), noTone(pin), servo.attach(pin) and servo.write(0-180), Serial.println(text), display.clear() / display.println(text) for the OLED, map(), constrain(), random(). No internet, files or other pages inside the board.`,
+      state.bench.electronics.program ? `Saved program:\n${state.bench.electronics.program}` : `No program saved yet. A starter for this board:\n${starterProgram(wire)}`,
+      args.code ? await testProgram({ seconds: 5, by }) : "",
+    ].filter(Boolean).join("\n\n");
+  }
+  if (action === "run") {
+    jarvisWorks("electronics", "testing the board computer");
+    return await testProgram({ seconds: args.seconds, sensors: args.sensors, by });
+  }
   if (action === "look") {
     jarvisWorks(state.bench.jarvis.room || "electronics", "looking at the benches");
     return benchNow();

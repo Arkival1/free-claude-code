@@ -164,7 +164,7 @@ export const defaultSettings = () => ({
 export function defaultBench() {
   return {
     chemistry: { items: [], heat: false, flame: false, result: null },
-    electronics: { parts: [], series: true, sun: true, powered: false, result: null },
+    electronics: { parts: [], series: true, sun: true, powered: false, result: null, program: "" },
     from: { chemistry: "", electronics: "" },
     jarvis: { room: "", doing: "", at: 0 },
     // What happened at the benches, newest last: the user's steps and

@@ -617,6 +617,7 @@ export function makeWorld(canvas, { onPick = () => {}, onFocus = () => {} } = {}
     },
     setChemistry: (items, result, options) => chemistry.update(items, result, options),
     setCircuit: (entries, result, powered) => electronics.update(entries, result, powered),
+    setRun: (states) => electronics.setRun(states),
     setLabels: (on) => {
       electronics.setLabels(on);
     },

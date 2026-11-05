@@ -146,3 +146,39 @@ def test_jarvis_takes_off_what_is_on_the_bench_and_logs_it_plainly(
     assert any(line.startswith("Jarvis: took out Vinegar") for line in log), log
     assert not any(line.startswith("Jarvis: mixed") for line in log), log
     assert done["kept"] == 40 and done["last"] == "step 44"
+
+
+def test_jarvis_programs_and_tests_the_board_computer(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url, "lab")
+    done = page.evaluate(
+        r"""async () => {
+            const shop = await import('./js/workshop.js');
+            const { runTool } = await import('./js/tools.js');
+            const jarvis = window.fccPhone.state.agents.find((a) => a.role === 'main');
+            const ctx = { depth: 0, chain: [], built: new Set() };
+            const call = (args) => runTool(jarvis, { name: 'lab', arguments: args }, ctx);
+            const out = {};
+            out.none = await call({ action: 'run' });
+            await shop.setBoard([{ id: 'usb', count: 1 }, { id: 'arduino', count: 1 }, { id: 'led-red', count: 1 }, { id: 'light-sensor', count: 1 }, { id: 'oled', count: 1 }], { powered: true });
+            out.wiring = await call({ action: 'program' });
+            out.saved = await call({ action: 'program', code: 'function setup() { pinMode(LED_RED, OUTPUT); }\nfunction loop() {\n  digitalWrite(LED_RED, readLight() < 30 ? HIGH : LOW);\n  display.clear();\n  display.println("Light " + readLight());\n  Serial.println("light " + readLight());\n  delay(1000);\n}' });
+            out.dark = await call({ action: 'run', seconds: 3, sensors: { light: 10 } });
+            out.bright = await call({ action: 'run', seconds: 3, sensors: { light: 90 } });
+            out.broken = await call({ action: 'program', code: 'function loop() {\n  digitalWrite(LED_RED HIGH);\n}' });
+            out.endless = await call({ action: 'program', code: 'function setup() { while (true) { digitalRead(4); } }' });
+            out.program = window.fccPhone.state.bench.electronics.program;
+            out.boxes = document.querySelectorAll('iframe.board-box').length;
+            return out;
+        }"""
+    )
+    assert done["none"].startswith("There's no board computer")
+    assert "LED_RED = pin 13" in done["wiring"] and "LIGHT = pin A0" in done["wiring"]
+    assert "Red LED (LED_RED, pin 13): on 1 time, 100% of the time" in done["dark"]
+    assert "The screen shows: Light 10" in done["dark"] and "light 10" in done["dark"]
+    assert "Red LED (LED_RED, pin 13): stayed off" in done["bright"]
+    assert "SyntaxError" in done["broken"] and "(line 2)" in done["broken"]
+    assert "endless loop" in done["endless"]
+    assert "while (true)" in done["program"]
+    assert done["boxes"] == 0
