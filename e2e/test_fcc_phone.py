@@ -538,3 +538,46 @@ def reopen(page: Page) -> None:
     page.reload()
     page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
     page.evaluate("() => window.fccPhone.ready")
+
+
+def test_jarvis_hears_when_a_teammate_calls_unfinished_work_done(
+    page: Page, admin_base_url: str
+) -> None:
+    """Small models report "done" over failing checks (found running Jarvis on
+    a local Qwen): FCC checks the project itself and tells Jarvis."""
+
+    def lazy_builder(body: dict) -> dict:
+        system = body["messages"][0]["content"]
+        last = body["messages"][-1]
+        if "You are Builder" in system:
+            if last["role"] == "user":
+                return tool_call(
+                    "write_file",
+                    {
+                        "path": "index.html",
+                        "content": "<h1>Sunrise</h1><p>Lorem ipsum</p>",
+                    },
+                )
+            return say("All done, no issues.")
+        return team_brain(body)
+
+    seen = fake_gemini(page, lazy_builder)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Have Builder make a page for my bakery")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Builder finished", timeout=15000
+    )
+    reports = [
+        message["content"]
+        for call in seen
+        if "You are Jarvis" in call["messages"][0]["content"]
+        for message in call["messages"]
+        if message["role"] == "tool" and "Builder finished" in str(message["content"])
+    ]
+    assert reports, "Jarvis got the Builder's report"
+    assert "FCC's own check of Sunrise Bakery still finds" in reports[-1]
+    assert "placeholder text" in reports[-1]

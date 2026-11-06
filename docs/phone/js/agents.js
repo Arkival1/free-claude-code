@@ -232,7 +232,15 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
     // (Jarvis included) get the app to download.
     for (const id of ctx.chain) await handOver(state.agents.find((item) => item.id === id), ctx.built);
     feed(agent.name, `Finished: ${result.split("\n")[0].slice(0, 120)}`, "done");
-    return `${agent.name} finished${ctx.project ? ` (project ${ctx.project.name})` : ""}: ${result}`;
+    // FCC checks the project itself, so an agent can't report a job done
+    // while the project still fails FCC's checks (small models do).
+    let still = "";
+    if (ctx.project && Object.keys(ctx.project.files || {}).length) {
+      const { checkProject } = await import("./projects.js");
+      const problems = checkProject(ctx.project).filter((problem) => !problem.startsWith("Note: "));
+      if (problems.length) still = `\n\nFCC's own check of ${ctx.project.name} still finds ${problems.length} problem(s), so it isn't finished:\n${problems.slice(0, 6).map((problem) => `- ${problem}`).join("\n")}\nDon't tell the user it's done: have them fixed first.`;
+    }
+    return `${agent.name} finished${ctx.project ? ` (project ${ctx.project.name})` : ""}: ${result}${still}`;
   } catch (error) {
     job.status = "failed";
     job.result = error.message;
