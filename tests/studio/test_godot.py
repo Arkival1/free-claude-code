@@ -5,6 +5,7 @@ import dataclasses
 import hashlib
 import io
 import os
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -326,6 +327,96 @@ async def test_the_kit_runs_clean_in_real_godot(tmp_path):
     assert report.passed, report.problems
     assert "KIT OK" in report.output
     assert not [line for line in report.warnings if "fcc/" in line], report.warnings
+
+
+WANDER_GAME = """extends Node3D
+## Real physics: an animal dropped above the floor lands while it rests,
+## then walks; boxed in by walls it gives up on spots it can't reach and
+## rests again; a 2D person (CharacterBody2D) stays in its circle.
+const Kit := preload("res://fcc/kit.gd")
+var animal: CharacterBody3D
+var person: CharacterBody2D
+var mind: Node
+var ticks := 0
+var rests := 0
+var resting := true
+var widest := 0.0
+
+
+func _ready() -> void:
+	_block(Vector3(0, 0, 0), Vector3(20, 1, 20))
+	for side: Vector3 in [Vector3(0.9, 0, 0), Vector3(-0.9, 0, 0), Vector3(0, 0, 0.9), Vector3(0, 0, -0.9)]:
+		_block(side + Vector3(0, 1, 0), Vector3(0.2, 2, 2) if side.x != 0.0 else Vector3(2, 2, 0.2))
+	animal = CharacterBody3D.new()
+	var shape := CollisionShape3D.new()
+	var ball := SphereShape3D.new()
+	ball.radius = 0.3
+	shape.shape = ball
+	animal.add_child(shape)
+	animal.position = Vector3(0, 3, 0)
+	add_child(animal)
+	mind = Kit.wander(animal, 2.0, 2.0)
+	person = CharacterBody2D.new()
+	var flat := CollisionShape2D.new()
+	flat.shape = CircleShape2D.new()
+	person.add_child(flat)
+	person.position = Vector2(200, 200)
+	add_child(person)
+	Kit.wander(person, 1.5, 2.0)
+
+
+func _block(at: Vector3, size: Vector3) -> void:
+	var body := StaticBody3D.new()
+	body.position = at
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	shape.shape = box
+	body.add_child(shape)
+	add_child(body)
+
+
+func _physics_process(_delta: float) -> void:
+	ticks += 1
+	var now_resting: bool = mind.get("_pause") > 0.0
+	if now_resting and not resting:
+		rests += 1
+	resting = now_resting
+	widest = maxf(widest, Vector2(animal.position.x, animal.position.z).length())
+	assert(person.position.distance_to(Vector2(200, 200)) <= 25.0)
+	if ticks == 960:
+		print("WALK %.2f %d %.2f" % [animal.position.y, rests, widest])
+		get_tree().quit()
+"""
+
+
+@pytest.mark.skipif(not REAL_GODOT, reason="set FCC_GODOT_BIN to a Godot 4.7.2 program")
+@pytest.mark.asyncio
+async def test_wanderers_land_give_up_when_blocked_and_stay_home(tmp_path):
+    root = tmp_path / "godot"
+    (root / godot_engine.VERSION).mkdir(parents=True)
+    shutil.copy(REAL_GODOT, root / godot_engine.VERSION / Path(REAL_GODOT).name)
+    project = tmp_path / "wander-game"
+    files = {
+        "project.godot": b'config_version=5\n\n[application]\n\nconfig/name="Walk"\n'
+        b'run/main_scene="res://main.tscn"\n',
+        "main.tscn": b'[gd_scene load_steps=2 format=3]\n\n[ext_resource type="Script" '
+        b'path="res://main.gd" id="1"]\n\n[node name="Main" type="Node3D"]\n'
+        b'script = ExtResource("1")\n',
+        "main.gd": WANDER_GAME.encode(),
+        **godot.kit_files(),
+    }
+    for path, data in files.items():
+        (project / path).parent.mkdir(parents=True, exist_ok=True)
+        (project / path).write_bytes(data)
+    report = await GodotEngine(root, platform="linux").check(project, frames=1_000_000)
+    assert report.passed, report.problems
+    found = re.search(r"WALK (-?[\d.]+) (\d+) ([\d.]+)", report.output)
+    assert found is not None, report.output
+    height, rests, widest = float(found[1]), int(found[2]), float(found[3])
+    assert 0.7 <= height <= 0.9  # landed on the floor (top at 0.5, radius 0.3)
+    assert rests >= 2  # walked, gave up on a spot behind the walls, rested again
+    assert widest < 0.9  # the walls held it; it never got through
 
 
 @pytest.mark.asyncio
