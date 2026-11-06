@@ -21,11 +21,18 @@ const LINUX_FILES = [
   "linux/fcc-linux.initrd",
   "linux/fcc-linux.json",
 ];
+// FCC's Godot kit fonts (about 4 MB) are kept with it, fetched the first
+// time a game uses the kit.
 const GODOT_FILES = [
   "godot/godot.js",
   "godot/godot.wasm.gz",
   "godot/godot.audio.worklet.js",
   "godot/godot.audio.position.worklet.js",
+  "godot/fcc/fonts/emoji.ttf",
+  "godot/fcc/fonts/fantasy.ttf",
+  "godot/fcc/fonts/pixel.ttf",
+  "godot/fcc/fonts/symbols.ttf",
+  "godot/fcc/fonts/symbols2.ttf",
 ];
 const SHELL = [
   "./",
@@ -75,6 +82,7 @@ const SHELL = [
   "js/views/godot.js",
   "godot/pack.js",
   "godot/starters.js",
+  "godot/kit.js",
   "js/views/webkit.js",
   "js/plugins.js",
   "js/apis.js",

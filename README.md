@@ -2869,6 +2869,20 @@ account, and costs nothing.
   works. A game's saves (`user://`) stay on the phone between plays, per
   game, up to 16 MB; the game's page shows the save and **Start over**
   forgets it.
+  - **FCC's Godot kit** (`res://fcc/kit.gd`, in every starter on the PC
+    and added on the phone to any game that uses it): fonts with symbols
+    and emoji (Noto, black and white) plus a pixel and a fantasy style
+    (SIL OFL, `vendor/godot-fonts`; the phone fetches them once, about
+    4 MB, and checks them); textures and 3D materials made from Godot's
+    noise (stone, rock, grass, dirt, sand, wood, metal, gold, snow, lava,
+    water, brick); particles (dust, leaves, fireflies, rain, snow,
+    embers); day and night; and wandering NPCs and animals.
+  - **Fits the phone either way up**: held upright, the 2D games draw the
+    level in the top of the screen and give the touch controls a panel
+    below; buttons are sized from the screen, so they're the same size on
+    the glass whatever the game's resolution, and never cut off; texts
+    wrap and grow, and say "tap" on a touch screen. The 3D starters keep
+    their texts and buttons readable both ways (`Kit.fit_screen`).
 - **FCC Linux**: Lab, **FCC Linux** runs FCC's own Linux (Alpine 3.21,
   32-bit x86) on the phone in the v86 emulator, in a sealed box, with every
   language: C/C++ (gcc, g++, cmake, gdb), Rust (cargo), Go, Java 8, Node.js

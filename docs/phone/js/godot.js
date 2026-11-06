@@ -10,6 +10,7 @@
 // against their SHA-256 sums before they run.
 import { sha256Hex, digest } from "./sha256.js";
 import { makePack, importPictures, isGodotProject } from "../godot/pack.js";
+import { KIT_TEXT, KIT_FONTS } from "../godot/kit.js";
 
 export { isGodotProject };
 export const GODOT_VERSION = "4.7.2";
@@ -291,6 +292,25 @@ const RES_PATH = /(?:preload|load)\(\s*"res:\/\/([^"]+)"\s*\)/g;
 const EXT_PATH = /\[ext_resource\b[^\]]*\bpath="res:\/\/([^"]+)"/g;
 const IMPORTED = /\.(png|jpe?g|webp|svg|bmp|tga|ogg|wav|mp3|glb|gltf|obj|fbx|blend|ttf|otf|woff2?)$/i;
 
+// FCC's Godot kit (res://fcc/: fonts with symbols and emoji, textures,
+// particles, day and night, wandering), added to any game that uses it and
+// doesn't carry its own copy. Its fonts are fetched the first time, checked
+// against their checksums and kept, like the engine.
+const KIT_PATHS = new Set([...Object.keys(KIT_TEXT).map((path) => `fcc/${path}`), ...KIT_FONTS.map(([path]) => path.replace(/^godot\//, ""))]);
+/** True when a game's files load res://fcc/ and the game has no kit of its own. */
+export function usesKit(files) {
+  if (typeof files["fcc/kit.gd"] === "string") return false;
+  return Object.entries(files).some(([name, body]) => typeof body === "string" && GODOT_TEXT.test(name) && body.includes("res://fcc/"));
+}
+/** The kit's files for a game's pack ({ "fcc/kit.gd": text, "fcc/fonts/x.ttf": bytes }), or none. */
+export async function kitFiles(files, onProgress) {
+  if (!usesKit(files)) return {};
+  const out = {};
+  for (const [path, text] of Object.entries(KIT_TEXT)) out[`fcc/${path}`] = text;
+  for (const entry of KIT_FONTS) out[entry[0].replace(/^godot\//, "")] = new Uint8Array(await fetchChecked(entry, onProgress && ((done, total) => onProgress(done, total, entry[0]))));
+  return out;
+}
+
 /** A line's code: strings emptied (a "#" or a keyword inside one is only text), then the comment cut. */
 const codeOf = (row) => row.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""').replace(/#.*$/, "");
 
@@ -356,6 +376,7 @@ export function godotProblems(project) {
     const refs = [...body.matchAll(RES_PATH), ...body.matchAll(EXT_PATH)].map((match) => match[1]);
     for (const ref of new Set(refs)) {
       if (ref.startsWith(".godot/")) continue;
+      if (KIT_PATHS.has(ref) && !(ref in files) && typeof files["fcc/kit.gd"] !== "string") continue; // FCC adds its kit
       if (!(ref in files)) {
         out.push({ text: `${name} loads res://${ref}, which isn't in the project.`, stop: /preload\(|ext_resource/.test(body.slice(0, body.indexOf(ref))) });
       } else if (IMPORTED.test(ref) && !/\.(png|jpe?g|webp|gif|bmp)$/i.test(ref)) {
@@ -411,7 +432,8 @@ export function runGodot(project, { host = document.body, mode = "play", seconds
     return { frame: null, stop: () => {}, done };
   }
   // Pictures are imported as the editor would (async: JPEG and WebP become PNG).
-  const packing = importPictures(project.files).then((imported) => makePack(project.files, imported));
+  // FCC's kit goes in too when the game uses it (its fonts fetched once, then kept).
+  const packing = Promise.all([importPictures(project.files), kitFiles(project.files)]).then(([imported, kit]) => makePack(project.files, { ...kit, ...imported }));
   const keeps = mode === "play" && typeof project.id === "string" && project.id !== "";
   const frame = document.createElement("iframe");
   // Scripts, and the mouse lock a 3D game asks for on a computer (Esc frees it).
@@ -613,7 +635,8 @@ What runs: GDScript, scenes (.tscn), resources (.tres), shaders (.gdshader), 2D 
 How it draws: the Compatibility renderer (WebGL 2). Lights, shadows, glow, fog, particles and your own shaders work; Forward+ effects (SDFGI, VoxelGI, volumetric fog, screen-space reflections, SSAO, SSIL) and compute shaders don't.
 One thread: Thread doesn't run on its own and long work freezes the game. Build big things in steps (await get_tree().process_frame between them), keep generated textures small (256 or less), and keep instance counts modest.
 Pictures: put them in the project (use_photo or find_images): PNG, JPEG, WebP, GIF or BMP. FCC imports them as Godot's editor would, so preload("res://art/hero.png") and textures in scenes work. Sound is loaded at run time: AudioStreamOggVorbis.load_from_buffer(FileAccess.get_file_as_bytes(path)) or AudioStreamWAV.load_from_buffer(...).
-Text: the built-in font has letters, digits and punctuation only; symbols and emoji show as empty boxes, so use words or draw shapes.
+FCC's kit (res://fcc/, added by FCC to every game that uses it): const Kit := preload("res://fcc/kit.gd"). Kit.use_fonts() first in _ready gives every text symbols (★ ♥ ⚔ ☀ ♞ → ✓) and emoji (black and white); Kit.font("pixel") or Kit.font("fantasy") for headings. Kit.texture(kind) for 2D and Kit.material(kind, tile) for 3D: stone, rock, grass, dirt, sand, wood, metal, gold, snow, lava, water, brick (made from Godot's noise, nothing to download). Life: Kit.particles_3d(kind, area) or Kit.particles_2d(kind, area) for dust, leaves, fireflies, rain, snow, embers; Kit.day_night(seconds_per_day, sun, world_environment) (2D: no sun, it tints the scene); Kit.wander(node, radius, speed) makes an NPC or animal stroll. Kit.fit_screen(get_window(), 560) keeps texts and buttons a good size on a phone held either way (needs stretch mode canvas_items, aspect expand).
+Text without the kit: the built-in font has letters, digits and punctuation only; symbols and emoji show as empty boxes.
 Touch: a phone has no keyboard or mouse. Give every action an on-screen control (TouchScreenButton with action set, a joystick from InputEventScreenTouch and InputEventScreenDrag) shown when DisplayServer.is_touchscreen_available().
 Saving: user:// (FileAccess, ConfigFile, ResourceSaver) is kept on this phone between plays, per game, up to 16 MB; the user can clear it in Projects (Start over). Checks start with no saves, so a game must also work from nothing.
 Not here: C#, GDExtension (native code), the internet (HTTPRequest and WebSocket fail on purpose), JavaScriptBridge.

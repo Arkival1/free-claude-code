@@ -69,6 +69,49 @@ def test_every_starter_comes_with_its_art_and_name(name):
         godot.starter_files("mmo")
 
 
+def font_sums() -> dict[str, str]:
+    rows = (ROOT / "vendor" / "godot-fonts" / "SHA256SUMS").read_text().splitlines()
+    return {line[66:]: line[:64] for line in rows if line.strip()}
+
+
+@pytest.mark.parametrize("name", godot.starter_names())
+def test_every_starter_carries_fccs_kit_and_uses_it(name):
+    """FCC's kit (fonts with symbols and emoji, textures, life) is in every
+    starter as res://fcc/, its fonts exactly the recorded ones, kept as they
+    are (not imported) so the PC, exports and the phone all read them."""
+    files = godot.starter_files(name)
+    for script in ("fcc/kit.gd", "fcc/day_night.gd", "fcc/wander.gd"):
+        assert files[script].startswith(b"extends ")
+    sums = font_sums()
+    assert set(sums) == {
+        "emoji.ttf",
+        "fantasy.ttf",
+        "pixel.ttf",
+        "symbols.ttf",
+        "symbols2.ttf",
+    }
+    for font, digest in sums.items():
+        assert hashlib.sha256(files[f"fcc/fonts/{font}"]).hexdigest() == digest
+        assert files[f"fcc/fonts/{font}.import"] == b'[remap]\n\nimporter="keep"\n'
+    assert b"SIL Open Font License" in files["fcc/fonts/OFL.txt"]
+    main = files["main.gd"]
+    assert b'preload("res://fcc/kit.gd")' in main and b"Kit.use_fonts()" in main
+
+
+def test_the_2d_starters_fill_an_upright_phone_and_3d_starters_keep_sizes():
+    for name in ("platformer-2d", "rpg-topdown"):
+        files = godot.starter_files(name)
+        assert b'window/stretch/aspect="expand"' in files["project.godot"]
+        assert b'touch.call("fit", camera' in files["main.gd"]
+        assert (
+            b"func fit(camera: Camera2D, world_size: Vector2)" in files["touch_pad.gd"]
+        )
+    for name in ("third-person-3d", "action-3d"):
+        files = godot.starter_files(name)
+        assert b'window/stretch/mode="canvas_items"' in files["project.godot"]
+        assert b"Kit.fit_screen(get_window()" in files["main.gd"]
+
+
 def test_godot_lines_become_problems_and_warnings():
     output = (
         'SCRIPT ERROR: Parse Error: Identifier "x" not declared.\n'
@@ -207,6 +250,57 @@ async def test_every_starter_runs_in_real_godot(tmp_path, name):
         (project / path).write_bytes(data)
     report = await GodotEngine(root, platform="linux").check(project)
     assert report.passed, report.problems
+
+
+KIT_GAME = """extends Node2D
+const Kit := preload("res://fcc/kit.gd")
+
+func _ready() -> void:
+	Kit.use_fonts()
+	assert(ThemeDB.fallback_font.fallbacks.size() == 3)
+	assert(Kit.font("pixel") != ThemeDB.fallback_font)
+	assert(Kit.font("fantasy") != ThemeDB.fallback_font)
+	for kind: String in Kit.SURFACES:
+		assert(Kit.texture(kind, 64) != null)
+		assert(Kit.material(kind, 2.0).albedo_texture != null)
+	for kind: String in Kit.PARTICLES:
+		add_child(Kit.particles_2d(kind))
+		add_child(Kit.particles_3d(kind))
+	add_child(Kit.day_night(5.0))
+	var walker := CharacterBody2D.new()
+	add_child(walker)
+	Kit.wander(walker, 2.0, 3.0)
+	var label := Label.new()
+	label.text = "★ ♥ ⚔ ☀ ♞ → ✓ 😀"
+	add_child(label)
+	Kit.fit_screen(get_window(), 560)
+	print("KIT OK")
+"""
+
+
+@pytest.mark.skipif(not REAL_GODOT, reason="set FCC_GODOT_BIN to a Godot 4.7.2 program")
+@pytest.mark.asyncio
+async def test_the_kit_runs_clean_in_real_godot(tmp_path):
+    root = tmp_path / "godot"
+    (root / godot_engine.VERSION).mkdir(parents=True)
+    shutil.copy(REAL_GODOT, root / godot_engine.VERSION / Path(REAL_GODOT).name)
+    project = tmp_path / "kit-game"
+    files = {
+        "project.godot": b'config_version=5\n\n[application]\n\nconfig/name="Kit"\n'
+        b'run/main_scene="res://main.tscn"\n',
+        "main.tscn": b'[gd_scene load_steps=2 format=3]\n\n[ext_resource type="Script" '
+        b'path="res://main.gd" id="1"]\n\n[node name="Main" type="Node2D"]\n'
+        b'script = ExtResource("1")\n',
+        "main.gd": KIT_GAME.encode(),
+        **godot.kit_files(),
+    }
+    for path, data in files.items():
+        (project / path).parent.mkdir(parents=True, exist_ok=True)
+        (project / path).write_bytes(data)
+    report = await GodotEngine(root, platform="linux").check(project, frames=120)
+    assert report.passed, report.problems
+    assert "KIT OK" in report.output
+    assert not [line for line in report.warnings if "fcc/" in line], report.warnings
 
 
 @pytest.mark.asyncio
