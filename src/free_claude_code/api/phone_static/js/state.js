@@ -62,8 +62,8 @@ const FILES = ["start_project", "write_file", "read_file", "edit_file", "list_fi
 const DESIGN = ["find_images", "polish_check", "look_at_site"];
 const PHOTOS = ["list_photos", "use_photo"];
 export const ROLE_TOOLS = {
-  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library", "lab", "web_kit", "godot", "linux"],
-  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library", "lab", "web_kit", "godot", "linux"],
+  main: ["remember", "recall", "calculate", "weather", "wikipedia", "web_search", "todo", "ask_agent", "team_status", "learn", "list_photos", "skill", "pc_task", "use_plugin", "start_task", "library", "lab", "web_kit", "godot", "linux", "game_art"],
+  builder: [...FILES, ...PHOTOS, ...DESIGN, "remember", "recall", "calculate", "read_page", "wikipedia", "ask_agent", "skill", "use_plugin", "library", "lab", "web_kit", "godot", "linux", "game_art"],
   researcher: ["wikipedia", "read_page", "web_search", "remember", "recall", "calculate", "use_plugin", "skill"],
   helper: ["remember", "recall", "calculate", "todo", "weather", "wikipedia", "skill"],
   tester: ["list_files", "read_file", "check_project", "look_at_site", "polish_check", "edit_file", "write_file", "restore_file", "remember", "recall", "skill", "godot"],
@@ -113,8 +113,9 @@ const TOOLS_ADDED = {
   8: { main: ["web_kit"], builder: ["web_kit"] },
   9: { main: ["godot"], builder: ["godot"], tester: ["godot"] },
   10: { main: ["linux"], builder: ["linux"] },
+  11: { main: ["game_art"], builder: ["game_art"] },
 };
-const TOOLS_VERSION = 10;
+const TOOLS_VERSION = 11;
 
 export const DEFAULT_TEAM = [
   { id: "jarvis", name: "Jarvis", role: "main" },

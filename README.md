@@ -2877,6 +2877,11 @@ account, and costs nothing.
     noise (stone, rock, grass, dirt, sand, wood, metal, gold, snow, lava,
     water, brick); particles (dust, leaves, fireflies, rain, snow,
     embers); day and night; and wandering NPCs and animals.
+  - **Game art** (`game_art` tool, Jarvis and the Builder): 4,000 2D
+    sprites from FCC's Kenney packs (CC0): characters, enemies, tiles,
+    items, vehicles, spaceships, cards, UI and icons, from 37 packs. One
+    8 MB file, fetched the first time an agent uses it, checked and kept;
+    agents search it and add sprites to a project as `art/<pack>/<file>.png`.
   - **Fits the phone either way up**: held upright, the 2D games draw the
     level in the top of the screen and give the touch controls a panel
     below; buttons are sized from the screen, so they're the same size on

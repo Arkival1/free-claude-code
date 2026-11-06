@@ -322,6 +322,12 @@ Notes carried over from the long session that built FCC Studio (LCC).
   and `js/godot.js kitFiles` adds them to any game that loads `res://fcc/`.
   The 2D starters fill an upright phone (aspect expand, `touch_pad.gd fit`);
   touch buttons scale from the screen's short side (720 design units).
+- FCC Phone game art (owner approved the 2D set, 6.114+): 4,000 sprites
+  picked by `build_pages.py art_pick()` from the shipped Kenney core zips,
+  packed into `games/art2d.bin` (catalogue `js/art2d.js`, SHA-256 checked by
+  `js/art.js`, cache `fcc-phone-art-1`), the `game_art` tool (tools version
+  11: main, builder). 3D (4,000 Kenney models) waits: kenney.nl refuses this
+  cloud machine; the owner is to pick PC Remote Control or the PC link.
 - The phone Lab's board computer (owner: single-board computers, Orange Pi
   not Raspberry Pi; "test my designs ... a monitor to see"): `lab/board.js`
   runs Arduino-style JavaScript in a sealed box on a virtual clock, with

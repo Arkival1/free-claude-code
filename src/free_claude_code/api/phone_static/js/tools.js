@@ -13,6 +13,7 @@ import { game3dFiles, useLab, GAME3D_ABOUT } from "./lab.js";
 import { useWorkshop } from "./workshop.js";
 import { useWebKit } from "./webkit.js";
 import { useGodot, isGodotProject } from "./godot.js";
+import { useArt, ART_COUNT } from "./art.js";
 import { SKILLS } from "./skills.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
@@ -106,6 +107,19 @@ export const SPECS = {
         starter: { type: "string", enum: ["action-3d", "third-person-3d", "platformer-2d", "rpg-topdown"], description: "start: which starter." },
         project: text("check: the project's name (the current project if left out)."),
         seconds: { type: "number", description: "check: how long to run it once it shows its first frame (3 to 30, default 8)." },
+      },
+      required: ["action"],
+    },
+  },
+  game_art: {
+    description: `FCC's ${ART_COUNT} free 2D game sprites (Kenney, CC0): characters, enemies, tiles, items, vehicles, spaceships, cards, UI buttons, icons, effects. guide (how to use them), packs (what each pack holds), search (find sprites by words; gives ids), add (copy sprites by id into the current project as art/<pack>/<file>.png). Use them in every 2D game instead of drawing placeholder shapes.`,
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["guide", "packs", "search", "add"] },
+        query: text("search: words, e.g. 'platformer character', 'tiny dungeon', 'coin', 'spaceship'."),
+        pack: text("search: only this pack (from packs)."),
+        ids: text("add: sprite ids from search, separated by commas (up to 60)."),
       },
       required: ["action"],
     },
@@ -391,6 +405,8 @@ export async function runTool(agent, call, ctx) {
         if (!ctx.project && args.action === "check") ctx.project = state.projects.find((project) => isGodotProject(project)) || null;
         return await useGodot(args, ctx, (project, path, body) => projects.putFile(project, path, body, agent.name));
       }
+      case "game_art":
+        return await useArt(args, ctx, (project, path, body) => projects.putFile(project, path, body, agent.name));
       case "use_plugin":
         return await usePlugin(args);
       case "start_task": {

@@ -10,6 +10,10 @@ const GODOT_CACHE = "fcc-phone-godot-4.7.2";
 // then kept. Its system packs (linux/fs/) skip this worker: js/linuxfiles.js
 // checks and keeps them itself, so they aren't stored twice.
 const LINUX_CACHE = "fcc-phone-linux-2.0";
+// FCC's 2D game art (8 MB, js/art.js checks it): fetched the first time an
+// agent uses it, then kept across app updates.
+const ART_CACHE = "fcc-phone-art-1";
+const ART_FILES = ["games/art2d.bin"];
 const LINUX_FILES = [
   "linux/libv86.js",
   "linux/v86.wasm",
@@ -83,6 +87,8 @@ const SHELL = [
   "godot/pack.js",
   "godot/starters.js",
   "godot/kit.js",
+  "js/art.js",
+  "js/art2d.js",
   "js/views/webkit.js",
   "js/plugins.js",
   "js/apis.js",
@@ -143,7 +149,7 @@ self.addEventListener("activate", (event) => {
       .then((names) =>
         Promise.all(
           names
-            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE, LINUX_CACHE].includes(name))
+            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE, LINUX_CACHE, ART_CACHE].includes(name))
             .map((name) => caches.delete(name))
         )
       )
@@ -171,7 +177,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (url.origin !== self.location.origin || url.pathname.includes("/studio/api/") || url.pathname.includes("/linux/fs/")) return;
-  const heavy = GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? GODOT_CACHE : LINUX_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? LINUX_CACHE : "";
+  const heavy = GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? GODOT_CACHE : LINUX_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? LINUX_CACHE : ART_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? ART_CACHE : "";
   if (heavy) {
     event.respondWith(
       caches.open(heavy).then((cache) =>
