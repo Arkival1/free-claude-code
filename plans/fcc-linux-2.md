@@ -55,3 +55,11 @@ H. Release + report; then "see what's missing or needs work".
   commands detected by counting owed prompt markers.
 - Next: B/C review fixes, then E (self-teaching), F+G, D (desktop: needs
   Xorg fbdev + bochs drm modules in the 9p root), release.
+- Released 6.113.0 / phone 2.14.0 (74849b0d): A, B, C, E core done, two
+  review passes each. Real pip/npm/go installs checked; cargo uses crates
+  index fallback on GitHub. Full zip 453 MB (over the 400 MB send limit):
+  the app zip is sent without linux/fs packs (they're on GitHub Pages).
+- Still to do: D desktop (Xorg fbdev + bochs drm modules in the 9p root,
+  jwm, pcmanfm, mousepad, dillo, v86 screen), F websites tested privately
+  in the browser, G libraries (Web kit, Lab tutorials, more lessons, games,
+  inventions library: builds, parts catalogue, guides, saved inventions).
