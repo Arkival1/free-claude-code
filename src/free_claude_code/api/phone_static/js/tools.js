@@ -942,6 +942,10 @@ export async function addTodo(textValue, due, by) {
 async function todo(agent, args) {
   const action = String(args.action || "list").toLowerCase();
   if (action === "add") {
+    // The same open item again isn't a new one (small models add it over and over).
+    const same = String(args.text || "").trim().toLowerCase();
+    const open = state.todos.find((item) => !item.done && String(item.text || "").trim().toLowerCase() === same);
+    if (same && open) return `Already on the list: ${open.text} [id ${open.id}]. Don't add it again.`;
     const item = await addTodo(String(args.text || ""), String(args.due || ""), agent.name);
     feed(agent.name, `Added to your list: ${item.text}`);
     return `Added: ${item.text}${item.due_at ? ` (reminder ${new Date(item.due_at).toLocaleString()})` : ""} [id ${item.id}]`;
