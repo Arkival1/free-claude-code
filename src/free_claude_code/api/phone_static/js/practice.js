@@ -69,6 +69,9 @@ If you're stuck after several real tries, say RESULT: stuck and in NOTE say exac
 
 function parse(text) {
   const result = /RESULT:\s*(passed|stuck)/i.exec(text);
+  // No RESULT line (an error, a brain that stopped, rounds ran out): the
+  // lesson wasn't done, so it isn't counted either way.
+  if (!result) return { result: "incomplete", skill: "", note: text.slice(-600) };
   const skill = /SKILL:\s*(.+)/i.exec(text);
   const note = /NOTE:\s*([\s\S]+)/i.exec(text);
   return { result: result ? result[1].toLowerCase() : "stuck", skill: skill ? skill[1].trim().slice(0, 160) : "", note: note ? note[1].trim().slice(0, 1200) : text.slice(-600) };
@@ -83,11 +86,12 @@ async function runLesson(lesson, signal) {
   await machine.run(`mkdir -p ${folder}`);
   const goal = `Lesson ${lesson.number} of ${course.name}: ${lesson.topic}. Work in ${folder} (the ${course.name} tools are installed: ${course.run}).`;
   const answer = await runTask(jarvis(), goal, { tools: ["linux", "remember", "recall"], instructions: RULES, maxRounds: 40, by: "practice" });
-  if (signal.stopped) return null;
   const got = parse(answer);
-  // FCC checks it itself: the lesson counts only if check.sh passes now.
-  const check = await machine.run(`cd ${folder} && [ -f check.sh ] && timeout 300 bash check.sh >/tmp/.fcc-check.log 2>&1; echo "check=$?"; tail -5 /tmp/.fcc-check.log`, { timeoutMs: 360000 }).catch((error) => ({ code: 1, text: error.message }));
-  const passed = /check=0/.test(check.text) && got.result === "passed";
+  if (got.result === "incomplete") throw new Error(`Lesson ${lesson.number} of ${course.name} didn't finish: ${got.note.slice(-200)}`);
+  // FCC checks it itself: the lesson counts only if check.sh passes now (its
+  // exit code on the last line, after the log, so the log can't fake it).
+  const check = await machine.run(`cd ${folder} && [ -f check.sh ] && timeout 300 bash check.sh >/tmp/.fcc-check.log 2>&1; code=$?; tail -5 /tmp/.fcc-check.log; echo "check=$code"`, { timeoutMs: 360000 }).catch((error) => ({ code: 1, text: error.message }));
+  const passed = /^check=0$/m.test(check.text) && got.result === "passed";
   const progress = (data.progress[lesson.lang] = data.progress[lesson.lang] || { next: 0, passed: [], stuck: [] });
   if (passed) {
     progress.passed.push(lesson.number);

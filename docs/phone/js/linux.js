@@ -434,6 +434,7 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
     if (users && machine.ready && machine.onUserIdle) machine.onUserIdle();
   };
   const setIdle = (value) => {
+    if (!value && machine.idle) machine.busyAt = Date.now();
     machine.idle = value;
     if (!value) return;
     for (const done of [...idleWaiters]) done(true);

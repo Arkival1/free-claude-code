@@ -14,13 +14,19 @@ import { syncIn, syncOut, forgetSynced } from "../linuxprojects.js";
 function shareProjects(machine) {
   let pending = null;
   forgetSynced(); // a new machine: write everything in again
-  syncIn(machine).catch((error) => notify(error.message));
+  // A kept session may hold edits made in Linux that never came back: bring
+  // those back first, then write the phone's files in.
+  syncOut(machine, "you")
+    .catch(() => [])
+    .then(() => syncIn(machine))
+    .catch((error) => notify(error.message));
   machine.onUserIdle = () => {
     clearTimeout(pending);
     pending = setTimeout(() => {
       // Started typing the next command? Then this waits for that one, so
       // nothing is typed over a half-typed line.
-      if ((machine.lastTyped || 0) > (machine.promptAt || 0)) return;
+      // (Keys typed while the command ran count too.)
+      if ((machine.lastTyped || 0) > (machine.busyAt || 0)) return;
       syncOut(machine, "you").catch(() => []);
     }, 600);
   };

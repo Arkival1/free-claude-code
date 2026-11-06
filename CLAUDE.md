@@ -177,7 +177,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   session at a time for code changes so pushes don't clash. Don't open pull
   requests unless asked.
 - Each release bumps the version in `pyproject.toml` and `uv.lock`
-  (6.112.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
+  (6.113.0 now). The phone app's source is `src/free_claude_code/api/phone_static/`;
   rebuild it into `docs/phone` with `scripts/phone/build_pages.py`.
 
 ## The owner's setup
@@ -322,15 +322,23 @@ Notes carried over from the long session that built FCC Studio (LCC).
   main SBC (`studio/lab/tech.py`, mirrored in `lab/science.js`). Agreed
   next phases: robot bodies on a test floor, then uploading blueprints and
   3D models.
-- FCC Linux (owner: "FCC LINUX CUSTOM ... runs locally ... Jarvis can
-  interact with it"): Alpine 3.21 x86 built by `scripts/linux/build_fcc_linux.py`
-  without running anything downloaded (signed index, SHA-1 and SHA-256
-  checks, Python's library precompiled by the build machine's Python 3.12),
-  run by v86 in a sealed box (`js/linux.js`, `js/views/linux.js`, Lab, FCC
-  Linux), 192 MB, no network, snapshots in the phone's `fcc-linux` store
-  (first boot ~13 s, then ~2 s). bash marks idle/busy, so commands (the
-  `linux` tool, tools version 10) only run at the prompt and are never typed
-  into an open program. Rebuilding: see `vendor/fcc-linux/README.md`.
+- FCC Linux 2 (owner: "FCC LINUX CUSTOM ... runs locally ... Jarvis can
+  interact with it"; then every language in one, GitHub, plugins, Jarvis
+  teaching himself; plan and progress in `plans/fcc-linux-2.md`): Alpine
+  3.21 x86 with C/C++, Rust, Go, Java 8, Node, Python, Ruby, PHP, Perl, Lua
+  and git, built by `scripts/linux/build_fcc_linux2.py` without running
+  anything downloaded (signed index, SHA-1/SHA-256 checks, Python's library
+  precompiled by the build machine's Python 3.12). A 1 MB initrd mounts the
+  real system over 9p; its files come from 21 packs (433 MB, sha-named,
+  fetched when first used and kept, `js/linuxfiles.js`, pinned manifest);
+  v86 in a sealed box (`js/linux.js`), 512 MB. Internet off until the owner
+  switches it on (`js/linuxnet.js`: the page makes every request, adds the
+  GitHub token and plugin keys outside Linux, GitHub changes ask first; the
+  token never goes in backups); `fcc-github`, `fcc-plugin`, `fcc-net`
+  inside; pip/npm/cargo/go through FCC. Projects are `/projects/<slug>`
+  both ways (`js/linuxprojects.js`). Jarvis learns (`js/practice.js`,
+  `js/lessons.js`, More, Jarvis learns): FCC runs each lesson's check.sh
+  itself; skills wait for the owner's OK. Not built yet: the desktop.
 - Godot on the PC (owner: "getting godot working and making SSS tier games
   with graphics"): FCC's install/check/frames/export path was checked end
   to end with real Godot 4.7.2; the `action-3d` starter

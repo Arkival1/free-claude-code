@@ -2869,18 +2869,33 @@ account, and costs nothing.
   works. A game's saves (`user://`) stay on the phone between plays, per
   game, up to 16 MB; the game's page shows the save and **Start over**
   forgets it.
-- **FCC Linux**: Lab, **FCC Linux** runs FCC's own small Linux (Alpine 3.21,
-  32-bit x86) on the phone in the v86 emulator, in a sealed box with no
-  network: bash, Python 3.12, Lua, nano, tmux, SQLite, jq, bc, make, htop
-  and lynx, in a terminal sized to the phone with keys a phone keyboard
-  lacks (Esc, Tab, Ctrl-C, arrows). The first start downloads 28 MB and
-  boots in about 15 s; after that it opens in about 2 s from a snapshot,
-  and **Keep my session** brings back your files and history next time.
-  Jarvis uses the same machine with the `linux` tool (run, write, read,
-  info, keep, interrupt); his commands only run at the prompt, so nothing
-  is ever typed into a program you have open. It is built by
-  `scripts/linux/build_fcc_linux.py` without running anything downloaded
-  (see `vendor/fcc-linux/README.md`).
+- **FCC Linux**: Lab, **FCC Linux** runs FCC's own Linux (Alpine 3.21,
+  32-bit x86) on the phone in the v86 emulator, in a sealed box, with every
+  language: C/C++ (gcc, g++, cmake, gdb), Rust (cargo), Go, Java 8, Node.js
+  (npm), Python 3.12 (pip), Ruby, PHP, Perl, Lua and git, plus bash, nano,
+  tmux, SQLite and htop. The first start downloads 12 MB and boots in about
+  12 s; each language's files (433 MB in all) download the first time it's
+  used, or all at once with **Get everything now**. After that it opens in
+  about 2 s, and **Keep my session** brings your files back next time.
+  - **Internet**: off until you switch it on (FCC Linux screen, **Internet
+    and plugins**). Programs inside use `http://` addresses and FCC makes
+    each request as https outside Linux; pip, npm, cargo and go install
+    through it. Sites that don't let apps in a browser reach them don't work
+    from the phone.
+  - **GitHub**: save a GitHub token in FCC (never inside Linux, never in
+    backups); `fcc-github clone OWNER/REPO`, then `push` (FCC asks you first,
+    once per repository for 10 minutes) and `pull`. `fcc-plugin` calls a
+    plugin you switched on; `fcc-net` shows what's on.
+  - **Your projects** are folders in `/projects`: changes there (Jarvis's or
+    yours) come back to Projects.
+  - **Jarvis** uses the same machine with the `linux` tool (run, write, read,
+    info, keep, interrupt, sync, practice); his commands only run at the
+    prompt, so nothing is typed into a program you have open.
+  - **Jarvis learns** (More): he teaches himself 14 courses in FCC Linux; FCC
+    runs each lesson's check itself, learned skills wait for your OK, and he
+    tells you (chat, notification, the page) when he's stuck.
+  Built by `scripts/linux/build_fcc_linux2.py` without running anything
+  downloaded (see `vendor/fcc-linux/README.md`).
 - **Board computer**: an Orange Pi 5, Arduino, ESP32 or Raspberry Pi on the
   Electronics bench runs a program you or Jarvis write (Arduino-style
   JavaScript: `setup()`, `loop()`, `digitalWrite`, `analogRead`, sensors,
