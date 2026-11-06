@@ -17,6 +17,8 @@ import { state, save, changed } from "./state.js";
 import { byName, usePlugin } from "./plugins.js";
 
 const LOG_SIZE = 120;
+const APPROVAL_MS = 10 * 60 * 1000;
+const approved = new Map(); // "owner/repo" -> until when changes are allowed
 const BODY_LIMIT = 200 * 1048576;
 export const netLog = [];
 const watchers = new Set();
@@ -126,10 +128,15 @@ export async function handle(request, { ask = (question) => confirm(question) } 
     const token = settings().githubToken;
     if (token) headers.set("authorization", `Bearer ${token}`);
     if (!["GET", "HEAD"].includes(method)) {
-      const ok = await ask(`FCC Linux wants to change something on GitHub:\n\n${method} ${url.pathname}\n\nAllow it?`);
-      if (!ok) {
-        log({ what: describe(method, url), status: "denied" });
-        return text(403, "The user said no to this GitHub change.");
+      // One OK covers one repository for ten minutes (a push is several calls).
+      const repo = (/^\/repos\/([^/]+\/[^/]+)/.exec(url.pathname) || [])[1] || url.pathname;
+      if (!((approved.get(repo) || 0) > Date.now())) {
+        const ok = await ask(`FCC Linux wants to change ${repo} on GitHub (${method} ${url.pathname.slice(0, 80)}).\n\nAllow changes to ${repo} for the next 10 minutes?`);
+        if (!ok) {
+          log({ what: describe(method, url), status: "denied" });
+          return text(403, "The user said no to this GitHub change.");
+        }
+        approved.set(repo, Date.now() + APPROVAL_MS);
       }
     }
   }

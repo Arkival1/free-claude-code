@@ -9,6 +9,7 @@
 
 import { digest } from "./sha256.js";
 import { useManifest, readFile, readList, setActivity, pruneOld } from "./linuxfiles.js";
+import { handle as netHandle } from "./linuxnet.js";
 
 export const LINUX_VERSION = "2.0";
 // Compilers (Rust, Go, C++) need room; memory nobody uses stays zero, so
@@ -27,7 +28,7 @@ const FILES = {
   kernel: ["linux/fcc-linux.kernel", "f37a5f89fefb28023b824fc71e814d2b6cc34bc27567fcdc5db75b3b95de6b2c"],
   initrd: ["linux/fcc-linux.initrd", "1fcc5236166073d5d93e7599902b992b0553d9371890dd800546c4f4a4d8f936"],
   // What's in the system: the file list and each pack with its SHA-256.
-  manifest: ["linux/fcc-linux.json", "3e3731f1dc01e827c854a2cf95900ecbc4233be182df07c0245cf99da9cf318f"],
+  manifest: ["linux/fcc-linux.json", "89b3125f958f2af45a45114b09945e8a8e27f463e6ce012d34a432ec902d8f88"],
 };
 /** A short hash of text (FNV-1a), for keys. */
 function shortHash(text) {
@@ -214,6 +215,32 @@ function linuxBox() {
       send({ type: "get", id: askNumber, url: this.url });
     }
   };
+  // Programs inside reach the web only through the page too: v86's network
+  // card hands each http request to fetch, and this stand-in passes it on;
+  // the page (js/linuxnet.js) decides, and makes the real https request.
+  const nets = new Map();
+  let netNumber = 0;
+  window.fetch = (input, init = {}) =>
+    new Promise((resolve, reject) => {
+      netNumber += 1;
+      nets.set(netNumber, { resolve, reject });
+      const url = typeof input === "string" ? input : String((input && input.url) || input);
+      const headers = [...new Headers(init.headers || (input && input.headers) || [])];
+      const raw = init.body;
+      const body = raw instanceof Uint8Array ? raw.slice().buffer : raw instanceof ArrayBuffer ? raw : typeof raw === "string" ? new TextEncoder().encode(raw).buffer : undefined;
+      send({ type: "net", id: netNumber, url, method: init.method || "GET", headers, body }, body ? [body] : []);
+    });
+  const netAnswer = (job) => {
+    const waiting = nets.get(job.id);
+    nets.delete(job.id);
+    if (!waiting) return;
+    const empty = [101, 204, 205, 304].includes(job.status);
+    try {
+      waiting.resolve(new Response(empty ? null : job.body, { status: job.status, headers: job.headers }));
+    } catch (error) {
+      waiting.reject(error);
+    }
+  };
   const answer = (job) => {
     const request = asks.get(job.id);
     asks.delete(job.id);
@@ -232,6 +259,7 @@ function linuxBox() {
     const job = event.data;
     if (event.source !== parent || !job) return;
     if (job.type === "got") return answer(job);
+    if (job.type === "netback") return netAnswer(job);
     try {
       if (job.type === "boot" && !emulator) {
         const style = document.createElement("style");
@@ -254,6 +282,7 @@ function linuxBox() {
         // The system's files, over 9p (tag host9p); a restored machine already
         // knows its file list, so only a fresh boot reads it.
         options.filesystem = job.state ? { baseurl: "fs/" } : { baseurl: "fs/", basefs: "fs/list.json" };
+        options.net_device = { type: "ne2k", relay_url: "fetch" };
         if (job.state) options.initial_state = { buffer: job.state };
         else Object.assign(options, { bzimage: { buffer: job.files.kernel }, initrd: { buffer: job.files.initrd }, cmdline: job.cmdline });
         emulator = new V86(options);
@@ -311,6 +340,8 @@ let current = null;
 /** The FCC Linux that's running (one at a time), or null. */
 export const runningLinux = () => current;
 let lastProblem = "";
+/** Has FCC Linux stopped by itself, with a reason not shown yet? */
+export const hasProblem = () => Boolean(lastProblem);
 /** Why FCC Linux last stopped by itself ("" if it didn't); reading it clears it. */
 export function takeProblem() {
   const problem = lastProblem;
@@ -433,6 +464,11 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
           }
           post({ type: "got", id, error: error.message, retry: true });
         });
+    } else if (message.type === "net") {
+      const id = message.id;
+      netHandle(message)
+        .catch(() => ({ status: 502, headers: [["content-type", "text/plain"]], body: new TextEncoder().encode("FCC couldn't make that request.\n").buffer }))
+        .then((reply) => post({ type: "netback", id, ...reply }, reply.body ? [reply.body] : []));
     } else if (message.type === "out") {
       output += message.text;
       if (output.length > 400_000) output = output.slice(-200_000);

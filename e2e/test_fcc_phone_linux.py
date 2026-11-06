@@ -4,7 +4,6 @@ network, opens from a snapshot after the first boot, keeps a session, and
 Jarvis uses it with the linux tool."""
 
 import json
-import re
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -48,7 +47,7 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
                 ran: await call({ action: 'run', command: 'python3 /root/hello.py && lua5.4 -e "print(2^10)"' }),
                 read: await call({ action: 'read', path: '/root/hello.py' }),
                 failed: await call({ action: 'run', command: 'ls /missing' }),
-                network: await call({ action: 'run', command: 'ls /sys/class/net; python3 -c "import socket; socket.create_connection((\'1.1.1.1\', 80), timeout=3)" 2>&1 | tail -1' }),
+                network: await call({ action: 'run', command: 'python3 -c "import urllib.request; urllib.request.urlopen(\'http://example.com\', timeout=20)" 2>&1 | tail -1' }),
             };
         }"""
     )
@@ -59,9 +58,9 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
     assert "1024" in done["ran"]
     assert done["read"].startswith("import json")
     assert done["failed"].startswith("exit code 1") and "No such file" in done["failed"]
-    # The network card has nothing behind it until the internet switch is on.
-    assert re.search(r"exit code \d+\n(eth0  )?lo\n", done["network"]), done["network"]
-    assert "Network is unreachable" in done["network"] or "Error" in done["network"]
+    # The network card leads only to FCC, which says no while the internet
+    # switch is off.
+    assert "HTTP Error 403" in done["network"], done["network"]
 
     # Commands run in bash with no keyboard input; a half-typed line at the
     # prompt is cleared, not run; a program left open (cat reading the
@@ -143,3 +142,94 @@ def test_a_bad_pack_stops_fcc_linux_and_says_why(
     expect(status).to_contain_text("FCC Linux stopped:")
     expect(status).to_contain_text("checksum is wrong")
     expect(page.locator(".linux-dock iframe.linux-box")).to_have_count(0)
+
+
+def test_the_internet_switch_github_and_the_token_stay_outside_linux(
+    page: Page, admin_base_url: str
+) -> None:
+    """Off by default: nothing leaves. Switched on: http requests go out as
+    https through FCC, fcc-github clones through GitHub's API with the token
+    FCC adds (never seen inside Linux), and a push waits for the user's OK."""
+    page.set_default_timeout(WAIT)
+    seen: list[dict] = []
+
+    def github(route) -> None:
+        request = route.request
+        seen.append(
+            {
+                "url": request.url,
+                "auth": request.headers.get("authorization", ""),
+                "method": request.method,
+            }
+        )
+        path = request.url.split("api.github.com", 1)[1]
+        answers = {
+            "/zen": "Keep it logically awesome.",
+            "/repos/o/r": json.dumps({"default_branch": "main", "private": True}),
+            "/repos/o/r/commits/main": json.dumps(
+                {"sha": "c" * 40, "commit": {"tree": {"sha": "t" * 40}}}
+            ),
+            f"/repos/o/r/git/trees/{'t' * 40}?recursive=1": json.dumps(
+                {
+                    "truncated": False,
+                    "tree": [
+                        {
+                            "path": "hello.py",
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": "b" * 40,
+                        }
+                    ],
+                }
+            ),
+            f"/repos/o/r/git/blobs/{'b' * 40}": "print('hello from GitHub')\n",
+        }
+        if path in answers:
+            route.fulfill(status=200, body=answers[path])
+        else:
+            route.fulfill(status=404, body=json.dumps({"message": "Not Found"}))
+
+    page.route("https://api.github.com/**", github)
+    open_phone(page, admin_base_url, "lab/linux")
+    expect(page.get_by_role("switch", name="FCC Linux internet")).not_to_be_checked()
+    page.get_by_role("button", name="▶ Start FCC Linux").click()
+    expect(page.locator(".linux-status")).to_contain_text(
+        "Tap the terminal to type", timeout=WAIT
+    )
+    run = """async ([command, seconds]) => {
+        const { runningLinux } = await import('./js/linux.js');
+        return runningLinux().run(command, { timeoutMs: seconds * 1000 });
+    }"""
+    off = page.evaluate(
+        run, ["fcc-net; wget -qO- http://api.github.com/zen; echo exit=$?", 60]
+    )
+    assert "Internet: off" in off["text"] and "exit=1" in off["text"], off
+    assert seen == []
+
+    page.get_by_role("switch", name="FCC Linux internet").check()
+    page.get_by_label("GitHub token").fill("ghp_test_token_never_inside")
+    page.get_by_role("button", name="Save").click()
+    on = page.evaluate(
+        run,
+        [
+            "wget -qO- http://api.github.com/zen; echo; cd /root && fcc-github clone o/r && cat r/hello.py && grep -r ghp_test /root /etc 2>/dev/null | head -1; echo done",
+            240,
+        ],
+    )
+    assert "Keep it logically awesome." in on["text"], on
+    assert "hello from GitHub" in on["text"] and "ghp_test" not in on["text"], on
+    assert all(item["url"].startswith("https://api.github.com/") for item in seen)
+    assert seen[-1]["auth"] == "Bearer ghp_test_token_never_inside"
+
+    # A push asks first; saying no stops it.
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    pushed = page.evaluate(
+        run,
+        [
+            "cd /root/r && echo more >> hello.py && git -c user.name=t -c user.email=t@t commit -qam more && fcc-github push; echo exit=$?",
+            240,
+        ],
+    )
+    assert "said no" in pushed["text"] and "exit=1" in pushed["text"], pushed
+    assert not any(item["method"] == "PATCH" for item in seen)
+    expect(page.locator(".linux-net-log")).to_contain_text("denied")

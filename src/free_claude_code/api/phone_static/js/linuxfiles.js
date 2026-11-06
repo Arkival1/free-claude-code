@@ -63,15 +63,16 @@ async function fetchPack(row) {
   const fresh = new Blob([bytes]);
   try {
     await packsDo("readwrite", (store) => store.put({ sha256: row.sha256, blob: fresh, at: Date.now() }, row.sha256));
-    // Read it back: the stored Blob lives on the phone's storage, not in memory.
-    const kept = await packsDo("readonly", (store) => store.get(row.sha256));
-    onActivity("");
-    return kept && kept.blob instanceof Blob ? kept.blob : fresh;
   } catch {
     // Checked but not kept (storage full?): used from memory this time.
     onActivity(`FCC Linux couldn't keep ${label(row)} on this phone (is its storage full?), so it will download again next time.`);
+    setTimeout(() => onActivity(""), 8000);
     return fresh;
   }
+  onActivity("");
+  // Read it back: the stored Blob lives on the phone's storage, not in memory.
+  const kept = await packsDo("readonly", (store) => store.get(row.sha256)).catch(() => null);
+  return kept && kept.blob instanceof Blob ? kept.blob : fresh;
 }
 /** Has the manifest been loaded (FCC Linux started, or its files fetched)? */
 export const hasManifest = () => Boolean(manifest);
@@ -121,9 +122,9 @@ export async function readList() {
   let blob = kept && kept.blob instanceof Blob ? kept.blob : null;
   if (!blob) {
     const response = await fetch(new URL(row.file, base), { cache: "no-store" });
-    if (!response.ok) throw new Error(`Couldn't get FCC Linux's file list (${response.status}). Try again with the internet on.`);
+    if (!response.ok) throw Object.assign(new Error(`Couldn't get FCC Linux's file list (${response.status}). Try again with the internet on.`), { retry: response.status >= 500 });
     const bytes = new Uint8Array(await response.arrayBuffer());
-    if ((await digest(bytes)) !== row.sha256) throw new Error("FCC Linux's file list isn't what FCC shipped (its checksum is wrong), so it wasn't used.");
+    if ((await digest(bytes)) !== row.sha256) throw Object.assign(new Error("FCC Linux's file list isn't what FCC shipped (its checksum is wrong), so it wasn't used."), { retry: false });
     blob = new Blob([bytes]);
     await packsDo("readwrite", (store) => store.put({ sha256: row.sha256, blob, at: Date.now() }, row.sha256));
   }

@@ -3,8 +3,10 @@
 // lives in a dock on the page (not in this screen), so it keeps running when
 // you look elsewhere and Jarvis can use the same one.
 import { el, button, notify, go } from "../ui.js";
-import { startLinux, runningLinux, forgetSession, hasSession, loadLinux, watchActivity, takeProblem } from "../linux.js";
+import { startLinux, runningLinux, forgetSession, hasSession, loadLinux, watchActivity, takeProblem, hasProblem } from "../linux.js";
 import { status as filesStatus, getEverything, hasManifest } from "../linuxfiles.js";
+import { internetOn, setInternet, githubTokenSaved, setGithubToken, netLog, watchNet } from "../linuxnet.js";
+import { state } from "../state.js";
 
 const MB = 1048576;
 let dockNode = null;
@@ -72,7 +74,7 @@ function filesCard(onChange) {
     // the user asks), only the button shows.
     if (!hasManifest()) {
       line.textContent = gettingAll ? "Getting FCC Linux's files…" : "Every language comes with FCC Linux: each one downloads the first time it's used, or all at once now.";
-      box.replaceChildren(line, gettingAll ? button("Stop getting files", () => (gettingAll.stop = true)) : button("Get everything now (about 450 MB, Wi-Fi best)", getAll));
+      box.replaceChildren(line, gettingAll ? button("Stop getting files", () => gettingAll && (gettingAll.stop = true)) : button("Get everything now (about 450 MB, Wi-Fi best)", getAll));
       return;
     }
     const now = await filesStatus();
@@ -85,11 +87,61 @@ function filesCard(onChange) {
       done
         ? ""
         : gettingAll
-          ? button("Stop getting files", () => (gettingAll.stop = true))
+          ? button("Stop getting files", () => gettingAll && (gettingAll.stop = true))
           : button(`Get everything now (${((now.total - now.bytes) / MB).toFixed(0)} MB, Wi-Fi best)`, getAll),
     );
   };
   show();
+  return box;
+}
+
+/** The internet switch, GitHub and plugins for FCC Linux: decided here,
+ * outside Linux, so nothing inside can switch them on or read a key. */
+function netCard() {
+  const log = el("ul", { class: "small muted linux-net-log", "aria-label": "FCC Linux's recent requests" });
+  const showLog = () =>
+    log.replaceChildren(...netLog.slice(0, 6).map((entry) => el("li", { text: `${entry.what} · ${entry.status}` })));
+  const toggle = el("input", { type: "checkbox", role: "switch", "aria-label": "FCC Linux internet", checked: internetOn() ? true : null });
+  const note = el("p", { class: "small muted" });
+  const explain = () =>
+    (note.textContent = internetOn()
+      ? "On: programs in FCC Linux (and Jarvis) can reach websites that let apps in a browser in, pip, npm, cargo and go, your GitHub and your plugins. FCC makes each request outside Linux; your keys never go inside."
+      : "Off: nothing in FCC Linux can reach the internet.");
+  toggle.addEventListener("change", async () => {
+    await setInternet(toggle.checked);
+    explain();
+  });
+  const token = el("input", { type: "password", autocomplete: "off", "aria-label": "GitHub token", placeholder: githubTokenSaved() ? "Saved (type a new one to replace it)" : "GitHub token (github.com, Settings, Developer settings)" });
+  const plugins = Object.entries(state.settings.plugins || {}).filter(([, saved]) => saved.on).map(([name]) => name);
+  explain();
+  showLog();
+  const stop = watchNet(showLog);
+  const box = el("section", { class: "card linux-net" }, [
+    el("h2", { text: "Internet and plugins" }),
+    el("label", { class: "row" }, [toggle, el("span", { text: "Internet for FCC Linux" })]),
+    note,
+    el("div", { class: "row" }, [
+      token,
+      button("Save", async () => {
+        if (!token.value.trim()) return notify("Paste a GitHub token first.");
+        await setGithubToken(token.value);
+        token.value = "";
+        token.placeholder = "Saved (type a new one to replace it)";
+        notify("GitHub token saved on this phone (never inside Linux, never in backups).");
+      }),
+      githubTokenSaved()
+        ? button("Forget it", async () => {
+            await setGithubToken("");
+            token.placeholder = "GitHub token (github.com, Settings, Developer settings)";
+            notify("GitHub token forgotten.");
+          })
+        : "",
+    ]),
+    el("p", { class: "small muted", text: `In FCC Linux: fcc-github clone OWNER/REPO, then push (FCC asks you first). Plugins on: ${plugins.length ? plugins.join(", ") : "none"}; fcc-plugin calls one.` }),
+    el("div", { class: "row" }, [button("Choose plugins", () => go("plugins"))]),
+    log,
+  ]);
+  box.stop = stop;
   return box;
 }
 
@@ -99,8 +151,10 @@ export function render(view) {
   // While a pack downloads, a program waits: say what's coming.
   let showingActivity = false;
   const stopWatching = watchActivity((text) => {
-    if (text && !runningLinux() && !starting) {
-      draw(); // it stopped by itself: say why
+    if (!runningLinux() && !starting) {
+      // Not running: only a stop with a reason redraws (Get everything shows
+      // its own progress in its card).
+      if (hasProblem()) draw();
     } else if (text) {
       status.textContent = text;
       showingActivity = true;
@@ -116,7 +170,9 @@ export function render(view) {
     if (card) host.style.top = `${Math.round(card.getBoundingClientRect().bottom + 8)}px`;
   };
   addEventListener("resize", place);
+  let net = null;
   const draw = async () => {
+    if (net) net.stop();
     const machine = runningLinux();
     const on = Boolean(machine && machine.ready);
     const kept = await hasSession();
@@ -148,6 +204,7 @@ export function render(view) {
         ]),
         status,
         filesCard(place),
+        (net = netCard()),
         el("div", { class: "linux-keys", role: "group", "aria-label": "Keys" }, KEYS.map(([label, keys]) => el("button", { type: "button", text: label, disabled: on ? null : true, onclick: () => {
           const running = runningLinux();
           if (running) running.send(keys);
@@ -157,6 +214,7 @@ export function render(view) {
     host.classList.toggle("shown", on);
     host.setAttribute("aria-hidden", String(!on));
     place();
+    showingActivity = false;
     const problem = !on && !starting ? takeProblem() : "";
     if (problem) status.textContent = `FCC Linux stopped: ${problem}`;
     else if (!on && !starting) status.textContent = kept ? "Your kept session is waiting: Start opens it where you left off." : "FCC's own Linux on this phone, with every language: C/C++, Rust, Go, Java, Node.js, Python, Ruby, PHP, Perl, Lua and git. No internet inside, so nothing it runs can reach anything else.";
@@ -177,6 +235,7 @@ export function render(view) {
   };
   draw();
   return () => {
+    if (net) net.stop();
     stopWatching();
     removeEventListener("resize", place);
     host.classList.remove("shown");

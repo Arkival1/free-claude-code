@@ -44,6 +44,8 @@ VERSION = "2.0"
 NAME = f"FCC Linux {VERSION}"
 OUT = base.OUT
 BLOBS = base.CACHE / "blobs"
+TOOLS = Path(__file__).resolve().parent / "files"
+"""FCC's own commands in FCC Linux (fcc-github, fcc-net, fcc-plugin)."""
 PACK_LIMIT = 24 * 1024 * 1024
 ZSTD_LEVEL = 15
 LANGUAGES = [
@@ -116,6 +118,46 @@ mount -t tmpfs tmpfs /run 2>/dev/null
 hostname fcc-linux
 ip link set lo up 2>/dev/null
 echo 1 > /proc/sys/kernel/printk 2>/dev/null
+# The network card leads only to FCC, which decides what may go out (the
+# internet switch in FCC). FCC's emulator is the gateway and answers DNS
+# itself, at fixed addresses.
+if ip link set eth0 up 2>/dev/null; then
+  ip addr add 192.168.86.100/24 dev eth0 2>/dev/null
+  ip route add default via 192.168.86.1 2>/dev/null
+  echo "nameserver 192.168.86.1" > /etc/resolv.conf
+fi
+""",
+    ),
+    # Package installers go through FCC: their indexes as http (FCC fetches
+    # them as https, outside Linux), and their https links turned into http.
+    "etc/pip.conf": (
+        0o644,
+        """[global]
+index-url = http://pypi.org/simple/
+trusted-host = pypi.org files.pythonhosted.org
+break-system-packages = true
+disable-pip-version-check = true
+no-cache-dir = false
+""",
+    ),
+    "root/.npmrc": (
+        0o644,
+        """registry=http://registry.npmjs.org/
+fund=false
+audit=false
+update-notifier=false
+""",
+    ),
+    "root/.cargo/config.toml": (
+        0o644,
+        """[source.crates-io]
+replace-with = "fcc"
+
+[source.fcc]
+registry = "sparse+http://index.crates.io/"
+
+[net]
+retry = 3
 """,
     ),
     "etc/profile.d/fcc-languages.sh": (
@@ -124,6 +166,8 @@ echo 1 > /proc/sys/kernel/printk 2>/dev/null
 # live in /root, so a kept session keeps them (Go's first build is slow).
 export JAVA_HOME=/usr/lib/jvm/java-1.8-openjdk
 export GOPATH=/root/go GOCACHE=/root/.cache/go-build GOTOOLCHAIN=local GOTELEMETRY=off
+# Go modules (and their checksums) come through FCC, as http.
+export GOPROXY=http://proxy.golang.org
 export CARGO_HOME=/root/.cargo
 export PATH="$PATH:$JAVA_HOME/bin:$GOPATH/bin:$CARGO_HOME/bin:/root/.local/bin"
 """,
@@ -135,6 +179,7 @@ export PATH="$PATH:$JAVA_HOME/bin:$GOPATH/bin:$CARGO_HOME/bin:/root/.local/bin"
   C/C++ (gcc, g++, cmake, gdb), Rust (cargo), Go, Java 8, Node.js (npm),
   Python 3.12 (pip), Ruby, PHP, Perl, Lua, git, bash, nano, tmux, sqlite3
   Type fcc-info for what's here. Programs load the first time you use them.
+  Internet: off until you switch it on in FCC (fcc-net). GitHub: fcc-github.
 
 """,
     ),
@@ -253,7 +298,7 @@ def blob(body: bytes) -> bytes:
 
 def file_body(root, info: tarfile.TarInfo, body: bytes | None) -> bytes:
     """A regular file's bytes, following hard links (and links to links)."""
-    for _ in range(8):
+    for _ in range(32):
         if not info.islnk():
             return body or b""
         target = root.get(base.clean_name(info.linkname))
@@ -262,7 +307,9 @@ def file_body(root, info: tarfile.TarInfo, body: bytes | None) -> bytes:
                 f"{info.name}: a hard link to {info.linkname}, which isn't there."
             )
         info, body = target
-    raise SystemExit(f"{info.name}: hard links in a loop.")
+    raise SystemExit(
+        f"{info.name}: a chain of hard links too long to follow (a loop?)."
+    )
 
 
 def packs_and_names(
@@ -417,6 +464,14 @@ def build(out: Path) -> dict:
         )
     for path, (mode, text) in FCC_FILES.items():
         base.add_text(root, path, text, mode)
+        owner[path] = "base"
+    for tool in sorted(
+        item
+        for item in TOOLS.iterdir()
+        if item.is_file() and not item.name.startswith(".")
+    ):
+        path = f"usr/local/bin/{tool.name}"
+        base.add_text(root, path, tool.read_text(encoding="utf-8"), 0o755)
         owner[path] = "base"
     base.add_text(
         root, "etc/fcc/packages", " ".join(str(item["name"]) for item in added) + "\n"
