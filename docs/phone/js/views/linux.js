@@ -3,8 +3,8 @@
 // lives in a dock on the page (not in this screen), so it keeps running when
 // you look elsewhere and Jarvis can use the same one.
 import { el, button, notify, go } from "../ui.js";
-import { startLinux, runningLinux, forgetSession, hasSession, loadLinux, watchActivity } from "../linux.js";
-import { status as filesStatus, getEverything } from "../linuxfiles.js";
+import { startLinux, runningLinux, forgetSession, hasSession, loadLinux, watchActivity, takeProblem } from "../linux.js";
+import { status as filesStatus, getEverything, hasManifest } from "../linuxfiles.js";
 
 const MB = 1048576;
 let dockNode = null;
@@ -50,11 +50,29 @@ let gettingAll = null;
 function filesCard(onChange) {
   const line = el("p", { class: "small muted linux-files-line" });
   const box = el("div", { class: "linux-files" }, [line]);
-  const show = async () => {
+  const getAll = async () => {
+    gettingAll = { stop: false };
+    show();
     try {
       await loadLinux();
-    } catch {
-      line.textContent = "";
+      await getEverything(
+        (got, total) => (line.textContent = `Getting FCC Linux's files: ${(got / MB).toFixed(0)} of ${(total / MB).toFixed(0)} MB…`),
+        () => gettingAll.stop,
+      );
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      gettingAll = null;
+      show();
+      onChange();
+    }
+  };
+  const show = async () => {
+    // Opening this screen downloads nothing: until FCC Linux has started (or
+    // the user asks), only the button shows.
+    if (!hasManifest()) {
+      line.textContent = gettingAll ? "Getting FCC Linux's files…" : "Every language comes with FCC Linux: each one downloads the first time it's used, or all at once now.";
+      box.replaceChildren(line, gettingAll ? button("Stop getting files", () => (gettingAll.stop = true)) : button("Get everything now (about 450 MB, Wi-Fi best)", getAll));
       return;
     }
     const now = await filesStatus();
@@ -68,22 +86,7 @@ function filesCard(onChange) {
         ? ""
         : gettingAll
           ? button("Stop getting files", () => (gettingAll.stop = true))
-          : button(`Get everything now (${((now.total - now.bytes) / MB).toFixed(0)} MB, Wi-Fi best)`, async () => {
-              gettingAll = { stop: false };
-              show();
-              try {
-                await getEverything(
-                  (got, total) => (line.textContent = `Getting FCC Linux's files: ${(got / MB).toFixed(0)} of ${(total / MB).toFixed(0)} MB…`),
-                  () => gettingAll.stop,
-                );
-              } catch (error) {
-                notify(error.message);
-              } finally {
-                gettingAll = null;
-                show();
-                onChange();
-              }
-            }),
+          : button(`Get everything now (${((now.total - now.bytes) / MB).toFixed(0)} MB, Wi-Fi best)`, getAll),
     );
   };
   show();
@@ -94,8 +97,18 @@ export function render(view) {
   const status = el("p", { class: "small muted linux-status", role: "status" });
   const host = dock();
   // While a pack downloads, a program waits: say what's coming.
+  let showingActivity = false;
   const stopWatching = watchActivity((text) => {
-    if (text) status.textContent = text;
+    if (text && !runningLinux() && !starting) {
+      draw(); // it stopped by itself: say why
+    } else if (text) {
+      status.textContent = text;
+      showingActivity = true;
+    } else if (showingActivity) {
+      const machine = runningLinux();
+      status.textContent = machine && machine.ready ? "Ready. Tap the terminal to type." : "Starting FCC Linux…";
+      showingActivity = false;
+    }
   });
   // The terminal fills the screen under the controls.
   const place = () => {
@@ -144,7 +157,9 @@ export function render(view) {
     host.classList.toggle("shown", on);
     host.setAttribute("aria-hidden", String(!on));
     place();
-    if (!on && !starting) status.textContent = kept ? "Your kept session is waiting: Start opens it where you left off." : "FCC's own Linux on this phone, with every language: C/C++, Rust, Go, Java, Node.js, Python, Ruby, PHP, Perl, Lua and git. No internet inside, so nothing it runs can reach anything else.";
+    const problem = !on && !starting ? takeProblem() : "";
+    if (problem) status.textContent = `FCC Linux stopped: ${problem}`;
+    else if (!on && !starting) status.textContent = kept ? "Your kept session is waiting: Start opens it where you left off." : "FCC's own Linux on this phone, with every language: C/C++, Rust, Go, Java, Node.js, Python, Ruby, PHP, Perl, Lua and git. No internet inside, so nothing it runs can reach anything else.";
   };
   const start = async () => {
     status.textContent = "Starting…";

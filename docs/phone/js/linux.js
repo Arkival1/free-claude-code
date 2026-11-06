@@ -310,6 +310,13 @@ const BOX_HTML = `<!doctype html><html><head><meta charset="utf-8">
 let current = null;
 /** The FCC Linux that's running (one at a time), or null. */
 export const runningLinux = () => current;
+let lastProblem = "";
+/** Why FCC Linux last stopped by itself ("" if it didn't); reading it clears it. */
+export function takeProblem() {
+  const problem = lastProblem;
+  lastProblem = "";
+  return problem;
+}
 // What FCC Linux is fetching now (a pack the first time it's used): the
 // screen shows it, since a program waits meanwhile.
 const activityWatchers = new Set();
@@ -415,7 +422,16 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
         .catch((error) => {
           machine.activity = error.message;
           for (const watch of activityWatchers) watch(error.message);
-          post({ type: "got", id, error: error.message, retry: error.retry !== false });
+          if (error.retry === false) {
+            // v86 waits for ever on anything but "try again" (5xx), so a file
+            // that can never come (a bad checksum, a missing pack) stops FCC
+            // Linux and says why, instead of leaving a program hanging.
+            lastProblem = error.message;
+            machine.stop();
+            for (const watch of activityWatchers) watch(error.message);
+            return;
+          }
+          post({ type: "got", id, error: error.message, retry: true });
         });
     } else if (message.type === "out") {
       output += message.text;

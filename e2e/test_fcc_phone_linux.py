@@ -3,10 +3,13 @@ v86 emulator in a sealed box, runs commands and Python, keeps files, has no
 network, opens from a snapshot after the first boot, keeps a session, and
 Jarvis uses it with the linux tool."""
 
+import json
 import re
 
 import pytest
 from playwright.sync_api import Page, expect
+
+from free_claude_code.api.studio_routes import PHONE_DIR
 
 from .test_fcc_phone import open_phone
 
@@ -110,3 +113,33 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
     assert again == "import json"
     page.get_by_role("button", name="Stop").click()
     assert errors == [], errors
+
+
+def test_a_bad_pack_stops_fcc_linux_and_says_why(
+    page: Page, admin_base_url: str
+) -> None:
+    """A pack that fails its checksum is never used, and the program that
+    needed it doesn't hang: FCC Linux stops and the screen says why."""
+    page.set_default_timeout(WAIT)
+    contents = json.loads(
+        (PHONE_DIR / "linux" / "fcc-linux.json").read_text(encoding="utf-8")
+    )
+    go_pack = next(row for row in contents["packs"] if "go" in row["packages"])
+    page.route(
+        f"**/linux/{go_pack['file']}",
+        lambda route: route.fulfill(status=200, body=b"not the real pack"),
+    )
+    open_phone(page, admin_base_url, "lab/linux")
+    page.get_by_role("button", name="▶ Start FCC Linux").click()
+    status = page.locator(".linux-status")
+    expect(status).to_contain_text("Tap the terminal to type", timeout=WAIT)
+    ran = page.evaluate(
+        """async () => {
+            const { runningLinux } = await import('./js/linux.js');
+            return runningLinux().run('go version', { timeoutMs: 120000 });
+        }"""
+    )
+    assert ran["code"] == -1 and "closed" in ran["text"], ran
+    expect(status).to_contain_text("FCC Linux stopped:")
+    expect(status).to_contain_text("checksum is wrong")
+    expect(page.locator(".linux-dock iframe.linux-box")).to_have_count(0)

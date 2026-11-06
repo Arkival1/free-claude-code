@@ -258,9 +258,9 @@ def file_body(root, info: tarfile.TarInfo, body: bytes | None) -> bytes:
             return body or b""
         target = root.get(base.clean_name(info.linkname))
         if not target:
-            return b""
+            raise SystemExit(f"{info.name}: a hard link to {info.linkname}, which isn't there.")
         info, body = target
-    return body or b""
+    raise SystemExit(f"{info.name}: hard links in a loop.")
 
 
 def packs_and_names(
