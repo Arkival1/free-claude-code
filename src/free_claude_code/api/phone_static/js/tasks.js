@@ -12,7 +12,7 @@ const MAX_STEPS = 6;
 const STEP_RESULT_CHARS = 1500;
 
 export const PLANNER =
-  "You are Jarvis, planning a job for your team. Split it into 1 to 6 steps, in order. Give each step to the agent whose role fits it best, and when a step needs outside data, name the plugin from the list that fits it best (or none). Answer with JSON only, like " +
+  "You are Jarvis, planning a job for your team. Split it into 1 to 6 steps, in order. Give each step to the agent whose role fits it best, and when a step needs outside data, name the plugin from the list that fits it best (or none). Each step's "do" says in plain words what to make or find (for example "Build the village map, the knight and the gem pickups with sprites from game_art"), never just a tool name. Answer with JSON only, like " +
   '{"steps": [{"agent": "Researcher", "do": "what to do", "plugin": "Open-Meteo"}]}.';
 
 export const REVIEWER =

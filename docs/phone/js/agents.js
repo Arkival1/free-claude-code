@@ -123,8 +123,12 @@ async function history(agent) {
 }
 
 /** The tool loop: think, run the tools asked for, think again, until a reply. */
+/** Tools whose answer doesn't change within one turn. */
+const LOOKUPS = new Set(["skill", "wikipedia", "read_page", "web_search", "recall", "library", "game_art", "find_images", "list_photos", "team_status"]);
+
 async function loop(agent, system, convo, ctx, { maxRounds, onTool }) {
   const tools = specsFor(agent, ctx);
+  const seen = new Set();
   const maxTokens = ctx.maxTokens || (agent.role === "builder" ? 4000 : 1200);
   for (let round = 0; round < maxRounds; round += 1) {
     const reply = await think(agent, system, convo, round < maxRounds - 1 ? tools : [], { maxTokens });
@@ -135,7 +139,12 @@ async function loop(agent, system, convo, ctx, { maxRounds, onTool }) {
       tool_calls: reply.tool_calls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })),
     });
     for (const call of reply.tool_calls) {
-      const result = await runTool(agent, call, ctx);
+      // A look-up repeated word for word gives the same answer: say so
+      // instead of fetching it again (small models go round in circles).
+      const key = LOOKUPS.has(call.name) && !(call.name === "game_art" && call.arguments && call.arguments.action === "add") ? `${call.name}:${JSON.stringify(call.arguments || {})}` : "";
+      const repeat = key && seen.has(key);
+      if (key) seen.add(key);
+      const result = repeat ? `You already did exactly this (${call.name}); its answer is above. Don't repeat it: use what you found and do the next step.` : await runTool(agent, call, ctx);
       if (onTool) await onTool(call, result);
       convo.push({ role: "tool", tool_call_id: call.id, content: result.slice(0, 16000) });
     }

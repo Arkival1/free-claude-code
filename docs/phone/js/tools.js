@@ -205,7 +205,7 @@ export const SPECS = {
     },
   },
   start_project: {
-    description: `Start (or switch to) a project, a folder of files for a website or app. For a new one, pick the closest starter template (${Object.entries(TEMPLATES).map(([name, t]) => `${name}: ${t.about}`).join("; ")}; ${GAME3D_ABOUT}), then make it the user's.`,
+    description: `Start (or switch to) a project, a folder of files for a website or app. For a new one, pick the closest starter template (${Object.entries(TEMPLATES).map(([name, t]) => `${name}: ${t.about}`).join("; ")}; ${GAME3D_ABOUT}), then make it the user's. A 2D game (platformer, top-down RPG, puzzle, shooter) starts from game and gets its sprites from game_art; game3d is only for a 3D action game.`,
     parameters: {
       type: "object",
       properties: { name: text("The project's name."), template: { type: "string", enum: [...Object.keys(TEMPLATES), "game3d"], description: "A starter template for a new project." } },
@@ -412,7 +412,10 @@ export async function runTool(agent, call, ctx) {
       case "start_task": {
         const { startTask } = await import("./tasks.js");
         const task = await startTask(String(args.goal || ""), agent.name);
-        return `Started the job on this phone (${task.id}): planning the steps now. The user can follow it on More, Tasks.`;
+        // The team does the job's steps in order: handing its parts out again
+        // as well would put two agents on the same work.
+        ctx.taskStarted = task.id;
+        return `Started the job on this phone (${task.id}): planning the steps now; the team does them in order. Don't hand its parts out with ask_agent as well. Tell the user it has started and that they can follow it on More, Tasks.`;
       }
       case "pc_task": {
         if (args.action === "status") {
@@ -544,6 +547,7 @@ export async function runTool(agent, call, ctx) {
       }
       case "ask_agent":
         if (!hooks.delegate) return "Teammates can't be reached right now.";
+        if (ctx.taskStarted) return `The job is already running on Tasks (${ctx.taskStarted}), and its steps go to the team in order. Don't hand out its parts as well: tell the user it has started.`;
         return await hooks.delegate(agent, String(args.agent || ""), String(args.task || ""), String(args.project || ""), ctx);
       case "team_status":
         return hooks.teamStatus ? hooks.teamStatus() : "Nobody is working.";
