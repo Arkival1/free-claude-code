@@ -65,6 +65,7 @@ const SHELL = [
   "js/godot.js",
   "js/sha256.js",
   "js/linuxfiles.js",
+  "js/linuxnet.js",
   "js/linux.js",
   "js/views/linux.js",
   "js/views/godot.js",
