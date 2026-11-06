@@ -54,6 +54,37 @@ export const PROVIDERS = {
     keyUrl: "https://dashboard.cohere.com/api-keys",
     note: "Free trial key, about 1,000 calls a month (Command models).",
   },
+  ovh: {
+    label: "OVHcloud AI (no key)",
+    base: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+    keyUrl: "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/catalog/",
+    noKey: true,
+    note: "Free with no sign-up and no key (EU, rate-limited): gpt-oss 120B, Qwen, Llama. Off until you switch it on here.",
+  },
+  requesty: {
+    label: "Requesty (free models)",
+    base: "https://router.requesty.ai/v1",
+    keyUrl: "https://app.requesty.ai/api-keys",
+    note: "A router with a dozen free models (Nemotron Ultra, Gemma); FCC uses only the free ones.",
+  },
+  nous: {
+    label: "Nous Portal (free models)",
+    base: "https://inference-api.nousresearch.com/v1",
+    keyUrl: "https://portal.nousresearch.com",
+    note: "Free plan with its :free models; FCC uses only those.",
+  },
+  aion: {
+    label: "Aion Labs",
+    base: "https://api.aionlabs.ai/v1",
+    keyUrl: "https://www.aionlabs.ai/app/api-keys/",
+    note: "Free plan with a daily allowance, no card.",
+  },
+  zai: {
+    label: "Z.ai (GLM Flash)",
+    base: "https://api.z.ai/api/paas/v4",
+    keyUrl: "https://z.ai/manage-apikey/apikey-list",
+    note: "Its GLM Flash model is free.",
+  },
   custom: {
     label: "Other (OpenAI-compatible)",
     base: "",
@@ -65,9 +96,14 @@ export const PROVIDERS = {
     note: "Thinks with your PC's main AI. The PC must be on and paired.",
   },
 };
-export const CLOUD = ["gemini", "groq", "openrouter", "cerebras", "mistral", "huggingface", "cohere", "custom"];
+export const CLOUD = ["gemini", "groq", "openrouter", "cerebras", "mistral", "huggingface", "cohere", "ovh", "requesty", "nous", "aion", "zai", "custom"];
 
 export class BrainError extends Error {}
+
+/** What a key-free service's "key" is set to once the user switches it on
+ * (it stays off until then, so the phone never sends anything to it
+ * unasked); no Authorization header goes with it. */
+export const NO_KEY = "no-key-needed";
 
 /** The brain the agent (or the default) is set to. */
 export const chosenBrain = (agent) => (agent.brain && agent.brain !== "default" ? agent.brain : state.settings.brain);
@@ -76,7 +112,7 @@ export const chosenBrain = (agent) => (agent.brain && agent.brain !== "default" 
  * that is: a model on this phone, then a cloud API key, and the PC last, so
  * the phone never relies on the PC (owner, 6.108). Memory rules follow the
  * brain really used (isPrivate reads this). */
-export const FALLBACK_ORDER = ["local", "gemini", "groq", "cerebras", "mistral", "openrouter", "huggingface", "cohere", "custom", "pc"];
+export const FALLBACK_ORDER = ["local", "gemini", "groq", "cerebras", "mistral", "openrouter", "requesty", "nous", "huggingface", "zai", "aion", "cohere", "ovh", "custom", "pc"];
 
 // A turn pins its agent's brain at the start (agents.js), like the PC: if
 // that brain goes away mid-turn the turn stops, instead of moving what a
@@ -194,6 +230,11 @@ export function bestModel(brain, rows) {
   if (brain === "mistral") return first([/^mistral-large-latest$/, /^mistral-medium-latest$/, /^mistral-small-latest$/]);
   if (brain === "huggingface") return first([/^openai\/gpt-oss-120b$/, /^Qwen\/Qwen3\.5-27B$/, /^Qwen\/Qwen3/, /^meta-llama\//]);
   if (brain === "cohere") return first([/^command-a(?!.*(vision|reasoning|translate))/, /^command-r-plus/, /^command/]);
+  if (brain === "ovh") return first([/^gpt-oss-120b$/, /^Qwen3\.5-397B/, /^Meta-Llama-3_3-70B/, /^gpt-oss/]);
+  if (brain === "requesty") return first([/nemotron-3-ultra/, /nemotron-3-super/, /gemma-4-31b/, /nemotron/]);
+  if (brain === "nous") return first([/beam-1\.0-501b/, /step-3\.7-flash/, /longcat/, /:free$/]);
+  if (brain === "aion") return first([/^aion-labs\/aion-3\.5$/, /^aion-labs\/aion-3\.0$/, /aion/]);
+  if (brain === "zai") return first([/^glm-[\d.]+-flash$/, /flash/]);
   return ids[0] || "";
 }
 
@@ -201,7 +242,7 @@ export async function listModels(brain) {
   const base = baseOf(brain);
   const key = state.settings.keys[brain];
   if (!base) throw new BrainError("Add the service's address first.");
-  const response = await request(`${base}/models`, { headers: key ? { Authorization: `Bearer ${key}` } : {} }, 20000);
+  const response = await request(`${base}/models`, { headers: key && key !== NO_KEY ? { Authorization: `Bearer ${key}` } : {} }, 20000);
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new BrainError(`${PROVIDERS[brain].label} refused that key. Check it and paste it again.`);
     throw new BrainError(`${PROVIDERS[brain].label}: ${await errorText(response)}`);
@@ -209,6 +250,11 @@ export async function listModels(brain) {
   const body = await response.json();
   let rows = (body.data || body.models || []).map((row) => ({ ...row, id: cleanId(row.id || row.name) }));
   if (brain === "openrouter") rows = rows.filter((row) => row.id.endsWith(":free"));
+  // Free keys stay on free models: Requesty's priced at 0 (and able to use
+  // tools), Nous's :free ones.
+  if (brain === "requesty") rows = rows.filter((row) => row.input_price === 0 && row.output_price === 0 && row.api === "chat" && row.supports_tool_calling);
+  if (brain === "nous") rows = rows.filter((row) => row.id.endsWith(":free"));
+  if (brain === "ovh") rows = rows.filter((row) => !/whisper|tts|embed|bge|guard|diffusion|VL-/i.test(row.id));
   rows.sort((a, b) => a.id.localeCompare(b.id));
   state.modelLists[brain] = rows;
   if (!state.settings.models[brain] || !rows.some((row) => row.id === state.settings.models[brain])) {
@@ -266,7 +312,8 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
   const useTools = tools.length && !state.settings.noTools[`${brain}:${model}`];
   const body = { model, messages: [{ role: "system", content: system }, ...messages], temperature: 0.5, max_tokens: maxTokens };
   if (useTools) body.tools = tools;
-  const headers = { Authorization: `Bearer ${state.settings.keys[brain]}`, "Content-Type": "application/json" };
+  const headers = { "Content-Type": "application/json" };
+  if (state.settings.keys[brain] !== NO_KEY) headers.Authorization = `Bearer ${state.settings.keys[brain]}`;
   if (brain === "openrouter") {
     headers["HTTP-Referer"] = location.origin;
     headers["X-Title"] = "FCC Phone";

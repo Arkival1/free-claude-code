@@ -142,9 +142,9 @@ export function newAgent(base) {
 export const defaultSettings = () => ({
   brain: "",
   localModel: "",
-  keys: { gemini: "", groq: "", openrouter: "", cerebras: "", mistral: "", huggingface: "", cohere: "", custom: "" },
+  keys: { gemini: "", groq: "", openrouter: "", cerebras: "", mistral: "", huggingface: "", cohere: "", ovh: "", requesty: "", nous: "", aion: "", zai: "", custom: "" },
   customBase: "",
-  models: { gemini: "", groq: "", openrouter: "", cerebras: "", mistral: "", huggingface: "", cohere: "", custom: "" },
+  models: { gemini: "", groq: "", openrouter: "", cerebras: "", mistral: "", huggingface: "", cohere: "", ovh: "", requesty: "", nous: "", aion: "", zai: "", custom: "" },
   noTools: {},
   pc: null,
   cloudSeesPc: false,

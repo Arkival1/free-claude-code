@@ -630,3 +630,87 @@ def test_more_free_cloud_ais_can_be_jarvis_brain_or_adviser(
         "async () => JSON.stringify((await import('./js/state.js')).state.settings.keys)"
     )
     assert "test-cerebras-key" in backup  # kept on the phone (backups drop keys)
+
+
+OVH = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
+REQUESTY = "https://router.requesty.ai/v1"
+
+
+def test_a_key_free_ai_stays_off_until_switched_on_and_free_keys_stay_free(
+    page: Page, admin_base_url: str
+) -> None:
+    """OVHcloud answers with no key: FCC never uses it until the user switches
+    it on, and then sends no key at all. Requesty and Nous carry paid models
+    too: FCC lists and picks only their free ones."""
+    asked: list[tuple[dict, dict]] = []
+
+    def ovh(route: Route) -> None:
+        if route.request.url.endswith("/models"):
+            rows = [
+                {"id": "whisper-large-v3"},
+                {"id": "gpt-oss-20b"},
+                {"id": "gpt-oss-120b"},
+            ]
+            route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+            return
+        asked.append(
+            (route.request.headers, json.loads(route.request.post_data or "{}"))
+        )
+        route.fulfill(
+            headers=CORS,
+            body=json.dumps({"choices": [{"message": say("Hi from OVH.")}]}),
+        )
+
+    def requesty(route: Route) -> None:
+        rows = [
+            {
+                "id": "openai/gpt-6",
+                "api": "chat",
+                "input_price": 1e-06,
+                "output_price": 1e-05,
+                "supports_tool_calling": True,
+            },
+            {
+                "id": "nvidia/nemotron-3-ultra-550b-a55b",
+                "api": "chat",
+                "input_price": 0,
+                "output_price": 0,
+                "supports_tool_calling": True,
+            },
+            {
+                "id": "poolside/laguna-xs.2",
+                "api": "chat",
+                "input_price": 0,
+                "output_price": 0,
+                "supports_tool_calling": False,
+            },
+        ]
+        route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+
+    page.route(f"{OVH}/**", ovh)
+    page.route(f"{REQUESTY}/**", requesty)
+    open_phone(page, admin_base_url)
+    ready = "async (name) => (await import('./js/brains.js')).brainReady(name)"
+    assert page.evaluate(ready, "ovh") is False
+    go(page, "settings")
+    page.get_by_role("button", name="Switch on OVHcloud AI (no key)").click()
+    expect(page.get_by_text("using gpt-oss-120b")).to_be_visible()
+    assert page.evaluate(ready, "ovh") is True
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Hi")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text("Hi from OVH.")
+    headers, body = asked[-1]
+    assert "authorization" not in {name.lower() for name in headers}
+    assert body["model"] == "gpt-oss-120b"
+
+    go(page, "settings")
+    page.get_by_role("button", name="Switch off OVHcloud AI (no key)").click()
+    expect(page.get_by_text("Switched off: FCC sends nothing to it.")).to_be_visible()
+    assert page.evaluate(ready, "ovh") is False
+    page.get_by_label("Requesty (free models) key").fill("test-requesty-key")
+    page.get_by_role("button", name="Save Requesty (free models)").click()
+    expect(
+        page.get_by_text("1 models; using nvidia/nemotron-3-ultra-550b-a55b")
+    ).to_be_visible()

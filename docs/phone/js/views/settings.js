@@ -1,7 +1,7 @@
 // Settings: the default brain, free cloud keys, the PC link, voice, backups.
 import { state, save, changed, chatOf, newAgent, DEFAULT_TEAM, VERSION } from "../state.js";
 import { el, button, card, go, notify, ago, bytes } from "../ui.js";
-import { PROVIDERS, CLOUD, listModels, brainReady, think } from "../brains.js";
+import { PROVIDERS, CLOUD, NO_KEY, listModels, brainReady, think } from "../brains.js";
 import { pair, unpair, sync } from "../sync.js";
 import * as engine from "../engine.js";
 import { store } from "../store.js";
@@ -16,7 +16,7 @@ const FEATURES = [
   ["Agents", "The team: each agent's brain, tools and instructions", "agents"],
   ["Models", "AI models on this phone: download, load, test speed", "models"],
   ["Brain", "Which AI every agent thinks with by default", "settings"],
-  ["Free cloud keys", "Gemini, Groq, OpenRouter, Cerebras, Mistral, Hugging Face, Cohere or any OpenAI-style service", "settings"],
+  ["Free cloud keys", "Gemini, Groq, OpenRouter, Cerebras, Mistral, Hugging Face, Cohere, OVHcloud (no key), Requesty, Nous, Aion, Z.ai or any OpenAI-style service", "settings"],
   ["Connect to my PC", "Pair with FCC Studio on your PC (optional)", "settings"],
   ["Voice", "Jarvis speaks his replies", "settings"],
   ["Backup", "Save or restore everything on this phone", "settings"],
@@ -128,7 +128,7 @@ export function render(view) {
 function providerCard(id) {
   const provider = PROVIDERS[id];
   const settings = state.settings;
-  const key = el("input", { type: "password", value: settings.keys[id] || "", "aria-label": `${provider.label} key`, autocomplete: "off", placeholder: "Paste your key" });
+  const key = el("input", { type: "password", value: settings.keys[id] === NO_KEY ? "" : settings.keys[id] || "", "aria-label": `${provider.label} key`, autocomplete: "off", placeholder: provider.noKey ? "No key needed: press Switch on" : "Paste your key" });
   const base = id === "custom" ? el("input", { value: settings.customBase || "", "aria-label": "Service address", placeholder: "https://…/v1" }) : null;
   const models = el("select", { "aria-label": `${provider.label} model` });
   const status = el("p", { class: "muted", role: "status" });
@@ -144,7 +144,7 @@ function providerCard(id) {
     changed("settings");
   });
   const saveKey = async () => {
-    settings.keys[id] = key.value.trim();
+    settings.keys[id] = key.value.trim() || (provider.noKey ? NO_KEY : "");
     if (base) settings.customBase = base.value.trim();
     if (!settings.brain && settings.keys[id]) settings.brain = id;
     await save.settings();
@@ -163,7 +163,20 @@ function providerCard(id) {
     base ? el("label", {}, ["Address", base]) : null,
     el("label", {}, ["Key", key]),
     el("label", {}, ["Model", models]),
-    button("Save", saveKey, { "aria-label": `Save ${provider.label}` }),
+    button(provider.noKey ? "Switch on" : "Save", saveKey, { "aria-label": `${provider.noKey ? "Switch on" : "Save"} ${provider.label}` }),
+    provider.noKey && settings.keys[id] === NO_KEY
+      ? button(
+          "Switch off",
+          async () => {
+            settings.keys[id] = "";
+            if (settings.brain === id) settings.brain = "";
+            await save.settings();
+            status.textContent = "Switched off: FCC sends nothing to it.";
+            changed("settings");
+          },
+          { "aria-label": `Switch off ${provider.label}` },
+        )
+      : null,
     status,
   ]);
 }

@@ -2878,10 +2878,17 @@ account, and costs nothing.
     water, brick); particles (dust, leaves, fireflies, rain, snow,
     embers); day and night; and wandering NPCs and animals.
   - **Free cloud brains**: besides Gemini, Groq and OpenRouter, Settings
-    takes free keys for Cerebras, Mistral, Hugging Face and Cohere (the
-    free-LLM-API providers that answer apps in a phone browser; NVIDIA NIM,
-    GitHub Models and SambaNova don't). Any of them can be an agent's brain
-    or a Playground adviser guiding Jarvis on the phone model, at no cost.
+    takes free keys for Cerebras, Mistral, Hugging Face, Cohere, Requesty
+    and Nous (FCC lists and picks only their free models), Aion Labs and
+    Z.ai (GLM Flash), and OVHcloud AI Endpoints needs no key at all (off
+    until you press Switch on; Switch off stops it). Picked from the GitHub
+    free-LLM-API lists (amardeeplakshkar, mnfst, open-free-llm-api,
+    mvalentsev, ai-gateways, nejib1) and checked one by one to answer apps
+    in a phone browser; left out: NVIDIA NIM, GitHub Models, SambaNova,
+    Kilo and Ollama Cloud (refuse browser apps), trial-credit-only services,
+    China-only sign-ups, and LLM7 and Pollinations (they hand out other
+    companies' models through shared keys). Any of them can be an agent's
+    brain or a Playground adviser guiding Jarvis on the phone model.
   - **Game art** (`game_art` tool, Jarvis and the Builder): 4,000 2D
     sprites from FCC's Kenney packs (CC0): characters, enemies, tiles,
     items, vehicles, spaceships, cards, UI and icons, from 37 packs. One
