@@ -336,6 +336,7 @@ const BOX_HTML = `<!doctype html><html><head><meta charset="utf-8">
 
 /* --------------------------------------------------------- the machine */
 
+const IDLE_MARK = "\x1b]fcc;idle\x07";
 let current = null;
 /** The FCC Linux that's running (one at a time), or null. */
 export const runningLinux = () => current;
@@ -402,6 +403,24 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
   // Is the shell at its prompt? bash says so with markers (PROMPT_COMMAND:
   // idle, PS0: busy). Kept and saved machines were kept at their prompt.
   const idleWaiters = new Set();
+  // Every line FCC types brings exactly one prompt back; a prompt nobody at
+  // FCC is owed is the user's (projects then bring changed files back).
+  let owed = 0;
+  let markerTail = "";
+  const countPrompts = (text) => {
+    const scan = markerTail + text;
+    let at = scan.indexOf(IDLE_MARK);
+    let users = 0;
+    while (at >= 0) {
+      if (at + IDLE_MARK.length > markerTail.length) {
+        if (owed > 0) owed -= 1;
+        else users += 1;
+      }
+      at = scan.indexOf(IDLE_MARK, at + 1);
+    }
+    markerTail = scan.slice(-(IDLE_MARK.length - 1));
+    if (users && machine.ready && machine.onUserIdle) machine.onUserIdle();
+  };
   const setIdle = (value) => {
     machine.idle = value;
     if (!value) return;
@@ -477,6 +496,7 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
       const busyAt = fresh.lastIndexOf("\x1b]fcc;busy\x07");
       settle();
       if (idleAt >= 0 || busyAt >= 0) setIdle(idleAt > busyAt);
+      countPrompts(String(message.text));
       // A fresh boot is ready at its first prompt; a restored one answers a command instead.
       if (!machine.ready && !state && /fcc\x1b\[0m:/.test(output)) markReady("boot");
     } else if (message.type === "ready") {
@@ -598,7 +618,10 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
     const id = nextId();
     const encoded = base64(command);
     // Ctrl-E Ctrl-U first: anything half-typed at the prompt is cleared, not run with it.
-    const line = (text) => post({ type: "send", text: `\x05\x15 ${text}\n` });
+    const line = (text) => {
+      owed += 1;
+      post({ type: "send", text: `\x05\x15 ${text}\n` });
+    };
     return new Promise((resolve, reject) => {
       let over = false;
       const finish = (error, result) => {

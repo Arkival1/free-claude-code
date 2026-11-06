@@ -233,3 +233,57 @@ def test_the_internet_switch_github_and_the_token_stay_outside_linux(
     assert "said no" in pushed["text"] and "exit=1" in pushed["text"], pushed
     assert not any(item["method"] == "PATCH" for item in seen)
     expect(page.locator(".linux-net-log")).to_contain_text("denied")
+
+
+PIXEL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+
+
+def test_projects_are_folders_in_fcc_linux_both_ways(
+    page: Page, admin_base_url: str
+) -> None:
+    """Each FCC project is /projects/<project> in FCC Linux: its files are
+    there when it opens, and files changed there (by Jarvis or typed in the
+    terminal) come back into the project."""
+    page.set_default_timeout(WAIT)
+    open_phone(page, admin_base_url, "lab/linux")
+    page.evaluate(
+        """async (pixel) => {
+            const projects = await import('./js/projects.js');
+            const project = await projects.createProject('Shop site', 'you');
+            await projects.writeFile(project, 'index.html', '<h1>Shop</h1>\\n', 'you');
+            await projects.putPicture(project, 'img/dot.png', pixel, 'you');
+        }""",
+        PIXEL,
+    )
+    page.get_by_role("button", name="▶ Start FCC Linux").click()
+    expect(page.locator(".linux-status")).to_contain_text(
+        "Tap the terminal to type", timeout=WAIT
+    )
+    done = page.evaluate(
+        r"""async () => {
+            const { runTool } = await import('./js/tools.js');
+            const { runningLinux } = await import('./js/linux.js');
+            const jarvis = window.fccPhone.state.agents.find((a) => a.role === 'main');
+            const ctx = { depth: 0, chain: [], built: new Set() };
+            const call = (args) => runTool(jarvis, { name: 'linux', arguments: args }, ctx);
+            const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+            for (let i = 0; i < 40 && !(await runningLinux().run('ls /projects/shop-site 2>/dev/null')).text.includes('index.html'); i += 1) await wait(500);
+            const out = {};
+            out.inside = await call({ action: 'run', command: 'cat /projects/shop-site/index.html; file /projects/shop-site/img/dot.png' });
+            out.edited = await call({ action: 'run', command: 'sed -i "s/Shop/Shop (built in Linux)/" /projects/shop-site/index.html && echo "body{color:red}" > /projects/shop-site/style.css' });
+            runningLinux().send('echo typed > /projects/shop-site/notes.txt\n');
+            for (let i = 0; i < 40; i += 1) {
+                const project = window.fccPhone.state.projects.find((p) => p.slug === 'shop-site');
+                if (project.files['notes.txt']) break;
+                await wait(500);
+            }
+            const project = window.fccPhone.state.projects.find((p) => p.slug === 'shop-site');
+            out.files = { index: project.files['index.html'], style: project.files['style.css'], notes: project.files['notes.txt'] };
+            return out;
+        }"""
+    )
+    assert "<h1>Shop</h1>" in done["inside"] and "PNG image" in done["inside"], done
+    assert "Saved back to FCC Projects" in done["edited"], done
+    assert done["files"]["index"] == "<h1>Shop (built in Linux)</h1>\n"
+    assert done["files"]["style"] == "body{color:red}\n"
+    assert done["files"]["notes"] == "typed\n"

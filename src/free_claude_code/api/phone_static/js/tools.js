@@ -82,11 +82,11 @@ export const SPECS = {
     },
   },
   linux: {
-    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time), interrupt (Ctrl-C: stop what's running so the terminal is back at its prompt). Commands only run at the prompt: if the user has a program open (nano, htop), say so instead of interrupting it. It has every language: C/C++ (gcc, g++, cmake, make, gdb), Rust (rustc, cargo), Go, Java 8 (javac, java), Node.js (npm), Python 3.12 (pip), Ruby, PHP, Perl, Lua, plus git, bash, nano, tmux, sqlite3 and jq; files live in /root. A language's files download the first time it's used (give that run seconds: 300). Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
+    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time), interrupt (Ctrl-C: stop what's running so the terminal is back at its prompt), sync (bring the user's FCC Projects in and changes back). The user's FCC Projects are folders in /projects (/projects/<project>/...): work on them there and changed files go back to FCC Projects after each run. Commands only run at the prompt: if the user has a program open (nano, htop), say so instead of interrupting it. It has every language: C/C++ (gcc, g++, cmake, make, gdb), Rust (rustc, cargo), Go, Java 8 (javac, java), Node.js (npm), Python 3.12 (pip), Ruby, PHP, Perl, Lua, plus git, bash, nano, tmux, sqlite3 and jq; files live in /root. A language's files download the first time it's used (give that run seconds: 300). Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["run", "write", "read", "info", "keep", "interrupt"] },
+        action: { type: "string", enum: ["run", "write", "read", "info", "keep", "interrupt", "sync"] },
         command: text("run: the shell command (bash; no keyboard input: it reads nothing)."),
         path: text("write or read: the file's path, e.g. /root/hello.py."),
         content: text("write: the file's whole text."),
@@ -339,7 +339,11 @@ export async function runTool(agent, call, ctx) {
           if (!command) return "Say the command to run.";
           const result = await machine.run(command, { timeoutMs: Math.min(300, Math.max(1, Number(args.seconds) || 60)) * 1000 });
           feed(agent.name, `Ran in FCC Linux: ${command.slice(0, 80)}`);
-          return `exit code ${result.code}\n${clip(result.text) || "(no output)"}`;
+          // Files changed in /projects go back into their FCC projects.
+          const { syncOut } = await import("./linuxprojects.js");
+          const back = await syncOut(machine, agent.name).catch(() => []);
+          const saved = back.length ? `\n(Saved back to FCC Projects: ${back.slice(0, 8).join(", ")}${back.length > 8 ? "…" : ""})` : "";
+          return `exit code ${result.code}\n${clip(result.text) || "(no output)"}${saved}`;
         }
         if (action === "write") {
           const path = String(args.path || "").trim();
@@ -364,7 +368,13 @@ export async function runTool(agent, call, ctx) {
           feed(agent.name, "Pressed Ctrl-C in FCC Linux.");
           return (await machine.waitIdle(3000)) ? "Sent Ctrl-C: the terminal is back at its prompt." : "Sent Ctrl-C, but something still holds the terminal (a program that ignores Ctrl-C, like nano or htop: its quit key is Ctrl-X or q). Ask the user to close it.";
         }
-        return "action is run, write, read, info, keep or interrupt.";
+        if (action === "sync") {
+          const { syncIn, syncOut } = await import("./linuxprojects.js");
+          const back = await syncOut(machine, agent.name);
+          const wrote = await syncIn(machine);
+          return `Projects are in /projects (one folder each). Wrote ${wrote} changed file(s) in; brought ${back.length} back to FCC Projects.`;
+        }
+        return "action is run, write, read, info, keep, interrupt or sync.";
       }
       case "godot": {
         if (args.project) ctx.project = projects.findProject(String(args.project)) || ctx.project;

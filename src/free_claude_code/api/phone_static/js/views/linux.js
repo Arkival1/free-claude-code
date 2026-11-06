@@ -7,6 +7,18 @@ import { startLinux, runningLinux, forgetSession, hasSession, loadLinux, watchAc
 import { status as filesStatus, getEverything, hasManifest } from "../linuxfiles.js";
 import { internetOn, setInternet, githubTokenSaved, setGithubToken, netLog, watchNet } from "../linuxnet.js";
 import { state } from "../state.js";
+import { syncIn, syncOut } from "../linuxprojects.js";
+
+/** Your projects as /projects/<name> in FCC Linux: written in once it's
+ * ready, and changed files brought back after commands you type. */
+function shareProjects(machine) {
+  let pending = null;
+  syncIn(machine).catch((error) => notify(error.message));
+  machine.onUserIdle = () => {
+    clearTimeout(pending);
+    pending = setTimeout(() => syncOut(machine, "you").catch(() => []), 600);
+  };
+}
 
 const MB = 1048576;
 let dockNode = null;
@@ -26,7 +38,12 @@ export async function ensureLinux({ onProgress, onStatus } = {}) {
   const running = runningLinux();
   if (running && running.ready) return running;
   if (!starting) {
-    starting = startLinux(dock(), { onProgress, onStatus }).finally(() => (starting = null));
+    starting = startLinux(dock(), { onProgress, onStatus })
+      .then((machine) => {
+        shareProjects(machine);
+        return machine;
+      })
+      .finally(() => (starting = null));
   }
   return starting;
 }
