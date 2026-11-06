@@ -9,6 +9,7 @@ var speed := 1.5
 var _home := Vector3.ZERO
 var _target := Vector3.ZERO
 var _pause := 1.0
+var _walk := 0.0
 var _flat := false
 
 
@@ -32,15 +33,24 @@ func _physics_process(delta: float) -> void:
 	var body := get_parent()
 	if _pause > 0.0:
 		_pause -= delta
+		if body is CharacterBody3D and not (body as CharacterBody3D).is_on_floor():
+			var faller := body as CharacterBody3D
+			faller.velocity.y -= 9.8 * delta
+			faller.move_and_slide()
 		if _pause <= 0.0:
 			var angle := randf() * TAU
 			var reach := randf_range(0.3, 1.0) * radius * (16.0 if _flat else 1.0)
 			_target = _home + (Vector3(cos(angle), sin(angle), 0) if _flat else Vector3(cos(angle), 0, sin(angle))) * reach
+			_walk = 0.0
 		return
 	var now := _where()
 	var away := _target - now
+	if not _flat:
+		away.y = 0.0  # walk on the ground: a body that settled lower still arrives
 	var step := speed * (16.0 if _flat else 1.0)
-	if away.length() < step * delta * 2.0:
+	_walk += delta
+	# Arrived, or stuck against something for too long: rest, then go on.
+	if away.length() < step * delta * 2.0 or _walk > radius * 2.5 / maxf(speed, 0.1) + 1.0:
 		_pause = randf_range(1.0, 3.5)
 		if body is CharacterBody2D or body is CharacterBody3D:
 			body.set("velocity", Vector2.ZERO if _flat else Vector3.ZERO)
@@ -53,10 +63,17 @@ func _physics_process(delta: float) -> void:
 		var mover := body as CharacterBody3D
 		mover.velocity = Vector3(heading.x, mover.velocity.y - 9.8 * delta, heading.z)
 		mover.move_and_slide()
-		mover.look_at(mover.global_position + Vector3(heading.x, 0, heading.z), Vector3.UP)
+		_face(mover, heading)
 	elif _flat:
 		(body as Node2D).position += Vector2(heading.x, heading.y) * delta
 	else:
 		var node := body as Node3D
 		node.position += heading * delta
-		node.look_at(node.global_position + Vector3(heading.x, 0, heading.z), Vector3.UP)
+		_face(node, heading)
+
+
+## Turn to face the way it walks (never straight up or down).
+func _face(node: Node3D, heading: Vector3) -> void:
+	var flat := Vector3(heading.x, 0, heading.z)
+	if flat.length() > 0.001:
+		node.look_at(node.global_position + flat, Vector3.UP)

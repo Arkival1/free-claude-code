@@ -45,7 +45,8 @@ const NOISE = /^Failed to assign PWA callback/;
 
 async function fetchChecked([path, sum], onProgress) {
   const response = await fetch(new URL(`../${path}`, import.meta.url));
-  if (!response.ok) throw new Error(`Couldn't get Godot's ${path.split("/").pop()} (${response.status}). Try again with the internet on.`);
+  const what = path.includes("/fcc/") ? `FCC's game kit file ${path.split("/").pop()}` : `Godot's ${path.split("/").pop()}`;
+  if (!response.ok) throw new Error(`Couldn't get ${what} (${response.status}). Try again with the internet on.`);
   let bytes;
   if (onProgress && response.body) {
     const total = Number(response.headers.get("content-length")) || ENGINE_BYTES;
@@ -72,7 +73,7 @@ async function fetchChecked([path, sum], onProgress) {
   if ((await digest(bytes)) !== sum) {
     // Drop the bad copy, so the next try fetches it again.
     if (globalThis.caches) await caches.open(GODOT_CACHE).then((cache) => cache.delete(response.url)).catch(() => false);
-    throw new Error(`Godot's ${path.split("/").pop()} isn't the file FCC shipped (its checksum is wrong), so it wasn't run. Reload the app to fetch it again.`);
+    throw new Error(`${what} isn't the file FCC shipped (its checksum is wrong), so it wasn't run. Reload the app to fetch it again.`);
   }
   return bytes;
 }
@@ -306,8 +307,12 @@ export function usesKit(files) {
 export async function kitFiles(files, onProgress) {
   if (!usesKit(files)) return {};
   const out = {};
-  for (const [path, text] of Object.entries(KIT_TEXT)) out[`fcc/${path}`] = text;
-  for (const entry of KIT_FONTS) out[entry[0].replace(/^godot\//, "")] = new Uint8Array(await fetchChecked(entry, onProgress && ((done, total) => onProgress(done, total, entry[0]))));
+  // The game's own files win (a pack never holds a path twice).
+  for (const [path, text] of Object.entries(KIT_TEXT)) if (!(`fcc/${path}` in files)) out[`fcc/${path}`] = text;
+  for (const entry of KIT_FONTS) {
+    const path = entry[0].replace(/^godot\//, "");
+    if (!(path in files)) out[path] = new Uint8Array(await fetchChecked(entry, onProgress && ((done, total) => onProgress(done, total, entry[0]))));
+  }
   return out;
 }
 

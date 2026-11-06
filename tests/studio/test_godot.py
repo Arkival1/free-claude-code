@@ -197,6 +197,8 @@ async def test_agents_start_a_godot_game_and_read_demos(make_studio):
     assert not started.failed, started.text
     paths = {item.path for item in await studio.workspace.files(site.id)}
     assert {"project.godot", "main.gd", "assets/tiles.png"} <= paths
+    # FCC's kit comes too, its fonts with their import notes.
+    assert {"fcc/kit.gd", "fcc/fonts/emoji.ttf", "fcc/fonts/emoji.ttf.import"} <= paths
     found = await run(studio, context, "godot", action="demos", query="tilemap")
     assert not found.failed and found.data["demos"]
     shown = await run(
@@ -274,6 +276,29 @@ func _ready() -> void:
 	label.text = "★ ♥ ⚔ ☀ ♞ → ✓ 😀"
 	add_child(label)
 	Kit.fit_screen(get_window(), 560)
+	# A wanderer that settled lower than where it started still arrives
+	# (rests) and never leaves its circle; a 2D one stays in its circle too.
+	var animal := Node3D.new()
+	animal.position = Vector3(0, 1, 0)
+	add_child(animal)
+	var mind: Node = Kit.wander(animal, 2.0, 2.0)
+	animal.position.y = 0.4
+	var person := StaticBody2D.new()
+	person.position = Vector2(100, 100)
+	add_child(person)
+	var feet: Node = Kit.wander(person, 1.5, 1.0)
+	var rests := 0
+	var resting := true
+	for i in 1500:
+		mind.call("_physics_process", 1.0 / 60.0)
+		feet.call("_physics_process", 1.0 / 60.0)
+		var now_resting: bool = mind.get("_pause") > 0.0
+		if now_resting and not resting:
+			rests += 1
+		resting = now_resting
+		assert(Vector2(animal.position.x, animal.position.z).length() <= 2.05)
+		assert(person.position.distance_to(Vector2(100, 100)) <= 24.5)
+	assert(rests >= 2)
 	print("KIT OK")
 """
 

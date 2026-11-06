@@ -3889,6 +3889,8 @@ _PHONE_TYPES = {
     # FCC Linux 2's system packs (js/linuxfiles.js checks each one).
     ".pack": "application/octet-stream",
     ".json": "application/json",
+    # FCC's Godot kit fonts (js/godot.js checks each one).
+    ".ttf": "font/ttf",
 }
 
 

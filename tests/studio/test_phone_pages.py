@@ -89,6 +89,10 @@ async def test_the_pc_serves_the_phone_app(make_studio):
             godot = await client.get("/phone/godot/godot.wasm.gz")
             assert godot.headers["content-type"] == "application/gzip"
             assert godot.content[:2] == b"\x1f\x8b"
+            # FCC's Godot kit fonts (the phone checks their checksums).
+            font = await client.get("/phone/godot/fcc/fonts/emoji.ttf")
+            assert font.status_code == 200
+            assert font.headers["content-type"] == "font/ttf"
             for bad in (
                 "/phone/secret.txt",
                 "/phone/..%2Fstudio_static%2Fstudio.js",
