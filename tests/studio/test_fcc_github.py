@@ -9,6 +9,7 @@ import json
 import shutil
 import subprocess
 import threading
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -64,7 +65,7 @@ class FakeGitHub:
         self.calls.append((method, path))
         if path.startswith("/raw/"):
             parts = path.split("/", 5)
-            return 200, self.files[parts[5]]
+            return 200, self.files[urllib.parse.unquote(parts[5])]
         if method == "GET" and path == "/repos/o/r":
             return 200, json.dumps(
                 {"default_branch": "main", "private": False}
@@ -197,3 +198,26 @@ def test_push_refuses_when_github_moved_and_clone_stays_in_its_folder(
     assert tool.main(["clone", "o/r", str(tmp_path / "other")]) == 1
     assert "outside the folder" in capsys.readouterr().err
     assert not (tmp_path / "escape.txt").exists()
+
+
+def test_odd_names_modes_and_folders_survive_push_and_pull(github, tmp_path):
+    """A name git would quote (café.txt) pushes; a mode-only change and a
+    file that became a folder come in with pull."""
+    tool, fake = github
+    folder = tmp_path / "r"
+    assert tool.main(["clone", "o/r", str(folder)]) == 0
+    (folder / "café.txt").write_text("bonjour\n")
+    git(folder, "add", "-A")
+    git(folder, "commit", "-q", "-m", "café")
+    assert tool.main(["push", str(folder)]) == 0
+    assert fake.files["café.txt"] == b"bonjour\n"
+    # GitHub: run.sh loses its executable bit, src/app.py becomes a folder.
+    fake.modes = {}
+    fake.files.pop("src/app.py")
+    fake.files["src/app.py/main.py"] = b"print('now a package')\n"
+    fake.commit, fake.tree = "9" * 40, "8" * 40
+    assert tool.main(["pull", str(folder)]) == 0
+    assert not (folder / "run.sh").stat().st_mode & 0o111
+    assert (
+        folder / "src" / "app.py" / "main.py"
+    ).read_text() == "print('now a package')\n"

@@ -19,6 +19,7 @@ import argparse
 import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -102,14 +103,20 @@ def write_tree(folder: Path, owner: str, repo: str, commit: str, items: list[dic
     """Write the files that differ from what's here (by blob sha)."""
     written = 0
     for number, item in enumerate(items, 1):
-        if have.get(item["path"]) == item["sha"]:
+        if have.get(item["path"]) == f"{item['mode']} {item['sha']}":
             continue
         path = folder / item["path"]
-        if not path.resolve().is_relative_to(folder.resolve()):
+        if not path.resolve().is_relative_to(folder.resolve()) or ".git" in Path(item["path"]).parts:
             raise Trouble(f"GitHub listed a file outside the folder ({item['path']}).")
+        for parent in reversed(path.relative_to(folder).parents[:-1]):
+            # A file here where GitHub now has a folder: the folder wins.
+            if (folder / parent).is_file() or (folder / parent).is_symlink():
+                (folder / parent).unlink()
         path.parent.mkdir(parents=True, exist_ok=True)
         data = blob_bytes(owner, repo, commit, item, private)
-        if path.is_symlink() or path.exists():
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)  # a folder here where GitHub now has a file
+        elif path.is_symlink() or path.exists():
             path.unlink()
         if item["mode"] == "120000":
             path.symlink_to(data.decode())
@@ -125,11 +132,14 @@ def write_tree(folder: Path, owner: str, repo: str, commit: str, items: list[dic
 
 
 def local_blobs(folder: Path) -> dict[str, str]:
-    """What's committed here: path -> blob sha."""
+    """What's committed here: path -> "mode sha" (any file name, via -z)."""
     out = {}
-    for line in git(folder, "ls-tree", "-r", "HEAD").splitlines():
-        meta, path = line.split("\t", 1)
-        out[path] = meta.split()[2]
+    for row in git(folder, "ls-tree", "-r", "-z", "HEAD").split("\0"):
+        if not row:
+            continue
+        meta, path = row.split("\t", 1)
+        mode, _, sha = meta.split()
+        out[path] = f"{mode} {sha}"
     return out
 
 
@@ -173,7 +183,7 @@ def pull(args) -> None:
         print("Already up to date with GitHub.")
         return
     if git(folder, "status", "--porcelain").strip() or git(folder, "rev-parse", "HEAD").strip() != state["local"]:
-        raise Trouble("You have changes here that aren't on GitHub: push them first (fcc-github push), then pull.")
+        raise Trouble("You have changes here that aren't on GitHub: push them first (fcc-github push), then pull. (After a pull that stopped halfway, git checkout -- . && git clean -fd puts the folder back as it was.)")
     items = remote_tree(state["owner"], state["repo"], tree)
     have = local_blobs(folder)
     wanted = {item["path"] for item in items}
@@ -199,8 +209,10 @@ def push(args) -> None:
     if head != state["remote"]:
         raise Trouble("GitHub has newer commits: pull first (fcc-github pull).")
     entries = []
-    for line in git(folder, "diff", "--name-status", "--no-renames", state["local"], "HEAD").splitlines():
-        kind, path = line.split("\t", 1)
+    fields = git(folder, "diff", "--name-status", "--no-renames", "-z", state["local"], "HEAD").split("\0")
+    for kind, path in zip(fields[0::2], fields[1::2], strict=False):
+        if not kind:
+            continue
         if kind == "D":
             entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
             continue

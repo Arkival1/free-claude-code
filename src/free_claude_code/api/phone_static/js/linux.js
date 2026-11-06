@@ -28,7 +28,7 @@ const FILES = {
   kernel: ["linux/fcc-linux.kernel", "f37a5f89fefb28023b824fc71e814d2b6cc34bc27567fcdc5db75b3b95de6b2c"],
   initrd: ["linux/fcc-linux.initrd", "1fcc5236166073d5d93e7599902b992b0553d9371890dd800546c4f4a4d8f936"],
   // What's in the system: the file list and each pack with its SHA-256.
-  manifest: ["linux/fcc-linux.json", "89b3125f958f2af45a45114b09945e8a8e27f463e6ce012d34a432ec902d8f88"],
+  manifest: ["linux/fcc-linux.json", "736a6663f44b2c4c3dff110819f9c318d3083626f66163c61734d7fa86cad46e"],
 };
 /** A short hash of text (FNV-1a), for keys. */
 function shortHash(text) {
@@ -288,6 +288,17 @@ function linuxBox() {
         emulator = new V86(options);
         emulator.add_listener("serial0-output-byte", (byte) => (pending += String.fromCharCode(byte)));
         emulator.add_listener("emulator-ready", () => {
+          // Say when the user types, so FCC never types over a half-typed line.
+          const term = emulator.serial_adapter && emulator.serial_adapter.term;
+          let told = 0;
+          if (term && term.onData) {
+            term.onData(() => {
+              if (Date.now() - told > 250) {
+                told = Date.now();
+                send({ type: "typed" });
+              }
+            });
+          }
           fit();
           send({ type: "ready", restored: Boolean(job.state) });
         });
@@ -419,6 +430,7 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
       at = scan.indexOf(IDLE_MARK, at + 1);
     }
     markerTail = scan.slice(-(IDLE_MARK.length - 1));
+    if (users) machine.promptAt = Date.now();
     if (users && machine.ready && machine.onUserIdle) machine.onUserIdle();
   };
   const setIdle = (value) => {
@@ -483,6 +495,8 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
           }
           post({ type: "got", id, error: error.message, retry: true });
         });
+    } else if (message.type === "typed") {
+      machine.lastTyped = Date.now();
     } else if (message.type === "net") {
       const id = message.id;
       netHandle(message)

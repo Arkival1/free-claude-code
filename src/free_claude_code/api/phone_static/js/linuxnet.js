@@ -58,6 +58,11 @@ const REWRITE = [
   [/^index\.crates\.io$/, ["https://static.crates.io/", "http://static.crates.io/"]],
   [/^rubygems\.org$/, ["https://rubygems.org/", "http://rubygems.org/"]],
 ];
+// Copies kept elsewhere that let apps in a browser in, for sites that don't
+// always: crates.io's index is also on GitHub (rust-lang/crates.io-index).
+const MIRRORS = {
+  "index.crates.io": (url) => `https://raw.githubusercontent.com/rust-lang/crates.io-index/master${url.pathname}`,
+};
 // What cargo needs from crates.io's index root, which doesn't answer apps in a
 // browser itself: where crates download from.
 const CRATES_CONFIG = JSON.stringify({ dl: "http://static.crates.io/crates", api: "http://crates.io" });
@@ -114,10 +119,13 @@ export async function handle(request, { ask = (question) => confirm(question) } 
   url.protocol = "https:";
   if (url.port === "80") url.port = "";
   const headers = new Headers();
+  // Only headers a browser may send without asking the site first: anything
+  // else makes the browser ask (a preflight), which most sites refuse. GitHub
+  // allows its own API headers. A token only ever comes from FCC.
+  const allowed = new Set(["accept", "accept-language", "content-language", "content-type", "range", ...(url.hostname === "api.github.com" ? ["x-github-api-version"] : [])]);
   for (const [name, value] of Array.isArray(request.headers) ? request.headers : []) {
     const lower = String(name).toLowerCase();
-    // The browser sets these itself; a token only ever comes from FCC.
-    if (["host", "connection", "content-length", "accept-encoding", "authorization", "cookie", "origin", "referer"].includes(lower)) continue;
+    if (!allowed.has(lower)) continue;
     try {
       headers.append(name, value);
     } catch {
@@ -128,24 +136,30 @@ export async function handle(request, { ask = (question) => confirm(question) } 
     const token = settings().githubToken;
     if (token) headers.set("authorization", `Bearer ${token}`);
     if (!["GET", "HEAD"].includes(method)) {
-      // One OK covers one repository for ten minutes (a push is several calls).
-      const repo = (/^\/repos\/([^/]+\/[^/]+)/.exec(url.pathname) || [])[1] || url.pathname;
-      if (!((approved.get(repo) || 0) > Date.now())) {
-        const ok = await ask(`FCC Linux wants to change ${repo} on GitHub (${method} ${url.pathname.slice(0, 80)}).\n\nAllow changes to ${repo} for the next 10 minutes?`);
+      // One OK covers one repository for ten minutes (a push is several calls);
+      // anything else on GitHub (GraphQL, an organisation) asks every time.
+      const repo = (/^\/repos\/([^/]+\/[^/]+)/.exec(url.pathname) || [])[1] || "";
+      if (!repo || !((approved.get(repo) || 0) > Date.now())) {
+        const ok = await ask(repo ? `FCC Linux wants to change ${repo} on GitHub (${method} ${url.pathname.slice(0, 80)}).\n\nAllow changes to ${repo} for the next 10 minutes?` : `FCC Linux wants to change something on GitHub (${method} ${url.pathname.slice(0, 80)}).\n\nAllow this one change?`);
         if (!ok) {
           log({ what: describe(method, url), status: "denied" });
           return text(403, "The user said no to this GitHub change.");
         }
-        approved.set(repo, Date.now() + APPROVAL_MS);
+        if (repo) approved.set(repo, Date.now() + APPROVAL_MS);
       }
     }
   }
   let response;
+  const send = (address) => fetch(address, { method, headers, body: ["GET", "HEAD"].includes(method) ? undefined : request.body, redirect: "follow", credentials: "omit" });
   try {
-    response = await fetch(url.href, { method, headers, body: ["GET", "HEAD"].includes(method) ? undefined : request.body, redirect: "follow", credentials: "omit" });
+    response = await send(url.href);
   } catch {
-    log({ what: describe(method, url), status: "blocked" });
-    return text(502, `${url.hostname} doesn't let apps in a browser reach it, so FCC Linux can't use it from the phone.`);
+    const mirror = method === "GET" && MIRRORS[url.hostname];
+    response = mirror ? await send(mirror(url)).catch(() => null) : null;
+    if (!response) {
+      log({ what: describe(method, url), status: "blocked" });
+      return text(502, `${url.hostname} doesn't let apps in a browser reach it, so FCC Linux can't use it from the phone.`);
+    }
   }
   let body = await response.arrayBuffer();
   if (body.byteLength > BODY_LIMIT) return text(413, `${url.hostname} sent more than ${BODY_LIMIT / 1048576} MB in one answer.`);

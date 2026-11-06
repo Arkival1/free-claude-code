@@ -53,6 +53,7 @@ const TITLES = {
   minds: "Minds",
   library: "Library",
   lab: "Lab",
+  practice: "Jarvis learns",
 };
 // Two looks (Settings, Look): the HUD (the command centre and the whole team)
 // and the Playground (one main AI does the work, the others advise).
@@ -134,6 +135,7 @@ async function render() {
     plugins: () => plugins.render(view, param),
     tasks: () => tasks.render(view, param),
     hq: () => hq.render(view),
+    practice: async () => (await import("./views/practice.js")).render(view, param),
   };
   try {
     const result = await screens[route]();

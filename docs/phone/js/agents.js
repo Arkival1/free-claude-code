@@ -80,6 +80,9 @@ async function addTurn(agent, turn) {
   changed(`chat:${agent.id}`);
 }
 
+/** A message from an agent in its chat with the user (e.g. Jarvis's practice notes). */
+export const tell = (agent, text) => addTurn(agent, { role: "assistant", text });
+
 // Tools that change a project's files: a turn that used one hands the
 // project over to download, like a file in a chat.
 const BUILDING_TOOLS = new Set(["start_project", "write_file", "edit_file", "delete_file", "use_photo", "restore_file"]);

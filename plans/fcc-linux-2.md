@@ -42,3 +42,16 @@ F. Websites: private browser testing of built sites; Web kit growth.
 G. Libraries: Web kit, Lab tutorials, lessons, games, inventions library
    (builds, parts catalogue, guides, saved inventions), loaded on demand.
 H. Release + report; then "see what's missing or needs work".
+
+## Progress (2026-11-06)
+- A done (0ed97227, f8b1da83): FCC Linux 2.0, 21 packs (433 MB), boot ~12 s,
+  restore ~2 s, every language checked in a browser (C, C++, Rust, Go, Java,
+  Node, Python, Ruby, PHP, Perl, Lua, git). Review: 2 passes, fixes in.
+- B core done (d6d2ea28): internet switch (js/linuxnet.js), fcc-github /
+  fcc-plugin / fcc-net, GitHub token outside Linux (not in backups), push
+  asks once per repo for 10 min. Boot sets eth0 192.168.86.100, gw/DNS .1
+  (no DHCP: no AF_PACKET). Real pip/npm/cargo/go check in progress.
+- C done (edafc7b1): /projects/<slug> both ways (js/linuxprojects.js); user
+  commands detected by counting owed prompt markers.
+- Next: B/C review fixes, then E (self-teaching), F+G, D (desktop: needs
+  Xorg fbdev + bochs drm modules in the 9p root), release.

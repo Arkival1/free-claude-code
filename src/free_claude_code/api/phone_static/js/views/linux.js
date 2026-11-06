@@ -7,16 +7,22 @@ import { startLinux, runningLinux, forgetSession, hasSession, loadLinux, watchAc
 import { status as filesStatus, getEverything, hasManifest } from "../linuxfiles.js";
 import { internetOn, setInternet, githubTokenSaved, setGithubToken, netLog, watchNet } from "../linuxnet.js";
 import { state } from "../state.js";
-import { syncIn, syncOut } from "../linuxprojects.js";
+import { syncIn, syncOut, forgetSynced } from "../linuxprojects.js";
 
 /** Your projects as /projects/<name> in FCC Linux: written in once it's
  * ready, and changed files brought back after commands you type. */
 function shareProjects(machine) {
   let pending = null;
+  forgetSynced(); // a new machine: write everything in again
   syncIn(machine).catch((error) => notify(error.message));
   machine.onUserIdle = () => {
     clearTimeout(pending);
-    pending = setTimeout(() => syncOut(machine, "you").catch(() => []), 600);
+    pending = setTimeout(() => {
+      // Started typing the next command? Then this waits for that one, so
+      // nothing is typed over a half-typed line.
+      if ((machine.lastTyped || 0) > (machine.promptAt || 0)) return;
+      syncOut(machine, "you").catch(() => []);
+    }, 600);
   };
 }
 
@@ -155,7 +161,7 @@ function netCard() {
         : "",
     ]),
     el("p", { class: "small muted", text: `In FCC Linux: fcc-github clone OWNER/REPO, then push (FCC asks you first). Plugins on: ${plugins.length ? plugins.join(", ") : "none"}; fcc-plugin calls one.` }),
-    el("div", { class: "row" }, [button("Choose plugins", () => go("plugins"))]),
+    el("div", { class: "row" }, [button("Choose plugins", () => go("plugins")), button("Jarvis learns", () => go("practice"))]),
     log,
   ]);
   box.stop = stop;

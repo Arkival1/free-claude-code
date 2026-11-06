@@ -82,11 +82,13 @@ export const SPECS = {
     },
   },
   linux: {
-    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time), interrupt (Ctrl-C: stop what's running so the terminal is back at its prompt), sync (bring the user's FCC Projects in and changes back). The user's FCC Projects are folders in /projects (/projects/<project>/...): work on them there and changed files go back to FCC Projects after each run. Commands only run at the prompt: if the user has a program open (nano, htop), say so instead of interrupting it. It has every language: C/C++ (gcc, g++, cmake, make, gdb), Rust (rustc, cargo), Go, Java 8 (javac, java), Node.js (npm), Python 3.12 (pip), Ruby, PHP, Perl, Lua, plus git, bash, nano, tmux, sqlite3 and jq; files live in /root. A language's files download the first time it's used (give that run seconds: 300). Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
+    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time), interrupt (Ctrl-C: stop what's running so the terminal is back at its prompt), sync (bring the user's FCC Projects in and changes back), practice (start a self-teaching session when the user asks you to practise or learn coding). Test your code for bugs before saying it works. When you fix a real problem in FCC Linux, save what you learned with remember (kind lesson). The user's FCC Projects are folders in /projects (/projects/<project>/...): work on them there and changed files go back to FCC Projects after each run. Commands only run at the prompt: if the user has a program open (nano, htop), say so instead of interrupting it. It has every language: C/C++ (gcc, g++, cmake, make, gdb), Rust (rustc, cargo), Go, Java 8 (javac, java), Node.js (npm), Python 3.12 (pip), Ruby, PHP, Perl, Lua, plus git, bash, nano, tmux, sqlite3 and jq; files live in /root. A language's files download the first time it's used (give that run seconds: 300). Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["run", "write", "read", "info", "keep", "interrupt", "sync"] },
+        action: { type: "string", enum: ["run", "write", "read", "info", "keep", "interrupt", "sync", "practice"] },
+        languages: text("practice: which courses, comma-separated (python, c, cpp, rust, go, java, javascript, web, ruby, php, bash, lua, perl, sql); all if left out."),
+        minutes: { type: "number", description: "practice: how long (0 = no limit, when the user asks for that)." },
         command: text("run: the shell command (bash; no keyboard input: it reads nothing)."),
         path: text("write or read: the file's path, e.g. /root/hello.py."),
         content: text("write: the file's whole text."),
@@ -374,7 +376,13 @@ export async function runTool(agent, call, ctx) {
           const wrote = await syncIn(machine);
           return `Projects are in /projects (one folder each). Wrote ${wrote} changed file(s) in; brought ${back.length} back to FCC Projects.`;
         }
-        return "action is run, write, read, info, keep, interrupt or sync.";
+        if (action === "practice") {
+          const { startPractice } = await import("./practice.js");
+          const languages = String(args.languages || "").split(/[\s,]+/).filter(Boolean);
+          const started = await startPractice({ ...(languages.length ? { languages } : {}), minutes: Math.max(0, Number(args.minutes) || 0) });
+          return `Practice started (${started.languages.join(", ")}${started.until === Infinity ? ", no time limit" : ""}). It runs while FCC is open; skills wait for the user's OK on More, Jarvis learns.`;
+        }
+        return "action is run, write, read, info, keep, interrupt, sync or practice.";
       }
       case "godot": {
         if (args.project) ctx.project = projects.findProject(String(args.project)) || ctx.project;

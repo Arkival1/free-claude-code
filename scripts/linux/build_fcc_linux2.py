@@ -167,7 +167,7 @@ retry = 3
 export JAVA_HOME=/usr/lib/jvm/java-1.8-openjdk
 export GOPATH=/root/go GOCACHE=/root/.cache/go-build GOTOOLCHAIN=local GOTELEMETRY=off
 # Go modules (and their checksums) come through FCC, as http.
-export GOPROXY=http://proxy.golang.org
+export GOPROXY=http://proxy.golang.org GOSUMDB="sum.golang.org http://sum.golang.org"
 export CARGO_HOME=/root/.cargo
 export PATH="$PATH:$JAVA_HOME/bin:$GOPATH/bin:$CARGO_HOME/bin:/root/.local/bin"
 """,
@@ -201,13 +201,8 @@ figlet -f small "FCC Linux" 2>/dev/null || echo "FCC Linux"
 echo "$PRETTY_NAME"
 echo "Kernel:  $(uname -r) ($(uname -m))"
 echo "Memory:  $(free -m | awk '/Mem/ {print $3 " MB used of " $2 " MB"}')"
-echo "Languages:"
-echo "  C/C++   $(gcc -dumpversion 2>/dev/null)   Rust  $(rustc --version 2>/dev/null | cut -d' ' -f2)"
-echo "  Go      $(go version 2>/dev/null | cut -d' ' -f3)   Java  $(java -version 2>&1 | head -1 | cut -d'"' -f2)"
-echo "  Node    $(node --version 2>/dev/null)   Python $(python3 --version 2>&1 | cut -d' ' -f2)"
-echo "  Ruby    $(ruby -e 'print RUBY_VERSION' 2>/dev/null)   PHP  $(php -r 'echo PHP_VERSION;' 2>/dev/null)"
-echo "  Perl    $(perl -e 'print substr($^V, 1)' 2>/dev/null)   Lua  $(lua5.4 -v 2>&1 | cut -d' ' -f2)"
-echo "  git     $(git --version 2>/dev/null | cut -d' ' -f3)"
+echo "Languages (as built; each loads the first time you use it):"
+cat /etc/fcc/languages 2>/dev/null
 echo "Packages: $(cat /etc/fcc/packages 2>/dev/null | wc -w) added to Alpine's base"
 """,
     ),
@@ -475,6 +470,33 @@ def build(out: Path) -> dict:
         owner[path] = "base"
     base.add_text(
         root, "etc/fcc/packages", " ".join(str(item["name"]) for item in added) + "\n"
+    )
+    versions = {
+        str(item["name"]): str(item["version"]).split("-r")[0] for item in added
+    }
+    shown = [
+        ("C/C++ (gcc)", "gcc"),
+        ("Rust", "rust"),
+        ("Go", "go"),
+        ("Java", "openjdk8-jdk"),
+        ("Node.js", "nodejs"),
+        ("Python", "python3"),
+        ("Ruby", "ruby"),
+        ("PHP", "php83"),
+        ("Perl", "perl"),
+        ("Lua", "lua5.4"),
+        ("git", "git"),
+    ]
+    # fcc-info reads this instead of starting every language (which would
+    # download most of the system just to print versions).
+    base.add_text(
+        root,
+        "etc/fcc/languages",
+        "".join(
+            f"  {label:<12} {versions[name]}\n"
+            for label, name in shown
+            if name in versions
+        ),
     )
     base.add_text(root, "etc/hostname", "fcc-linux\n")
     base.add_text(root, "etc/shells", "/bin/sh\n/bin/ash\n/bin/bash\n")

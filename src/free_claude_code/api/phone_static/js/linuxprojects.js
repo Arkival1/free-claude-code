@@ -91,10 +91,22 @@ export async function syncOut(machine, agentName = "FCC Linux") {
       const kind = /\.png$/i.test(path) ? "png" : /\.gif$/i.test(path) ? "gif" : /\.webp$/i.test(path) ? "webp" : "jpeg";
       body = `data:image/${kind};base64,${data}`;
     }
-    if (project.files[path] === body) continue;
+    const key = `${slug}/${path}`;
+    // Unchanged in Linux since FCC wrote it, or already the same: nothing to do.
+    if (body === sent.get(key) || project.files[path] === body) {
+      sent.set(key, body);
+      continue;
+    }
+    // Changed on both sides since FCC wrote it in: the phone's copy stays and
+    // Linux's comes in beside it, so neither is lost.
+    if (sent.has(key) && project.files[path] !== sent.get(key)) {
+      await putFile(project, `${path}.from-linux${text ? ".txt" : path.slice(path.lastIndexOf("."))}`, body, agentName).catch(() => null);
+      back.push(`${slug}/${path} (both changed: Linux's copy kept beside it)`);
+      continue;
+    }
     await putFile(project, path, body, agentName);
-    sent.set(`${slug}/${path}`, body);
-    back.push(`${slug}/${path}`);
+    sent.set(key, body);
+    back.push(key);
   }
   return back;
 }

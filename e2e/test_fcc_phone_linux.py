@@ -4,6 +4,8 @@ network, opens from a snapshot after the first boot, keeps a session, and
 Jarvis uses it with the linux tool."""
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -52,7 +54,9 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
         }"""
     )
     assert done["tools"]
-    assert "FCC Linux 2.0" in done["info"] and "Python 3.12" in done["info"]
+    assert "FCC Linux 2.0" in done["info"] and re.search(
+        r"Python\s+3\.12", done["info"]
+    )
     assert done["wrote"].startswith("Wrote /root/hello.py")
     assert done["ran"].startswith("exit code 0") and '{"sum": 5050}' in done["ran"]
     assert "1024" in done["ran"]
@@ -287,3 +291,22 @@ def test_projects_are_folders_in_fcc_linux_both_ways(
     assert done["files"]["index"] == "<h1>Shop (built in Linux)</h1>\n"
     assert done["files"]["style"] == "body{color:red}\n"
     assert done["files"]["notes"] == "typed\n"
+
+
+def test_a_backup_never_carries_fcc_linuxs_github_token(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(WAIT)
+    open_phone(page, admin_base_url, "settings")
+    page.evaluate(
+        """async () => {
+            const net = await import('./js/linuxnet.js');
+            await net.setInternet(true);
+            await net.setGithubToken('ghp_secret_never_in_backups');
+        }"""
+    )
+    with page.expect_download() as caught:
+        page.get_by_role("button", name="Save a backup").click()
+    backup = json.loads(Path(caught.value.path()).read_text(encoding="utf-8"))
+    assert "ghp_secret" not in json.dumps(backup)
+    assert backup["settings"]["linux"] == {"internet": False}

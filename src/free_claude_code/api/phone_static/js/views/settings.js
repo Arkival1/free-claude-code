@@ -253,9 +253,12 @@ function searchCard() {
 async function exportBackup() {
   const chats = {};
   for (const agent of state.agents) chats[agent.id] = await chatOf(agent.id);
-  const { keys, pc, plugins, ...settings } = state.settings;
+  const { keys, pc, plugins, linux, ...settings } = state.settings;
   // Plugin keys stay on the phone, like the cloud keys: only their switches go.
   settings.plugins = Object.fromEntries(Object.entries(plugins || {}).map(([name, saved]) => [name, { on: Boolean(saved.on) }]));
+  // FCC Linux's GitHub token stays on the phone too, and a restored backup
+  // never switches FCC Linux's internet on.
+  settings.linux = { internet: false };
   const backup = {
     app: "FCC Phone",
     version: VERSION,
@@ -305,8 +308,8 @@ function importButton() {
       // Keys, where they go (the custom AI's address, the PC link) and what
       // cloud brains may read stay as this phone has them: a backup file can
       // never send a saved key somewhere new or widen what's shared.
-      const { keys, pc, customBase, cloudSeesPc } = state.settings;
-      Object.assign(state.settings, backup.settings || {}, { keys, pc, customBase, cloudSeesPc, plugins });
+      const { keys, pc, customBase, cloudSeesPc, linux } = state.settings;
+      Object.assign(state.settings, backup.settings || {}, { keys, pc, customBase, cloudSeesPc, plugins, linux });
       await Promise.all([save.agents(), save.memories(), save.settings(), save.projects(), save.rooms(), save.todos(), save.studies(), save.library(), save.blueprints()]);
       for (const [agentId, chat] of Object.entries(backup.chats || {})) {
         state.chats[agentId] = chat;
