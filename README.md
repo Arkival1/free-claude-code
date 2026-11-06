@@ -2877,6 +2877,11 @@ account, and costs nothing.
     noise (stone, rock, grass, dirt, sand, wood, metal, gold, snow, lava,
     water, brick); particles (dust, leaves, fireflies, rain, snow,
     embers); day and night; and wandering NPCs and animals.
+  - **Free cloud brains**: besides Gemini, Groq and OpenRouter, Settings
+    takes free keys for Cerebras, Mistral, Hugging Face and Cohere (the
+    free-LLM-API providers that answer apps in a phone browser; NVIDIA NIM,
+    GitHub Models and SambaNova don't). Any of them can be an agent's brain
+    or a Playground adviser guiding Jarvis on the phone model, at no cost.
   - **Game art** (`game_art` tool, Jarvis and the Builder): 4,000 2D
     sprites from FCC's Kenney packs (CC0): characters, enemies, tiles,
     items, vehicles, spaceships, cards, UI and icons, from 37 packs. One

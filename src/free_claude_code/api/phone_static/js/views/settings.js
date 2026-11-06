@@ -16,7 +16,7 @@ const FEATURES = [
   ["Agents", "The team: each agent's brain, tools and instructions", "agents"],
   ["Models", "AI models on this phone: download, load, test speed", "models"],
   ["Brain", "Which AI every agent thinks with by default", "settings"],
-  ["Free cloud keys", "Gemini, Groq, OpenRouter or any OpenAI-style service", "settings"],
+  ["Free cloud keys", "Gemini, Groq, OpenRouter, Cerebras, Mistral, Hugging Face, Cohere or any OpenAI-style service", "settings"],
   ["Connect to my PC", "Pair with FCC Studio on your PC (optional)", "settings"],
   ["Voice", "Jarvis speaks his replies", "settings"],
   ["Backup", "Save or restore everything on this phone", "settings"],

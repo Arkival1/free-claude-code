@@ -581,3 +581,52 @@ def test_jarvis_hears_when_a_teammate_calls_unfinished_work_done(
     assert reports, "Jarvis got the Builder's report"
     assert "FCC's own check of Sunrise Bakery still finds" in reports[-1]
     assert "placeholder text" in reports[-1]
+
+
+CEREBRAS = "https://api.cerebras.ai/v1"
+
+
+def test_more_free_cloud_ais_can_be_jarvis_brain_or_adviser(
+    page: Page, admin_base_url: str
+) -> None:
+    """Free cloud AIs that answer apps in a phone browser (checked against
+    the free-LLM-API lists): Cerebras, Mistral, Hugging Face and Cohere sit
+    beside Gemini, Groq and OpenRouter. A saved key picks the best model,
+    Jarvis falls back to it with no other brain, and replies come from it."""
+    asked: list[dict] = []
+
+    def cerebras(route: Route) -> None:
+        if route.request.url.endswith("/models"):
+            rows = [{"id": "llama3.1-8b"}, {"id": "gpt-oss-120b"}, {"id": "qwen-3-32b"}]
+            route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+            return
+        asked.append(json.loads(route.request.post_data or "{}"))
+        route.fulfill(
+            headers=CORS,
+            body=json.dumps({"choices": [{"message": say("Hello from Cerebras.")}]}),
+        )
+
+    page.route(f"{CEREBRAS}/**", cerebras)
+    open_phone(page, admin_base_url)
+    go(page, "settings")
+    for label in ("Cerebras", "Mistral", "Hugging Face", "Cohere"):
+        expect(page.get_by_label(f"{label} key")).to_be_visible()
+    page.get_by_label("Cerebras key").fill("test-cerebras-key")
+    page.get_by_role("button", name="Save Cerebras").click()
+    expect(page.get_by_text("using gpt-oss-120b")).to_be_visible()
+    brain = page.evaluate(
+        "async () => (await import('./js/brains.js')).brainOf(window.fccPhone.state.agents.find((a) => a.id === 'jarvis'))"
+    )
+    assert brain == "cerebras"
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Hi")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Hello from Cerebras."
+    )
+    assert asked and asked[-1]["model"] == "gpt-oss-120b"
+    backup = page.evaluate(
+        "async () => JSON.stringify((await import('./js/state.js')).state.settings.keys)"
+    )
+    assert "test-cerebras-key" in backup  # kept on the phone (backups drop keys)

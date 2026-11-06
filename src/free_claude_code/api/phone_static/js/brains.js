@@ -26,6 +26,34 @@ export const PROVIDERS = {
     keyUrl: "https://openrouter.ai/keys",
     note: "Many free models; about 50 free messages a day.",
   },
+  // More free cloud AIs (from the free-LLM-API lists, checked 2026-11-06 to
+  // answer apps in a phone browser): any of them can guide Jarvis as an
+  // adviser at no cost. NVIDIA NIM, GitHub Models and SambaNova refuse apps
+  // in a browser, so they aren't here.
+  cerebras: {
+    label: "Cerebras",
+    base: "https://api.cerebras.ai/v1",
+    keyUrl: "https://cloud.cerebras.ai",
+    note: "Free tier, extremely fast, big open models (gpt-oss 120B, Qwen, Llama).",
+  },
+  mistral: {
+    label: "Mistral",
+    base: "https://api.mistral.ai/v1",
+    keyUrl: "https://console.mistral.ai/api-keys",
+    note: "Free Experiment plan (sign-up asks for a phone number); Mistral's own models.",
+  },
+  huggingface: {
+    label: "Hugging Face",
+    base: "https://router.huggingface.co/v1",
+    keyUrl: "https://huggingface.co/settings/tokens",
+    note: "A free account gets a small monthly credit across many open models.",
+  },
+  cohere: {
+    label: "Cohere",
+    base: "https://api.cohere.ai/compatibility/v1",
+    keyUrl: "https://dashboard.cohere.com/api-keys",
+    note: "Free trial key, about 1,000 calls a month (Command models).",
+  },
   custom: {
     label: "Other (OpenAI-compatible)",
     base: "",
@@ -37,7 +65,7 @@ export const PROVIDERS = {
     note: "Thinks with your PC's main AI. The PC must be on and paired.",
   },
 };
-export const CLOUD = ["gemini", "groq", "openrouter", "custom"];
+export const CLOUD = ["gemini", "groq", "openrouter", "cerebras", "mistral", "huggingface", "cohere", "custom"];
 
 export class BrainError extends Error {}
 
@@ -48,7 +76,7 @@ export const chosenBrain = (agent) => (agent.brain && agent.brain !== "default" 
  * that is: a model on this phone, then a cloud API key, and the PC last, so
  * the phone never relies on the PC (owner, 6.108). Memory rules follow the
  * brain really used (isPrivate reads this). */
-export const FALLBACK_ORDER = ["local", "gemini", "groq", "openrouter", "custom", "pc"];
+export const FALLBACK_ORDER = ["local", "gemini", "groq", "cerebras", "mistral", "openrouter", "huggingface", "cohere", "custom", "pc"];
 
 // A turn pins its agent's brain at the start (agents.js), like the PC: if
 // that brain goes away mid-turn the turn stops, instead of moving what a
@@ -155,6 +183,17 @@ export function bestModel(brain, rows) {
     pool.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
     return (pool[0] && pool[0].id) || "";
   }
+  const first = (patterns) => {
+    for (const pattern of patterns) {
+      const found = ids.find((id) => pattern.test(id));
+      if (found) return found;
+    }
+    return ids[0] || "";
+  };
+  if (brain === "cerebras") return first([/gpt-oss-120b/, /qwen-3-235b/, /llama-3\.3-70b/, /llama/]);
+  if (brain === "mistral") return first([/^mistral-large-latest$/, /^mistral-medium-latest$/, /^mistral-small-latest$/]);
+  if (brain === "huggingface") return first([/^openai\/gpt-oss-120b$/, /^Qwen\/Qwen3\.5-27B$/, /^Qwen\/Qwen3/, /^meta-llama\//]);
+  if (brain === "cohere") return first([/^command-a(?!.*(vision|reasoning|translate))/, /^command-r-plus/, /^command/]);
   return ids[0] || "";
 }
 
