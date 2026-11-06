@@ -52,11 +52,17 @@ def test_the_app_installs_as_its_own_home_screen_app():
     # Every link is relative, so it works at /phone/ and on GitHub Pages alike.
     assert 'href="/' not in page and 'src="/' not in page
     worker = (PHONE_DIR / "sw.js").read_text()
+    # FCC Linux's system packs (linux/fs/) are kept by js/linuxfiles.js, not
+    # the worker (so they aren't stored twice); the worker lets them through.
     shipped = [
         str(path.relative_to(PHONE_DIR))
         for path in PHONE_DIR.rglob("*")
-        if path.is_file() and path.suffix != ".txt" and path.name != "sw.js"
+        if path.is_file()
+        and path.suffix != ".txt"
+        and path.name != "sw.js"
+        and not str(path.relative_to(PHONE_DIR)).startswith("linux/fs/")
     ]
+    assert '"/linux/fs/"' in worker
     for name in shipped:
         assert f'"{name}"' in worker, f"sw.js must cache {name} for offline use"
 

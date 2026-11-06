@@ -1,5 +1,6 @@
 {
- "name": "FCC Linux 1.1",
+ "name": "FCC Linux 2.0",
+ "version": "2.0",
  "base": "Alpine Linux 3.21.9 (x86)",
  "base_packages": [
   "alpine-baselayout",
@@ -229,6 +230,612 @@
    "version": "2.9.2-r0",
    "repo": "main",
    "bytes": 1422753
+  },
+  {
+   "name": "jansson",
+   "version": "2.14-r4",
+   "repo": "main",
+   "bytes": 50484
+  },
+  {
+   "name": "zstd-libs",
+   "version": "1.5.6-r2",
+   "repo": "main",
+   "bytes": 701716
+  },
+  {
+   "name": "binutils",
+   "version": "2.43.1-r3",
+   "repo": "main",
+   "bytes": 11083747
+  },
+  {
+   "name": "libgomp",
+   "version": "14.2.0-r4",
+   "repo": "main",
+   "bytes": 345960
+  },
+  {
+   "name": "libatomic",
+   "version": "14.2.0-r4",
+   "repo": "main",
+   "bytes": 25824
+  },
+  {
+   "name": "gmp",
+   "version": "6.3.0-r2",
+   "repo": "main",
+   "bytes": 374156
+  },
+  {
+   "name": "isl25",
+   "version": "0.25-r2",
+   "repo": "main",
+   "bytes": 2580632
+  },
+  {
+   "name": "mpfr4",
+   "version": "4.2.1-r0",
+   "repo": "main",
+   "bytes": 733160
+  },
+  {
+   "name": "mpc1",
+   "version": "1.3.1-r1",
+   "repo": "main",
+   "bytes": 107744
+  },
+  {
+   "name": "gcc",
+   "version": "14.2.0-r4",
+   "repo": "main",
+   "bytes": 153284000
+  },
+  {
+   "name": "libstdc++-dev",
+   "version": "14.2.0-r4",
+   "repo": "main",
+   "bytes": 20713801
+  },
+  {
+   "name": "musl-dev",
+   "version": "1.2.5-r12",
+   "repo": "main",
+   "bytes": 7142731
+  },
+  {
+   "name": "g++",
+   "version": "14.2.0-r4",
+   "repo": "main",
+   "bytes": 46665252
+  },
+  {
+   "name": "linux-headers",
+   "version": "6.6-r1",
+   "repo": "main",
+   "bytes": 5716637
+  },
+  {
+   "name": "pkgconf",
+   "version": "2.3.0-r0",
+   "repo": "main",
+   "bytes": 125834
+  },
+  {
+   "name": "acl-libs",
+   "version": "2.3.2-r1",
+   "repo": "main",
+   "bytes": 34124
+  },
+  {
+   "name": "lz4-libs",
+   "version": "1.10.0-r0",
+   "repo": "main",
+   "bytes": 148756
+  },
+  {
+   "name": "libarchive",
+   "version": "3.8.11-r0",
+   "repo": "main",
+   "bytes": 705988
+  },
+  {
+   "name": "rhash-libs",
+   "version": "1.4.5-r0",
+   "repo": "main",
+   "bytes": 248920
+  },
+  {
+   "name": "libuv",
+   "version": "1.49.2-r0",
+   "repo": "main",
+   "bytes": 239959
+  },
+  {
+   "name": "cmake",
+   "version": "3.31.1-r0",
+   "repo": "main",
+   "bytes": 57173196
+  },
+  {
+   "name": "musl-dbg",
+   "version": "1.2.5-r12",
+   "repo": "main",
+   "bytes": 2631044
+  },
+  {
+   "name": "gdb",
+   "version": "15.2-r0",
+   "repo": "main",
+   "bytes": 12165744
+  },
+  {
+   "name": "nasm",
+   "version": "2.16.03-r0",
+   "repo": "main",
+   "bytes": 2280284
+  },
+  {
+   "name": "ca-certificates",
+   "version": "20261020-r0",
+   "repo": "main",
+   "bytes": 215141
+  },
+  {
+   "name": "ada-libs",
+   "version": "2.9.2-r1",
+   "repo": "main",
+   "bytes": 502216
+  },
+  {
+   "name": "brotli-libs",
+   "version": "1.1.1-r0",
+   "repo": "main",
+   "bytes": 934128
+  },
+  {
+   "name": "c-ares",
+   "version": "1.34.9-r0",
+   "repo": "main",
+   "bytes": 259360
+  },
+  {
+   "name": "icu-data-en",
+   "version": "74.2-r1",
+   "repo": "main",
+   "bytes": 2799392
+  },
+  {
+   "name": "icu-libs",
+   "version": "74.2-r1",
+   "repo": "main",
+   "bytes": 4682792
+  },
+  {
+   "name": "nghttp2-libs",
+   "version": "1.69.0-r0",
+   "repo": "main",
+   "bytes": 132408
+  },
+  {
+   "name": "simdjson",
+   "version": "3.10.1-r0",
+   "repo": "main",
+   "bytes": 104676
+  },
+  {
+   "name": "simdutf",
+   "version": "5.6.3-r0",
+   "repo": "main",
+   "bytes": 107976
+  },
+  {
+   "name": "nodejs",
+   "version": "22.23.4-r0",
+   "repo": "main",
+   "bytes": 48443476
+  },
+  {
+   "name": "npm",
+   "version": "10.9.1-r0",
+   "repo": "community",
+   "bytes": 7933969
+  },
+  {
+   "name": "libxml2",
+   "version": "2.13.9-r1",
+   "repo": "main",
+   "bytes": 1042496
+  },
+  {
+   "name": "llvm19-libs",
+   "version": "19.1.4-r1",
+   "repo": "main",
+   "bytes": 172918828
+  },
+  {
+   "name": "scudo-malloc",
+   "version": "19.1.4-r0",
+   "repo": "main",
+   "bytes": 132560
+  },
+  {
+   "name": "rust",
+   "version": "1.83.0-r1",
+   "repo": "main",
+   "bytes": 187456366
+  },
+  {
+   "name": "libunistring",
+   "version": "1.2-r0",
+   "repo": "main",
+   "bytes": 1717620
+  },
+  {
+   "name": "libidn2",
+   "version": "2.3.7-r0",
+   "repo": "main",
+   "bytes": 198124
+  },
+  {
+   "name": "libpsl",
+   "version": "0.21.5-r3",
+   "repo": "main",
+   "bytes": 70988
+  },
+  {
+   "name": "libcurl",
+   "version": "8.14.1-r3",
+   "repo": "main",
+   "bytes": 694928
+  },
+  {
+   "name": "cargo",
+   "version": "1.83.0-r1",
+   "repo": "main",
+   "bytes": 22028476
+  },
+  {
+   "name": "go",
+   "version": "1.23.9-r0",
+   "repo": "community",
+   "bytes": 185573763
+  },
+  {
+   "name": "libpng",
+   "version": "1.6.59-r0",
+   "repo": "main",
+   "bytes": 189880
+  },
+  {
+   "name": "freetype",
+   "version": "2.13.3-r0",
+   "repo": "main",
+   "bytes": 636352
+  },
+  {
+   "name": "fontconfig",
+   "version": "2.15.0-r1",
+   "repo": "main",
+   "bytes": 514408
+  },
+  {
+   "name": "encodings",
+   "version": "1.0.7-r1",
+   "repo": "main",
+   "bytes": 645863
+  },
+  {
+   "name": "libfontenc",
+   "version": "1.1.8-r0",
+   "repo": "main",
+   "bytes": 28028
+  },
+  {
+   "name": "mkfontscale",
+   "version": "1.2.3-r1",
+   "repo": "main",
+   "bytes": 30349
+  },
+  {
+   "name": "font-dejavu",
+   "version": "2.37-r5",
+   "repo": "main",
+   "bytes": 10230171
+  },
+  {
+   "name": "libxau",
+   "version": "1.0.11-r4",
+   "repo": "main",
+   "bytes": 13536
+  },
+  {
+   "name": "libmd",
+   "version": "1.1.0-r0",
+   "repo": "main",
+   "bytes": 58844
+  },
+  {
+   "name": "libbsd",
+   "version": "0.12.2-r0",
+   "repo": "main",
+   "bytes": 63532
+  },
+  {
+   "name": "libxdmcp",
+   "version": "1.1.5-r1",
+   "repo": "main",
+   "bytes": 21836
+  },
+  {
+   "name": "libxcb",
+   "version": "1.16.1-r0",
+   "repo": "main",
+   "bytes": 982996
+  },
+  {
+   "name": "libx11",
+   "version": "1.8.10-r0",
+   "repo": "main",
+   "bytes": 2311460
+  },
+  {
+   "name": "libxcomposite",
+   "version": "0.4.6-r5",
+   "repo": "main",
+   "bytes": 13536
+  },
+  {
+   "name": "libxext",
+   "version": "1.3.6-r2",
+   "repo": "main",
+   "bytes": 67612
+  },
+  {
+   "name": "libxi",
+   "version": "1.8.2-r0",
+   "repo": "main",
+   "bytes": 58716
+  },
+  {
+   "name": "libxrender",
+   "version": "0.9.11-r5",
+   "repo": "main",
+   "bytes": 38328
+  },
+  {
+   "name": "libxtst",
+   "version": "1.2.5-r0",
+   "repo": "main",
+   "bytes": 21868
+  },
+  {
+   "name": "alsa-lib",
+   "version": "1.2.12-r0",
+   "repo": "main",
+   "bytes": 1216435
+  },
+  {
+   "name": "giflib",
+   "version": "5.2.2-r2",
+   "repo": "main",
+   "bytes": 34016
+  },
+  {
+   "name": "libjpeg-turbo",
+   "version": "3.0.4-r0",
+   "repo": "main",
+   "bytes": 710004
+  },
+  {
+   "name": "openjdk8-jre-lib",
+   "version": "8.452.09-r0",
+   "repo": "community",
+   "bytes": 48338993
+  },
+  {
+   "name": "java-common",
+   "version": "0.5-r0",
+   "repo": "community",
+   "bytes": 0
+  },
+  {
+   "name": "libtasn1",
+   "version": "4.21.0-r0",
+   "repo": "main",
+   "bytes": 71044
+  },
+  {
+   "name": "p11-kit",
+   "version": "0.26.2-r0",
+   "repo": "main",
+   "bytes": 1567599
+  },
+  {
+   "name": "p11-kit-trust",
+   "version": "0.26.2-r0",
+   "repo": "main",
+   "bytes": 340054
+  },
+  {
+   "name": "java-cacerts",
+   "version": "1.1-r0",
+   "repo": "community",
+   "bytes": 134
+  },
+  {
+   "name": "nspr",
+   "version": "4.36-r0",
+   "repo": "main",
+   "bytes": 320828
+  },
+  {
+   "name": "nss",
+   "version": "3.109-r0",
+   "repo": "main",
+   "bytes": 4026136
+  },
+  {
+   "name": "krb5-conf",
+   "version": "1.0-r2",
+   "repo": "main",
+   "bytes": 450
+  },
+  {
+   "name": "libcom_err",
+   "version": "1.47.1-r1",
+   "repo": "main",
+   "bytes": 13588
+  },
+  {
+   "name": "keyutils-libs",
+   "version": "1.6.3-r4",
+   "repo": "main",
+   "bytes": 21836
+  },
+  {
+   "name": "libverto",
+   "version": "0.3.2-r2",
+   "repo": "main",
+   "bytes": 17632
+  },
+  {
+   "name": "krb5-libs",
+   "version": "1.21.3-r0",
+   "repo": "main",
+   "bytes": 1737516
+  },
+  {
+   "name": "lcms2",
+   "version": "2.19-r0",
+   "repo": "main",
+   "bytes": 351352
+  },
+  {
+   "name": "pcsc-lite-libs",
+   "version": "2.2.3-r1",
+   "repo": "main",
+   "bytes": 47704
+  },
+  {
+   "name": "liblksctp",
+   "version": "1.0.19-r5",
+   "repo": "main",
+   "bytes": 27132
+  },
+  {
+   "name": "openjdk8-jre-base",
+   "version": "8.452.09-r0",
+   "repo": "community",
+   "bytes": 16319532
+  },
+  {
+   "name": "openjdk8-jre",
+   "version": "8.452.09-r0",
+   "repo": "community",
+   "bytes": 906000
+  },
+  {
+   "name": "openjdk8-jdk",
+   "version": "8.452.09-r0",
+   "repo": "community",
+   "bytes": 19770385
+  },
+  {
+   "name": "openjdk8",
+   "version": "8.452.09-r0",
+   "repo": "community",
+   "bytes": 179127
+  },
+  {
+   "name": "yaml",
+   "version": "0.2.5-r2",
+   "repo": "main",
+   "bytes": 103648
+  },
+  {
+   "name": "ruby-libs",
+   "version": "3.3.13-r0",
+   "repo": "main",
+   "bytes": 15589627
+  },
+  {
+   "name": "libucontext",
+   "version": "1.3.2-r0",
+   "repo": "main",
+   "bytes": 26976
+  },
+  {
+   "name": "ruby",
+   "version": "3.3.13-r0",
+   "repo": "main",
+   "bytes": 15458
+  },
+  {
+   "name": "php83-common",
+   "version": "8.3.36-r0",
+   "repo": "community",
+   "bytes": 73399
+  },
+  {
+   "name": "argon2-libs",
+   "version": "20190702-r5",
+   "repo": "main",
+   "bytes": 50456
+  },
+  {
+   "name": "libedit",
+   "version": "20240808.3.1-r0",
+   "repo": "main",
+   "bytes": 169364
+  },
+  {
+   "name": "pcre2",
+   "version": "10.43-r1",
+   "repo": "main",
+   "bytes": 760372
+  },
+  {
+   "name": "php83",
+   "version": "8.3.36-r0",
+   "repo": "community",
+   "bytes": 8392276
+  },
+  {
+   "name": "perl",
+   "version": "5.40.4-r0",
+   "repo": "main",
+   "bytes": 32434256
+  },
+  {
+   "name": "py3-parsing",
+   "version": "3.1.4-r0",
+   "repo": "main",
+   "bytes": 397566
+  },
+  {
+   "name": "py3-packaging",
+   "version": "24.2-r0",
+   "repo": "main",
+   "bytes": 235076
+  },
+  {
+   "name": "py3-setuptools",
+   "version": "70.3.0-r0",
+   "repo": "main",
+   "bytes": 3106385
+  },
+  {
+   "name": "py3-pip",
+   "version": "24.3.1-r0",
+   "repo": "community",
+   "bytes": 5656209
+  },
+  {
+   "name": "git",
+   "version": "2.47.3-r0",
+   "repo": "main",
+   "bytes": 6616531
   }
  ],
  "left_out": [
@@ -241,16 +848,361 @@
   "usr/lib/python3.12/turtledemo/",
   "usr/lib/python3.12/ensurepip/",
   "usr/lib/python3.12/lib2to3/",
-  "usr/lib/python3.12/lib-dynload/_test"
+  "usr/lib/python3.12/lib-dynload/_test",
+  "usr/lib/go/test/",
+  "usr/lib/go/misc/",
+  "usr/share/gtk-doc/"
  ],
- "python_precompiled": 515,
+ "python_precompiled": 1201,
  "kernel": {
-  "from": "boot/vmlinuz-lts",
-  "bytes": 8233472,
-  "sha256": "1c3ff14102200692a49019d091262ade97dcb6fc7ae1bd56ae2f94fae4033b2d"
+  "from": "linux-lts 6.12.115-r0",
+  "release": "6.12.115-0-lts",
+  "bytes": 8237568,
+  "sha256": "f37a5f89fefb28023b824fc71e814d2b6cc34bc27567fcdc5db75b3b95de6b2c",
+  "modules": [
+   "netfs",
+   "9pnet",
+   "9p",
+   "virtio_ring",
+   "virtio",
+   "9pnet_virtio",
+   "virtio_pci_modern_dev",
+   "virtio_pci_legacy_dev",
+   "virtio_pci",
+   "8390",
+   "ne2k-pci"
+  ]
  },
  "initrd": {
-  "bytes": 16800482,
-  "sha256": "1f5b5f0215908d8459b923fe5e3f7cf55206e3dd91e2e3d57a911a555a4cdb32"
- }
+  "bytes": 1030246,
+  "sha256": "1fcc5236166073d5d93e7599902b992b0553d9371890dd800546c4f4a4d8f936"
+ },
+ "files": {
+  "file": "fs/fs-6ed467b0685a404d.json.gz",
+  "sha256": "6ed467b0685a404dc958a52799eb5fc4b7d42b8ee45e226ef790c24db75ab26c",
+  "bytes": 301353,
+  "count": 19615,
+  "used_bytes": 1217814709
+ },
+ "packs": [
+  {
+   "n": 0,
+   "file": "fs/d7a4655379d18a63a34159255ed3e56c52cf1aaa3535a720de6f953c234840dc.pack",
+   "sha256": "d7a4655379d18a63a34159255ed3e56c52cf1aaa3535a720de6f953c234840dc",
+   "bytes": 25154188,
+   "packages": [
+    "base",
+    "ncurses-terminfo-base",
+    "libncursesw",
+    "readline",
+    "bash",
+    "nano",
+    "less",
+    "libevent",
+    "tmux",
+    "ncurses",
+    "libexpat",
+    "libbz2",
+    "libffi",
+    "gdbm",
+    "xz-libs",
+    "libgcc",
+    "libstdc++",
+    "mpdecimal",
+    "libpanelw",
+    "sqlite-libs",
+    "python3",
+    "lua5.4-libs",
+    "lua5.4",
+    "make",
+    "sqlite",
+    "oniguruma",
+    "jq",
+    "libmagic",
+    "file",
+    "htop",
+    "figlet",
+    "gzip",
+    "libintl",
+    "lynx",
+    "jansson",
+    "zstd-libs",
+    "binutils"
+   ]
+  },
+  {
+   "n": 1,
+   "file": "fs/077610aa6f6f20e7bf8cbbfcc4830c5b3200d0f9b54dcc7847902d6c6b1b567c.pack",
+   "sha256": "077610aa6f6f20e7bf8cbbfcc4830c5b3200d0f9b54dcc7847902d6c6b1b567c",
+   "bytes": 25125341,
+   "packages": [
+    "binutils",
+    "libgomp",
+    "libatomic",
+    "gmp",
+    "isl25",
+    "mpfr4",
+    "mpc1",
+    "gcc"
+   ]
+  },
+  {
+   "n": 2,
+   "file": "fs/e501cda60d4d00eed830d0ba34d0f7c26eeeb13ed161b764f4beb5d791fbe39f.pack",
+   "sha256": "e501cda60d4d00eed830d0ba34d0f7c26eeeb13ed161b764f4beb5d791fbe39f",
+   "bytes": 16298327,
+   "packages": [
+    "gcc"
+   ]
+  },
+  {
+   "n": 3,
+   "file": "fs/0574c6954e26ef056f3f645ef4028b978992448d7524af8fcfb12bcc4414a2e7.pack",
+   "sha256": "0574c6954e26ef056f3f645ef4028b978992448d7524af8fcfb12bcc4414a2e7",
+   "bytes": 20847494,
+   "packages": [
+    "gcc",
+    "libstdc++-dev",
+    "musl-dev",
+    "g++"
+   ]
+  },
+  {
+   "n": 4,
+   "file": "fs/0a85624c799cf6dca221942af4e681c659d8559adff7cf2636c8127b018bb84a.pack",
+   "sha256": "0a85624c799cf6dca221942af4e681c659d8559adff7cf2636c8127b018bb84a",
+   "bytes": 22615144,
+   "packages": [
+    "g++",
+    "linux-headers",
+    "pkgconf",
+    "acl-libs",
+    "lz4-libs",
+    "libarchive",
+    "rhash-libs",
+    "libuv",
+    "cmake"
+   ]
+  },
+  {
+   "n": 5,
+   "file": "fs/12a07a80d1569be2607b334542f338712fc351aa76c5b18106871982a58ecd08.pack",
+   "sha256": "12a07a80d1569be2607b334542f338712fc351aa76c5b18106871982a58ecd08",
+   "bytes": 24589437,
+   "packages": [
+    "cmake",
+    "musl-dbg",
+    "gdb",
+    "nasm",
+    "ca-certificates",
+    "ada-libs",
+    "brotli-libs",
+    "c-ares",
+    "icu-data-en",
+    "icu-libs",
+    "nghttp2-libs",
+    "simdjson",
+    "simdutf"
+   ]
+  },
+  {
+   "n": 6,
+   "file": "fs/14f5d863342f25470eefd7e40a1496738c1a45ecd0c92c812727b10186a47ed2.pack",
+   "sha256": "14f5d863342f25470eefd7e40a1496738c1a45ecd0c92c812727b10186a47ed2",
+   "bytes": 17557945,
+   "packages": [
+    "nodejs",
+    "npm",
+    "libxml2"
+   ]
+  },
+  {
+   "n": 7,
+   "file": "fs/5f654889a962c480b41e6be2a3b002844c4801d73d35c6fef659dd1c5eeec1fc.pack",
+   "sha256": "5f654889a962c480b41e6be2a3b002844c4801d73d35c6fef659dd1c5eeec1fc",
+   "bytes": 25165824,
+   "packages": [
+    "llvm19-libs"
+   ]
+  },
+  {
+   "n": 8,
+   "file": "fs/6f95fcd94e7e4a1456233be36698043277283872de3ef288d15292f0aadd3ce5.pack",
+   "sha256": "6f95fcd94e7e4a1456233be36698043277283872de3ef288d15292f0aadd3ce5",
+   "bytes": 25165824,
+   "packages": [
+    "llvm19-libs"
+   ]
+  },
+  {
+   "n": 9,
+   "file": "fs/5ca1e9e0cf7837380d4ae05fa999f21ed1236dabfc65d604fbdfb5026020f7a1.pack",
+   "sha256": "5ca1e9e0cf7837380d4ae05fa999f21ed1236dabfc65d604fbdfb5026020f7a1",
+   "bytes": 4914400,
+   "packages": [
+    "llvm19-libs"
+   ]
+  },
+  {
+   "n": 10,
+   "file": "fs/fb35b55228c88f937ddca5280a8d39f3935686063d9504833d0ea595b4894af8.pack",
+   "sha256": "fb35b55228c88f937ddca5280a8d39f3935686063d9504833d0ea595b4894af8",
+   "bytes": 3874826,
+   "packages": [
+    "scudo-malloc",
+    "rust"
+   ]
+  },
+  {
+   "n": 11,
+   "file": "fs/ac22f8c22a8df7cf1a242eb29fd003448a1c751c065b26d2fd7605939397f16d.pack",
+   "sha256": "ac22f8c22a8df7cf1a242eb29fd003448a1c751c065b26d2fd7605939397f16d",
+   "bytes": 24225594,
+   "packages": [
+    "rust"
+   ]
+  },
+  {
+   "n": 12,
+   "file": "fs/83ef69d260e522c88bc65f51e724517f3e5ea4a470cec2ac31690764ddc1c83a.pack",
+   "sha256": "83ef69d260e522c88bc65f51e724517f3e5ea4a470cec2ac31690764ddc1c83a",
+   "bytes": 23107915,
+   "packages": [
+    "rust"
+   ]
+  },
+  {
+   "n": 13,
+   "file": "fs/f028fdc2d3b80919daf4c6b961dda8e5aabaa24aa214f79280205574bda32074.pack",
+   "sha256": "f028fdc2d3b80919daf4c6b961dda8e5aabaa24aa214f79280205574bda32074",
+   "bytes": 24406639,
+   "packages": [
+    "rust",
+    "libunistring",
+    "libidn2",
+    "libpsl",
+    "libcurl",
+    "cargo",
+    "go"
+   ]
+  },
+  {
+   "n": 14,
+   "file": "fs/6469e81b97969aef3c49df805fa4747fde3dfeecfd1db08eeb0cb4cef92539d9.pack",
+   "sha256": "6469e81b97969aef3c49df805fa4747fde3dfeecfd1db08eeb0cb4cef92539d9",
+   "bytes": 25119516,
+   "packages": [
+    "go"
+   ]
+  },
+  {
+   "n": 15,
+   "file": "fs/3f04219b63d7e3598b4be8d1d420d43fca60f09bd1066d984184a61b1f28de9a.pack",
+   "sha256": "3f04219b63d7e3598b4be8d1d420d43fca60f09bd1066d984184a61b1f28de9a",
+   "bytes": 25162969,
+   "packages": [
+    "go"
+   ]
+  },
+  {
+   "n": 16,
+   "file": "fs/cea374a468fd8afb8918830d691a5fc240112d7ac718ea793eba598d2399b043.pack",
+   "sha256": "cea374a468fd8afb8918830d691a5fc240112d7ac718ea793eba598d2399b043",
+   "bytes": 20465261,
+   "packages": [
+    "go",
+    "libpng",
+    "freetype",
+    "fontconfig",
+    "encodings",
+    "libfontenc",
+    "mkfontscale",
+    "font-dejavu",
+    "libxau",
+    "libmd",
+    "libbsd",
+    "libxdmcp",
+    "libxcb",
+    "libx11",
+    "libxcomposite",
+    "libxext",
+    "libxi",
+    "libxrender",
+    "libxtst",
+    "alsa-lib",
+    "giflib",
+    "libjpeg-turbo",
+    "openjdk8-jre-lib"
+   ]
+  },
+  {
+   "n": 17,
+   "file": "fs/57a5e4423bfc52a0bd6b4a94f9628e7fe973fe00eae6bb129f100e16ba7277bf.pack",
+   "sha256": "57a5e4423bfc52a0bd6b4a94f9628e7fe973fe00eae6bb129f100e16ba7277bf",
+   "bytes": 25165824,
+   "packages": [
+    "openjdk8-jre-lib"
+   ]
+  },
+  {
+   "n": 18,
+   "file": "fs/bdf00059d34bad5f37b1f86b23a3de8d2c0cdebe55d5676c559d67a278297c79.pack",
+   "sha256": "bdf00059d34bad5f37b1f86b23a3de8d2c0cdebe55d5676c559d67a278297c79",
+   "bytes": 6828840,
+   "packages": [
+    "openjdk8-jre-lib"
+   ]
+  },
+  {
+   "n": 19,
+   "file": "fs/dfbe79ebf3ad9228f292601c3e92dffa1d6fa21c7faf6222f11c44dd009db876.pack",
+   "sha256": "dfbe79ebf3ad9228f292601c3e92dffa1d6fa21c7faf6222f11c44dd009db876",
+   "bytes": 24917673,
+   "packages": [
+    "openjdk8-jre-lib",
+    "libtasn1",
+    "p11-kit",
+    "p11-kit-trust",
+    "java-cacerts",
+    "nspr",
+    "nss",
+    "krb5-conf",
+    "libcom_err",
+    "keyutils-libs",
+    "libverto",
+    "krb5-libs",
+    "lcms2",
+    "pcsc-lite-libs",
+    "liblksctp",
+    "openjdk8-jre-base",
+    "openjdk8-jre",
+    "openjdk8-jdk",
+    "openjdk8",
+    "yaml"
+   ]
+  },
+  {
+   "n": 20,
+   "file": "fs/83ebe4a25b7ddfb7431a03e14dd928c227863553406fcb77b6e1967607c43888.pack",
+   "sha256": "83ebe4a25b7ddfb7431a03e14dd928c227863553406fcb77b6e1967607c43888",
+   "bytes": 21586908,
+   "packages": [
+    "ruby-libs",
+    "libucontext",
+    "ruby",
+    "php83-common",
+    "argon2-libs",
+    "libedit",
+    "pcre2",
+    "php83",
+    "perl",
+    "py3-parsing",
+    "py3-packaging",
+    "py3-setuptools",
+    "py3-pip",
+    "git"
+   ]
+  }
+ ],
+ "download_bytes": 432597242
 }

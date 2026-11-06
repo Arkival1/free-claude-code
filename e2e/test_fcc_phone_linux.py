@@ -50,14 +50,14 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
         }"""
     )
     assert done["tools"]
-    assert "FCC Linux 1.1" in done["info"] and "Python 3.12" in done["info"]
+    assert "FCC Linux 2.0" in done["info"] and "Python 3.12" in done["info"]
     assert done["wrote"].startswith("Wrote /root/hello.py")
     assert done["ran"].startswith("exit code 0") and '{"sum": 5050}' in done["ran"]
     assert "1024" in done["ran"]
     assert done["read"].startswith("import json")
     assert done["failed"].startswith("exit code 1") and "No such file" in done["failed"]
-    # Only the loopback: no network card in the emulated PC.
-    assert re.search(r"exit code \d+\nlo\n", done["network"]), done["network"]
+    # The network card has nothing behind it until the internet switch is on.
+    assert re.search(r"exit code \d+\n(eth0  )?lo\n", done["network"]), done["network"]
     assert "Network is unreachable" in done["network"] or "Error" in done["network"]
 
     # Commands run in bash with no keyboard input; a half-typed line at the

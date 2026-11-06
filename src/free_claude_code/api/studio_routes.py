@@ -3886,6 +3886,8 @@ _PHONE_TYPES = {
     ".bin": "application/octet-stream",
     ".kernel": "application/octet-stream",
     ".initrd": "application/octet-stream",
+    # FCC Linux 2's system packs (js/linuxfiles.js checks each one).
+    ".pack": "application/octet-stream",
     ".json": "application/json",
 }
 
