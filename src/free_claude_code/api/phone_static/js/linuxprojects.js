@@ -14,6 +14,10 @@ const OUT_MAX = 40; // changed files read per round
 const NEXT = `${MARK}.next`;
 const CHANGED = "/tmp/.fcc-projects-changed";
 const sent = new Map(); // "slug/path" -> the text last written in or read out
+// Linux files changed but not yet read back (a read or its conflict copy
+// failed): syncIn leaves them alone until a sync-out brings them back, so
+// writing the phone's copy in can't overwrite Linux's change.
+const pending = new Set();
 // File times in FCC Linux are whole seconds: the mark is set two seconds back,
 // so a file changed just after a sync still counts (unchanged ones are
 // skipped by their contents).
@@ -57,7 +61,7 @@ async function syncInNow(machine) {
   for (const project of state.projects || []) {
     for (const [path, body] of Object.entries(project.files || {})) {
       const key = `${project.slug}/${path}`;
-      if (!safe(path) || sent.get(key) === body) continue;
+      if (!safe(path) || sent.get(key) === body || pending.has(key)) continue;
       let data;
       if (TEXT_TYPES.test(path) && typeof body === "string" && !isPicture(body)) data = base64Text(body);
       else if (PICTURE_TYPES.test(path) && isPicture(body)) data = body.slice(body.indexOf(",") + 1);
@@ -98,6 +102,8 @@ async function syncOutNow(machine, agentName) {
   }
   const back = [];
   const missed = [];
+  // The projects Linux changed (FCC checks each one after an agent's job).
+  back.projects = [];
   // The whole list, a page at a time (each page handled before the next is
   // read, so a long list never sits in memory at once).
   for (let from = 1; from <= total; from += OUT_MAX) {
@@ -125,9 +131,11 @@ async function bringBack(machine, lines, agentName, back, missed) {
     const project = (state.projects || []).find((item) => item.slug === slug);
     const text = TEXT_TYPES.test(path);
     if (!project || !safe(path) || !(text || PICTURE_TYPES.test(path))) continue;
+    const key = `${slug}/${path}`;
     const read = await machine.run(`base64 -w0 ${quote(`${ROOT}/${relative}`)}`, { timeoutMs: 60000 }).catch(() => null);
     if (!read || read.code !== 0) {
       missed.push(relative);
+      pending.add(key);
       continue;
     }
     const data = read.text.trim();
@@ -140,10 +148,10 @@ async function bringBack(machine, lines, agentName, back, missed) {
       const kind = /\.png$/i.test(path) ? "png" : /\.gif$/i.test(path) ? "gif" : /\.webp$/i.test(path) ? "webp" : "jpeg";
       body = `data:image/${kind};base64,${data}`;
     }
-    const key = `${slug}/${path}`;
     // Unchanged in Linux since FCC wrote it, or already the same: nothing to do.
     if (body === sent.get(key) || project.files[path] === body) {
       sent.set(key, body);
+      pending.delete(key);
       continue;
     }
     // Changed on both sides since FCC wrote it in, or the phone has its own
@@ -151,19 +159,31 @@ async function bringBack(machine, lines, agentName, back, missed) {
     // record was lost): the phone's copy stays and Linux's comes in beside
     // it, so neither is lost.
     if (project.files[path] !== undefined && (!sent.has(key) || project.files[path] !== sent.get(key))) {
-      await putFile(project, `${path}.from-linux${text ? ".txt" : path.slice(path.lastIndexOf("."))}`, body, agentName).catch(() => null);
+      try {
+        await putFile(project, `${path}.from-linux${text ? ".txt" : path.slice(path.lastIndexOf("."))}`, body, agentName);
+      } catch {
+        // The copy couldn't be saved: the mark stays, so it's tried again.
+        missed.push(relative);
+        pending.add(key);
+        continue;
+      }
+      pending.delete(key);
       back.push(`${slug}/${path} (both changed: Linux's copy kept beside it)`);
+      if (!back.projects.includes(project)) back.projects.push(project);
       continue;
     }
     await putFile(project, path, body, agentName);
     sent.set(key, body);
+    pending.delete(key);
     back.push(key);
+    if (!back.projects.includes(project)) back.projects.push(project);
   }
 }
 
 /** Forget what was written in (after FCC Linux starts fresh). */
 export function forgetSynced() {
   sent.clear();
+  pending.clear();
 }
 
 /** What FCC last wrote in or read out, kept with a kept session ... */

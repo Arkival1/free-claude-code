@@ -308,6 +308,13 @@ export function specsFor(agent, ctx = {}) {
 const partsOnly = (path) => `${path} is the main AI's file. As a helper you write only under parts/ (for example parts/${path.split("/").pop()}); nothing was changed.`;
 
 /** Run one tool call for an agent. ctx: {project, depth, chain}. Returns text. */
+/** Projects Linux changed during a job (FCC checks each one after it). */
+function noteLinuxProjects(ctx, back) {
+  if (!ctx) return;
+  ctx.linuxProjects = ctx.linuxProjects || [];
+  for (const project of back.projects || []) if (!ctx.linuxProjects.includes(project)) ctx.linuxProjects.push(project);
+}
+
 export async function runTool(agent, call, ctx) {
   const args = call.arguments || {};
   const allowed = toolsFor(agent, ctx);
@@ -362,6 +369,7 @@ export async function runTool(agent, call, ctx) {
             failed = `\n(Couldn't copy changes back to FCC Projects: ${error.message}. Some files may not be in Projects yet; run the linux tool's sync to try again.)`;
             return [];
           });
+          noteLinuxProjects(ctx, back);
           const saved = (back.length ? `\n(Saved back to FCC Projects: ${back.slice(0, 8).join(", ")}${back.length > 8 ? "…" : ""})` : "") + failed;
           return `exit code ${result.code}\n${clip(result.text) || "(no output)"}${saved}`;
         }
@@ -391,6 +399,7 @@ export async function runTool(agent, call, ctx) {
         if (action === "sync") {
           const { syncIn, syncOut } = await import("./linuxprojects.js");
           const back = await syncOut(machine, agent.name);
+          noteLinuxProjects(ctx, back);
           const wrote = await syncIn(machine);
           return `Projects are in /projects (one folder each). Wrote ${wrote} changed file(s) in; brought ${back.length} back to FCC Projects.`;
         }

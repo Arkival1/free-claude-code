@@ -523,6 +523,8 @@ def test_a_site_that_fails_fccs_check_is_not_called_done(
     assert task["summary"].startswith("Not finished: FCC's own check still finds")
     work = [s for s in task["steps"] if s["stage"] == "work"]
     assert len(work) == 3
+    # Tries that leave the check failing aren't shown as done.
+    assert {s["status"] for s in work} == {"unfinished"}
     assert "FCC's own check" in work[0]["result"].split("\n")[0] + work[0]["result"]
     # The second try was told what FCC's check found.
     assert any(

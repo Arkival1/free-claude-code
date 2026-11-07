@@ -356,7 +356,19 @@ def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
             }
             const bounced = await net.handle({ url: 'http://bounce.example.org/go', method: 'POST', body: 'x' }, { ask });
             const bouncedRead = await net.handle({ url: 'http://bounce.example.org/read', method: 'GET' }, { ask });
-            return { own: own.status, local, bounced: bounced.status, bouncedRead: bouncedRead.status };
+            // A listed host (PyPI) is followed, and where it ends is checked:
+            // ending somewhere local, nothing comes back.
+            const realFetch = window.fetch;
+            let followMode = '';
+            window.fetch = async (address, options) => {
+                followMode = options.redirect;
+                const answer = new Response('local secrets', { status: 200 });
+                Object.defineProperty(answer, 'url', { value: 'http://192.168.1.5/admin' });
+                return answer;
+            };
+            const followed = await net.handle({ url: 'http://pypi.org/simple/x/', method: 'GET' }, { ask });
+            window.fetch = realFetch;
+            return { own: own.status, local, bounced: bounced.status, bouncedRead: bouncedRead.status, followed: followed.status, followMode };
         }"""
     )
     assert result["own"] == 403
@@ -366,6 +378,7 @@ def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
     assert result["bounced"] == 502
     # A read is only redirected for package indexes and GitHub.
     assert result["bouncedRead"] == 502
+    assert result["followMode"] == "follow" and result["followed"] == 403
     assert len(asked) == 2, asked  # once for the push, once for the deletion
     assert "push to me/app" in asked[0] and "Allow this one change?" in asked[1]
 
@@ -415,20 +428,36 @@ def test_a_changed_file_that_cannot_be_read_is_tried_again(
             const projects = await import('./js/projects.js');
             const sync = await import('./js/linuxprojects.js');
             const project = await projects.createProject('Retry', 'you');
+            await projects.putFile(project, 'index.html', 'phone copy', 'you');
             sync.forgetSynced();
             const commands = [];
+            let readable = false;
             const machine = {
                 run: async (command) => {
                     commands.push(command);
                     if (command.includes('find .')) return { code: 0, text: '1' };
                     if (command.startsWith('sed -n')) return { code: 0, text: `./${project.slug}/index.html` };
-                    if (command.startsWith('base64')) return { code: 1, text: 'busy' };
+                    if (command.startsWith('base64')) return readable ? { code: 0, text: btoa('linux copy') } : { code: 1, text: 'busy' };
                     return { code: 0, text: '' };
                 },
             };
             const back = await sync.syncOut(machine, 'you');
-            return { back, moved: commands.some((command) => command.startsWith('mv -f')) };
+            const moved = commands.some((command) => command.startsWith('mv -f'));
+            // While Linux's change is still unread, writing the phone's copy in
+            // leaves that file alone.
+            commands.length = 0;
+            await sync.syncIn(machine);
+            const wroteOver = commands.some((command) => command.includes('index.html'));
+            // The next sync reads it, brings it back and moves the mark.
+            readable = true;
+            commands.length = 0;
+            const again = await sync.syncOut(machine, 'you');
+            return { back, moved, wroteOver, again, movedAfter: commands.some((command) => command.startsWith('mv -f')), files: project.files };
         }"""
     )
     assert result["moved"] is False
     assert "couldn't read 1 changed file" in result["back"][0]
+    assert result["wroteOver"] is False
+    assert result["movedAfter"] is True
+    assert result["files"]["index.html.from-linux.txt"] == "linux copy"
+    assert result["files"]["index.html"] == "phone copy"

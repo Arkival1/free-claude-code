@@ -265,12 +265,6 @@ export async function handle(request, { ask = (question) => confirm(question) } 
   // The size cap holds while the answer arrives, so a huge download stops
   // before it fills the phone's memory.
   const tooBig = () => text(413, `${url.hostname} sent more than ${BODY_LIMIT / 1048576} MB in one answer.`);
-  // Content-Length counts the body only when nothing is encoded and a body
-  // comes (a HEAD answer has none); otherwise the streamed count decides.
-  if (method !== "HEAD" && !response.headers.get("content-encoding") && Number(response.headers.get("content-length")) > BODY_LIMIT) {
-    response.body?.cancel().catch(() => {});
-    return tooBig();
-  }
   let body = await readCapped(response);
   if (!body) return tooBig();
   const rule = REWRITE.find(([host]) => host.test(url.hostname));

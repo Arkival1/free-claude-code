@@ -240,14 +240,18 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
     let still = "";
     let problems = [];
     const builds = !ctx.partsOnly && (!ctx.tools || ctx.tools.some((name) => CHANGES_FILES.has(name)));
-    // An emptied project is checked too (it says it has no files).
-    if (builds && ctx.project) {
+    // The job's project (an emptied one too: it says it has no files) and
+    // every project Linux changed during the job.
+    const checked = builds ? [ctx.project, ...(ctx.linuxProjects || [])].filter((project, index, all) => project && all.indexOf(project) === index) : [];
+    const { checkProject } = checked.length ? await import("./projects.js") : {};
+    for (const project of checked) {
       try {
-        const { checkProject } = await import("./projects.js");
-        problems = checkProject(ctx.project).filter((problem) => !problem.startsWith("Note: "));
-        if (problems.length) still = `\n\nFCC's own check of ${ctx.project.name} still finds ${problems.length} problem(s), so it isn't finished:\n${problems.slice(0, 6).map((problem) => `- ${problem}`).join("\n")}\nDon't tell the user it's done: have them fixed first.`;
+        const found = checkProject(project).filter((problem) => !problem.startsWith("Note: "));
+        if (!found.length) continue;
+        problems = [...problems, ...found];
+        still += `\n\nFCC's own check of ${project.name} still finds ${found.length} problem(s), so it isn't finished:\n${found.slice(0, 6).map((problem) => `- ${problem}`).join("\n")}\nDon't tell the user it's done: have them fixed first.`;
       } catch (error) {
-        still = `\n\nFCC couldn't check ${ctx.project.name} (${error.message}), so whether it works isn't known yet.`;
+        still += `\n\nFCC couldn't check ${project.name} (${error.message}), so whether it works isn't known yet.`;
       }
     }
     if (report) report.problems = problems;
@@ -258,7 +262,7 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
     // The agent that did the work and every agent that handed the job down
     // (Jarvis included) get the app to download.
     for (const id of ctx.chain) await handOver(state.agents.find((item) => item.id === id), ctx.built);
-    feed(agent.name, still ? `Finished, but FCC's check still finds problems in ${ctx.project.name}` : `Finished: ${result.split("\n")[0].slice(0, 120)}`, still ? "error" : "done");
+    feed(agent.name, still ? `Finished, but FCC's check still finds problems in ${checked.map((project) => project.name).join(", ")}` : `Finished: ${result.split("\n")[0].slice(0, 120)}`, still ? "error" : "done");
     // The check comes first, so a long answer cut short never hides it.
     return `${agent.name} finished${ctx.project ? ` (project ${ctx.project.name})` : ""}: ${still ? `${still.trim()}\n\n` : ""}${result}`;
   } catch (error) {
