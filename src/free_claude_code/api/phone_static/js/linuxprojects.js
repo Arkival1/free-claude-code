@@ -97,18 +97,25 @@ async function syncOutNow(machine, agentName) {
     return [];
   }
   const back = [];
+  const missed = [];
   // The whole list, a page at a time (each page handled before the next is
   // read, so a long list never sits in memory at once).
   for (let from = 1; from <= total; from += OUT_MAX) {
     const page = await machine.run(`sed -n '${from},${from + OUT_MAX - 1}p' ${CHANGED}`, { timeoutMs: 60000 });
     if (page.code !== 0) throw new Error("Couldn't list the files changed in FCC Linux.");
-    await bringBack(machine, page.text.split("\n"), agentName, back);
+    await bringBack(machine, page.text.split("\n"), agentName, back, missed);
+  }
+  if (missed.length) {
+    // A file that couldn't be read keeps the mark where it is, so the next
+    // sync tries it again (the ones already back are skipped by contents).
+    back.push(`(couldn't read ${missed.length} changed file(s) yet, e.g. ${missed.slice(0, 3).join(", ")}: they come back on the next sync)`);
+    return back;
   }
   await machine.run(`mv -f ${NEXT} ${MARK}`, { timeoutMs: 30000 });
   return back;
 }
 
-async function bringBack(machine, lines, agentName, back) {
+async function bringBack(machine, lines, agentName, back, missed) {
   for (const line of lines) {
     const relative = line.trim().replace(/^\.\//, "");
     const slash = relative.indexOf("/");
@@ -119,7 +126,10 @@ async function bringBack(machine, lines, agentName, back) {
     const text = TEXT_TYPES.test(path);
     if (!project || !safe(path) || !(text || PICTURE_TYPES.test(path))) continue;
     const read = await machine.run(`base64 -w0 ${quote(`${ROOT}/${relative}`)}`, { timeoutMs: 60000 }).catch(() => null);
-    if (!read || read.code !== 0) continue;
+    if (!read || read.code !== 0) {
+      missed.push(relative);
+      continue;
+    }
     const data = read.text.trim();
     let body;
     if (text) {

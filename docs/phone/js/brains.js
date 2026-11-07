@@ -321,9 +321,14 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
   // Z.ai is offered as free: only its free Flash models are ever sent (a paid
   // one saved before, or typed on an agent, is swapped for the free one).
   if (brain === "zai" && !ZAI_FREE.test(model)) {
-    await listModels(brain).catch(() => []);
+    // A list that can't load (key, network) says why, unless a free model is
+    // already saved to fall back on.
+    let failed = null;
+    await listModels(brain).catch((error) => {
+      failed = error;
+    });
     model = ZAI_FREE.test(state.settings.models.zai || "") ? state.settings.models.zai : "";
-    if (!model) throw new BrainError("Z.ai: only its free GLM Flash models are used. Pick one in Settings.");
+    if (!model) throw failed || new BrainError("Z.ai: only its free GLM Flash models are used. Pick one in Settings.");
   }
   const useTools = tools.length && !state.settings.noTools[`${brain}:${model}`];
   const body = { model, messages: [{ role: "system", content: system }, ...messages], temperature: 0.5, max_tokens: maxTokens };

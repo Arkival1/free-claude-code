@@ -97,6 +97,25 @@ async function plugin(url) {
  * body }. ask(question) shows the user a yes/no (for GitHub changes). Returns
  * { status, headers, body (ArrayBuffer) }.
  */
+/** Hosts whose redirects (reads only) are followed: package indexes and
+ * GitHub, which send downloads on to their own file servers. */
+const FOLLOW = new Set([
+  "pypi.org",
+  "files.pythonhosted.org",
+  "registry.npmjs.org",
+  "index.crates.io",
+  "static.crates.io",
+  "crates.io",
+  "rubygems.org",
+  "proxy.golang.org",
+  "sum.golang.org",
+  "api.github.com",
+  "github.com",
+  "codeload.github.com",
+  "raw.githubusercontent.com",
+  "objects.githubusercontent.com",
+]);
+
 /** The calls fcc-github push makes (the only ones a 10-minute OK covers). */
 const PUSH_STEPS = [
   ["POST", /^\/repos\/[^/]+\/[^/]+\/git\/(blobs|trees|commits)$/],
@@ -218,12 +237,13 @@ export async function handle(request, { ask = (question) => confirm(question) } 
     }
   }
   let response;
-  // A change (POST and the rest) never follows a redirect: the browser would
-  // send it on before FCC could see where to, so a site can't bounce one
-  // into FCC or the home network. Reads follow, and where they end is checked
-  // before anything comes back.
+  // The browser follows a redirect before FCC could see where it goes, so a
+  // site could bounce a request into FCC or the home network. Redirects are
+  // followed only for reads from package indexes and GitHub (they send
+  // downloads to their own file servers); anything else isn't followed.
   const reading = ["GET", "HEAD"].includes(method);
-  const send = (address) => fetch(address, { method, headers, body: reading ? undefined : request.body, redirect: reading ? "follow" : "manual", credentials: "omit" });
+  const follows = reading && FOLLOW.has(url.hostname);
+  const send = (address) => fetch(address, { method, headers, body: reading ? undefined : request.body, redirect: follows ? "follow" : "manual", credentials: "omit" });
   try {
     response = await send(url.href);
   } catch {
@@ -236,7 +256,7 @@ export async function handle(request, { ask = (question) => confirm(question) } 
   }
   if (response.type === "opaqueredirect") {
     log({ what: describe(method, url), status: "redirect" });
-    return text(502, `${url.hostname} answered this ${method} with a redirect; FCC Linux doesn't follow redirects for changes.`);
+    return text(502, `${url.hostname} answered with a redirect, and FCC Linux only follows redirects from package indexes and GitHub (so no site can bounce a request into FCC or your home network). Use the final address directly.`);
   }
   if (response.url && offLimits(new URL(response.url))) {
     log({ what: describe(method, url), status: "blocked" });

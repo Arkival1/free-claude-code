@@ -355,7 +355,8 @@ def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
                 local.push((await net.handle({ url: address, method: 'GET' }, { ask })).status);
             }
             const bounced = await net.handle({ url: 'http://bounce.example.org/go', method: 'POST', body: 'x' }, { ask });
-            return { own: own.status, local, bounced: bounced.status };
+            const bouncedRead = await net.handle({ url: 'http://bounce.example.org/read', method: 'GET' }, { ask });
+            return { own: own.status, local, bounced: bounced.status, bouncedRead: bouncedRead.status };
         }"""
     )
     assert result["own"] == 403
@@ -363,6 +364,8 @@ def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
     # A change answered with a redirect isn't followed (it could be bounced
     # into FCC or the home network).
     assert result["bounced"] == 502
+    # A read is only redirected for package indexes and GitHub.
+    assert result["bouncedRead"] == 502
     assert len(asked) == 2, asked  # once for the push, once for the deletion
     assert "push to me/app" in asked[0] and "Allow this one change?" in asked[1]
 
@@ -398,3 +401,34 @@ def test_a_phone_file_without_a_sync_record_is_never_overwritten(
     assert result["files"]["index.html"] == "phone copy"
     assert result["files"]["index.html.from-linux.txt"] == "linux copy"
     assert "both changed" in result["back"][0]
+
+
+def test_a_changed_file_that_cannot_be_read_is_tried_again(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: a changed Linux file whose read fails keeps the
+    sync mark where it is (so the next sync tries it again) and is reported."""
+    page.set_default_timeout(WAIT)
+    open_phone(page, admin_base_url, "settings")
+    result = page.evaluate(
+        """async () => {
+            const projects = await import('./js/projects.js');
+            const sync = await import('./js/linuxprojects.js');
+            const project = await projects.createProject('Retry', 'you');
+            sync.forgetSynced();
+            const commands = [];
+            const machine = {
+                run: async (command) => {
+                    commands.push(command);
+                    if (command.includes('find .')) return { code: 0, text: '1' };
+                    if (command.startsWith('sed -n')) return { code: 0, text: `./${project.slug}/index.html` };
+                    if (command.startsWith('base64')) return { code: 1, text: 'busy' };
+                    return { code: 0, text: '' };
+                },
+            };
+            const back = await sync.syncOut(machine, 'you');
+            return { back, moved: commands.some((command) => command.startsWith('mv -f')) };
+        }"""
+    )
+    assert result["moved"] is False
+    assert "couldn't read 1 changed file" in result["back"][0]

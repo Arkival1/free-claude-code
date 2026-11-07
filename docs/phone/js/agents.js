@@ -124,6 +124,9 @@ async function history(agent) {
 
 /** The tool loop: think, run the tools asked for, think again, until a reply. */
 /** Tools whose answer doesn't change within one turn. */
+/** Tools that can change a project's files (a job with any of them is a build
+ * job, so FCC checks the project after it). */
+const CHANGES_FILES = new Set(["start_project", "write_file", "edit_file", "delete_file", "restore_file", "use_photo", "game_art", "web_kit", "linux", "godot"]);
 // recall isn't one: a teammate can save a shared memory mid-turn.
 const LOOKUPS = new Set(["skill", "wikipedia", "read_page", "web_search", "library", "game_art", "find_images", "list_photos"]);
 
@@ -236,7 +239,7 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
     // turn aren't the finished project.
     let still = "";
     let problems = [];
-    const builds = !ctx.partsOnly && (!ctx.tools || ctx.tools.some((name) => ["write_file", "edit_file", "start_project"].includes(name)));
+    const builds = !ctx.partsOnly && (!ctx.tools || ctx.tools.some((name) => CHANGES_FILES.has(name)));
     if (builds && ctx.project && Object.keys(ctx.project.files || {}).length) {
       try {
         const { checkProject } = await import("./projects.js");
