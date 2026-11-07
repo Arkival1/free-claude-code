@@ -1,0 +1,550 @@
+"""FCC Phone's Godot: real Godot 4.7.2 (its web player) runs a project's game
+on the phone in a sealed box. A starter plays and checks clean; a broken
+script is reported with its file and line; a game with an endless loop is
+refused before it runs; the box has no internet and no way into the page; a
+game that wants too much memory is told no in its box; the probe lists what
+Godot can do here; and the AI makes and checks a Godot game with the tool."""
+
+import json
+import struct
+
+import pytest
+from playwright.sync_api import ConsoleMessage, Page, Route, expect
+
+from .test_fcc_phone import go, open_phone
+
+GODOT_WAIT = 150_000
+SCENE = """[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1")
+"""
+
+
+@pytest.fixture
+def browser_context_args(browser_context_args: dict) -> dict:
+    """A touch screen, like the phone: games show touch controls and never
+    take the mouse (on a computer they do, until Esc)."""
+    return {**browser_context_args, "has_touch": True}
+
+
+def project_files(main: str) -> dict[str, str]:
+    return {
+        "project.godot": 'config_version=5\n\n[application]\n\nconfig/name="Test"\n'
+        'run/main_scene="res://main.tscn"\n',
+        "main.tscn": SCENE,
+        "main.gd": main,
+    }
+
+
+def run_in_box(page: Page, files: dict[str, str], until: str = "^DONE") -> dict:
+    """Run files in the box (as a check) until a line matches `until`."""
+    return page.evaluate(
+        """async ([files, until]) => {
+            const godot = await import('./js/godot.js');
+            const run = godot.runGodot({ name: 'Test', files }, { mode: 'check', seconds: 60, untilPrint: new RegExp(until) });
+            const sandbox = run.frame && run.frame.getAttribute('sandbox');
+            const policy = run.frame && run.frame.srcdoc.match(/Content-Security-Policy" content="([^"]*)"/)[1];
+            const result = await run.done;
+            return { ...result, sandbox, policy, report: godot.describeRun(result), boxes: document.querySelectorAll('iframe.godot-box').length };
+        }""",
+        [files, until],
+    )
+
+
+def watch_errors(page: Page) -> list[str]:
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+
+    def console_error(message: ConsoleMessage) -> None:
+        if message.type == "error" and "fonts.g" not in message.text:
+            errors.append(message.text)
+
+    page.on("console", console_error)
+    return errors
+
+
+def test_a_godot_starter_checks_clean_and_plays_full_screen(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(GODOT_WAIT)
+    errors = watch_errors(page)
+    open_phone(page, admin_base_url)
+    go(page, "projects")
+    page.get_by_role("button", name="Third-person (3D)").click()
+    expect(page.get_by_role("heading", name="Godot third-person game")).to_be_visible()
+    expect(page.get_by_text("Godot game ·")).to_be_visible()
+    project = page.evaluate(
+        "() => window.fccPhone.state.projects.find((p) => p.name === 'Godot third-person game')"
+    )
+    assert 'config/name="Godot third-person game"' in project["files"]["project.godot"]
+    assert {"main.gd", "main.tscn", "player.gd"} <= set(project["files"])
+
+    page.get_by_role("button", name="Check it").click()
+    report = page.locator(".godot-report")
+    expect(report).to_contain_text("No errors", timeout=GODOT_WAIT)
+    expect(report).to_contain_text("its first frame came after")
+    expect(page.locator("iframe.godot-box")).to_have_count(0)
+
+    page.get_by_role("button", name="Play Godot third-person game").click()
+    box = page.locator(".godot-layer iframe.godot-box")
+    expect(box).to_have_attribute("sandbox", "allow-scripts allow-pointer-lock")
+    expect(page.locator(".godot-layer .godot-status")).to_be_hidden(timeout=GODOT_WAIT)
+    page.get_by_role("button", name="Close the game").click()
+    # Software drawing here makes each frame slow, so the click waits its turn.
+    expect(page.locator(".godot-layer")).to_have_count(0, timeout=GODOT_WAIT)
+    assert errors == [], errors
+
+
+def test_godot_check_names_the_broken_line_and_refuses_endless_loops(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(GODOT_WAIT)
+    open_phone(page, admin_base_url)
+    broken = project_files(
+        'extends Node\n\n\nfunc _ready() -> void:\n\tvar score: int = "ten" + 1\n\tprint(score)\n'
+    )
+    endless = project_files(
+        "extends Node\n\n\nfunc _ready() -> void:\n\twhile true:\n\t\tprint('again')\n"
+    )
+    checked = page.evaluate(
+        """async ([broken, endless]) => {
+            const { runTool } = await import('./js/tools.js');
+            const projects = await import('./js/projects.js');
+            const tester = window.fccPhone.state.agents.find((a) => a.id === 'tester');
+            const out = {};
+            for (const [name, files] of [['Broken game', broken], ['Endless game', endless]]) {
+                const project = await projects.createProject(name, 'you');
+                for (const [path, body] of Object.entries(files)) await projects.writeFile(project, path, body, 'you');
+                const ctx = { project, depth: 0, chain: [], built: new Set() };
+                out[name] = {
+                    check: await runTool(tester, { name: 'godot', arguments: { action: 'check' } }, ctx),
+                    project: await runTool(tester, { name: 'check_project', arguments: {} }, ctx),
+                };
+            }
+            return out;
+        }""",
+        [broken, endless],
+    )
+    broken_check = checked["Broken game"]["check"]
+    assert "Errors (" in broken_check, broken_check
+    assert "res://main.gd:5" in broken_check
+    assert "Parse Error" in broken_check
+    endless_check = checked["Endless game"]["check"]
+    assert "didn't run" in endless_check
+    assert "main.gd:5 has a while true loop" in endless_check
+    assert "would freeze the phone" in checked["Endless game"]["project"]
+    expect(page.locator("iframe.godot-box")).to_have_count(0)
+
+
+def test_the_godot_box_has_no_internet_no_page_access_and_a_memory_cap(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(GODOT_WAIT)
+    hits: list[str] = []
+
+    def count(route: Route) -> None:
+        hits.append(route.request.url)
+        route.fulfill(body="reached")
+
+    page.route("**/godot-net-probe*", count)
+    open_phone(page, admin_base_url)
+    url = f"{admin_base_url}/godot-net-probe"
+    main = (
+        "extends Node\n\n\nfunc _ready() -> void:\n"
+        "\tvar request := HTTPRequest.new()\n"
+        "\trequest.timeout = 3.0\n"
+        "\tadd_child(request)\n"
+        f"\tvar error := request.request({json.dumps(url)})\n"
+        "\tif error != OK:\n"
+        '\t\tprint("NET start-error %d" % error)\n'
+        "\telse:\n"
+        "\t\tvar answer: Array = await request.request_completed\n"
+        '\t\tprint("NET %d %d" % [answer[0], answer[1]])\n'
+        '\tvar value: Variant = JavaScriptBridge.eval("parent.document.title", true)\n'
+        '\tprint("JS %s" % [value])\n'
+        "\tvar peer := WebRTCPeerConnection.new()\n"
+        '\tprint("RTC %d" % peer.initialize({"iceServers": [{"urls": ["stun:127.0.0.1:3478"]}]}))\n'
+        "\tvar big := PackedByteArray()\n"
+        '\tprint("BIG %d" % big.resize(1536 * 1024 * 1024))\n'
+        '\tprint("DONE")\n'
+    )
+    result = run_in_box(page, project_files(main))
+    assert result["sandbox"] == "allow-scripts allow-pointer-lock"
+    assert "connect-src 'none'" in result["policy"]
+    assert "default-src 'none'" in result["policy"]
+    lines = result["prints"]
+    net = next(line for line in lines if line.startswith("NET"))
+    # RESULT_SUCCESS is 0: anything else means the request never got through.
+    assert net != "NET 0 200", lines
+    assert "JS <null>" in lines, lines
+    # WebRTC isn't covered by the content policy, so the box switches it off.
+    rtc = next(line for line in lines if line.startswith("RTC"))
+    assert rtc != "RTC 0", lines
+    assert any(line.startswith("BIG") and line != "BIG 0" for line in lines), lines
+    assert "DONE" in lines
+    assert "said no" in result["memory"]
+    assert "JavaScriptBridge.eval" in result["report"]
+    assert hits == []
+    assert result["boxes"] == 0
+    # The page is still fine afterwards.
+    go(page, "projects")
+    expect(page.get_by_role("heading", name="Godot games")).to_be_visible()
+
+
+def test_the_probe_lists_what_godot_can_do_on_the_phone(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(GODOT_WAIT)
+    open_phone(page, admin_base_url)
+    go(page, "projects")
+    page.get_by_role("button", name="What can Godot do on this phone?").click()
+    sheet = page.locator("#sheet")
+    expect(page.locator("#sheet-title")).to_contain_text(
+        "Godot here:", timeout=GODOT_WAIT
+    )
+    for words in (
+        "Works (",
+        "Missing (",
+        "Blocked on purpose (FCC's box)",
+        "Internet from the game",
+        "3D physics",
+        "Thread support",
+        "GDExtension (native add-ons)",
+        "Memory cap",
+    ):
+        expect(sheet).to_contain_text(words)
+    expect(page.locator(".godot-layer")).to_have_count(0)
+    told = page.evaluate(
+        """async () => {
+            const { runTool } = await import('./js/tools.js');
+            const jarvis = window.fccPhone.state.agents.find((a) => a.id === 'jarvis');
+            return runTool(jarvis, { name: 'godot', arguments: { action: 'probe' } }, { depth: 0, chain: [], built: new Set() });
+        }"""
+    )
+    assert told.startswith("What Godot 4.7.2 can do on this phone")
+
+
+def test_the_ai_starts_and_checks_a_godot_game_with_the_tool(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(GODOT_WAIT)
+    open_phone(page, admin_base_url)
+    result = page.evaluate(
+        """async () => {
+            const { runTool } = await import('./js/tools.js');
+            const builder = window.fccPhone.state.agents.find((a) => a.id === 'builder');
+            const ctx = { depth: 0, chain: [], built: new Set() };
+            const call = (name, args) => runTool(builder, { name, arguments: args }, ctx);
+            const out = { tools: builder.tools.includes('godot') };
+            out.guide = await call('godot', { action: 'guide' });
+            out.starters = await call('godot', { action: 'starters' });
+            await call('start_project', { name: 'Ember Duel' });
+            out.start = await call('godot', { action: 'start', starter: 'third-person-3d' });
+            out.again = await call('godot', { action: 'start', starter: 'action-3d' });
+            out.bad = await call('godot', { action: 'start', starter: 'nope' });
+            await call('edit_file', { path: 'main.gd', find: 'extends Node3D', replace: 'extends Node3D\\n# Ember Duel' });
+            out.check = await call('godot', { action: 'check', seconds: 4 });
+            out.files = Object.keys(ctx.project.files).sort();
+            return out;
+        }"""
+    )
+    assert result["tools"]
+    assert "Compatibility renderer" in result["guide"]
+    assert "action-3d:" in result["starters"]
+    assert "Put the third-person-3d starter in Ember Duel" in result["start"]
+    assert "already has files" in result["again"]
+    assert "starter is one of" in result["bad"]
+    assert "No errors" in result["check"], result["check"]
+    assert {"project.godot", "main.gd", "main.tscn"} <= set(result["files"])
+
+
+def test_the_box_guards_hold_and_the_pack_is_godots_format(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(GODOT_WAIT)
+    open_phone(page, admin_base_url)
+    found = page.evaluate(
+        r"""async () => {
+            const godot = await import('./js/godot.js');
+            const { makePack } = await import('./godot/pack.js');
+            const loops = {
+                nested: 'func _ready():\n\twhile true:\n\t\tfor i in 3:\n\t\t\tbreak\n',
+                inline: 'func _ready():\n\twhile true:\n\t\tfor i in 3: break\n',
+                breaks: 'func _ready():\n\twhile true:\n\t\tfor i in 3:\n\t\t\tpass\n\t\tbreak\n',
+                waits: 'func _ready():\n\twhile true:\n\t\tfor i in 3:\n\t\t\tawait get_tree().process_frame\n',
+                one_line: 'func _ready():\n\twhile true: break\n',
+                hash_break: 'func _ready():\n\twhile true:\n\t\tif c == "#": break\n',
+                hash_text: 'func _ready():\n\twhile true:\n\t\tprint("#")\n',
+                word_in_text: 'func _ready():\n\twhile true:\n\t\tvar s = "quit"\n\t\tprint(s)\n',
+                lambda_return: 'func _ready():\n\twhile true:\n\t\tvar f = func(): return 1\n\t\tprint(f.call())\n',
+                lambda_block: 'func _ready():\n\twhile true:\n\t\tvar f = func():\n\t\t\treturn 1\n\t\tprint(f.call())\n',
+                after_lambda: 'func _ready():\n\twhile true:\n\t\tvar f = func():\n\t\t\treturn 1\n\t\tif f.call() == 1:\n\t\t\tbreak\n',
+            };
+            const out = { loops: {} };
+            for (const [name, text] of Object.entries(loops)) out.loops[name] = godot.endlessLoops(text);
+            // The plain-JS SHA-256 (for plain http) agrees with the browser's.
+            out.sums = [];
+            for (const size of [0, 3, 55, 56, 63, 64, 65, 1000, 1048577]) {
+                const bytes = new Uint8Array(size).map((_, i) => (i * 31 + size) & 255);
+                const theirs = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+                out.sums.push(godot.sha256Hex(bytes.buffer) === theirs);
+            }
+            // One game at a time: a second run closes the first; a stop before
+            // the engine is in leaves nothing behind.
+            const files = { 'project.godot': 'run/main_scene="res://main.tscn"\n', 'main.tscn': '', 'main.gd': '' };
+            const first = godot.runGodot({ name: 'First', files }, { mode: 'check' });
+            const second = godot.runGodot({ name: 'Second', files }, { mode: 'check' });
+            out.first = (await first.done).stopped;
+            second.stop('Closed.');
+            const done = await second.done;
+            out.second = [done.stopped, done.started];
+            out.boxes = document.querySelectorAll('iframe.godot-box').length;
+            // A message that isn't from the box changes nothing.
+            const third = godot.runGodot({ name: 'Third', files }, { mode: 'check' });
+            window.postMessage({ type: 'crash', text: 'Aborted' }, '*');
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            third.stop('Closed.');
+            const spoofed = await third.done;
+            out.spoofed = [spoofed.crash, spoofed.stopped];
+            out.pack = [...new Uint8Array(makePack({ 'project.godot': 'x', 'a/b.gd': 'hello', 'c.txt': 'abcd' }))];
+            return out;
+        }"""
+    )
+    assert found["loops"] == {
+        "nested": [2],
+        "inline": [2],
+        "breaks": [],
+        "waits": [],
+        "one_line": [],
+        "hash_break": [],
+        "hash_text": [2],
+        "word_in_text": [2],
+        "lambda_return": [2],
+        "lambda_block": [2],
+        "after_lambda": [],
+    }
+    assert all(found["sums"]), found["sums"]
+    assert found["first"] == "Another Godot game started, so this one was closed."
+    assert found["second"] == ["Closed.", False]
+    assert found["boxes"] == 0
+    assert found["spoofed"] == ["", "Closed."]
+    pack = bytes(found["pack"])
+    magic, version, major, minor, patch, flags = struct.unpack_from("<6I", pack, 0)
+    base, directory = struct.unpack_from("<2Q", pack, 24)
+    assert (magic, version, (major, minor, patch), flags) == (
+        0x43504447,
+        4,
+        (4, 7, 2),
+        2,
+    )
+    assert base == 104 and directory <= len(pack)
+    count = struct.unpack_from("<I", pack, directory)[0]
+    at, entries = directory + 4, {}
+    for _ in range(count):
+        size = struct.unpack_from("<I", pack, at)[0]
+        name = pack[at + 4 : at + 4 + size].rstrip(b"\0").decode()
+        offset, length = struct.unpack_from("<2Q", pack, at + 4 + size)
+        entries[name] = pack[base + offset : base + offset + length]
+        assert offset % 4 == 0
+        at += 4 + size + 16 + 16 + 4
+    assert entries == {
+        "res://project.godot": b"x",
+        "res://a/b.gd": b"hello",
+        "res://c.txt": b"abcd",
+        "res://.godot/global_script_class_cache.cfg": b"list=[]\n",
+    }
+
+
+PICTURE_GAME = """extends Node
+
+
+func _ready() -> void:
+\tvar png: Texture2D = preload("res://art/dot.png")
+\tvar jpeg: Texture2D = preload("res://art/photo.jpg")
+\tprint("SIZES %d %d %d %d" % [png.get_width(), png.get_height(), jpeg.get_width(), jpeg.get_height()])
+\tprint("DONE")
+"""
+
+
+def test_pictures_load_in_godot_and_the_2d_starters_check_clean(
+    page: Page, admin_base_url: str
+) -> None:
+    """Godot's own importer isn't on the phone, so the phone imports a
+    project's pictures itself: preload works for PNG and JPEG, at their
+    real sizes, and the 2D starters (with their art) check clean."""
+    page.set_default_timeout(GODOT_WAIT)
+    errors = watch_errors(page)
+    open_phone(page, admin_base_url)
+    pictures = page.evaluate(
+        """async () => {
+            const url = async (type, width, height) => {
+                const canvas = new OffscreenCanvas(width, height);
+                const draw = canvas.getContext('2d');
+                draw.fillStyle = '#e94';
+                draw.fillRect(0, 0, width, height);
+                const blob = await canvas.convertToBlob({ type });
+                return await new Promise((done) => {
+                    const reader = new FileReader();
+                    reader.onload = () => done(reader.result);
+                    reader.readAsDataURL(blob);
+                });
+            };
+            return { png: await url('image/png', 7, 5), jpeg: await url('image/jpeg', 12, 9) };
+        }"""
+    )
+    files = {
+        **project_files(PICTURE_GAME),
+        "art/dot.png": pictures["png"],
+        "art/photo.jpg": pictures["jpeg"],
+    }
+    result = run_in_box(page, files)
+    assert any("SIZES 7 5 12 9" in line for line in result["prints"]), result["report"]
+    assert not result["errors"], result["report"]
+
+    go(page, "projects")
+    page.get_by_role("button", name="Platformer (2D)").click()
+    expect(page.get_by_role("heading", name="Godot platformer")).to_be_visible()
+    page.get_by_role("button", name="Check it").click()
+    report = page.locator(".godot-report")
+    expect(report).to_contain_text("No errors", timeout=GODOT_WAIT)
+    assert errors == [], errors
+
+
+COUNTER_GAME = """extends Node
+
+
+func _ready() -> void:
+\tvar count := 0
+\tif FileAccess.file_exists("user://count.txt"):
+\t\tcount = int(FileAccess.get_file_as_string("user://count.txt"))
+\tcount += 1
+\tvar file := FileAccess.open("user://count.txt", FileAccess.WRITE)
+\tfile.store_string(str(count))
+\tfile.close()
+\tawait get_tree().create_timer(1.5).timeout
+\tprint("COUNT %d %s" % [count, OS.is_userfs_persistent()])
+"""
+
+
+def test_a_games_saves_are_kept_on_the_phone_between_plays(
+    page: Page, admin_base_url: str
+) -> None:
+    """user:// survives closing the game: the box hands saves to the page,
+    which keeps them per project and hands them back next time it's played.
+    Checks start clean, and forgetting the saves starts the game over."""
+    page.set_default_timeout(GODOT_WAIT)
+    open_phone(page, admin_base_url)
+    counts = page.evaluate(
+        """async (files) => {
+            const godot = await import('./js/godot.js');
+            const project = { id: 'saves-test', name: 'Counter', files };
+            const play = async (mode) => {
+                const run = godot.runGodot(project, { mode, seconds: 60, untilPrint: /^COUNT/ });
+                const result = await run.done;
+                return (result.prints.find((line) => line.startsWith('COUNT')) || result.crash || 'none').trim();
+            };
+            await godot.forgetSaves('saves-test');
+            const out = [await play('play'), await play('play'), await play('check')];
+            out.push(String(await godot.savesSize('saves-test') > 0));
+            await godot.forgetSaves('saves-test');
+            out.push(await play('play'));
+            await godot.forgetSaves('saves-test');
+            return out;
+        }""",
+        project_files(COUNTER_GAME),
+    )
+    # The game's page shows the save and can forget it.
+    page.evaluate(
+        """async (files) => {
+            const projects = await import('./js/projects.js');
+            const godot = await import('./js/godot.js');
+            const project = await projects.createProject('Counter game', 'you');
+            for (const [path, body] of Object.entries(files)) await projects.writeFile(project, path, body, 'you');
+            await godot.runGodot(project, { mode: 'play', seconds: 60, untilPrint: /^COUNT/ }).done;
+            await new Promise((done) => setTimeout(done, 500));
+            window.location.hash = '#projects/' + project.id;
+        }""",
+        project_files(COUNTER_GAME),
+    )
+    expect(page.get_by_text("Saved game on this phone:")).to_be_visible()
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.get_by_role("button", name="Start over (forget the save)").click()
+    expect(page.get_by_text("Saved game on this phone:")).to_have_count(0)
+    assert counts == [
+        "COUNT 1 true",
+        "COUNT 2 true",
+        "COUNT 1 true",
+        "true",
+        "COUNT 1 true",
+    ], counts
+
+
+KIT_GAME = """extends Node
+const Kit := preload("res://fcc/kit.gd")
+
+
+func _ready() -> void:
+\tKit.use_fonts()
+\tvar fonts := ThemeDB.fallback_font.fallbacks.size()
+\tvar styles := Kit.font("pixel") != ThemeDB.fallback_font and Kit.font("fantasy") != ThemeDB.fallback_font
+\tvar label := Label.new()
+\tlabel.text = "★ ♥ ⚔ 😀"
+\tadd_child(label)
+\tvar made := 0
+\tfor kind: String in Kit.SURFACES:
+\t\tif Kit.material(kind, 2.0).albedo_texture != null:
+\t\t\tmade += 1
+\tadd_child(Kit.particles_2d("snow"))
+\tadd_child(Kit.day_night(10.0))
+\tvar walker := Node2D.new()
+\tadd_child(walker)
+\tKit.wander(walker, 1.0, 4.0)
+\t# The wanderer waits up to 2.5 s before its first step.
+\tawait get_tree().create_timer(4.0, true, true).timeout
+\tprint("KIT %d %s %d %s" % [fonts, styles, made, walker.position != Vector2.ZERO])
+"""
+
+
+def test_fccs_kit_gives_phone_games_symbols_textures_and_life(
+    page: Page, admin_base_url: str
+) -> None:
+    """A game that loads res://fcc/ gets FCC's kit in its pack (the fonts
+    fetched once and checked): symbols and emoji fonts as fallbacks, the two
+    styles, every surface, particles, day and night, and a wanderer that
+    moves; the check flags no missing file."""
+    page.set_default_timeout(GODOT_WAIT)
+    errors = watch_errors(page)
+    open_phone(page, admin_base_url)
+    picks = page.evaluate(
+        """async () => {
+            const godot = await import('./js/godot.js');
+            const uses = 'extends Node\\nconst K := preload("res://fcc/kit.gd")\\n';
+            const own = await godot.kitFiles({ 'main.gd': uses, 'fcc/fonts/pixel.ttf': 'mine' });
+            return {
+                plain: godot.usesKit({ 'main.gd': 'extends Node\\n' }),
+                uses: godot.usesKit({ 'main.gd': uses }),
+                carries: godot.usesKit({ 'main.gd': uses, 'fcc/kit.gd': 'extends RefCounted\\n' }),
+                keepsOwn: !('fcc/fonts/pixel.ttf' in own) && 'fcc/kit.gd' in own && own['fcc/fonts/emoji.ttf'].length > 1000000,
+                flagged: godot.godotProblems({ files: { 'project.godot': 'run/main_scene="res://main.gd"', 'main.gd': uses } }).map((p) => p.text),
+            };
+        }"""
+    )
+    assert picks == {
+        "plain": False,
+        "uses": True,
+        "carries": False,
+        "keepsOwn": True,
+        "flagged": [],
+    }, picks
+    result = run_in_box(page, project_files(KIT_GAME), "^KIT")
+    assert any(line == "KIT 3 true 12 true" for line in result["prints"]), result[
+        "report"
+    ]
+    assert not result["errors"], result["report"]
+    assert not [p for p in result["problems"] if "fcc/" in p["text"]], result[
+        "problems"
+    ]
+    assert errors == [], errors

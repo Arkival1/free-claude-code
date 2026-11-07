@@ -1,0 +1,902 @@
+"""FCC Phone on an iPhone 12 Pro screen: the command center, team, models, and PC link."""
+
+import json
+import re
+import struct
+from collections.abc import Callable
+
+from playwright.sync_api import Page, Route, ViewportSize, expect
+
+IPHONE_12_PRO = ViewportSize(width=390, height=844)
+GEMINI = "https://generativelanguage.googleapis.com/v1beta/openai"
+CORS = {"Access-Control-Allow-Origin": "*", "Content-Type": "application/json"}
+
+
+def open_phone(
+    page: Page, admin_base_url: str, route: str = "home", look: str = "hud"
+) -> None:
+    page.set_viewport_size(IPHONE_12_PRO)
+    # The HUD (?look=hud): most tests drive its tabs; the Playground is the default.
+    page.goto(f"{admin_base_url}/phone/?look={look}#{route}")
+    expect(page.locator(".tabs")).to_be_visible()
+    # Wait for saved data to load, so a test's changes aren't loaded over.
+    page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
+    page.evaluate("() => window.fccPhone.ready")
+
+
+def go(page: Page, route: str) -> None:
+    page.evaluate(f"location.hash = {json.dumps(route)}")
+
+
+def tool_call(name: str, arguments: dict) -> dict:
+    return {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": f"call_{name}",
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments)},
+            }
+        ],
+    }
+
+
+def say(text: str) -> dict:
+    return {"role": "assistant", "content": text}
+
+
+BAKERY = (
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    "<title>Sunrise Bakery</title><link rel='stylesheet' href='style.css'></head>"
+    "<body><header><h1>Sunrise Bakery</h1></header><main><p>Fresh bread daily.</p></main></body></html>"
+)
+
+
+def team_brain(body: dict) -> dict:
+    """A scripted Gemini that plays every agent by reading its instructions."""
+    system = body["messages"][0]["content"]
+    last = body["messages"][-1]
+    said = last.get("content") or ""
+    if "You plan short courses" in system:
+        return say('["What stars are", "Planets"]')
+    if "You write clear study notes" in system:
+        return say("Stars are huge balls of hot gas.\nKey idea: fusion powers them.")
+    if "in a group chat" in system:
+        found = re.search(r"You are (\w+)", system)
+        name = found.group(1) if found else "Agent"
+        if "The room's goal" in system:
+            return say("TASK COMPLETE: the plan is ready.")
+        return say(f"Hello from {name}.")
+    if "You are Builder" in system:
+        if last["role"] == "user":
+            return tool_call("write_file", {"path": "index.html", "content": BAKERY})
+        if "Wrote index.html" in said:
+            return tool_call(
+                "write_file", {"path": "style.css", "content": "h1 { color: teal; }"}
+            )
+        if "Wrote style.css" in said:
+            return tool_call("check_project", {})
+        return say("Built index.html and style.css for Sunrise Bakery.")
+    if last["role"] == "tool":
+        return say(f"Done. ({said.splitlines()[0]})")
+    if "gym" in said:
+        return tool_call(
+            "remember", {"text": "The user's gym days are Monday and Thursday."}
+        )
+    if "weather" in said:
+        return tool_call("weather", {"place": "Oslo", "days": 2})
+    if "bakery" in said:
+        return tool_call(
+            "ask_agent",
+            {
+                "agent": "Builder",
+                "task": "Make a one-page site for Sunrise Bakery.",
+                "project": "Sunrise Bakery",
+            },
+        )
+    return say("Hi!")
+
+
+def fake_gemini(page: Page, answer: Callable[[dict], dict] = team_brain) -> list[dict]:
+    seen: list[dict] = []
+
+    def handle(route: Route) -> None:
+        if route.request.url.endswith("/models"):
+            route.fulfill(
+                headers=CORS,
+                body=json.dumps(
+                    {
+                        "data": [
+                            {"id": "models/text-embedding-004"},
+                            {"id": "models/gemini-2.0-flash"},
+                            {"id": "models/gemini-2.5-flash"},
+                            {"id": "models/gemini-2.5-flash-lite"},
+                        ]
+                    }
+                ),
+            )
+            return
+        body = json.loads(route.request.post_data or "{}")
+        seen.append(body)
+        route.fulfill(
+            headers=CORS, body=json.dumps({"choices": [{"message": answer(body)}]})
+        )
+
+    page.route(f"{GEMINI}/**", handle)
+    page.route(
+        "https://geocoding-api.open-meteo.com/**",
+        lambda route: route.fulfill(
+            headers=CORS,
+            body=json.dumps(
+                {
+                    "results": [
+                        {
+                            "name": "Oslo",
+                            "country": "Norway",
+                            "latitude": 59.9,
+                            "longitude": 10.7,
+                        }
+                    ]
+                }
+            ),
+        ),
+    )
+    page.route(
+        "https://api.open-meteo.com/**",
+        lambda route: route.fulfill(
+            headers=CORS,
+            body=json.dumps(
+                {
+                    "current": {
+                        "temperature_2m": 4.2,
+                        "apparent_temperature": 1.0,
+                        "relative_humidity_2m": 80,
+                        "weather_code": 61,
+                        "wind_speed_10m": 12,
+                    },
+                    "daily": {
+                        "time": ["2026-09-27", "2026-09-28"],
+                        "weather_code": [61, 3],
+                        "temperature_2m_max": [7, 9],
+                        "temperature_2m_min": [2, 3],
+                        "precipitation_probability_max": [70, 20],
+                    },
+                }
+            ),
+        ),
+    )
+    page.route(
+        "https://en.wikipedia.org/**",
+        lambda route: route.fulfill(
+            headers=CORS,
+            body=json.dumps(
+                {"query": {"search": [{"title": "Star"}]}}
+                if "api.php" in route.request.url
+                else {
+                    "title": "Star",
+                    "extract": "A star is a luminous ball of gas.",
+                    "content_urls": {
+                        "mobile": {"page": "https://en.m.wikipedia.org/wiki/Star"}
+                    },
+                }
+            ),
+        ),
+    )
+    return seen
+
+
+def use_gemini(page: Page) -> None:
+    go(page, "settings")
+    page.get_by_label("Google Gemini key").fill("test-gemini-key")
+    page.get_by_role("button", name="Save Google Gemini").click()
+    expect(page.get_by_text("using gemini-2.5-flash")).to_be_visible()
+
+
+def fake_gguf(*, tools: bool) -> bytes:
+    def text(value: str) -> bytes:
+        raw = value.encode()
+        return struct.pack("<Q", len(raw)) + raw
+
+    template = "{% if tools %}<tool_call>{% endif %}" if tools else "{{ messages }}"
+    pairs = [
+        ("general.architecture", 8, text("qwen2")),
+        ("general.name", 8, text("Tiny Coder")),
+        ("general.size_label", 8, text("1.5B")),
+        ("qwen2.block_count", 4, struct.pack("<I", 28)),
+        ("qwen2.context_length", 4, struct.pack("<I", 32768)),
+        ("qwen2.embedding_length", 4, struct.pack("<I", 1536)),
+        ("qwen2.attention.head_count", 4, struct.pack("<I", 12)),
+        ("qwen2.attention.head_count_kv", 4, struct.pack("<I", 2)),
+        ("tokenizer.ggml.tokens", 9, struct.pack("<IQ", 8, 2) + text("a") + text("b")),
+        ("tokenizer.chat_template", 8, text(template)),
+    ]
+    header = b"GGUF" + struct.pack("<I", 3) + struct.pack("<QQ", 0, len(pairs))
+    return header + b"".join(
+        text(key) + struct.pack("<I", kind) + value for key, kind, value in pairs
+    )
+
+
+# --------------------------------------------------------------------- tests
+
+
+def test_home_is_the_jarvis_command_center(page: Page, admin_base_url: str) -> None:
+    open_phone(page, admin_base_url)
+    expect(page.locator(".hud-title")).to_have_text("JARVIS")
+    expect(page.locator(".orb-canvas")).to_be_visible()
+    expect(page.locator(".hud-chips")).to_contain_text("CORE NOT SET")
+    team = page.locator(".hud-agent")
+    expect(team).to_have_count(5)
+    for name in ("Jarvis", "Builder", "Researcher", "Helper", "Tester"):
+        expect(team.filter(has_text=name)).to_contain_text("READY")
+    expect(page.locator(".hud-log")).to_contain_text("needs a brain")
+    assert page.evaluate("() => document.documentElement.scrollWidth - innerWidth") <= 0
+
+    page.get_by_role("button", name="Model control Models on this phone").click()
+    expect(page.locator("#title")).to_have_text("Models")
+    expect(page.get_by_role("button", name="Download Qwen3 0.6B")).to_be_visible()
+    assert page.evaluate("() => window.fccPhone.calculate('15% of 240 + 2^3')") == 44
+    assert page.evaluate("() => window.fccPhone.calculate('sqrt(81) * (2 + 1)')") == 27
+    problems = page.evaluate(
+        "() => window.fccPhone.checkProject({name: 'x', files: {'index.html': '<p><img src=a.png>'}})"
+    )
+    assert any("DOCTYPE" in p for p in problems) and any("a.png" in p for p in problems)
+    # A part pasted in twice by an edit, as on the PC.
+    line = "<p>Founded in 1947, Rosie's Bakery has baked in Bath for years.</p>"
+    repeated = page.evaluate(
+        "(html) => window.fccPhone.checkProject({name: 'x', files: {'index.html': html}})",
+        "\n".join([line, "<p>Every loaf is hand-mixed and baked in our oven.</p>"] * 2)
+        + '\n<p id="s"></p><p id="s"></p>',
+    )
+    assert any("2 lines of text appear twice" in p for p in repeated), repeated
+    assert any("the id s is on more than one element" in p for p in repeated)
+    bundled = page.evaluate(
+        "() => window.fccPhone.bundle({files: {'index.html': "
+        '\'<link rel="stylesheet" href="s.css"><script src="a.js"></script>\', '
+        "'s.css': 'h1{}', 'a.js': 'x=1'}})"
+    )
+    assert "<style>" in bundled and "x=1" in bundled
+
+
+def test_jarvis_remembers_checks_the_weather_and_runs_the_builder(
+    page: Page, admin_base_url: str
+) -> None:
+    seen = fake_gemini(page)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    go(page, "home")
+    expect(page.locator(".hud-chips")).to_contain_text("CORE GEMINI")
+
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Remember my gym days are Monday and Thursday")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Done. (Saved to your own memory"
+    )
+    first = seen[0]
+    assert first["model"] == "gemini-2.5-flash"
+    assert "You are Jarvis, the user's main AI." in first["messages"][0]["content"]
+    assert {tool["function"]["name"] for tool in first["tools"]} >= {
+        "remember",
+        "ask_agent",
+        "todo",
+        "learn",
+    }
+
+    talk.fill("What's the weather in Oslo?")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Weather in Oslo, Norway: now 4°C"
+    )
+
+    talk.fill("Have Builder make a page for my bakery")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Builder finished", timeout=15000
+    )
+    expect(page.locator(".hud-feed")).to_contain_text("Wrote Sunrise Bakery/index.html")
+    builder_calls = [
+        call for call in seen if "You are Builder" in call["messages"][0]["content"]
+    ]
+    assert "write_file" in {
+        tool["function"]["name"] for tool in builder_calls[0]["tools"]
+    }
+
+    go(page, "projects")
+    page.get_by_role("button", name="Open Sunrise Bakery").click()
+    preview = page.frame_locator("iframe.preview")
+    expect(preview.locator("h1")).to_have_text("Sunrise Bakery")
+    files = page.locator(
+        ".card", has=page.get_by_role("heading", name=re.compile(r"Files$"))
+    )
+    expect(files).to_contain_text("style.css")
+    color = preview.locator("h1").evaluate("el => getComputedStyle(el).color")
+    assert color == "rgb(0, 128, 128)", "the stylesheet is inlined into the preview"
+    page.get_by_role("button", name="Open full screen").click()
+    expect(page.frame_locator("iframe.preview-full").locator("h1")).to_have_text(
+        "Sunrise Bakery"
+    )
+    page.get_by_role("button", name="Close full screen").click()
+
+    go(page, "memory")
+    expect(
+        page.get_by_text("The user's gym days are Monday and Thursday.", exact=True)
+    ).to_be_visible()
+
+
+def test_each_agent_has_its_own_brain_and_tools(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url, "agents")
+    expect(page.locator(".card", has_text="Your phone team")).to_contain_text("Helper")
+    page.get_by_role("button", name="Edit Helper").click()
+    sheet = page.locator(".sheet-panel")
+    expect(sheet.get_by_label("weather for Helper")).to_be_checked()
+    read = sheet.get_by_label("read_file for Helper")
+    expect(read).not_to_be_checked()
+    expect(sheet.get_by_label("team_status for Helper")).to_have_count(0)
+    expect(sheet.get_by_label("web_search for Helper")).to_be_disabled()
+    sheet.get_by_label("Every tool for Helper").check()
+    expect(read).to_be_checked()
+    expect(read).to_be_disabled()
+    expect(sheet.locator(".tool-count")).to_contain_text("Every tool")
+    sheet.get_by_role("button", name="Save").click()
+    expect(page.locator(".item", has_text="Helper")).to_contain_text("every tool")
+
+    page.get_by_role("button", name="Coach").click()
+    expect(sheet.get_by_label("Name")).to_have_value("Coach")
+    sheet.get_by_role("button", name="Create agent").click()
+    expect(page.get_by_role("button", name="Edit Coach")).to_be_visible()
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.get_by_role("button", name="Edit Coach").click()
+    sheet.get_by_role("button", name="Delete").click()
+    expect(page.get_by_role("button", name="Edit Coach")).to_have_count(0)
+
+    go(page, "agents/brains")
+    page.get_by_label("Brain for Builder").select_option("gemini")
+    page.get_by_role("button", name="Save").click()
+    expect(page.locator(".item", has_text="Builder")).to_contain_text("Google Gemini")
+
+
+def test_models_can_be_added_from_files(page: Page, admin_base_url: str) -> None:
+    open_phone(page, admin_base_url, "models")
+    chooser = page.get_by_label("Choose a model file")
+    chooser.set_input_files(
+        files=[
+            {
+                "name": "notes.txt",
+                "mimeType": "text/plain",
+                "buffer": b"hello there, not a model" * 4,
+            }
+        ]
+    )
+    expect(page.get_by_role("status").last).to_have_text(
+        "This isn't a GGUF model file."
+    )
+
+    chooser.set_input_files(
+        files=[
+            {
+                "name": "tiny-coder-1.5b-q4_k_m.gguf",
+                "mimeType": "application/octet-stream",
+                "buffer": fake_gguf(tools=True),
+            }
+        ]
+    )
+    expect(
+        page.get_by_text("tiny-coder-1.5b-q4_k_m added. It can use tools.")
+    ).to_be_visible()
+    row = page.locator(".model", has_text="tiny-coder-1.5b-q4_k_m")
+    for badge in ("Tools", "1.5B", "from Files", "Needs about"):
+        expect(row).to_contain_text(badge)
+    expect(row.locator(".pill.gold", has_text="default")).to_be_visible()
+    page.reload()
+    expect(page.locator(".model", has_text="tiny-coder-1.5b-q4_k_m")).to_be_visible()
+
+    go(page, "agents/brains")
+    page.get_by_label("Brain for Jarvis").select_option("local")
+    expect(page.get_by_label("Phone model for Jarvis")).to_contain_text(
+        "tiny-coder-1.5b-q4_k_m"
+    )
+
+    go(page, "models")
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.get_by_role("button", name="Delete tiny-coder-1.5b-q4_k_m").click()
+    expect(page.locator(".model", has_text="tiny-coder-1.5b-q4_k_m")).to_have_count(0)
+
+
+def test_rooms_learning_and_reminders(page: Page, admin_base_url: str) -> None:
+    fake_gemini(page)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+
+    go(page, "rooms")
+    for name in ("Builder", "Tester"):
+        page.get_by_label(f"{name} in the room").uncheck()
+    page.get_by_role("button", name="Open the room").click()
+    page.get_by_label("Message the room").fill("hello team")
+    page.get_by_role("button", name="Send").click()
+    expect(
+        page.locator(".msg.assistant", has_text="Hello from Researcher.")
+    ).to_be_visible()
+    expect(
+        page.locator(".msg.assistant", has_text="Hello from Helper.")
+    ).to_be_visible()
+    page.get_by_label("Room goal").fill("Plan a picnic")
+    page.get_by_role("button", name="Start task").click()
+    expect(page.locator(".msg.assistant").last).to_contain_text("TASK COMPLETE")
+
+    go(page, "learn")
+    page.get_by_label("Subject").fill("astronomy")
+    page.get_by_label("How deep").select_option("quick")
+    page.get_by_role("button", name="Start learning").click()
+    study = page.get_by_role("button", name="Open astronomy")
+    expect(study).to_contain_text("done", timeout=15000)
+    study.click()
+    expect(page.locator(".card", has_text="Lesson 1: What stars are")).to_contain_text(
+        "huge balls of hot gas"
+    )
+    go(page, "memory")
+    expect(page.locator(".card", has_text="On this phone")).to_contain_text(
+        "Learned (astronomy"
+    )
+
+    go(page, "todos")
+    page.get_by_label("To-do", exact=True).fill("Call Sam")
+    page.get_by_label("Reminder").fill("in 0 minutes")
+    page.get_by_role("button", name="Add").click()
+    expect(page.locator(".item", has_text="Call Sam")).to_contain_text("reminder")
+    page.evaluate("() => window.fccPhone.checkReminders()")
+    expect(page.locator("#toast")).to_have_text("Reminder: Call Sam")
+
+
+def test_the_phone_pairs_with_the_pc(page: Page, admin_base_url: str) -> None:
+    assert page.request.post(
+        f"{admin_base_url}/studio/api/memory/shared",
+        data={"text": "The user's car is a blue Corolla."},
+    ).ok
+    code = page.request.post(f"{admin_base_url}/studio/api/phones/code").json()["code"]
+    open_phone(page, admin_base_url, "memory")
+    page.get_by_label("New memory").fill("Mum's birthday is 12 March.")
+    page.get_by_role("button", name="Add").click()
+
+    go(page, "settings")
+    page.get_by_label("PC address").fill(admin_base_url)
+    page.get_by_label("Pairing code").fill(code.lower())
+    page.get_by_role("button", name="Pair", exact=True).click()
+    expect(page.get_by_role("heading", name="My PC")).to_be_visible()
+    expect(page.get_by_label("Let cloud brains see PC memories")).not_to_be_checked()
+
+    shared = page.request.get(f"{admin_base_url}/studio/api/memory/shared").json()
+    from_phone = [row for row in shared["memories"] if "phone" in row["tags"]]
+    assert [row["text"] for row in from_phone] == ["Mum's birthday is 12 March."]
+
+    go(page, "memory")
+    expect(page.get_by_text("The user's car is a blue Corolla.")).to_be_visible()
+    expect(page.get_by_text("Kept private")).to_be_visible()
+
+    go(page, "settings")
+    page.get_by_label("Default brain").select_option("pc")
+    go(page, "chat/jarvis")
+    page.get_by_label("Message").fill("hello from the phone")
+    page.get_by_role("button", name="Send").click()
+    expect(page.locator(".msg.assistant").last).to_contain_text("is on it.")
+
+    go(page, "agents")
+    page.get_by_role("button", name="Edit Researcher").click()
+    expect(
+        page.locator(".sheet-panel").get_by_label("web_search for Researcher")
+    ).to_be_enabled()
+
+
+def test_a_backup_can_be_saved(page: Page, admin_base_url: str) -> None:
+    open_phone(page, admin_base_url, "settings")
+    with page.expect_download() as download:
+        page.get_by_role("button", name="Save a backup").click()
+    with open(download.value.path()) as handle:
+        saved = json.load(handle)
+    assert saved["app"] == "FCC Phone" and len(saved["agents"]) == 5
+    assert "keys" not in saved["settings"] and "pc" not in saved["settings"]
+
+
+def test_a_reply_cut_off_by_ios_is_explained_and_the_model_made_lighter(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    # As if iOS closed the app while a big model was answering Jarvis.
+    page.evaluate(
+        """async () => {
+            const f = window.fccPhone;
+            f.state.models.push({id: 'big', name: 'Big Model', ready: true, size: 1,
+                settings: {context: 4096, gpu: true}});
+            await f.save.models();
+            f.state.chats.jarvis = [{role: 'user', text: 'Hello', at: Date.now()}];
+            await f.save.chat('jarvis');
+            localStorage.setItem('fcc-engine-work', JSON.stringify(
+                {stage: 'answer', id: 'big', name: 'Big Model', context: 4096}));
+        }"""
+    )
+    reopen(page)
+    line = page.locator(".hud-line").last
+    expect(line).to_contain_text("No reply to your last message.")
+    expect(line).to_contain_text("closed FCC Phone while Big Model was answering")
+    expect(line).to_contain_text("lowered its context to 2,048 tokens")
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'big')"
+    )
+    assert model["settings"]["context"] == 2048 and model["crashes"] == 1
+    assert page.evaluate("() => localStorage.getItem('fcc-engine-work')") is None
+
+    # Opening again doesn't repeat it: the note was cleared and answered.
+    reopen(page)
+    expect(page.locator(".hud-line.error")).to_have_count(1)
+
+
+def test_a_model_too_big_for_the_phone_stops_being_used(
+    page: Page, admin_base_url: str
+) -> None:
+    fake_gemini(page)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    page.evaluate(
+        """async () => {
+            const f = window.fccPhone;
+            f.state.models.push({id: 'huge', name: 'Huge Model', ready: true, size: 1200000000,
+                settings: {context: 2048, gpu: true}});
+            f.state.settings.localModel = 'huge';
+            f.state.settings.brain = 'local';
+            await f.save.models();
+            await f.save.settings();
+        }"""
+    )
+    assert (
+        page.evaluate("() => window.fccPhone.brainOf(window.fccPhone.state.agents[0])")
+        == "local"
+    )
+
+    def crash_while_loading() -> None:
+        page.evaluate(
+            """() => localStorage.setItem('fcc-engine-work', JSON.stringify(
+                {stage: 'load', id: 'huge', name: 'Huge Model', context: 2048}))"""
+        )
+        reopen(page)
+
+    # First crash at the smallest context: the graphics chip goes off.
+    crash_while_loading()
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'huge')"
+    )
+    assert model["settings"]["gpu"] is False and not model.get("tooBig")
+    # Second crash at its lightest: too big, and the agents stop using it, so
+    # Jarvis thinks with the cloud key instead of closing the app again.
+    crash_while_loading()
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'huge')"
+    )
+    assert model["tooBig"] is True and model["crashes"] == 2
+    assert (
+        page.evaluate("() => window.fccPhone.brainOf(window.fccPhone.state.agents[0])")
+        == "gemini"
+    )
+    go(page, "models")
+    expect(
+        page.get_by_text("Too big for this phone: it closed FCC Phone")
+    ).to_be_visible()
+    expect(page.get_by_role("button", name="Try Huge Model again")).to_be_visible()
+    expect(page.get_by_role("button", name="Load Huge Model")).to_have_count(0)
+    # The advice is sized to this phone: models clearly smaller than the one
+    # that didn't fit, and bigger ones are flagged before they're downloaded.
+    expect(page.locator(".warn").first).to_contain_text("Llama 3.2 1B Instruct or Gemma 3 1B")
+    flagged = page.locator(
+        ".item", has=page.get_by_text("Probably too big for this phone")
+    )
+    expect(flagged.filter(has_text="Qwen3 1.7B")).to_have_count(1)
+    expect(flagged.filter(has_text="Llama 3.2 1B")).to_have_count(0)
+
+
+def reopen(page: Page) -> None:
+    """Close and open the app again, as iOS does after it stops it."""
+    page.reload()
+    page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
+    page.evaluate("() => window.fccPhone.ready")
+
+
+def test_jarvis_hears_when_a_teammate_calls_unfinished_work_done(
+    page: Page, admin_base_url: str
+) -> None:
+    """Small models report "done" over failing checks (found running Jarvis on
+    a local Qwen): FCC checks the project itself and tells Jarvis."""
+
+    def lazy_builder(body: dict) -> dict:
+        system = body["messages"][0]["content"]
+        last = body["messages"][-1]
+        if "You are Builder" in system:
+            if last["role"] == "user":
+                return tool_call(
+                    "write_file",
+                    {
+                        "path": "index.html",
+                        "content": "<h1>Sunrise</h1><p>Lorem ipsum</p>",
+                    },
+                )
+            return say("All done, no issues.")
+        return team_brain(body)
+
+    seen = fake_gemini(page, lazy_builder)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Have Builder make a page for my bakery")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Builder finished", timeout=15000
+    )
+    reports = [
+        message["content"]
+        for call in seen
+        if "You are Jarvis" in call["messages"][0]["content"]
+        for message in call["messages"]
+        if message["role"] == "tool" and "Builder finished" in str(message["content"])
+    ]
+    assert reports, "Jarvis got the Builder's report"
+    assert "FCC's own check of Sunrise Bakery still finds" in reports[-1]
+    assert "placeholder text" in reports[-1]
+
+
+CEREBRAS = "https://api.cerebras.ai/v1"
+
+
+def test_more_free_cloud_ais_can_be_jarvis_brain_or_adviser(
+    page: Page, admin_base_url: str
+) -> None:
+    """Free cloud AIs that answer apps in a phone browser (checked against
+    the free-LLM-API lists): Cerebras, Mistral, Hugging Face and Cohere sit
+    beside Gemini, Groq and OpenRouter. A saved key picks the best model,
+    Jarvis falls back to it with no other brain, and replies come from it."""
+    asked: list[dict] = []
+
+    def cerebras(route: Route) -> None:
+        if route.request.url.endswith("/models"):
+            rows = [{"id": "llama3.1-8b"}, {"id": "gpt-oss-120b"}, {"id": "qwen-3-32b"}]
+            route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+            return
+        asked.append(json.loads(route.request.post_data or "{}"))
+        route.fulfill(
+            headers=CORS,
+            body=json.dumps({"choices": [{"message": say("Hello from Cerebras.")}]}),
+        )
+
+    page.route(f"{CEREBRAS}/**", cerebras)
+    open_phone(page, admin_base_url)
+    go(page, "settings")
+    for label in ("Cerebras", "Mistral", "Hugging Face", "Cohere"):
+        expect(page.get_by_label(f"{label} key")).to_be_visible()
+    page.get_by_label("Cerebras key").fill("test-cerebras-key")
+    page.get_by_role("button", name="Save Cerebras").click()
+    expect(page.get_by_text("using gpt-oss-120b")).to_be_visible()
+    brain = page.evaluate(
+        "async () => (await import('./js/brains.js')).brainOf(window.fccPhone.state.agents.find((a) => a.id === 'jarvis'))"
+    )
+    assert brain == "cerebras"
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Hi")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Hello from Cerebras."
+    )
+    assert asked and asked[-1]["model"] == "gpt-oss-120b"
+    backup = page.evaluate(
+        "async () => JSON.stringify((await import('./js/state.js')).state.settings.keys)"
+    )
+    assert "test-cerebras-key" in backup  # kept on the phone (backups drop keys)
+
+
+OVH = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
+REQUESTY = "https://router.requesty.ai/v1"
+
+
+def test_a_key_free_ai_stays_off_until_switched_on_and_free_keys_stay_free(
+    page: Page, admin_base_url: str
+) -> None:
+    """OVHcloud answers with no key: FCC never uses it until the user switches
+    it on, and then sends no key at all. Requesty and Nous carry paid models
+    too: FCC lists and picks only their free ones."""
+    asked: list[tuple[dict, dict]] = []
+
+    def ovh(route: Route) -> None:
+        if route.request.url.endswith("/models"):
+            rows = [
+                {"id": "whisper-large-v3"},
+                {"id": "gpt-oss-20b"},
+                {"id": "gpt-oss-120b"},
+            ]
+            route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+            return
+        asked.append(
+            (route.request.headers, json.loads(route.request.post_data or "{}"))
+        )
+        route.fulfill(
+            headers=CORS,
+            body=json.dumps({"choices": [{"message": say("Hi from OVH.")}]}),
+        )
+
+    def requesty(route: Route) -> None:
+        rows = [
+            {
+                "id": "openai/gpt-6",
+                "api": "chat",
+                "input_price": 1e-06,
+                "output_price": 1e-05,
+                "supports_tool_calling": True,
+            },
+            {
+                "id": "nvidia/nemotron-3-ultra-550b-a55b",
+                "api": "chat",
+                "input_price": 0,
+                "output_price": 0,
+                "supports_tool_calling": True,
+            },
+            {
+                "id": "poolside/laguna-xs.2",
+                "api": "chat",
+                "input_price": 0,
+                "output_price": 0,
+                "supports_tool_calling": False,
+            },
+        ]
+        route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+
+    page.route(f"{OVH}/**", ovh)
+    page.route(f"{REQUESTY}/**", requesty)
+    open_phone(page, admin_base_url)
+    ready = "async (name) => (await import('./js/brains.js')).brainReady(name)"
+    assert page.evaluate(ready, "ovh") is False
+    go(page, "settings")
+    page.get_by_role("button", name="Switch on OVHcloud AI (no key)").click()
+    expect(page.get_by_text("using gpt-oss-120b")).to_be_visible()
+    assert page.evaluate(ready, "ovh") is True
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Hi")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text("Hi from OVH.")
+    headers, body = asked[-1]
+    assert "authorization" not in {name.lower() for name in headers}
+    assert body["model"] == "gpt-oss-120b"
+
+    go(page, "settings")
+    page.get_by_role("button", name="Switch off OVHcloud AI (no key)").click()
+    expect(page.get_by_text("Switched off: FCC sends nothing to it.")).to_be_visible()
+    assert page.evaluate(ready, "ovh") is False
+    page.get_by_label("Requesty (free models) key").fill("test-requesty-key")
+    page.get_by_role("button", name="Save Requesty (free models)").click()
+    expect(
+        page.get_by_text("1 models; using nvidia/nemotron-3-ultra-550b-a55b")
+    ).to_be_visible()
+
+
+def test_a_saved_paid_zai_model_is_swapped_for_the_free_one(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: Z.ai is offered as free, so a paid model saved
+    before the free-only list (or typed on an agent) is never sent."""
+    sent: list[str] = []
+
+    def zai(route: Route) -> None:
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json",
+        }
+        if route.request.method == "OPTIONS":
+            route.fulfill(
+                status=204, headers={**headers, "Access-Control-Allow-Headers": "*"}
+            )
+        elif route.request.url.endswith("/models"):
+            route.fulfill(
+                headers=headers,
+                body=json.dumps(
+                    {
+                        "data": [
+                            {"id": "glm-5.3-flash"},
+                            {"id": "glm-4.7-flash"},
+                            {"id": "glm-5.3"},
+                        ]
+                    }
+                ),
+            )
+        else:
+            sent.append(json.loads(route.request.post_data or "{}").get("model", ""))
+            route.fulfill(
+                headers=headers,
+                body=json.dumps(
+                    {"choices": [{"message": {"role": "assistant", "content": "Hi!"}}]}
+                ),
+            )
+
+    page.route("https://api.z.ai/**", zai)
+    open_phone(page, admin_base_url)
+    said = page.evaluate(
+        """async () => {
+            const { state, jarvis, save } = await import('./js/state.js');
+            const { think } = await import('./js/brains.js');
+            state.settings.keys.zai = 'zai-test-key';
+            state.settings.models.zai = 'glm-5.3-flash';
+            await save.settings();
+            const agent = { ...jarvis(), brain: 'zai', model: '' };
+            const reply = await think(agent, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+            // A paid model typed on an agent card is swapped too.
+            const typed = await think({ ...jarvis(), brain: 'zai', model: 'glm-5.3' }, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+            return { text: reply.text, typed: typed.text, saved: state.settings.models.zai };
+        }"""
+    )
+    assert sent == ["glm-4.7-flash", "glm-4.7-flash"]
+    assert said == {"text": "Hi!", "typed": "Hi!", "saved": "glm-4.7-flash"}
+
+    # With no free model listed or saved, nothing is sent and it says why.
+    def paid_only(route: Route) -> None:
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json",
+        }
+        if route.request.method == "POST":
+            sent.append("POST")
+            route.fulfill(status=500)
+        else:
+            route.fulfill(
+                headers=headers, body=json.dumps({"data": [{"id": "glm-5.3"}]})
+            )
+
+    page.unroute("https://api.z.ai/**")
+    page.route("https://api.z.ai/**", paid_only)
+    refused = page.evaluate(
+        """async () => {
+            const { state, jarvis } = await import('./js/state.js');
+            const { think } = await import('./js/brains.js');
+            state.settings.models.zai = 'glm-5.3';
+            try {
+                await think({ ...jarvis(), brain: 'zai', model: '' }, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+                return 'sent';
+            } catch (error) {
+                return error.message;
+            }
+        }"""
+    )
+    assert "only its free GLM Flash models" in refused
+    assert sent == ["glm-4.7-flash", "glm-4.7-flash"]
+
+
+def test_four_billion_parameter_models_fit_the_phone(
+    page: Page, admin_base_url: str
+) -> None:
+    """Owner: 4B models on the phone. Each 4B download is under the 2 GB a
+    phone browser can load, starts at 2,048 tokens of context, and needs
+    about 2.1 GB, under the 2.5 GB the Models page warns about."""
+    open_phone(page, admin_base_url, "models")
+    expect(page.get_by_text("Qwen3 4B Instruct")).to_be_visible()
+    found = page.evaluate(
+        """async () => {
+            const engine = await import('./js/engine.js');
+            const { estimateMemory } = await import('./js/gguf.js');
+            // Qwen3 4B: 36 layers, 32 heads (8 for keys and values), 2,560 wide.
+            const info = { layers: 36, heads: 32, kvHeads: 8, embedding: 2560 };
+            // Gemma 3 4B: 34 layers, 8 heads (4 for keys and values), 2,560 wide.
+            const gemma = { layers: 34, heads: 8, kvHeads: 4, embedding: 2560 };
+            return engine.CATALOG.filter((entry) => / 4B/.test(entry.name)).map((entry) => ({
+                name: entry.name,
+                fits: entry.size < engine.MAX_FILE,
+                context: entry.context,
+                gb: estimateMemory(entry.id === 'gemma-3-4b' ? gemma : info, entry.size, entry.context) / 1024 ** 3,
+            }));
+        }"""
+    )
+    assert [row["name"] for row in found] == [
+        "Qwen3 4B Instruct",
+        "Qwen3 4B (thinking)",
+        "Gemma 3 4B",
+    ]
+    for row in found:
+        assert row["fits"] and row["context"] == 2048, row
+        assert row["gb"] < 2.5, row

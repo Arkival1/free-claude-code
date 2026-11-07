@@ -10,6 +10,7 @@ from free_claude_code.core.anthropic.streaming import (
     ToolSchema,
     parse_complete_tool_input,
 )
+from free_claude_code.core.anthropic.task_policy import normalize_task_arguments
 from free_claude_code.core.json_types import JsonObject
 from free_claude_code.core.openai_tool_names import OpenAIToolNameCodec
 
@@ -130,9 +131,7 @@ def iter_heuristic_tool_use_events(
         if decoded_name != name:
             tool_use = {**tool_use, "name": decoded_name}
     if tool_use.get("name") == "Task" and isinstance(tool_use.get("input"), dict):
-        task_input = tool_use["input"]
-        if task_input.get("run_in_background") is not False:
-            task_input["run_in_background"] = False
+        normalize_task_arguments(tool_use["input"])
     yield from output.close_content_blocks()
     tool_index = len(output.tool_states)
     output.ensure_tool_state(tool_index)

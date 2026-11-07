@@ -163,7 +163,14 @@ def _catalog_proxy_env_keys() -> tuple[str, ...]:
 
 
 @pytest.mark.parametrize(
-    "path", ["/admin", "/admin/model_config", "/admin/messaging", "/admin/integrations"]
+    "path",
+    [
+        "/admin",
+        "/admin/model_config",
+        "/admin/messaging",
+        "/admin/studio",
+        "/admin/integrations",
+    ],
 )
 def test_admin_page_is_loopback_only(monkeypatch, tmp_path, path):
     _set_home(monkeypatch, tmp_path)

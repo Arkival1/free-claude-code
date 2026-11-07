@@ -1,0 +1,736 @@
+// The Lab's board computer: when an Arduino, ESP32 or Raspberry Pi is on the
+// electronics bench, its program (Arduino-style JavaScript: setup(), loop(),
+// digitalWrite, analogRead, delay, Serial, a display) runs on the phone and
+// drives the parts on the board. The program runs in a sealed box (an iframe
+// with an origin of its own and a content policy with no network), on a
+// virtual clock: delay() moves the clock instead of waiting, so the box runs
+// a little ahead and the page plays the changes back in real time (or all at
+// once for a test). Loops are counted, so an endless one stops the program,
+// not the phone.
+import { findPart } from "./science.js";
+
+export const BRAINS = new Set(["orange-pi", "arduino", "esp32", "raspberry-pi"]);
+/** Board computers with a monitor (HDMI): single-board computers. */
+export const SBCS = new Set(["orange-pi", "raspberry-pi"]);
+const ROLES = {
+  "led-red": "led", "led-green": "led", "led-blue": "led", "led-white": "led", "led-power": "led", "led-strip": "led", bulb: "led",
+  motor: "motor", fan: "motor", pump: "motor", vibration: "motor", servo: "servo", buzzer: "buzzer", speaker: "buzzer", relay: "relay",
+  "light-sensor": "light", "temp-sensor": "temp", "soil-sensor": "soil", "distance-sensor": "distance", "motion-sensor": "motion",
+  button: "button", switch: "switch", oled: "display",
+};
+const NAMES = { "light-sensor": "LIGHT", "temp-sensor": "TEMP", "soil-sensor": "SOIL", "distance-sensor": "DISTANCE", "motion-sensor": "MOTION", "led-power": "POWER_LED", "led-strip": "LED_STRIP" };
+const PWM = [9, 10, 6, 5, 3, 11];
+const DIGITAL = [13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 9];
+const ANALOG = { light: 14, temp: 15, soil: 16, distance: 17 };
+/** Analog pins A0-A5: each sensor gets its own (a second light sensor takes a free one). */
+const ANALOG_PINS = [14, 15, 16, 17, 18, 19];
+const DIGITAL_IN = { motion: 2, button: 4, switch: 5 };
+const MAX_COPIES = 4;
+/** Sensor readings the user sets with sliders (and a test starts from). */
+export const SENSOR_DEFAULTS = { light: 60, temp: 22, soil: 40, distance: 80, motion: false, button: false, switch: false };
+export const SENSOR_RANGES = {
+  light: { min: 0, max: 100, step: 1, unit: "%", name: "Light" },
+  temp: { min: -10, max: 50, step: 0.5, unit: "°C", name: "Temperature" },
+  soil: { min: 0, max: 100, step: 1, unit: "% wet", name: "Soil moisture" },
+  distance: { min: 2, max: 400, step: 1, unit: "cm", name: "Distance" },
+};
+
+const label = (id) => NAMES[id] || id.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+
+/** Which pin each part is wired to (the same build always gets the same pins). */
+export function wiring(parts) {
+  const brain = parts.find((entry) => BRAINS.has(entry.id));
+  const wires = [];
+  const unwired = [];
+  const used = new Set();
+  const take = (pool) => {
+    const pin = pool.find((candidate) => !used.has(candidate));
+    if (pin !== undefined) used.add(pin);
+    return pin;
+  };
+  Object.values(DIGITAL_IN).forEach((pin) => used.add(pin));
+  // First copies of each sensor keep their usual pin (light A0, temp A1...);
+  // extra copies take the free analog pins after them.
+  const analogUsed = new Set();
+  const reserved = new Set(parts.map((entry) => ANALOG[ROLES[entry.id]]).filter((pin) => pin !== undefined));
+  const analogPin = (role, copy) => {
+    const usual = ANALOG[role];
+    const pin = copy === 0 && !analogUsed.has(usual) ? usual : ANALOG_PINS.find((candidate) => !analogUsed.has(candidate) && !reserved.has(candidate));
+    if (pin !== undefined) analogUsed.add(pin);
+    return pin;
+  };
+  const order = (role) => (role === "motor" || role === "servo" ? 0 : role === "buzzer" ? 1 : 2);
+  const outputs = [];
+  for (const entry of parts) {
+    const role = ROLES[entry.id];
+    if (!role) continue;
+    const copies = Math.min(Math.max(1, Number(entry.count) || 1), MAX_COPIES);
+    for (let copy = 0; copy < copies; copy += 1) {
+      const part = findPart(entry.id);
+      const name = `${part ? part.name : entry.id}${copies > 1 ? ` ${copy + 1}` : ""}`;
+      const constant = `${label(entry.id)}${copy ? `_${copy + 1}` : ""}`;
+      if (role in ANALOG) {
+        const pin = analogPin(role, copy);
+        if (pin !== undefined) wires.push({ id: entry.id, copy, role, name, constant, pin, input: true });
+        else unwired.push(name);
+      }
+      else if (role in DIGITAL_IN) wires.push({ id: entry.id, copy, role, name, constant, pin: DIGITAL_IN[role], input: true });
+      else if (role === "display") wires.push({ id: entry.id, copy, role, name, constant: "DISPLAY", pin: null, input: false });
+      else outputs.push({ id: entry.id, copy, role, name, constant });
+    }
+  }
+  outputs.sort((a, b) => order(a.role) - order(b.role));
+  for (const wire of outputs) {
+    const pin = wire.role === "motor" || wire.role === "servo" ? take(PWM) ?? take(DIGITAL) : wire.role === "buzzer" ? (used.has(8) ? take(DIGITAL) : (used.add(8), 8)) : take(DIGITAL) ?? take(PWM);
+    if (pin !== undefined) wires.push({ ...wire, pin, input: false });
+    else unwired.push(wire.name);
+  }
+  return { brain: brain ? brain.id : "", wires, unwired };
+}
+
+/** The wiring as the program's names: LED_RED = 13, LIGHT = A0... */
+export function constantsOf(wire) {
+  const names = {};
+  for (const item of wire.wires) if (item.pin !== null) names[item.constant] = item.pin;
+  return names;
+}
+
+const pinText = (pin) => (pin >= 14 ? `A${pin - 14}` : String(pin));
+
+export function wiringText(wire) {
+  if (!wire.brain) return "No board computer on the board (add an Orange Pi, Arduino, ESP32 or Raspberry Pi).";
+  const rows = wire.wires.map((item) => (item.role === "display" ? `display (OLED screen): ${item.name}` : `${item.constant} = pin ${pinText(item.pin)}: ${item.name}${item.input ? " (input)" : ""}`));
+  if (wire.unwired && wire.unwired.length) rows.push(`Not wired (no free pin left): ${wire.unwired.join(", ")}`);
+  return rows.length ? rows.join("\n") : "Nothing is wired to the board computer yet: add LEDs, motors, a buzzer, sensors, a button or a screen.";
+}
+
+/** A first program for what's on the board, so Run always does something. */
+export function starterProgram(wire) {
+  const outs = wire.wires.filter((item) => !item.input && item.pin !== null);
+  const leds = outs.filter((item) => item.role === "led");
+  const motors = outs.filter((item) => item.role === "motor");
+  const servo = outs.find((item) => item.role === "servo");
+  const buzzer = outs.find((item) => item.role === "buzzer");
+  const has = (role) => wire.wires.some((item) => item.role === role);
+  const lines = ["// Runs once at the start.", "function setup() {", "  Serial.begin(9600);"];
+  for (const item of outs) lines.push(`  pinMode(${item.constant}, OUTPUT);`);
+  if (servo) lines.push(`  servo.attach(${servo.constant});`);
+  if (has("display")) lines.push('  display.clear();', '  display.println("FCC Lab");');
+  lines.push('  Serial.println("Ready");', "}", "", "// Runs again and again.", "function loop() {");
+  if (has("light")) lines.push("  const light = readLight(); // 0-100 %", '  Serial.println("Light: " + light + " %");');
+  if (has("temp")) lines.push("  const temp = readTemperature(); // °C", '  Serial.println("Temp: " + temp + " C");');
+  if (has("distance")) lines.push("  const cm = readDistance();", '  Serial.println("Distance: " + cm + " cm");');
+  if (has("display")) lines.push("  display.clear();", `  display.println(${has("temp") ? '"Temp " + readTemperature() + " C"' : has("light") ? '"Light " + readLight() + " %"' : '"Time " + Math.floor(millis() / 1000) + " s"'});`);
+  if (leds.length) {
+    const on = has("light") ? "light < 30" : has("button") ? "digitalRead(BUTTON)" : "true";
+    if (on === "true") {
+      for (const item of leds) lines.push(`  digitalWrite(${item.constant}, HIGH);`);
+      lines.push("  delay(500);");
+      for (const item of leds) lines.push(`  digitalWrite(${item.constant}, LOW);`);
+    } else for (const item of leds) lines.push(`  digitalWrite(${item.constant}, ${on} ? HIGH : LOW);`);
+  }
+  for (const item of motors) lines.push(`  analogWrite(${item.constant}, ${has("temp") ? "readTemperature() > 25 ? 255 : 0" : "180"}); // 0-255 speed`);
+  if (servo) lines.push("  servo.write((millis() / 20) % 180);");
+  if (buzzer) lines.push(`  if (${has("motion") ? "digitalRead(MOTION)" : has("button") ? "digitalRead(BUTTON)" : "false"}) tone(${buzzer.constant}, 880, 200);`);
+  if (SBCS.has(wire.brain)) {
+    // A single-board computer has a monitor (HDMI): draw a small dashboard on it.
+    lines.push(
+      '  monitor.clear("#0d1b2a");',
+      '  monitor.text(16, 34, "FCC single-board computer", "#7fe3ff", 18);',
+      '  monitor.text(16, 70, "Up " + Math.floor(millis() / 1000) + " s", "#ffffff", 16);'
+    );
+    if (has("light")) lines.push('  monitor.rect(16, 96, readLight() * 2.8, 18, "#ffd166");', '  monitor.text(16, 140, "Light " + readLight() + " %", "#ffd166", 16);');
+    if (has("temp")) lines.push('  monitor.text(16, 170, "Temp " + readTemperature() + " C", "#ef476f", 16);');
+  }
+  lines.push("  delay(500);", "}");
+  return lines.join("\n");
+}
+
+// What runs in the box. It becomes text for the box's page, so it uses
+// nothing from this module.
+function boardBox() {
+  const send = (message) => parent.postMessage(message, "*");
+  const LIMIT = 5000000;
+  const AHEAD = 600000;
+  let vt = 0;
+  let horizon = 0;
+  let budget = 0;
+  let events = [];
+  let inputs = {};
+  let analogRoles = {};
+  let line = "";
+  let screen = [];
+  let canvas = [];
+  let drawn = false;
+  let started = false;
+  let dead = false;
+  const out = (kind, pin, value) => {
+    events.push({ t: vt, kind, pin, value });
+    if (events.length > 20000) throw new Error("The program changes things too fast (20,000 changes in a moment): add a delay().");
+  };
+  const tick = () => {
+    budget += 1;
+    if (budget > LIMIT) throw new Error("A loop ran millions of times without stopping, so the program was stopped (an endless loop?).");
+    return true;
+  };
+  const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+  const sensor = (name) => Number(inputs[name] ?? 0);
+  const api = {
+    HIGH: 1, LOW: 0, INPUT: 0, OUTPUT: 1, INPUT_PULLUP: 2, A0: 14, A1: 15, A2: 16, A3: 17, A4: 18, A5: 19, LED_BUILTIN: 13,
+    __tick: tick,
+    pinMode() {},
+    digitalWrite(pin, value) {
+      tick();
+      out("pin", Number(pin), value ? 255 : 0);
+    },
+    analogWrite(pin, value) {
+      tick();
+      out("pin", Number(pin), clamp(Math.round(Number(value) || 0), 0, 255));
+    },
+    digitalRead(pin) {
+      tick();
+      return inputs.pins && inputs.pins[pin] ? 1 : 0;
+    },
+    analogRead(pin) {
+      tick();
+      const role = analogRoles[pin];
+      if (role === "light") return Math.round((sensor("light") / 100) * 1023);
+      if (role === "temp") return Math.round(((0.5 + sensor("temp") / 100) / 5) * 1023);
+      if (role === "soil") return Math.round(1023 - (sensor("soil") / 100) * 700);
+      if (role === "distance") return Math.round(clamp(sensor("distance") / 400, 0, 1) * 1023);
+      return 0;
+    },
+    readLight: () => (tick(), sensor("light")),
+    readTemperature: () => (tick(), sensor("temp")),
+    readSoil: () => (tick(), sensor("soil")),
+    readDistance: () => (tick(), sensor("distance")),
+    delay(ms) {
+      tick();
+      vt += Math.max(0, Number(ms) || 0);
+      if (vt > horizon + AHEAD) throw new Error("loop() or setup() never finishes (a while loop that never ends?): keep the repeating part in loop().");
+    },
+    delayMicroseconds(us) {
+      tick();
+      vt += Math.max(0, Number(us) || 0) / 1000;
+    },
+    millis: () => Math.floor(vt),
+    micros: () => Math.floor(vt * 1000),
+    tone(pin, frequency, duration) {
+      tick();
+      out("tone", Number(pin), Math.max(0, Number(frequency) || 0));
+      if (duration > 0) events.push({ t: vt + Number(duration), kind: "tone", pin: Number(pin), value: 0 });
+    },
+    noTone(pin) {
+      tick();
+      out("tone", Number(pin), 0);
+    },
+    map: (x, inLow, inHigh, outLow, outHigh) => ((x - inLow) * (outHigh - outLow)) / (inHigh - inLow) + outLow,
+    constrain: clamp,
+    random: (low, high) => (high === undefined ? Math.floor(Math.random() * low) : Math.floor(low + Math.random() * (high - low))),
+    Serial: {
+      begin() {},
+      print(value = "") {
+        line += String(value);
+      },
+      println(value = "") {
+        tick();
+        out("serial", null, (line + String(value)).slice(0, 300));
+        line = "";
+      },
+    },
+    display: {
+      clear() {
+        screen = [];
+        out("display", null, []);
+      },
+      print(value = "") {
+        if (!screen.length) screen.push("");
+        screen[screen.length - 1] = (screen[screen.length - 1] + String(value)).slice(0, 40);
+        out("display", null, screen.slice(-6));
+      },
+      println(value = "") {
+        screen.push(String(value).slice(0, 40));
+        out("display", null, screen.slice(-6));
+      },
+      setCursor() {},
+      display() {},
+      show() {},
+    },
+    // The monitor (320 x 240): draw, then it shows at the end of loop() or on show().
+    monitor: {
+      width: 320,
+      height: 240,
+      clear(colour = "#000000") {
+        tick();
+        canvas = [["clear", String(colour)]];
+        drawn = true;
+      },
+      rect(x, y, w, h, colour = "#ffffff") {
+        draw(["rect", +x, +y, +w, +h, String(colour)]);
+      },
+      circle(x, y, r, colour = "#ffffff") {
+        draw(["circle", +x, +y, +r, String(colour)]);
+      },
+      line(x1, y1, x2, y2, colour = "#ffffff", width = 2) {
+        draw(["line", +x1, +y1, +x2, +y2, String(colour), +width]);
+      },
+      text(x, y, value, colour = "#ffffff", size = 16) {
+        draw(["text", +x, +y, String(value).slice(0, 80), String(colour), Math.max(6, Math.min(64, +size || 16))]);
+      },
+      show() {
+        if (drawn) out("screen", null, canvas.slice());
+        drawn = false;
+      },
+    },
+    servo: {
+      pin: 9,
+      attach(pin) {
+        this.pin = Number(pin);
+      },
+      write(angle) {
+        tick();
+        out("servo", this.pin, clamp(Number(angle) || 0, 0, 180));
+      },
+    },
+  };
+  function draw(command) {
+    tick();
+    if (canvas.length < 800) canvas.push(command);
+    drawn = true;
+  }
+  const flush = () => {
+    if (drawn) out("screen", null, canvas.slice());
+    drawn = false;
+  };
+  const fail = (error) => {
+    dead = true;
+    const text = String((error && error.message) || error).replace(/^Uncaught /, "").replace(/Failed to execute '\w+' on '\w+': /, "");
+    // The program's own line, from the first stack frame in its script.
+    const frame = String((error && error.stack) || "").split("\n").find((row) => /<anonymous>:\d+/.test(row));
+    const line = (error && error.line) || (frame ? Number(frame.match(/<anonymous>:(\d+)/)[1]) : 0);
+    send({ type: "error", text: text.slice(0, 400), line });
+  };
+  addEventListener("error", (event) => {
+    event.preventDefault();
+    fail({ message: event.message, line: event.lineno });
+  });
+  addEventListener("message", (event) => {
+    const job = event.data;
+    if (event.source !== parent || !job || dead) return;
+    if (job.type === "load") {
+      analogRoles = job.analogRoles || {};
+      Object.assign(window, api, job.constants);
+      const script = document.createElement("script");
+      script.textContent = `${job.code}\n;window.__fcc = { setup: typeof setup === "function" ? setup : null, loop: typeof loop === "function" ? loop : null };`;
+      document.head.append(script);
+      if (dead) return;
+      if (!window.__fcc || (!window.__fcc.setup && !window.__fcc.loop)) return fail("The program needs a setup() or loop() function.");
+      send({ type: "loaded" });
+      return;
+    }
+    if (job.type === "advance") {
+      inputs = job.inputs || {};
+      horizon = job.until;
+      budget = 0;
+      const wall = performance.now();
+      try {
+        if (!started) {
+          started = true;
+          if (window.__fcc.setup) window.__fcc.setup();
+          flush();
+        }
+        let calls = 0;
+        while (window.__fcc.loop && vt < job.until && calls < 100000 && performance.now() - wall < 250) {
+          const before = vt;
+          window.__fcc.loop();
+          flush();
+          if (vt === before) vt += 1;
+          calls += 1;
+        }
+      } catch (error) {
+        send({ type: "events", events, vt });
+        events = [];
+        return fail(error);
+      }
+      send({ type: "events", events, vt, ended: !window.__fcc.loop });
+      events = [];
+    }
+  });
+  send({ type: "ready" });
+}
+
+const BOX_HTML = `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+</head><body><script>(${boardBox.toString()})();</script></body></html>`;
+
+/** Where the code's strings, comments and regular expressions are, so the
+ * loop guard only ever looks at code. Returns a function: is this index code? */
+function codeMap(code) {
+  const skip = new Uint8Array(code.length);
+  const stack = []; // open template literals: the brace depth each ${ began at
+  let depth = 0;
+  let last = ""; // the last code character that wasn't a space
+  let before = ""; // the one before it (x++ / 2 divides; it isn't a regex)
+  let word = ""; // the last word, for regexes after return/typeof/...
+  let i = 0;
+  const mark = (from, to) => skip.fill(1, from, Math.min(to, code.length));
+  const regexCanStart = () => !((last === "+" || last === "-") && before === last) && (!last || "(,=:[!&|?{};+-*%<>~^".includes(last) || /^(return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/.test(word));
+  const template = (from) => {
+    // From inside a template literal to its end or its next ${.
+    let at = from;
+    while (at < code.length) {
+      if (code[at] === "\\") at += 2;
+      else if (code[at] === "`") return [at + 1, false];
+      else if (code[at] === "$" && code[at + 1] === "{") return [at + 2, true];
+      else at += 1;
+    }
+    return [at, false];
+  };
+  while (i < code.length) {
+    const c = code[i];
+    if (c === "/" && code[i + 1] === "/") {
+      const stop = code.indexOf("\n", i);
+      const to = stop < 0 ? code.length : stop;
+      mark(i, to);
+      i = to;
+    } else if (c === "/" && code[i + 1] === "*") {
+      const stop = code.indexOf("*/", i + 2);
+      const to = stop < 0 ? code.length : stop + 2;
+      mark(i, to);
+      i = to;
+    } else if (c === "'" || c === '"') {
+      let at = i + 1;
+      while (at < code.length && code[at] !== c && code[at] !== "\n") at += code[at] === "\\" ? 2 : 1;
+      mark(i, at + 1);
+      i = at + 1;
+      before = last;
+      last = c;
+      word = "";
+    } else if (c === "`" || (c === "}" && stack.length && stack[stack.length - 1] === depth)) {
+      if (c === "}") stack.pop();
+      const [to, opened] = template(i + 1);
+      mark(i, to);
+      if (opened) stack.push(depth);
+      i = to;
+      last = opened ? "{" : "`";
+      word = "";
+    } else if (c === "/" && regexCanStart()) {
+      let at = i + 1;
+      let inClass = false;
+      while (at < code.length && code[at] !== "\n") {
+        if (code[at] === "\\") at += 1;
+        else if (code[at] === "[") inClass = true;
+        else if (code[at] === "]") inClass = false;
+        else if (code[at] === "/" && !inClass) break;
+        at += 1;
+      }
+      while (/[a-z]/i.test(code[at + 1] || "")) at += 1;
+      mark(i, at + 1);
+      i = at + 1;
+      last = "/";
+      word = "";
+    } else {
+      if (c === "{") depth += 1;
+      else if (c === "}") depth -= 1;
+      if (/[A-Za-z_$0-9]/.test(c)) {
+        const match = /^[A-Za-z_$0-9]+/.exec(code.slice(i, i + 64));
+        word = match[0];
+        before = last;
+        last = word[word.length - 1];
+        i += word.length;
+        continue;
+      }
+      if (!/\s/.test(c)) {
+        before = last;
+        last = c;
+        word = "";
+      }
+      i += 1;
+    }
+  }
+  return (at) => !skip[at];
+}
+
+/** The index of the ")" closing the "(" at `open` (code only), or -1. */
+function closing(code, open, isCode) {
+  let depth = 0;
+  for (let at = open; at < code.length; at += 1) {
+    if (!isCode(at)) continue;
+    if ("([{".includes(code[at])) depth += 1;
+    else if (")]}".includes(code[at]) && --depth === 0) return code[at] === ")" ? at : -1;
+  }
+  return -1;
+}
+
+/** Count every loop's turns: each while/for condition calls __tick() first
+ * (for (a; b; c) → for (a; __tick() && (b); c)), so an endless loop stops
+ * the program instead of freezing the phone, whatever its shape (braces or
+ * none, do…while). Strings, comments and regexes are left alone; lines stay
+ * put. for…of/for…in walk a list, so they need none. */
+export function guardLoops(code) {
+  code = String(code);
+  const isCode = codeMap(code);
+  const edits = []; // [at, remove, insert]
+  const loop = /\b(while|for)\b/g;
+  let found;
+  while ((found = loop.exec(code))) {
+    const at = found.index;
+    if (!isCode(at) || /[.$\w]/.test(code[at - 1] || "")) continue;
+    let open = at + found[0].length;
+    while (/\s/.test(code[open] || "")) open += 1;
+    if (found[1] === "for" && code.startsWith("await", open)) {
+      open += 5;
+      while (/\s/.test(code[open] || "")) open += 1;
+    }
+    if (code[open] !== "(") continue;
+    const close = closing(code, open, isCode);
+    if (close < 0) continue;
+    if (found[1] === "while") {
+      if (!code.slice(open + 1, close).trim()) continue;
+      edits.push([open + 1, 0, "__tick() && ("], [close, 0, ")"]);
+      continue;
+    }
+    // for: the condition sits between the two top-level semicolons.
+    const semis = [];
+    let depth = 0;
+    for (let k = open + 1; k < close; k += 1) {
+      if (!isCode(k)) continue;
+      if ("([{".includes(code[k])) depth += 1;
+      else if (")]}".includes(code[k])) depth -= 1;
+      else if (code[k] === ";" && depth === 0) semis.push(k);
+    }
+    if (semis.length !== 2) continue; // for…of / for…in
+    const condition = code.slice(semis[0] + 1, semis[1]);
+    if (condition.trim()) edits.push([semis[0] + 1, 0, " __tick() && ("], [semis[1], 0, ")"]);
+    else edits.push([semis[0] + 1, 0, " __tick()"]);
+  }
+  edits.sort((a, b) => b[0] - a[0]);
+  for (const [at, remove, insert] of edits) code = code.slice(0, at) + insert + code.slice(at + remove);
+  return code;
+}
+
+/** What the outputs are doing now, from the events played so far. */
+function blankState() {
+  return { pins: {}, tones: {}, servos: {}, display: [], serial: [], screen: null };
+}
+
+function apply(state, event) {
+  if (event.kind === "pin") state.pins[event.pin] = event.value;
+  else if (event.kind === "tone") state.tones[event.pin] = event.value;
+  else if (event.kind === "servo") state.servos[event.pin] = event.value;
+  else if (event.kind === "display") state.display = event.value;
+  else if (event.kind === "screen") state.screen = Array.isArray(event.value) ? event.value : null;
+  else if (event.kind === "serial") {
+    state.serial.push(`${(event.t / 1000).toFixed(1)}s  ${event.value}`);
+    if (state.serial.length > 200) state.serial.shift();
+  }
+}
+
+/** How each wired part looks now: { "led-red#0": { state, level, angle, lines } }. */
+export function partsNow(wire, state) {
+  const now = {};
+  for (const item of wire.wires) {
+    const key = `${item.id}#${item.copy}`;
+    if (item.role === "display") now[key] = { state: "on", level: 1, lines: state.display };
+    else if (item.input) now[key] = { state: "on", level: 1 };
+    else if (item.role === "servo") now[key] = { state: "on", level: 1, angle: state.servos[item.pin] ?? 90 };
+    else if (item.role === "buzzer") {
+      const level = state.tones[item.pin] || state.pins[item.pin] ? 1 : 0;
+      now[key] = { state: level ? "on" : "off", level, frequency: state.tones[item.pin] || 0 };
+    } else {
+      const level = (state.pins[item.pin] || 0) / 255;
+      now[key] = { state: level > 0 ? "on" : "off", level };
+    }
+  }
+  if (wire.brain) now[`${wire.brain}#0`] = { state: "on", level: 1 };
+  now.monitor = { screen: state.screen, serial: state.serial };
+  return now;
+}
+
+/** The sensor values as the box reads them (digital inputs by pin). */
+function inputsFor(wire, sensors) {
+  const pins = {};
+  for (const item of wire.wires) if (item.role in DIGITAL_IN) pins[item.pin] = Boolean(sensors[item.role]);
+  return { ...sensors, pins };
+}
+
+/**
+ * Run a program for the parts on the board. live: play it in real time
+ * (onState gets each change); otherwise run `seconds` of board time as fast
+ * as it goes. Returns { stop(), done } (done: { state, events, error, seconds }).
+ */
+export function runBoard(code, parts, { host = document.body, live = true, seconds = 10, sensors = () => SENSOR_DEFAULTS, onState = () => {} } = {}) {
+  const wire = wiring(parts);
+  const state = blankState();
+  const all = [];
+  let settle;
+  const done = new Promise((resolve) => (settle = resolve));
+  let closed = false;
+  let error = "";
+  let boxTime = 0;
+  let waiting = false;
+  let pending = [];
+  let lastWord = Date.now();
+  let started = 0;
+  let paused = 0;
+  const frame = document.createElement("iframe");
+  frame.setAttribute("sandbox", "allow-scripts");
+  frame.className = "board-box";
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.cssText = "position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;border:0;left:-10px;top:-10px";
+  const now = () => (started ? Date.now() - started - paused : 0);
+  const stop = (reason = "") => {
+    if (closed) return;
+    closed = true;
+    if (reason && !error) error = reason;
+    clearInterval(timer);
+    removeEventListener("message", listen);
+    frame.remove();
+    settle({ state, events: all, error, seconds: Math.round((live ? now() : boxTime) / 100) / 10, wire });
+  };
+  const advance = (until) => {
+    waiting = true;
+    lastWord = Date.now();
+    frame.contentWindow.postMessage({ type: "advance", until, inputs: inputsFor(wire, sensors()) }, "*");
+  };
+  const listen = (event) => {
+    if (event.source !== frame.contentWindow || !event.data || closed) return;
+    const message = event.data;
+    lastWord = Date.now();
+    if (message.type === "ready") {
+      const analogRoles = Object.fromEntries(wire.wires.filter((item) => item.input && item.role in ANALOG).map((item) => [item.pin, item.role]));
+      frame.contentWindow.postMessage({ type: "load", code: guardLoops(code), constants: constantsOf(wire), analogRoles }, "*");
+    } else if (message.type === "loaded") {
+      started = Date.now();
+      advance(live ? 1000 : 2000);
+    } else if (message.type === "error") {
+      error = `${message.text}${message.line ? ` (line ${message.line})` : ""}`;
+      if (!live || !pending.length) stop();
+      else boxTime = Infinity;
+    } else if (message.type === "events") {
+      waiting = false;
+      const events = Array.isArray(message.events) ? message.events.slice(0, 20000) : [];
+      boxTime = Number(message.vt) || boxTime;
+      if (live) {
+        pending.push(...events);
+        // A program with no loop() ends after setup: play what it did, then stop.
+        if (message.ended) boxTime = Infinity;
+      } else {
+        for (const item of events) {
+          apply(state, item);
+          if (all.length < 50000) all.push(item);
+        }
+        if (boxTime >= seconds * 1000 || message.ended) stop();
+        else advance(Math.min(seconds * 1000, boxTime + 2000));
+      }
+    }
+  };
+  addEventListener("message", listen);
+  let hiddenAt = 0;
+  const timer = setInterval(() => {
+    if (document.hidden) {
+      hiddenAt = hiddenAt || Date.now();
+      return;
+    }
+    if (hiddenAt) {
+      paused += Date.now() - hiddenAt;
+      hiddenAt = 0;
+    }
+    if (waiting && Date.now() - lastWord > 4000) return stop("The program stopped answering, so it was stopped.");
+    if (!live || !started) return;
+    const t = now();
+    let changed = false;
+    pending.sort((a, b) => a.t - b.t);
+    while (pending.length && pending[0].t <= t) {
+      const item = pending.shift();
+      apply(state, item);
+      if (all.length < 50000) all.push(item);
+      changed = true;
+    }
+    if (changed) onState(state, partsNow(wire, state));
+    if (boxTime === Infinity && !pending.length) return stop();
+    if (!waiting && boxTime !== Infinity && boxTime - t < 500) advance(t + 1000);
+  }, 40);
+  frame.srcdoc = BOX_HTML;
+  host.append(frame);
+  return { stop, done, wire };
+}
+
+/** Paint the monitor: the program's drawing, or a terminal of its Serial lines. */
+export function paintMonitor(paint, width, height, view) {
+  const scale = Math.min(width / 320, height / 240);
+  paint.save();
+  paint.fillStyle = "#000000";
+  paint.fillRect(0, 0, width, height);
+  if (view && view.screen) {
+    paint.scale(scale, scale);
+    for (const [kind, ...args] of view.screen.slice(0, 800)) {
+      if (kind === "clear") {
+        paint.fillStyle = args[0];
+        paint.fillRect(0, 0, 320, 240);
+      } else if (kind === "rect") {
+        paint.fillStyle = args[4];
+        paint.fillRect(args[0], args[1], args[2], args[3]);
+      } else if (kind === "circle") {
+        paint.fillStyle = args[3];
+        paint.beginPath();
+        paint.arc(args[0], args[1], Math.max(0, args[2]), 0, Math.PI * 2);
+        paint.fill();
+      } else if (kind === "line") {
+        paint.strokeStyle = args[4];
+        paint.lineWidth = args[5] || 2;
+        paint.beginPath();
+        paint.moveTo(args[0], args[1]);
+        paint.lineTo(args[2], args[3]);
+        paint.stroke();
+      } else if (kind === "text") {
+        paint.fillStyle = args[3];
+        paint.font = `${args[4]}px ui-monospace, Menlo, monospace`;
+        paint.fillText(args[2], args[0], args[1]);
+      }
+    }
+  } else {
+    const lines = view && view.serial ? view.serial.slice(-11) : [];
+    paint.fillStyle = "#39ff88";
+    paint.font = `${Math.round(17 * scale)}px ui-monospace, Menlo, monospace`;
+    const rows = lines.length ? lines : ["FCC board computer", "", "Waiting for a program..."];
+    rows.forEach((row, i) => paint.fillText(String(row).slice(0, 34), 10 * scale, (24 + i * 20) * scale));
+  }
+  paint.restore();
+}
+
+/** A test run in plain words: what each output did, the serial output, the screen. */
+export function describeRun(result) {
+  const { wire, events, state, error, seconds } = result;
+  const lines = [`Ran the program for ${seconds} s of board time.`];
+  if (error) lines.push(`It stopped with an error: ${error}`);
+  for (const item of wire.wires.filter((entry) => !entry.input && entry.pin !== null)) {
+    const mine = events.filter((event) => event.pin === item.pin && (event.kind === "pin" || event.kind === "tone" || event.kind === "servo"));
+    if (item.role === "servo") {
+      const angles = mine.map((event) => event.value);
+      lines.push(`${item.name} (${item.constant}): ${angles.length ? `moved ${angles.length} times, between ${Math.min(...angles)}° and ${Math.max(...angles)}°, ended at ${angles.at(-1)}°` : "never moved"}.`);
+      continue;
+    }
+    let on = 0;
+    let level = 0;
+    let since = 0;
+    let turnsOn = 0;
+    for (const event of mine) {
+      if (level > 0) on += event.t - since;
+      if (!(level > 0) && event.value > 0) turnsOn += 1;
+      level = event.value;
+      since = event.t;
+    }
+    if (level > 0) on += seconds * 1000 - since;
+    const share = seconds ? Math.round((on / (seconds * 1000)) * 100) : 0;
+    lines.push(`${item.name} (${item.constant}, pin ${pinText(item.pin)}): ${turnsOn ? `on ${turnsOn} time${turnsOn === 1 ? "" : "s"}, ${share}% of the time${turnsOn > 1 ? ` (about ${(turnsOn / seconds).toFixed(2)} times a second)` : ""}` : "stayed off"}${level > 0 && level < 255 && item.role === "motor" ? `, ended at speed ${level}/255` : ""}.`);
+  }
+  if (state.display.length) lines.push(`The screen shows: ${state.display.join(" | ")}`);
+  if (state.screen) {
+    const words = state.screen.filter(([kind]) => kind === "text").map((command) => command[3]);
+    lines.push(`The monitor shows a drawing (${state.screen.length} shapes)${words.length ? ` with the text: ${words.slice(0, 12).join(" | ")}` : ""}.`);
+  }
+  if (state.serial.length) lines.push(`Serial output (last ${Math.min(12, state.serial.length)}):`, ...state.serial.slice(-12).map((text) => `  ${text}`));
+  else lines.push("Nothing was printed to Serial.");
+  return lines.join("\n");
+}

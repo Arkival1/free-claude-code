@@ -46,6 +46,13 @@ const VIEW_GROUPS = [
     containerId: "messagingSections",
   },
   {
+    id: "studio",
+    label: "Studio",
+    title: "Studio",
+    sections: ["studio"],
+    containerId: "studioSections",
+  },
+  {
     id: "integrations",
     label: "Integrations",
     title: "Integrations",
@@ -66,6 +73,9 @@ function viewFromLocation() {
 }
 
 const byId = (id) => document.getElementById(id);
+
+// Inside the Studio app the settings wear Studio's dark console look.
+if (window.self !== window.top) document.documentElement.classList.add("embedded");
 
 function sourceLabel(source) {
   const labels = {
@@ -249,6 +259,58 @@ function renderNav() {
   setActiveView(state.activeView, { scroll: false });
 }
 
+// Search every settings page at once: matching fields stay visible (advanced
+// ones included), everything else hides until the search is cleared.
+function applySettingsSearch() {
+  const input = byId("settingsSearch");
+  const summary = byId("searchSummary");
+  const query = input.value.trim().toLowerCase();
+  const searchable = VIEW_GROUPS.filter((view) => view.sections.length);
+  document.body.classList.toggle("settings-searching", Boolean(query));
+  document.querySelectorAll(".field-grid .field").forEach((field) => {
+    const text = `${field.dataset.key || ""} ${field.textContent}`.toLowerCase();
+    const hit = !query || text.includes(query);
+    field.classList.toggle("search-hit", Boolean(query) && hit);
+    field.classList.toggle("search-miss", !hit);
+  });
+  document.querySelectorAll(".settings-section").forEach((section) => {
+    section.classList.toggle(
+      "search-empty",
+      Boolean(query) && !section.querySelector(".field.search-hit"),
+    );
+  });
+  if (!query) {
+    summary.hidden = true;
+    setActiveView(state.activeView);
+    return;
+  }
+  let hits = 0;
+  document.querySelectorAll(".admin-view").forEach((view) => {
+    const config = searchable.some((group) => group.id === view.dataset.view);
+    const count = config ? view.querySelectorAll(".field.search-hit").length : 0;
+    hits += count;
+    view.hidden = count === 0;
+    view.classList.toggle("active", count > 0);
+  });
+  byId("pageTitle").textContent = "Search";
+  summary.hidden = false;
+  summary.textContent = hits
+    ? `${hits} setting${hits === 1 ? "" : "s"} match “${input.value.trim()}”.`
+    : `No settings match “${input.value.trim()}”.`;
+}
+
+byId("settingsSearch")?.addEventListener("input", applySettingsSearch);
+byId("settingsSearch")?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") clearSettingsSearch();
+});
+
+function clearSettingsSearch() {
+  const input = byId("settingsSearch");
+  if (!input || !input.value) return;
+  input.value = "";
+  applySettingsSearch();
+}
+
 function setActiveView(viewId, { scroll = false } = {}) {
   const activeView =
     VIEW_GROUPS.find((view) => view.id === viewId) || VIEW_GROUPS[0];
@@ -293,6 +355,7 @@ function setActiveView(viewId, { scroll = false } = {}) {
 }
 
 function navigateToView(viewId) {
+  clearSettingsSearch();
   const target = viewId === "providers" ? "/admin" : `/admin/${viewId}`;
   if (window.location.pathname + window.location.search !== target) {
     window.history.pushState({}, "", target);
@@ -775,6 +838,7 @@ function renderSections(sections, fields) {
       container.appendChild(sectionEl);
     });
   });
+  if (byId("settingsSearch")?.value) applySettingsSearch();
 }
 
 function renderField(field) {
@@ -794,6 +858,13 @@ function renderField(field) {
     sourceEl.className = "field-source";
     sourceEl.textContent = source;
     label.appendChild(sourceEl);
+  }
+  if (field.type === "secret" && field.configured) {
+    // A saved key stays hidden, so say plainly that it is there.
+    const savedEl = document.createElement("span");
+    savedEl.className = "field-saved";
+    savedEl.textContent = "\u2713 saved";
+    label.appendChild(savedEl);
   }
 
   const input = window.FccFormControls.configure(inputForField(field));
@@ -900,7 +971,7 @@ function inputForField(field) {
     input.spellcheck = false;
     input.setAttribute("autocorrect", "off");
     input.placeholder = field.configured
-      ? "Configured - enter a new value to replace"
+      ? "Saved (hidden) - type a new key to replace it"
       : "Not configured";
     input.value = "";
     input.autocomplete = "off";

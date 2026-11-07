@@ -1,0 +1,190 @@
+"""try_page in a real hidden browser finds what reading the code missed.
+
+The page below has the bug a local model's Tip Calculator really had: typing
+a custom tip changes nothing until another box is touched."""
+
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from free_claude_code.studio.page_try import PageReport, parse_steps, try_page
+
+TIP_PAGE = """<!doctype html><title>Tips</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<label for="bill">Bill Amount ($)</label><input id="bill" type="number">
+<label for="pct">Tip Percent</label>
+<select id="pct"><option value="20">20%</option><option value="custom">Custom</option></select>
+<label for="custom">Custom Tip (%)</label><input id="custom" type="number">
+<p>Tip: <span id="tip">$0.00</span></p>
+<script>
+const bill = document.getElementById("bill"), pct = document.getElementById("pct");
+const custom = document.getElementById("custom"), tip = document.getElementById("tip");
+function show() {
+  const rate = pct.value === "custom" ? Number(custom.value) || 0 : Number(pct.value);
+  tip.textContent = "$" + ((Number(bill.value) || 0) * rate / 100).toFixed(2);
+}
+bill.addEventListener("input", show);
+pct.addEventListener("change", show);
+</script>"""
+
+
+def run(folder: Path, steps: list[dict[str, str]], page: str = "index.html"):
+    # The browser tests' own event loop runs on this thread; use another.
+    with ThreadPoolExecutor(1) as pool:
+        return pool.submit(
+            asyncio.run, try_page(folder, page, parse_steps(steps))
+        ).result()
+
+
+def test_it_catches_a_box_that_does_nothing(tmp_path: Path):
+    (tmp_path / "index.html").write_text(TIP_PAGE)
+    report = run(
+        tmp_path,
+        [
+            {"do": "fill", "target": "Bill Amount", "value": "50"},
+            {"do": "read", "target": "#tip", "expect": "$10.00"},
+            {"do": "select", "target": "Tip Percent", "value": "Custom"},
+            {"do": "fill", "target": "Custom Tip", "value": "18"},
+            {"do": "read", "target": "#tip", "expect": "$9.00"},
+        ],
+    )
+    assert report.read == {"#tip": "$0.00"}
+    assert report.problems == ["Step 5: #tip shows '$0.00', expected '$9.00'."]
+    assert "2. #tip shows '$10.00' (as expected)" in report.lines
+    assert "Tip: $0.00" in report.text
+
+    fixed = TIP_PAGE.replace(
+        'pct.addEventListener("change", show);',
+        'pct.addEventListener("change", show); custom.addEventListener("input", show);',
+    )
+    (tmp_path / "index.html").write_text(fixed)
+    again = run(
+        tmp_path,
+        [
+            # A bare id, as small models write it, works too.
+            {"do": "fill", "target": "bill", "value": "50"},
+            {"do": "select", "target": "#pct", "value": "custom"},
+            {"do": "fill", "target": "#custom", "value": "18"},
+            {"do": "read", "target": "Tip:", "expect": "$9.00"},
+        ],
+    )
+    assert again.passed, again.render()
+
+    # A wrong id (a small model's guess) is answered with the ids there are.
+    guessed = run(tmp_path, [{"do": "read", "target": "#tip-total"}])
+    (problem,) = guessed.problems
+    assert "Fix the step, not the page" in problem
+    assert '#tip "$0.00"' in problem and '#bill "Bill Amount ($)"' in problem
+
+
+def test_it_reports_pop_ups_errors_missing_files_and_a_too_wide_page(tmp_path: Path):
+    (tmp_path / "index.html").write_text(
+        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+        '<link rel="stylesheet" href="gone.css">'
+        "<div style='width:900px'>wide</div>"
+        "<button onclick=\"alert('Saved!')\">Save</button>"
+        "<script>missingFunction()</script>"
+    )
+    report = run(
+        tmp_path,
+        [{"do": "click", "target": "Save"}, {"do": "click", "target": "#nothing"}],
+    )
+    text = "\n".join(report.problems)
+    assert "pop-up alert box opened: 'Saved!'" in text
+    assert "missingFunction" in text
+    assert "Missing file: gone.css" in text
+    assert "Step 2 (click #nothing) couldn't be done" in text
+    assert 'The page has: button "Save"' in text
+    assert "wider than a phone screen" in text
+    assert not report.passed
+
+
+SERVED_PAGE = """<!doctype html><title>Served</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/missing.js"></script>
+<button id="go" onclick="document.getElementById('out').textContent='Done'">Go</button>
+<p id="out">Waiting</p>
+<script>fetch('/api/nothing-here').catch(() => {});</script>"""
+
+
+def test_a_served_page_is_tried_and_pictured(tmp_path: Path):
+    import functools
+    import http.server
+    import threading
+
+    from free_claude_code.studio.page_try import try_url
+
+    (tmp_path / "index.html").write_text(SERVED_PAGE)
+    handler = functools.partial(
+        http.server.SimpleHTTPRequestHandler, directory=str(tmp_path)
+    )
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/index.html"
+    steps = parse_steps(
+        [
+            {"do": "click", "target": "Go"},
+            {"do": "read", "target": "#out", "expect": "Done"},
+        ]
+    )
+    try:
+        with ThreadPoolExecutor(1) as pool:
+            coroutine = try_url(
+                url, steps, name="served", phone=False, shot=tmp_path / "s.png"
+            )
+            report: PageReport = pool.submit(lambda: asyncio.run(coroutine)).result()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert report.read == {"#out": "Done"}
+    # The missing script counts; the API's 404 is an answer, not a missing file.
+    assert report.problems == ["Missing file: /missing.js"]
+    assert (tmp_path / "s.png").stat().st_size > 0
+    assert report.picture[:3] == b"\xff\xd8\xff", "a JPEG for the Vision Model"
+
+
+LABELLED_PAGE = """<!doctype html><title>Budget</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<section aria-labelledby="form-heading">
+<h2 id="form-heading">Add Entry</h2>
+<label for="amount">Amount</label><input id="amount" type="number">
+<button type="button" onclick="document.getElementById('out').textContent =
+  document.getElementById('amount').value">Add</button>
+</section>
+<p id="out">none</p>"""
+
+
+def test_a_click_finds_the_button_not_a_section_labelled_like_it(tmp_path: Path):
+    (tmp_path / "index.html").write_text(LABELLED_PAGE)
+    report = run(
+        tmp_path,
+        [
+            {"do": "fill", "target": "Amount", "value": "42"},
+            {"do": "click", "target": "Add"},
+            {"do": "read", "target": "#out", "expect": "42"},
+        ],
+    )
+    assert report.passed, report.render()
+
+
+SEARCH_PAGE = """<!doctype html><title>Find</title>
+<label for="q">Search</label>
+<input id="q" onkeydown="if (event.key === 'Enter')
+  document.getElementById('out').textContent = 'entered ' + this.value">
+<button type="button" onclick="document.getElementById('out').textContent =
+  'clicked'">Search</button>
+<p id="out">none</p>"""
+
+
+def test_a_press_goes_to_the_labelled_field_not_a_same_named_button(tmp_path: Path):
+    (tmp_path / "index.html").write_text(SEARCH_PAGE)
+    report = run(
+        tmp_path,
+        [
+            {"do": "fill", "target": "Search", "value": "dogs"},
+            {"do": "press", "target": "Search", "value": "Enter"},
+            {"do": "read", "target": "#out", "expect": "entered dogs"},
+        ],
+    )
+    assert report.passed, report.render()

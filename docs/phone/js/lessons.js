@@ -1,0 +1,23 @@
+// Jarvis's coding courses: what he teaches himself in FCC Linux, language by
+// language, from the basics to real projects (js/practice.js runs them).
+// Each lesson ends with a program, its tests, and a check.sh FCC runs itself:
+// only a passing check counts as learned.
+export const COURSES = {
+  python: { name: "Python", run: "python3", topics: ["variables, types and f-strings", "lists, dicts and comprehensions", "functions, default and keyword arguments", "classes and dataclasses", "errors: try/except and raising your own", "files: reading and writing text and JSON", "iterators and generators", "unittest: testing your own code", "sqlite3: a small database", "argparse: a command-line tool", "a text adventure game", "a JSON API client with urllib (internet on)"] },
+  c: { name: "C", run: "gcc", topics: ["printf, variables and types", "loops and conditions", "functions and header files", "arrays and strings", "pointers and memory addresses", "malloc, free and avoiding leaks", "structs", "file input and output", "a Makefile for a small project", "a linked list with tests", "a tiny command-line calculator"] },
+  cpp: { name: "C++", run: "g++", topics: ["iostream, variables and auto", "std::string and std::vector", "functions, references and const", "classes, constructors and RAII", "std::map and algorithms", "templates", "smart pointers", "exceptions", "a CMake project with tests", "a bank account simulation"] },
+  rust: { name: "Rust", run: "cargo", topics: ["variables, mutability and types", "ownership and borrowing", "structs and impl blocks", "enums and match", "Option and Result", "vectors, strings and hash maps", "traits", "error handling with ?", "cargo test: unit tests", "modules and a small library", "a command-line todo app"] },
+  go: { name: "Go", run: "go", topics: ["packages, variables and fmt", "slices and maps", "functions and multiple returns", "structs and methods", "interfaces", "errors", "goroutines and channels", "go test: table tests", "a small HTTP handler tested with httptest", "a word-count tool"] },
+  java: { name: "Java", run: "javac", topics: ["classes, main and System.out", "variables, strings and arrays", "methods and overloading", "objects, constructors and encapsulation", "inheritance and interfaces", "collections: ArrayList and HashMap", "exceptions", "file input and output", "a test without a framework (assertions)", "a library catalogue program"] },
+  javascript: { name: "JavaScript (Node.js)", run: "node", topics: ["let, const and types", "arrays, objects and destructuring", "functions and arrow functions", "classes", "promises and async/await", "modules (import/export)", "node:test and node:assert", "reading and writing files with fs", "a small HTTP server with node:http", "an npm package of your own (internet on for npm)"] },
+  web: { name: "Websites (HTML, CSS, JavaScript)", run: "node", topics: ["a semantic HTML page", "CSS layout with flexbox", "CSS grid and responsive design", "forms and validation", "DOM events and state", "fetching JSON and showing it", "accessibility: labels, contrast and focus", "a multi-page site served by node:http", "testing a page's HTML with a script", "a portfolio site in /projects"] },
+  ruby: { name: "Ruby", run: "ruby", topics: ["puts, variables and strings", "arrays, hashes and blocks", "methods", "classes and modules", "exceptions", "files", "minitest-style tests without gems", "a command-line tool"] },
+  php: { name: "PHP", run: "php", topics: ["echo, variables and strings", "arrays and loops", "functions", "classes and interfaces", "errors and exceptions", "files and JSON", "a small page served with php -S", "tests with assert"] },
+  bash: { name: "Bash and Linux", run: "bash", topics: ["files, folders and permissions", "pipes and redirection", "variables, quotes and conditions", "loops and functions", "grep, sed and awk", "find and xargs", "a backup script with tests", "processes, jobs and signals", "make: automating builds"] },
+  lua: { name: "Lua", run: "lua5.4", topics: ["variables and tables", "functions and closures", "metatables", "string patterns", "modules", "a small game loop simulation"] },
+  perl: { name: "Perl", run: "perl", topics: ["scalars, arrays and hashes", "regular expressions", "subroutines", "files", "a log analyser"] },
+  sql: { name: "SQL (SQLite)", run: "sqlite3", topics: ["CREATE TABLE and INSERT", "SELECT, WHERE and ORDER BY", "JOINs", "GROUP BY and aggregates", "indexes and EXPLAIN QUERY PLAN", "transactions", "a schema for a shop with tests"] },
+};
+
+/** How many lessons there are in all. */
+export const LESSON_COUNT = Object.values(COURSES).reduce((sum, course) => sum + course.topics.length, 0);

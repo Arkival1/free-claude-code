@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Studio Name</title>
+  <meta name="description" content="An independent design studio: identity, web and print.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#work">Skip to the work</a>
+  <header class="top" id="top">
+    <a class="brand" data-brand href="#top">Studio Name</a>
+    <button class="menu" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav id="nav" aria-label="Main">
+      <a href="#work">Work</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <p class="eyebrow">Independent design studio</p>
+      <h1 id="hero-title">Quiet work for<br>loud ideas.</h1>
+      <p class="lede">Identity, websites and print for people who care how things are made. Based in your city, working everywhere.</p>
+      <a class="button" href="#contact">Start a project</a>
+    </section>
+
+    <section id="work" class="work" aria-labelledby="work-title">
+      <div class="section-head">
+        <h2 id="work-title">Selected work</h2>
+        <p>2023 to now</p>
+      </div>
+      <div class="bento">
+        <article class="tile tile-a">
+          <div class="art" aria-hidden="true"></div>
+          <h3>North Bakery</h3><p>Identity and packaging</p>
+        </article>
+        <article class="tile tile-b">
+          <div class="art" aria-hidden="true"></div>
+          <h3>Field Notes</h3><p>Editorial website</p>
+        </article>
+        <article class="tile tile-c">
+          <div class="art" aria-hidden="true"></div>
+          <h3>Harbour Club</h3><p>Signage system</p>
+        </article>
+        <article class="tile tile-d">
+          <div class="art" aria-hidden="true"></div>
+          <h3>Common Room</h3><p>Brand and menu</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="about" class="about" aria-labelledby="about-title">
+      <h2 id="about-title">About</h2>
+      <div class="about-grid">
+        <p class="big">We are a small team. You talk to the people doing the work, from the first sketch to the last file.</p>
+        <dl class="facts">
+          <div><dt>Founded</dt><dd>2019</dd></div>
+          <div><dt>Projects</dt><dd>140+</dd></div>
+          <div><dt>Team</dt><dd>4 people</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section id="contact" class="contact" aria-labelledby="contact-title">
+      <h2 id="contact-title">Tell us about it</h2>
+      <form class="form" data-email="hello@example.com" novalidate>
+        <label>Your name<input name="name" autocomplete="name" required></label>
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <label class="wide">The project<textarea name="message" rows="4" required></textarea></label>
+        <button class="button" type="submit">Send</button>
+        <p class="note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>&copy; <span data-year></span> <span data-brand-text>Studio Name</span></p>
+    <a href="#top">Back to top</a>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

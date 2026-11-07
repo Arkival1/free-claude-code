@@ -1,0 +1,65 @@
+/* Creator links: one centred card, big tappable links, a CV timeline. */
+:root {
+  --bg-1: #ffecd2;
+  --bg-2: #fcb69f;
+  --card: #fffdfa;
+  --ink: #2b1d16;
+  --muted: #7d665a;
+  --accent: #b03b28;
+  --line: #f1e2d8;
+  --radius: 20px;
+  --font: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; min-height: 100vh; padding: clamp(16px, 5vw, 48px) 16px; background: linear-gradient(160deg, var(--bg-1), var(--bg-2)); color: var(--ink); font: 17px/1.6 var(--font); }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.skip { position: absolute; left: -999px; }
+.skip:focus { left: 16px; top: 16px; background: var(--ink); color: #fff; padding: 8px 12px; border-radius: 8px; }
+
+.card { max-width: 620px; margin: 0 auto; background: var(--card); border-radius: 28px; padding: clamp(24px, 5vw, 44px); box-shadow: 0 24px 60px rgb(124 60 30 / 0.18); }
+.me { text-align: center; }
+.avatar { width: 112px; height: 112px; margin: 0 auto; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(135deg, var(--accent), #f39c6b); color: #fff; font-size: 2rem; font-weight: 700; border: 5px solid #fff; box-shadow: 0 6px 18px rgb(124 60 30 / 0.25); }
+h1 { font-size: clamp(1.8rem, 5vw, 2.4rem); margin: 16px 0 4px; letter-spacing: -0.01em; }
+.role { color: var(--accent); font-weight: 600; margin: 0; }
+.bio { color: var(--muted); margin: 10px 0 0; }
+
+.links { display: grid; gap: 12px; margin: 28px 0; }
+.links a { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 14px 20px; border-radius: var(--radius); background: #fff; border: 2px solid var(--line); text-decoration: none; font-weight: 600; transition: transform 0.15s, border-color 0.15s; }
+.links a:hover { transform: translateY(-2px); border-color: var(--accent); }
+.links span { color: var(--accent); }
+
+.block { border-top: 2px solid var(--line); padding-top: 24px; margin-top: 24px; }
+h2 { font-size: 1.3rem; margin: 0 0 14px; }
+.project { display: flex; gap: 16px; align-items: center; }
+.thumb { flex: none; width: 96px; height: 96px; border-radius: 16px; background: linear-gradient(135deg, #fcd9c3, #f6a98a); }
+.project h3 { margin: 0; }
+.project p { margin: 4px 0 0; color: var(--muted); }
+
+.timeline { list-style: none; padding: 0 0 0 20px; margin: 0 0 24px; border-left: 3px solid var(--line); }
+.timeline li { position: relative; padding: 0 0 18px 16px; }
+.timeline li::before { content: ""; position: absolute; left: -29px; top: 6px; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 3px solid var(--card); }
+.timeline time { color: var(--muted); font-size: 0.9rem; }
+.timeline h3 { margin: 2px 0; font-size: 1.05rem; }
+.timeline p { margin: 0; color: var(--muted); }
+.chips { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.chips li { padding: 6px 14px; border-radius: 999px; background: #fff3ec; color: var(--accent); font-weight: 600; font-size: 0.9rem; }
+
+.form { display: grid; gap: 12px; }
+.form label { display: grid; gap: 6px; font-weight: 600; }
+input, textarea { min-height: 48px; padding: 10px 14px; border-radius: 14px; border: 2px solid var(--line); background: #fff; font: inherit; color: var(--ink); }
+.send { justify-self: start; min-height: 48px; padding: 12px 26px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font: 700 1rem var(--font); cursor: pointer; }
+.send:hover { background: #c4432f; }
+.note { margin: 0; min-height: 1.6em; }
+
+.foot { text-align: center; color: var(--muted); font-size: 0.9rem; margin-top: 24px; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; }
+}
+
+/* Big enough to tap on a phone: the skip link, the logo and "Back to top". */
+.skip, .brand, a[href="#top"] { min-height: 44px; display: inline-flex; align-items: center; }

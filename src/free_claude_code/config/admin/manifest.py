@@ -70,6 +70,11 @@ SECTIONS: tuple[ConfigSectionSpec, ...] = (
         "Local Anthropic web_search and web_fetch behavior.",
     ),
     ConfigSectionSpec(
+        "studio",
+        "Studio",
+        "Agents, local models, light tuning, classes, memory, and Obsidian.",
+    ),
+    ConfigSectionSpec(
         "diagnostics",
         "Diagnostics",
         "Logging and debugging flags.",
@@ -405,6 +410,19 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
         advanced=True,
     ),
     ConfigFieldSpec(
+        "ALLOW_BACKGROUND_SUBAGENTS",
+        "Allow Background Subagents",
+        "runtime",
+        "boolean",
+        settings_attr="allow_background_subagents",
+        description=(
+            "Let Claude Code's subagents (the Task tool) run in the background, "
+            "so several can work at once while the main agent carries on. Off: "
+            "every subagent runs in the foreground, which works with every "
+            "provider."
+        ),
+    ),
+    ConfigFieldSpec(
         "ENABLE_TITLE_GENERATION_SKIP",
         "Title Generation Skip",
         "runtime",
@@ -566,6 +584,1175 @@ _NON_PROVIDER_FIELDS: tuple[ConfigFieldSpec, ...] = (
 )
 
 
+_STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
+    ConfigFieldSpec(
+        "STUDIO_ENABLED",
+        "Enable Studio",
+        "studio",
+        "boolean",
+        settings_attr="studio_enabled",
+        restart_required=True,
+        description="Serve the Studio app at /studio for agents, classes, and tuning.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_DEFAULT_MODEL",
+        "Studio Default Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_default_model",
+        description="Model new Studio agents use. Defaults to the Default Model.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LOCAL_BASE_URL",
+        "Local Model Server",
+        "studio",
+        "text",
+        settings_attr="studio_local_base_url",
+        description=(
+            "OpenAI-compatible endpoint that serves downloaded models. "
+            "Studio models written as local/<id> are sent here."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LOCAL_API_KEY",
+        "Local Model Server Key",
+        "studio",
+        "secret",
+        settings_attr="studio_local_api_key",
+        secret=True,
+        advanced=True,
+        description="Only needed when your local runtime requires a key.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_GUIDE_MODEL",
+        "Guide Model",
+        "studio",
+        "text",
+        settings_attr="studio_guide_model",
+        description="Small preloaded model that explains the app to the user.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_GUIDE_CATALOG_ID",
+        "Guide Model Download",
+        "studio",
+        "text",
+        settings_attr="studio_guide_catalog_id",
+        advanced=True,
+        description="Curated catalog id downloaded when the guide model is missing.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MODELS_DIR",
+        "Model Download Folder",
+        "studio",
+        "text",
+        settings_attr="studio_models_dir",
+        advanced=True,
+        description="Where downloaded model files are stored. Defaults to ~/.fcc/studio/models.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_AGENT_MAX_STEPS",
+        "Agent Step Budget",
+        "studio",
+        "number",
+        settings_attr="studio_agent_max_steps",
+        description="Maximum tool steps one agent task may take before stopping.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_BUILDER_MAX_STEPS",
+        "Builder Max Steps",
+        "studio",
+        "number",
+        settings_attr="studio_builder_max_steps",
+        description=(
+            "How many steps (tool calls) a builder agent may take on one job, "
+            "1 to 120. Whole apps need more steps than questions do."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CODER_MAX_STEPS",
+        "Coder Max Steps",
+        "studio",
+        "number",
+        settings_attr="studio_coder_max_steps",
+        description=(
+            "How many steps (tool calls) the Coder may take on one round of a "
+            "job, 1 to 300. The Coder codes for a long time: it plans, writes "
+            "every file, runs the code, and fixes what fails."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CODE_TEST_ROUNDS",
+        "Coder and Tester Rounds",
+        "studio",
+        "number",
+        settings_attr="studio_code_test_rounds",
+        description=(
+            "How many times the Tester tests the Coder's work and hands bugs "
+            "back, 1 to 10. The rounds stop early when the Tester says it works."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_FARM_VIDEO_SIZE",
+        "Content Farm Video Size",
+        "studio",
+        "select",
+        settings_attr="studio_farm_video_size",
+        description=(
+            "How big the Content Farm's videos are. 720p renders about twice as "
+            "fast; 1080p is sharper. Both are vertical 9:16."
+        ),
+        options=(
+            ConfigOptionSpec("720p", "720 x 1280 (faster)"),
+            ConfigOptionSpec("1080p", "1080 x 1920 (sharper)"),
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_FARM_IMAGE_URL",
+        "Content Farm Image Maker",
+        "studio",
+        "text",
+        settings_attr="studio_farm_image_url",
+        description=(
+            "Address of a Stable Diffusion running on this PC for channels set "
+            "to AI pictures, e.g. http://127.0.0.1:7860 (Automatic1111, Forge, "
+            "SD.Next) or an OpenAI-style images server. Empty: free photos."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CARTOON_ART",
+        "Cartoon Art",
+        "studio",
+        "select",
+        settings_attr="studio_cartoon_art",
+        options=(
+            ConfigOptionSpec("auto", "Painted when the image engine is set up"),
+            ConfigOptionSpec("painted", "Painted by the image engine (AI art)"),
+            ConfigOptionSpec("drawn", "Drawn by Studio (stick bodies, fast)"),
+        ),
+        description=(
+            "How cartoons look. Painted: the image engine paints every place "
+            "and character in the chosen style once, then animates them."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_SOURCE",
+        "Image Engine",
+        "studio",
+        "select",
+        settings_attr="studio_image_source",
+        options=(
+            ConfigOptionSpec("pc", "This PC (stable-diffusion.cpp, free, offline)"),
+            ConfigOptionSpec("cloud", "An online image service (needs a key)"),
+        ),
+        description=(
+            "Where painted pictures are made. This PC needs a graphics card with "
+            "about 8 GB (or 4 GB with the smaller style); set it up on Settings, "
+            "Image engine."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_BUILD",
+        "Image Engine Build",
+        "studio",
+        "select",
+        settings_attr="studio_image_build",
+        options=(
+            ConfigOptionSpec("vulkan", "Graphics card (Vulkan: AMD, NVIDIA, Intel)"),
+            ConfigOptionSpec("cpu", "Processor only (very slow)"),
+        ),
+        description="Which stable-diffusion.cpp build Install downloads.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_STYLE",
+        "Image Style",
+        "studio",
+        "select",
+        settings_attr="studio_image_style",
+        options=(
+            ConfigOptionSpec("superhero", "2000s superhero cartoon (8 GB card)"),
+            ConfigOptionSpec(
+                "superhero-small", "2000s superhero cartoon, smaller (4-6 GB)"
+            ),
+        ),
+        description=(
+            "The look of painted pictures: the early-2000s superhero cartoon "
+            "style (Teen Titans, Ben 10: Alien Force, Justice League)."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_CLOUD_URL",
+        "Online Image Service",
+        "studio",
+        "text",
+        settings_attr="studio_image_cloud_url",
+        description=(
+            "An OpenAI-style images API, e.g. https://api.openai.com/v1, used "
+            "when Image Engine is set to the online service."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_CLOUD_KEY",
+        "Online Image Service Key",
+        "studio",
+        "secret",
+        settings_attr="studio_image_cloud_key",
+        description="The online image service's API key.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_IMAGE_CLOUD_MODEL",
+        "Online Image Model",
+        "studio",
+        "text",
+        settings_attr="studio_image_cloud_model",
+        description="The service's image model, e.g. gpt-image-1.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_FARM_PEXELS_KEY",
+        "Content Farm Pexels Key",
+        "studio",
+        "secret",
+        settings_attr="studio_farm_pexels_key",
+        description=(
+            "A free Pexels API key (pexels.com/api) lets long videos use real "
+            "stock clips when your library and the fandom wiki run out."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_FARM_MUSIC",
+        "Content Farm Background Music",
+        "studio",
+        "text",
+        settings_attr="studio_farm_music",
+        advanced=True,
+        description=(
+            "A music file (MP3, WAV, M4A) played quietly under every video. Use "
+            "music you have the rights to; empty for none, and add a trending "
+            "sound in the app when you post."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LIGHT_TUNING_ENABLED",
+        "Light Tuning",
+        "studio",
+        "boolean",
+        settings_attr="studio_light_tuning_enabled",
+        description=(
+            "Allow very light tuning from chat settings. Turning it on in a chat "
+            "opens a new chat that uses the tuned profile."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_TUNING_BACKEND",
+        "Tuning Backend",
+        "studio",
+        "select",
+        settings_attr="studio_tuning_backend",
+        options=(
+            ConfigOptionSpec("local_light", "On device (very light)"),
+            ConfigOptionSpec("cloud", "Cloud trainer"),
+        ),
+        description=(
+            "On device searches a small instruction pack and runs on a phone. "
+            "Cloud sends the dataset to an OpenAI-compatible fine-tuning API."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_TUNING_ROUNDS",
+        "Tuning Rounds",
+        "studio",
+        "number",
+        settings_attr="studio_tuning_rounds",
+        description="How many candidate packs on-device tuning tries. Keep it small on a phone.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CLOUD_TUNING_BASE_URL",
+        "Cloud Trainer URL",
+        "studio",
+        "text",
+        settings_attr="studio_cloud_tuning_base_url",
+        description="OpenAI-compatible /v1 root exposing files and fine_tuning endpoints.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CLOUD_TUNING_API_KEY",
+        "Cloud Trainer Key",
+        "studio",
+        "secret",
+        settings_attr="studio_cloud_tuning_api_key",
+        secret=True,
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CLOUD_TUNING_PROVIDER",
+        "Cloud Trainer Provider",
+        "studio",
+        "text",
+        settings_attr="studio_cloud_tuning_provider",
+        description=(
+            "FCC provider that serves models the trainer produces, e.g. openai or "
+            "together. When set, a finished server tune switches the agent to it."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_TEACHER_ENABLED",
+        "AI Teacher",
+        "studio",
+        "boolean",
+        settings_attr="studio_teacher_enabled",
+        description="Show the classroom where a teacher agent teaches and tests a student agent.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_TEACHER_MODEL",
+        "Teacher Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_teacher_model",
+        description="Model the teacher agent uses. Defaults to the Studio default model.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_STUDENT_MODEL",
+        "Student Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_student_model",
+        description="Model the student agent uses. A small local model is the point.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VISION_MODEL",
+        "Vision Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_vision_model",
+        description=(
+            "A model that can see pictures. The Changer and the Builder send it "
+            "screenshots of the pages they made and fix what it points out. "
+            "Empty: they read each page's text and layout checks instead."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_AIDER_EDITOR_MODEL",
+        "Aider Editor Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_aider_editor_model",
+        description=(
+            "For Aider's architect mode: a cheaper model that writes the edits "
+            "while the agent's own model plans them (a local model when the "
+            "agent is on a local model; a server model otherwise). Empty: the "
+            "agent's model does both."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LIGHT_MODEL",
+        "Light Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_light_model",
+        description=(
+            "For agents added from a repo that ask for a light model (simple, "
+            "high-volume work): a cheap or local model. Empty: the Studio default."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_STRONG_MODEL",
+        "Strong Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_strong_model",
+        description=(
+            "For agents added from a repo that ask for a strong model (security, "
+            "architecture, hard reviews). Empty: the Studio default."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CLASS_PASS_MARK",
+        "Class Pass Mark",
+        "studio",
+        "number",
+        settings_attr="studio_class_pass_mark",
+        description="Fraction of the end-of-class test the student must score to pass.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_OBSIDIAN_VAULT",
+        "Obsidian Vault",
+        "studio",
+        "text",
+        settings_attr="studio_obsidian_vault",
+        description=(
+            "Vault folder to mirror chats, classes, and memories into. On iOS this "
+            "is usually in iCloud Drive under iCloud~md~obsidian."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_OBSIDIAN_FOLDER",
+        "Obsidian Subfolder",
+        "studio",
+        "text",
+        settings_attr="studio_obsidian_folder",
+        description="Folder inside the vault that Studio writes to.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_OBSIDIAN_AUTO_SYNC",
+        "Auto-sync To Obsidian",
+        "studio",
+        "boolean",
+        settings_attr="studio_obsidian_auto_sync",
+        description="Write a note every time a chat turn or class finishes.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_OBSIDIAN_MEMORY_SYNC",
+        "Mirror Memory Into Obsidian",
+        "studio",
+        "boolean",
+        settings_attr="studio_obsidian_memory_sync",
+        description=(
+            "Keep every agent's working and long-term memory in the vault as "
+            "linked notes, one per memory, updated as agents learn."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SHARED_MEMORY",
+        "Shared Team Memory",
+        "studio",
+        "boolean",
+        settings_attr="studio_shared_memory",
+        description=(
+            "Agents save what they learn into one memory the whole team reads, "
+            "so the main AI and every agent build on each other's work. Each "
+            "agent keeps its own working notes."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MAIN_AGENT_NAME",
+        "Main AI Name",
+        "studio",
+        "text",
+        settings_attr="studio_main_agent_name",
+        description="Name of the main AI that runs the other agents from the HUD.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MAIN_AGENT_MODEL",
+        "Main AI Model",
+        "studio",
+        "optional_model",
+        settings_attr="studio_main_agent_model",
+        description=(
+            "Model the main AI thinks with, e.g. local/qwen2.5-coder:7b. "
+            "Defaults to the Studio Default Model."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_ENGINE",
+        "Main AI Voice Engine",
+        "studio",
+        "select",
+        settings_attr="studio_voice_engine",
+        options=(
+            ConfigOptionSpec("auto", "Automatic (built-in when installed)"),
+            ConfigOptionSpec("builtin", "Built-in, on this PC, offline"),
+            ConfigOptionSpec("server", "A voice server"),
+            ConfigOptionSpec("browser", "The browser's own voice"),
+        ),
+        description=(
+            "Built-in runs a neural voice and speech recognition on this PC with "
+            "no server and no internet, after a one-time download."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_NAME",
+        "Main AI Voice",
+        "studio",
+        "text",
+        settings_attr="studio_voice_name",
+        description=(
+            "jarvis is a blend of two British men (bm_george and bm_lewis). "
+            "Others: bm_george, bm_lewis, bm_daniel, bm_fable, am_michael, "
+            "am_adam, bf_emma, af_heart. For a voice server, use its voice names."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_EFFECT",
+        "Voice Effect",
+        "studio",
+        "select",
+        settings_attr="studio_voice_effect",
+        options=(
+            ConfigOptionSpec("jarvis", "AI in the room (subtle sheen and space)"),
+            ConfigOptionSpec("none", "Dry voice"),
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_SPEED",
+        "Voice Speed",
+        "studio",
+        "number",
+        settings_attr="studio_voice_speed",
+        description="1.0 is natural; 1.05 is crisp.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_QUALITY",
+        "Voice Quality",
+        "studio",
+        "select",
+        settings_attr="studio_voice_quality",
+        advanced=True,
+        options=(
+            ConfigOptionSpec("high", "High (325 MB download)"),
+            ConfigOptionSpec("compact", "Compact (92 MB download)"),
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_EARS",
+        "Speech Recognition Size",
+        "studio",
+        "select",
+        settings_attr="studio_voice_ears",
+        advanced=True,
+        options=(
+            ConfigOptionSpec("tiny.en", "Tiny (75 MB, fastest)"),
+            ConfigOptionSpec("base.en", "Base (145 MB, recommended)"),
+            ConfigOptionSpec("small.en", "Small (480 MB, more accurate)"),
+            ConfigOptionSpec(
+                "medium.en", "Medium (1.5 GB, most accurate, slow on CPU)"
+            ),
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_SPEAK_URL",
+        "Voice Server",
+        "studio",
+        "text",
+        settings_attr="studio_voice_speak_url",
+        description=(
+            "Only for the voice-server engine: an OpenAI-compatible speech "
+            "server such as Kokoro-FastAPI (http://localhost:8880/v1) or "
+            "https://api.openai.com/v1."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_SPEAK_KEY",
+        "Voice Server Key",
+        "studio",
+        "secret",
+        settings_attr="studio_voice_speak_key",
+        secret=True,
+        description="Only needed for paid services such as OpenAI.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_SPEAK_MODEL",
+        "Voice Model",
+        "studio",
+        "text",
+        settings_attr="studio_voice_speak_model",
+        description="kokoro for Kokoro-FastAPI; tts-1 or gpt-4o-mini-tts for OpenAI.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_LISTEN_URL",
+        "Speech-To-Text Server",
+        "studio",
+        "text",
+        settings_attr="studio_voice_listen_url",
+        description=(
+            "OpenAI-compatible transcription server that turns your voice into "
+            "text, e.g. whisper.cpp's server started with --inference-path "
+            "/v1/audio/transcriptions (then http://localhost:8178/v1), Speaches, "
+            "or https://api.openai.com/v1. Used when the built-in ears are not "
+            "installed."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_LISTEN_KEY",
+        "Speech-To-Text Key",
+        "studio",
+        "secret",
+        settings_attr="studio_voice_listen_key",
+        secret=True,
+        description="Leave empty to reuse the voice server key for the same server.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_LISTEN_MODEL",
+        "Speech-To-Text Model",
+        "studio",
+        "text",
+        settings_attr="studio_voice_listen_model",
+        advanced=True,
+        description="whisper-1 for OpenAI; most local servers ignore it.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_VOICE_LANGUAGE",
+        "Voice Language",
+        "studio",
+        "text",
+        settings_attr="studio_voice_language",
+        advanced=True,
+        description="Language you speak, as a code such as en; empty detects it.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LOCAL_FAST_REPLIES",
+        "Fast Local Replies",
+        "studio",
+        "boolean",
+        settings_attr="studio_local_fast_replies",
+        description=(
+            "Skip the long hidden 'thinking' pass that reasoning models such as "
+            "Qwen3 write before every answer on this PC, so replies start "
+            "sooner. Turn off for harder problems where thinking helps."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE",
+        "Built-in Engine",
+        "studio",
+        "boolean",
+        settings_attr="studio_engine",
+        description=(
+            "Run local models with Studio's own engine (llama.cpp) instead of "
+            "LM Studio. Install it and control every model on Model Control."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_BUILD",
+        "Engine Build",
+        "studio",
+        "select",
+        settings_attr="studio_engine_build",
+        options=(
+            ConfigOptionSpec("vulkan", "Graphics card (Vulkan: AMD, NVIDIA, Intel)"),
+            ConfigOptionSpec("cpu", "Processor only"),
+        ),
+        description="Which llama.cpp build Install downloads for this PC.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_GPU_GB",
+        "Graphics Memory (GB)",
+        "studio",
+        "number",
+        settings_attr="studio_engine_gpu_gb",
+        description=(
+            "How much memory your graphics card has. Model Control warns when a "
+            "model's settings need more."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_MODELS_AT_ONCE",
+        "Models Loaded At Once",
+        "studio",
+        "number",
+        settings_attr="studio_engine_models_at_once",
+        description=(
+            "How many models the engine keeps loaded; the oldest is unloaded "
+            "to make room. Keep 1 on an 8 GB card."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_FOLDERS",
+        "Extra Model Folders",
+        "studio",
+        "text",
+        settings_attr="studio_engine_folders",
+        description=(
+            "More folders with .gguf models for the engine, separated by ';'. "
+            "Studio's models folder and LM Studio's are always included."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_PORT",
+        "Engine Port",
+        "studio",
+        "number",
+        settings_attr="studio_engine_port",
+        advanced=True,
+        restart_required=True,
+        description="The port the built-in engine listens on, on this PC only.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ENGINE_PATH",
+        "Engine Program",
+        "studio",
+        "text",
+        settings_attr="studio_engine_path",
+        advanced=True,
+        description=(
+            "Use your own llama-server program instead of the one Install "
+            "downloads. Leave empty normally."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_ALL_TOOLS",
+        "Every Agent Gets Every Tool",
+        "studio",
+        "boolean",
+        settings_attr="studio_all_tools",
+        description=(
+            "Agents chosen for every tool (Agents, Who gets every tool, or the "
+            "switch on each agent's page) can use every tool Studio has: files, "
+            "code, commands (still with your approval), the web, research, "
+            "videos, memory, to-dos, maths, weather, projects, the PC's status, "
+            "and handing parts of a job to teammates. Fewer tools use fewer "
+            "tokens on every message. Turn off to give every agent only the "
+            "tools ticked for it."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MCP_SERVER",
+        "Other AI Tools Can Use Your Team (MCP)",
+        "studio",
+        "boolean",
+        settings_attr="studio_mcp_server",
+        description=(
+            "Claude Code, Codex, Cursor, Gemini CLI, VS Code, Cline, Goose, and "
+            "any other tool that speaks MCP can connect to http://127.0.0.1:8082/mcp "
+            "and use your team: talk to Jarvis, give an agent a job, run a team "
+            "plan, and read project files. Only programs on this PC can reach it "
+            "(and they need the proxy token when you set one). What they read goes "
+            "to whatever AI that tool runs on."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LOCAL_CONTROL",
+        "Local Agents Direct Server Agents",
+        "studio",
+        "boolean",
+        settings_attr="studio_local_control",
+        description=(
+            "Agents thinking on this PC can hand work to, check on, stop, and "
+            "adjust the agents that think on a server or cloud AI. Server "
+            "agents can't direct agents on this PC, which read your memory. "
+            "Switching an agent's model moves it between the two groups."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MAIN_OWN_MEMORY",
+        "Main AI Has Its Own Memory",
+        "studio",
+        "boolean",
+        settings_attr="studio_main_own_memory",
+        description=(
+            "The main AI (Jarvis) keeps what it remembers in a memory of its "
+            "own that the other agents can't read, and shares a fact with the "
+            "team only when it chooses. It can still read every agent's "
+            "memory and the team memory, and add notes to theirs. Off: what "
+            "it remembers goes into the team memory, as before."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_JARVIS_PLAYBOOK",
+        "Jarvis's Playbook",
+        "studio",
+        "boolean",
+        settings_attr="studio_jarvis_playbook",
+        description=(
+            "Notes that teach the main AI (Jarvis) when and how to use each "
+            "tool, with examples. Before each reply Studio adds the notes that "
+            "match your message, and when a tool call works it adds your words "
+            "and the call to that tool's note. The notes live in the Obsidian "
+            "vault's Playbook folder (or Studio's own folder until a vault is "
+            "set); edit them there or on the More page."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_PRIVATE_MEMORY",
+        "Keep Memory on This PC",
+        "studio",
+        "boolean",
+        settings_attr="studio_private_memory",
+        description=(
+            "Agents that think on a server or cloud AI get no access to the "
+            "memory bank, Obsidian vault, knowledge library, to-dos, or earlier "
+            "conversations. When the main AI hands them work, it writes them a "
+            "briefing with only what the job needs, and shows it to you."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LOCAL_BACKUP",
+        "Server Model When Local Models Are Off",
+        "studio",
+        "boolean",
+        settings_attr="studio_local_backup",
+        description=(
+            "When LM Studio (or the PC's other model runtime) isn't running, "
+            "agents set to a model on this PC think with the server model "
+            "instead (if its key is set), so jobs still get done. Memory stays "
+            "on this PC while they do, as for any server agent."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LOCAL_MODEL_TURNS",
+        "Local Models Take Turns",
+        "studio",
+        "boolean",
+        settings_attr="studio_local_model_turns",
+        description=(
+            "When agents use different models on this PC, let one model work "
+            "at a time so a small graphics card is not swapping models on "
+            "every step. Models already loaded side by side still run "
+            "together. Turn off if your card holds all of them at once."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LOW_POWER",
+        "Low-Power Mode",
+        "studio",
+        "boolean",
+        settings_attr="studio_low_power",
+        description=(
+            "Keep FCC light while you use the PC: background work (searches, "
+            "market data, model calls) runs half as many jobs at once, and 3D "
+            "views draw fewer frames."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_CPU_THROTTLE",
+        "Busy-Processor Pause (%)",
+        "studio",
+        "number",
+        settings_attr="studio_cpu_throttle",
+        advanced=True,
+        description=(
+            "Background jobs that can wait (scans, research) pause while the "
+            "processor is busier than this, for up to 30 seconds, so FCC doesn't "
+            "slow down what you're doing. 100 never pauses."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_AGENT_TEMPERATURE",
+        "Agent Temperature",
+        "studio",
+        "number",
+        settings_attr="studio_agent_temperature",
+        description=(
+            "How much agents vary their wording, 0 to 2. Low (0.1 to 0.3) keeps "
+            "tool use steady; higher is more creative."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_HELPER_PIPELINE",
+        "Helper Reviews Research",
+        "studio",
+        "boolean",
+        settings_attr="studio_helper_pipeline",
+        description=(
+            "When an agent asks the Researcher, the Helper filters the findings "
+            "and turns them into next steps before they come back."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_DESK_BROWSER",
+        "Desktop Browser",
+        "studio",
+        "select",
+        settings_attr="studio_desk_browser",
+        options=(
+            ConfigOptionSpec("auto", "Edge, else Chrome (recommended)"),
+            ConfigOptionSpec("edge", "Microsoft Edge"),
+            ConfigOptionSpec("chrome", "Google Chrome"),
+            ConfigOptionSpec("chromium", "Playwright's Chromium"),
+        ),
+        description=(
+            "The browser window agents drive on your desktop to research and "
+            "play videos. It uses its own Studio profile, never your "
+            "passwords, cookies, or tabs."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_DESK_VISIBLE",
+        "Show The Desktop Browser",
+        "studio",
+        "boolean",
+        settings_attr="studio_desk_visible",
+        description=(
+            "On, you see the window and can watch the agents browse and "
+            "watch along with videos. Off, it works out of sight."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_WATCH_MAX_MINUTES",
+        "Longest Video To Listen To",
+        "studio",
+        "number",
+        settings_attr="studio_watch_max_minutes",
+        advanced=True,
+        description=(
+            "Videos with no captions are listened to on this PC with speech "
+            "recognition; longer videos take longer (about a tenth of their "
+            "length on a fast PC)."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_WEB_ACCESS",
+        "Agents On The Internet",
+        "studio",
+        "select",
+        settings_attr="studio_web_access",
+        options=(
+            ConfigOptionSpec("all", "Every agent"),
+            ConfigOptionSpec("listed", "Only agents given web tools"),
+            ConfigOptionSpec("off", "No agent"),
+        ),
+        description=(
+            "Lets agents search the web and read pages, local models included: "
+            "Studio does the browsing on their behalf."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_PROVIDER",
+        "Web Search Service",
+        "studio",
+        "select",
+        settings_attr="studio_search_provider",
+        options=(
+            ConfigOptionSpec("auto", "Auto (from the key)"),
+            ConfigOptionSpec("duckduckgo", "DuckDuckGo (no key)"),
+            ConfigOptionSpec("brave", "Brave Search API"),
+            ConfigOptionSpec("tavily", "Tavily"),
+            ConfigOptionSpec("serper", "Serper (Google results)"),
+            ConfigOptionSpec("searxng", "SearXNG (self-hosted)"),
+        ),
+        description=(
+            "Where agents' web searches go. DuckDuckGo needs no key but often "
+            "limits automated searches; a key makes search reliable. Auto picks "
+            "the service from the key: tvly- is Tavily, BSA is Brave."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_API_KEY",
+        "Web Search API Key",
+        "studio",
+        "secret",
+        settings_attr="studio_search_api_key",
+        secret=True,
+        description=(
+            "Key or token for Brave Search, Tavily, or Serper. Studio uses it "
+            "for every agent's searches and falls back to DuckDuckGo if it fails."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_ORDER",
+        "Web Search Order",
+        "studio",
+        "select",
+        settings_attr="studio_search_order",
+        options=(
+            ConfigOptionSpec("api_first", "API key first, then free search"),
+            ConfigOptionSpec(
+                "free_first", "Free search first, API key only when needed"
+            ),
+        ),
+        description=(
+            "Which goes first. With the API first, free search takes over when a "
+            "key runs out (and that key is skipped for the rest of the day). With "
+            "free first, a key is only used when free search finds too little."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_DAILY_LIMIT",
+        "Daily API Search Limit",
+        "studio",
+        "number",
+        settings_attr="studio_search_daily_limit",
+        description=(
+            "The most searches a day that may use your search API keys; after "
+            "that, free search only. 0 means no limit. The same search within six "
+            "hours reuses its results and never costs twice."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_BACKUP_API_KEY",
+        "Backup Web Search API Key",
+        "studio",
+        "secret",
+        settings_attr="studio_search_backup_api_key",
+        secret=True,
+        description=(
+            "A second search service, used when the first one fails or runs out "
+            "of free searches, before DuckDuckGo. Paste a Tavily (tvly-), Brave "
+            "(BSA), or Serper key; Studio tells which from the key."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_YOUTUBE_API_KEY",
+        "YouTube API Key",
+        "studio",
+        "secret",
+        settings_attr="studio_youtube_api_key",
+        secret=True,
+        description=(
+            "YouTube Data API key from Google Cloud. Lets research search "
+            "YouTube through the official API; without it, research reads "
+            "YouTube's own search page. "
+            "Transcripts are read either way when a video has captions."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_REDDIT_CLIENT_ID",
+        "Reddit App ID",
+        "studio",
+        "text",
+        settings_attr="studio_reddit_client_id",
+        description=(
+            "From reddit.com/prefs/apps (create a 'script' app). With the "
+            "secret, research reads Reddit through its official API instead "
+            "of the public pages Reddit often blocks."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_REDDIT_CLIENT_SECRET",
+        "Reddit App Secret",
+        "studio",
+        "secret",
+        settings_attr="studio_reddit_client_secret",
+        secret=True,
+    ),
+    ConfigFieldSpec(
+        "STUDIO_RESEARCH_SOURCES",
+        "Sources Per Research",
+        "studio",
+        "number",
+        settings_attr="studio_research_sources",
+        description=(
+            "How many sources the research tool gathers and reads for each "
+            "question, from 3 to 25."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_RESEARCH_WEB",
+        "Research Web Pages",
+        "studio",
+        "number",
+        settings_attr="studio_research_web",
+        description=(
+            "Web pages every research run reads, at least. 0 to 10; agents "
+            "use a different number when you ask for one."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_RESEARCH_REDDIT",
+        "Research Reddit Threads",
+        "studio",
+        "number",
+        settings_attr="studio_research_reddit",
+        description=(
+            "Reddit threads every research run reads, 0 to 6. Only threads "
+            "that are on topic and have real replies or votes count."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_RESEARCH_YOUTUBE",
+        "Research YouTube Videos",
+        "studio",
+        "number",
+        settings_attr="studio_research_youtube",
+        description=(
+            "YouTube videos every research run reads, 0 to 6. Only videos whose "
+            "transcript could be read count."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_SEARCH_BASE_URL",
+        "SearXNG Address",
+        "studio",
+        "text",
+        settings_attr="studio_search_base_url",
+        description=(
+            "Address of your own SearXNG, e.g. http://localhost:8888, with the "
+            "json format enabled. Free and needs no key."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_AGENT_COMMANDS",
+        "Agents Can Run Commands",
+        "studio",
+        "select",
+        settings_attr="studio_agent_commands",
+        options=(
+            ConfigOptionSpec("off", "Off"),
+            ConfigOptionSpec("ask", "Ask me each time"),
+            ConfigOptionSpec("auto", "Run without asking"),
+        ),
+        description=(
+            "Lets agents run shell commands (npm, python, builds, tests) inside a "
+            "project folder. Commands run on this computer with your permissions, "
+            "minus credentials; Ask shows each one for approval first."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_COMMAND_TIMEOUT",
+        "Command Time Limit",
+        "studio",
+        "number",
+        settings_attr="studio_command_timeout",
+        description="Seconds before an agent's command and everything it started is stopped.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LORA_PYTHON",
+        "LoRA Trainer Python",
+        "studio",
+        "text",
+        settings_attr="studio_lora_python",
+        description=(
+            "Python with torch, transformers, and peft for training on this "
+            "computer. Leave empty to use Studio's own (install the lora extra)."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LORA_LLAMA_CPP",
+        "llama.cpp Folder",
+        "studio",
+        "text",
+        settings_attr="studio_lora_llama_cpp",
+        description="A llama.cpp checkout; lets training also produce a GGUF adapter Ollama can load.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LMSTUDIO_MODELS_DIR",
+        "LM Studio Models Folder",
+        "studio",
+        "text",
+        settings_attr="studio_lmstudio_models_dir",
+        description=(
+            "Where LM Studio keeps models, so trained models install there. "
+            "Leave empty to use LM Studio's usual folder (.lmstudio/models in "
+            "your user folder)."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LORA_OLLAMA",
+        "Ollama Program",
+        "studio",
+        "text",
+        settings_attr="studio_lora_ollama",
+        advanced=True,
+        description="Path to ollama when it is not on PATH.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_LORA_PUBLIC_URL",
+        "Address For Remote Trainers",
+        "studio",
+        "text",
+        settings_attr="studio_lora_public_url",
+        description=(
+            "How a rented GPU or VPS reaches this Studio, e.g. a Tailscale address "
+            "like http://my-pc:8082. Defaults to this computer's LAN address."
+        ),
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MEMORY_WORKING_LIMIT",
+        "Working Memory Size",
+        "studio",
+        "number",
+        settings_attr="studio_memory_working_limit",
+        advanced=True,
+        description="How many short-term notes each agent keeps.",
+    ),
+    ConfigFieldSpec(
+        "STUDIO_MEMORY_RECALL_LIMIT",
+        "Memory Recall Size",
+        "studio",
+        "number",
+        settings_attr="studio_memory_recall_limit",
+        advanced=True,
+        description="How many long-term memories are recalled into one prompt.",
+    ),
+)
+
+
 def _catalog_smoke_fields() -> tuple[ConfigFieldSpec, ...]:
     return tuple(
         ConfigFieldSpec(
@@ -581,6 +1768,7 @@ def _catalog_smoke_fields() -> tuple[ConfigFieldSpec, ...]:
 FIELDS: tuple[ConfigFieldSpec, ...] = (
     *provider_field_specs(),
     *_NON_PROVIDER_FIELDS,
+    *_STUDIO_FIELDS,
     *_catalog_smoke_fields(),
 )
 FIELD_BY_KEY = {field.key: field for field in FIELDS}

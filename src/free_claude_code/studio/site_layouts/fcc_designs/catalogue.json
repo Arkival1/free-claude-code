@@ -1,0 +1,82 @@
+[
+  {
+    "id": "studio-minimal",
+    "name": "Studio Minimal",
+    "about": "Calm portfolio for a design studio or freelancer: warm monochrome, editorial serif type, a bento grid of projects, about and contact",
+    "kind": "portfolio",
+    "style": "minimalist-ui",
+    "pages": ["index.html"],
+    "files": ["index.html", "styles.css", "app.js"],
+    "libs": []
+  },
+  {
+    "id": "bold-brutalist",
+    "name": "Bold Brutalist",
+    "about": "Loud agency or studio site: rigid grid, mono type, huge headings, safety orange; services, numbers and a brief form",
+    "kind": "business",
+    "style": "industrial-brutalist-ui",
+    "pages": ["index.html"],
+    "files": ["index.html", "styles.css", "app.js"],
+    "libs": []
+  },
+  {
+    "id": "soft-saas",
+    "name": "Soft SaaS",
+    "about": "Premium software landing page: soft gradients, rounded cards, app window, features, two pricing plans, FAQ and sign-up",
+    "kind": "landing",
+    "style": "high-end-visual-design",
+    "pages": ["index.html"],
+    "files": ["index.html", "styles.css", "app.js"],
+    "libs": []
+  },
+  {
+    "id": "cafe-warm",
+    "name": "Cafe Warm",
+    "about": "Friendly cafe or restaurant: tabbed menu with prices, opening hours, map spot and a table booking form",
+    "kind": "business",
+    "style": "frontend-design",
+    "pages": ["index.html"],
+    "files": ["index.html", "styles.css", "app.js"],
+    "libs": []
+  },
+  {
+    "id": "boutique-shop",
+    "name": "Boutique Shop",
+    "about": "Small online shop: hero, product grid with category filters and a cart count, story, promises and a questions form",
+    "kind": "shop",
+    "style": "design-taste-frontend",
+    "pages": ["index.html"],
+    "files": ["index.html", "styles.css", "app.js"],
+    "libs": []
+  },
+  {
+    "id": "trade-pro",
+    "name": "Trade Pro",
+    "about": "Electrician, plumber or any trade: emergency call bar, licence badge, services, how it works, reviews and a free quote form",
+    "kind": "business",
+    "style": "frontend-ui-engineering",
+    "pages": ["index.html"],
+    "files": ["index.html", "styles.css", "app.js"],
+    "libs": []
+  },
+  {
+    "id": "game-launch",
+    "name": "Game Launch",
+    "about": "Indie game page: glowing title over a night sky, trailer spot, story, features, press kit facts and a wishlist form",
+    "kind": "landing",
+    "style": "game-design",
+    "pages": ["index.html"],
+    "files": ["index.html", "styles.css", "app.js"],
+    "libs": []
+  },
+  {
+    "id": "creator-links",
+    "name": "Creator Links",
+    "about": "Personal link page and CV in one card: photo, big tappable links, latest project, experience timeline, skills and contact",
+    "kind": "personal",
+    "style": "minimalist-ui",
+    "pages": ["index.html"],
+    "files": ["index.html", "styles.css", "app.js"],
+    "libs": []
+  }
+]

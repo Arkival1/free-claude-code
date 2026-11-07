@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""fcc-github: GitHub in FCC Linux, through FCC.
+
+GitHub's git server doesn't let apps in a browser reach it, so this uses
+GitHub's API instead (which does). Requests go out as http:// and FCC makes
+them https; FCC adds your GitHub token (saved in FCC, never inside Linux) and
+asks you before anything on GitHub changes.
+
+    fcc-github clone OWNER/REPO [FOLDER] [--branch BRANCH]
+    fcc-github status [FOLDER]
+    fcc-github pull [FOLDER]
+    fcc-github push [FOLDER] [-m MESSAGE]
+
+A clone is an ordinary git folder (commit with git as usual); push sends the
+commits made since the last clone, pull or push as one GitHub commit.
+"""
+
+import argparse
+import base64
+import json
+import os
+import shutil
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+API = os.environ.get("FCC_GITHUB_API", "http://api.github.com")
+RAW = os.environ.get("FCC_GITHUB_RAW", "http://raw.githubusercontent.com")
+STATE = "fcc-github.json"
+
+
+class Trouble(Exception):
+    """Something to tell the user in plain words."""
+
+
+def request(method: str, url: str, body: dict | None = None, raw: bool = False):
+    data = json.dumps(body).encode() if body is not None else None
+    headers = {"Accept": "application/vnd.github.raw" if raw else "application/vnd.github+json", "User-Agent": "fcc-github"}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=data, method=method, headers=headers), timeout=300) as response:
+            payload = response.read()
+    except urllib.error.HTTPError as error:
+        words = error.read().decode(errors="replace")[:400]
+        try:
+            words = json.loads(words).get("message", words)
+        except ValueError:
+            pass
+        if error.code == 403 and "internet is off" in words:
+            raise Trouble(words.strip()) from None
+        raise Trouble(f"GitHub said {error.code}: {words.strip()}") from None
+    except urllib.error.URLError as error:
+        raise Trouble(f"Couldn't reach GitHub through FCC ({error.reason}). Is FCC Linux's internet on? (fcc-net)") from None
+    return payload if raw else json.loads(payload or b"null")
+
+
+def api(method: str, path: str, body: dict | None = None):
+    return request(method, f"{API}{path}", body)
+
+
+def git(folder: Path, *args: str, text: str | None = None) -> str:
+    done = subprocess.run(["git", "-C", str(folder), *args], input=text, capture_output=True, text=True, check=False)
+    if done.returncode:
+        raise Trouble(f"git {' '.join(args[:2])} failed: {done.stderr.strip()[:300]}")
+    return done.stdout
+
+
+def state_of(folder: Path) -> dict:
+    path = folder / ".git" / STATE
+    if not path.exists():
+        raise Trouble(f"{folder} wasn't cloned with fcc-github (no .git/{STATE}).")
+    return json.loads(path.read_text())
+
+
+def keep_state(folder: Path, state: dict) -> None:
+    (folder / ".git" / STATE).write_text(json.dumps(state, indent=1) + "\n")
+
+
+def remote_head(owner: str, repo: str, branch: str) -> tuple[str, str]:
+    """The branch's newest commit on GitHub and its tree."""
+    commit = api("GET", f"/repos/{owner}/{repo}/commits/{urllib.parse.quote(branch)}")
+    return commit["sha"], commit["commit"]["tree"]["sha"]
+
+
+def remote_tree(owner: str, repo: str, tree: str) -> list[dict]:
+    listing = api("GET", f"/repos/{owner}/{repo}/git/trees/{tree}?recursive=1")
+    if listing.get("truncated"):
+        raise Trouble("That repository is too big for GitHub to list in one go.")
+    return [item for item in listing["tree"] if item["type"] == "blob"]
+
+
+def blob_bytes(owner: str, repo: str, commit: str, item: dict, private: bool) -> bytes:
+    if private:
+        return request("GET", f"{API}/repos/{owner}/{repo}/git/blobs/{item['sha']}", raw=True)
+    return request("GET", f"{RAW}/{owner}/{repo}/{commit}/{urllib.parse.quote(item['path'])}", raw=True)
+
+
+def write_tree(folder: Path, owner: str, repo: str, commit: str, items: list[dict], private: bool, have: dict[str, str]) -> int:
+    """Write the files that differ from what's here (by blob sha)."""
+    written = 0
+    for number, item in enumerate(items, 1):
+        if have.get(item["path"]) == f"{item['mode']} {item['sha']}":
+            continue
+        path = folder / item["path"]
+        if not path.resolve().is_relative_to(folder.resolve()) or ".git" in Path(item["path"]).parts:
+            raise Trouble(f"GitHub listed a file outside the folder ({item['path']}).")
+        for parent in reversed(path.relative_to(folder).parents[:-1]):
+            # A file here where GitHub now has a folder: the folder wins.
+            if (folder / parent).is_file() or (folder / parent).is_symlink():
+                (folder / parent).unlink()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = blob_bytes(owner, repo, commit, item, private)
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)  # a folder here where GitHub now has a file
+        elif path.is_symlink() or path.exists():
+            path.unlink()
+        if item["mode"] == "120000":
+            path.symlink_to(data.decode())
+        else:
+            path.write_bytes(data)
+            if item["mode"] == "100755":
+                path.chmod(0o755)
+        written += 1
+        print(f"\r  {number}/{len(items)} files", end="", flush=True)
+    if written:
+        print()
+    return written
+
+
+def local_blobs(folder: Path) -> dict[str, str]:
+    """What's committed here: path -> "mode sha" (any file name, via -z)."""
+    out = {}
+    for row in git(folder, "ls-tree", "-r", "-z", "HEAD").split("\0"):
+        if not row:
+            continue
+        meta, path = row.split("\t", 1)
+        mode, _, sha = meta.split()
+        out[path] = f"{mode} {sha}"
+    return out
+
+
+def clone(args) -> None:
+    owner, _, repo = args.repo.partition("/")
+    if not owner or not repo:
+        raise Trouble("Say which repository, like fcc-github clone octocat/Hello-World.")
+    info = api("GET", f"/repos/{owner}/{repo}")
+    branch = args.branch or info["default_branch"]
+    head, tree = remote_head(owner, repo, branch)
+    folder = Path(args.folder or repo).resolve()
+    if folder.exists() and any(folder.iterdir()):
+        raise Trouble(f"{folder} already has files in it.")
+    folder.mkdir(parents=True, exist_ok=True)
+    git(folder, "init", "-q", "-b", branch)
+    items = remote_tree(owner, repo, tree)
+    print(f"Cloning {owner}/{repo} ({branch}, {len(items)} files)…")
+    write_tree(folder, owner, repo, head, items, bool(info.get("private")), {})
+    git(folder, "add", "-A")
+    git(folder, "-c", "user.name=FCC Linux", "-c", "user.email=fcc@localhost", "commit", "-q", "--allow-empty", "-m", f"{owner}/{repo} at {head[:12]} (fcc-github clone)")
+    keep_state(folder, {"owner": owner, "repo": repo, "branch": branch, "remote": head, "tree": tree, "local": git(folder, "rev-parse", "HEAD").strip(), "private": bool(info.get("private"))})
+    print(f"Cloned into {folder}. Commit with git; fcc-github push sends your commits.")
+
+
+def status(args) -> None:
+    folder = Path(args.folder or ".").resolve()
+    state = state_of(folder)
+    head, _ = remote_head(state["owner"], state["repo"], state["branch"])
+    ahead = git(folder, "rev-list", "--count", f"{state['local']}..HEAD").strip()
+    dirty = git(folder, "status", "--porcelain").strip()
+    print(f"{state['owner']}/{state['repo']} ({state['branch']})")
+    print(f"GitHub: {'no newer commits' if head == state['remote'] else 'has newer commits (fcc-github pull)'}")
+    print(f"Here: {ahead} commit(s) to push{'; changes not committed yet' if dirty else ''}")
+
+
+def pull(args) -> None:
+    folder = Path(args.folder or ".").resolve()
+    state = state_of(folder)
+    head, tree = remote_head(state["owner"], state["repo"], state["branch"])
+    if head == state["remote"]:
+        print("Already up to date with GitHub.")
+        return
+    if git(folder, "status", "--porcelain").strip() or git(folder, "rev-parse", "HEAD").strip() != state["local"]:
+        raise Trouble("You have changes here that aren't on GitHub: push them first (fcc-github push), then pull. (After a pull that stopped halfway, git checkout -- . && git clean -fd puts the folder back as it was.)")
+    items = remote_tree(state["owner"], state["repo"], tree)
+    have = local_blobs(folder)
+    wanted = {item["path"] for item in items}
+    for path in set(have) - wanted:
+        (folder / path).unlink(missing_ok=True)
+    changed = write_tree(folder, state["owner"], state["repo"], head, items, state.get("private", False), have)
+    git(folder, "add", "-A")
+    git(folder, "-c", "user.name=FCC Linux", "-c", "user.email=fcc@localhost", "commit", "-q", "--allow-empty", "-m", f"{state['owner']}/{state['repo']} at {head[:12]} (fcc-github pull)")
+    keep_state(folder, {**state, "remote": head, "tree": tree, "local": git(folder, "rev-parse", "HEAD").strip()})
+    print(f"Pulled {changed} changed file(s) from GitHub.")
+
+
+def push(args) -> None:
+    folder = Path(args.folder or ".").resolve()
+    state = state_of(folder)
+    if git(folder, "status", "--porcelain").strip():
+        raise Trouble("Commit your changes first (git add -A && git commit -m '...'), then push.")
+    if git(folder, "rev-parse", "HEAD").strip() == state["local"]:
+        print("Nothing to push: no commits since the last clone, pull or push.")
+        return
+    owner, repo, branch = state["owner"], state["repo"], state["branch"]
+    head, _ = remote_head(owner, repo, branch)
+    if head != state["remote"]:
+        raise Trouble("GitHub has newer commits: pull first (fcc-github pull).")
+    entries = []
+    fields = git(folder, "diff", "--name-status", "--no-renames", "-z", state["local"], "HEAD").split("\0")
+    for kind, path in zip(fields[0::2], fields[1::2], strict=False):
+        if not kind:
+            continue
+        if kind == "D":
+            entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+            continue
+        file = folder / path
+        mode = "120000" if file.is_symlink() else ("100755" if os.access(file, os.X_OK) else "100644")
+        data = os.readlink(file).encode() if file.is_symlink() else file.read_bytes()
+        blob = api("POST", f"/repos/{owner}/{repo}/git/blobs", {"content": base64.b64encode(data).decode(), "encoding": "base64"})
+        entries.append({"path": path, "mode": mode, "type": "blob", "sha": blob["sha"]})
+    message = args.message or git(folder, "log", "--format=%s", f"{state['local']}..HEAD").strip().replace("\n", "; ")[:200] or "Changes from FCC Linux"
+    tree = api("POST", f"/repos/{owner}/{repo}/git/trees", {"base_tree": state["tree"], "tree": entries})
+    commit = api("POST", f"/repos/{owner}/{repo}/git/commits", {"message": message, "tree": tree["sha"], "parents": [head]})
+    api("PATCH", f"/repos/{owner}/{repo}/git/refs/heads/{urllib.parse.quote(branch)}", {"sha": commit["sha"], "force": False})
+    keep_state(folder, {**state, "remote": commit["sha"], "tree": tree["sha"], "local": git(folder, "rev-parse", "HEAD").strip()})
+    print(f"Pushed {len(entries)} file change(s) to {owner}/{repo} ({branch}) as {commit['sha'][:12]}.")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="fcc-github", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    jobs = parser.add_subparsers(dest="job", required=True)
+    one = jobs.add_parser("clone")
+    one.add_argument("repo")
+    one.add_argument("folder", nargs="?")
+    one.add_argument("--branch")
+    one.set_defaults(run=clone)
+    for name, run in (("status", status), ("pull", pull)):
+        job = jobs.add_parser(name)
+        job.add_argument("folder", nargs="?")
+        job.set_defaults(run=run)
+    job = jobs.add_parser("push")
+    job.add_argument("folder", nargs="?")
+    job.add_argument("-m", "--message")
+    job.set_defaults(run=push)
+    args = parser.parse_args(argv)
+    try:
+        args.run(args)
+    except Trouble as trouble:
+        print(f"fcc-github: {trouble}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

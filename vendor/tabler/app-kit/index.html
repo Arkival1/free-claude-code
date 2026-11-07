@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>App Name</title>
+  <link rel="stylesheet" href="vendor/tabler/tabler.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page">
+    <header class="navbar navbar-expand-md d-print-none">
+      <div class="container-xl">
+        <a class="navbar-brand" href="#home" data-screen-link="home">
+          <svg class="icon" aria-hidden="true"><use href="assets/icons.svg#device-gamepad-2"></use></svg>
+          <span class="app-name">App Name</span>
+        </a>
+        <nav class="navbar-nav flex-row gap-1" aria-label="Screens">
+          <a class="nav-link" href="#home" data-screen-link="home"><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#home"></use></svg><span>Home</span></a>
+          <a class="nav-link" href="#leaderboard" data-screen-link="leaderboard"><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#trophy"></use></svg><span>Leaderboard</span></a>
+          <a class="nav-link" href="#settings" data-screen-link="settings"><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#settings"></use></svg><span>Settings</span></a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page-wrapper">
+      <div class="container-xl py-4">
+        <!-- Home: the main menu, with the player's numbers. -->
+        <section class="screen" id="home" aria-labelledby="home-title">
+          <div class="row g-3">
+            <div class="col-lg-5">
+              <div class="card hero-card">
+                <div class="card-body d-grid gap-3">
+                  <h1 id="home-title" class="m-0">App Name</h1>
+                  <p class="text-secondary m-0" id="home-sub">Level 1 · 3 lives</p>
+                  <div class="progress progress-sm"><div class="progress-bar" id="home-progress" style="width: 0%" role="progressbar" aria-label="Progress"></div></div>
+                  <button class="btn btn-primary btn-lg" id="play"><svg class="icon" aria-hidden="true"><use href="assets/icons.svg#player-play"></use></svg>Play</button>
+                  <a class="btn btn-outline-secondary" href="#settings" data-screen-link="settings">Settings</a>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-7">
+              <div class="row g-3" id="stats"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Leaderboard: best scores, kept on this device. -->
+        <section class="screen" id="leaderboard" aria-labelledby="board-title" hidden>
+          <div class="card">
+            <div class="card-header"><h2 class="card-title" id="board-title">Leaderboard</h2></div>
+            <div class="list-group list-group-flush" id="board"></div>
+          </div>
+        </section>
+
+        <!-- Settings: sound, vibration, difficulty; saved on this device. -->
+        <section class="screen" id="settings" aria-labelledby="settings-title" hidden>
+          <div class="card">
+            <div class="card-header"><h2 class="card-title" id="settings-title">Settings</h2></div>
+            <div class="card-body d-grid gap-3">
+              <label class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="opt-sound" checked><span class="form-check-label">Sound</span></label>
+              <label class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" id="opt-vibrate"><span class="form-check-label">Vibration</span></label>
+              <div><label class="form-label" for="opt-volume">Volume</label><input class="form-range" type="range" id="opt-volume" min="0" max="100" value="70"></div>
+              <div><label class="form-label" for="opt-level">Difficulty</label>
+                <select class="form-select" id="opt-level"><option value="easy">Easy</option><option value="normal" selected>Normal</option><option value="hard">Hard</option></select></div>
+              <button class="btn btn-primary" id="save">Save</button>
+              <p class="text-success m-0" id="saved" hidden>Saved.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="vendor/tabler/tabler.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

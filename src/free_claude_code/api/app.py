@@ -25,19 +25,33 @@ from free_claude_code.core.trace import (
     trace_event,
 )
 from free_claude_code.core.version import package_version
+from free_claude_code.studio import StudioError, StudioStoreError
+from free_claude_code.studio.downloads import DownloadError
+from free_claude_code.studio.local_voice import LocalVoiceError
+from free_claude_code.studio.lora import LoraError
+from free_claude_code.studio.obsidian import ObsidianError
+from free_claude_code.studio.school import SchoolError
+from free_claude_code.studio.sites import SiteError
+from free_claude_code.studio.tuning import TuningError
+from free_claude_code.studio.voice import VoiceError
 
 from .admin_cache import AdminNoStoreMiddleware, attach_admin_no_store
 from .admin_routes import router as admin_router
 from .code_sessions_routes import router as code_router
+from .phone_cors import PhoneCorsMiddleware
 from .ports import ApiServices
 from .request_errors import ordinary_application_error_response
 from .request_ids import (
+    OPENAI_WIRE_PATHS,
     RequestCorrelationMiddleware,
     attach_request_id_headers,
     get_request_id,
 )
 from .request_lifetime import ClientRequestLifetimeMiddleware
 from .routes import router
+from .studio_routes import router as studio_router
+from .studio_routes import studio_error_status
+from .team_mcp import router as team_mcp_router
 from .validation_log import summarize_request_validation_body
 
 
@@ -45,12 +59,15 @@ def create_app(services: ApiServices) -> FastAPI:
     """Create the HTTP adapter around explicitly supplied runtime services."""
     app = FastAPI(title="Claude Code Proxy", version=package_version())
     app.state.services = services
+    app.add_middleware(PhoneCorsMiddleware)
     app.add_middleware(AdminNoStoreMiddleware)
     app.add_middleware(ClientRequestLifetimeMiddleware)
     app.add_middleware(RequestCorrelationMiddleware)
 
     app.include_router(admin_router)
     app.include_router(code_router)
+    app.include_router(studio_router)
+    app.include_router(team_mcp_router)
     app.include_router(router)
 
     @app.exception_handler(CodeError)
@@ -67,6 +84,25 @@ def create_app(services: ApiServices) -> FastAPI:
             status_code = 500
         response = JSONResponse(
             status_code=status_code,
+            content={"detail": str(exc), "code": type(exc).__name__},
+        )
+        attach_admin_no_store(response, path=request.url.path)
+        return response
+
+    @app.exception_handler(StudioStoreError)
+    @app.exception_handler(StudioError)
+    @app.exception_handler(SiteError)
+    @app.exception_handler(DownloadError)
+    @app.exception_handler(TuningError)
+    @app.exception_handler(SchoolError)
+    @app.exception_handler(ObsidianError)
+    @app.exception_handler(LoraError)
+    @app.exception_handler(VoiceError)
+    @app.exception_handler(LocalVoiceError)
+    async def studio_error_handler(request: Request, exc: Exception):
+        """Report Studio failures as plain, actionable JSON."""
+        response = JSONResponse(
+            status_code=studio_error_status(exc),
             content={"detail": str(exc), "code": type(exc).__name__},
         )
         attach_admin_no_store(response, path=request.url.path)
@@ -101,7 +137,7 @@ def create_app(services: ApiServices) -> FastAPI:
         return ordinary_application_error_response(
             exc,
             wire_api=(
-                "responses" if request.url.path == "/v1/responses" else "messages"
+                "responses" if request.url.path in OPENAI_WIRE_PATHS else "messages"
             ),
             request_id=get_request_id(request),
         )
@@ -129,7 +165,7 @@ def create_app(services: ApiServices) -> FastAPI:
                     type(exc).__name__,
                 )
             message = safe_exception_message(exc)
-            if request.url.path == "/v1/responses":
+            if request.url.path in OPENAI_WIRE_PATHS:
                 content = openai_error_payload(message=message, error_type="api_error")
             else:
                 content = anthropic_error_payload(

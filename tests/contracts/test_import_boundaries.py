@@ -16,7 +16,8 @@ ALLOWED_PACKAGE_DEPENDENCIES: dict[str, set[str]] = {
     "application": {"config", "core"},
     "messaging": {"core"},
     "providers": {"application", "config", "core"},
-    "api": {"application", "config", "core"},
+    "api": {"application", "config", "core", "studio"},
+    "studio": {"application", "config", "core"},
     "harnesses": {"application", "config", "core"},
     "cli": {"application", "config", "core", "harnesses"},
     "runtime": {
@@ -28,6 +29,7 @@ ALLOWED_PACKAGE_DEPENDENCIES: dict[str, set[str]] = {
         "harnesses",
         "messaging",
         "providers",
+        "studio",
     },
 }
 
@@ -47,11 +49,25 @@ FACADE_ONLY_BOUNDARIES = {
     "free_claude_code.providers.openai_chat",
 }
 
-OPTIONAL_IMPORT_OWNERS = {
-    "librosa": "free_claude_code.messaging.transcription",
-    "torch": "free_claude_code.messaging.transcription",
-    "transformers": "free_claude_code.messaging.transcription",
-    "riva": "free_claude_code.providers.nvidia_nim.voice",
+_TRANSCRIPTION = "free_claude_code.messaging.transcription"
+_LORA_WORKER = "free_claude_code.studio.lora_worker"
+_STUDIO_VOICE = "free_claude_code.studio.local_voice"
+OPTIONAL_IMPORT_OWNERS: dict[str, frozenset[str]] = {
+    "librosa": frozenset({_TRANSCRIPTION}),
+    "torch": frozenset({_TRANSCRIPTION, _LORA_WORKER}),
+    "transformers": frozenset({_TRANSCRIPTION, _LORA_WORKER}),
+    "peft": frozenset({_LORA_WORKER}),
+    "huggingface_hub": frozenset({_LORA_WORKER}),
+    "riva": frozenset({"free_claude_code.providers.nvidia_nim.voice"}),
+    "kokoro_onnx": frozenset({_STUDIO_VOICE}),
+    "faster_whisper": frozenset({_STUDIO_VOICE}),
+    "numpy": frozenset(
+        {
+            _STUDIO_VOICE,
+            "free_claude_code.studio.farm.beats",
+            "free_claude_code.studio.farm.cartoon.aiart",
+        }
+    ),
 }
 
 
@@ -657,16 +673,16 @@ def test_providers_do_not_own_wire_error_type_literals() -> None:
     assert sorted(offenders) == []
 
 
-def test_optional_dependencies_have_one_lazy_owner() -> None:
+def test_optional_dependencies_have_declared_lazy_owners() -> None:
     seen: set[str] = set()
     offenders: list[str] = []
     for record in _scan_imports(_PACKAGE_ROOT):
         dependency = record.imported.split(".", 1)[0]
-        owner = OPTIONAL_IMPORT_OWNERS.get(dependency)
-        if owner is None:
+        owners = OPTIONAL_IMPORT_OWNERS.get(dependency)
+        if owners is None:
             continue
         seen.add(dependency)
-        if record.importer != owner or not record.inside_function:
+        if record.importer not in owners or not record.inside_function:
             offenders.append(record.describe())
 
     assert seen == set(OPTIONAL_IMPORT_OWNERS)

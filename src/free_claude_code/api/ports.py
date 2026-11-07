@@ -14,6 +14,7 @@ from free_claude_code.application.ports import RequestRuntimePort, TaskControlle
 from free_claude_code.application.web_tools.ports import WebToolsPort
 from free_claude_code.config.admin.state import ConfigInputValue, ValueState
 from free_claude_code.core.json_types import JsonObject
+from free_claude_code.studio import StudioService
 
 
 class AdminRuntimePort(Protocol):
@@ -95,3 +96,4 @@ class ApiServices:
     tasks: TaskController
     web_tools: WebToolsPort
     code: CodeApplicationPort | None = None
+    studio: StudioService | None = None
