@@ -103,8 +103,32 @@ const PUSH_STEPS = [
   ["PATCH", /^\/repos\/[^/]+\/[^/]+\/git\/refs\/heads\/.+$/],
 ];
 
-/** True for the address FCC itself is served from (any scheme). */
-const ownSite = (url) => Boolean(globalThis.location && location.host) && url.host === location.host;
+/** True for FCC itself and anything local: the address FCC is served from,
+ * the linked PC, this machine, the home network and Tailscale (where the PC
+ * lives), by name or by number. FCC Linux only reaches the public internet. */
+function offLimits(url) {
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (globalThis.location && location.hostname && host === location.hostname.toLowerCase()) return true;
+  const pc = state.settings.pc && state.settings.pc.address;
+  if (pc) {
+    try {
+      if (host === new URL(pc).hostname.toLowerCase()) return true;
+    } catch {
+      // Not an address: nothing to match.
+    }
+  }
+  if (host.includes(":")) return LOCAL_V6.test(host);
+  if (host === "localhost" || !host.includes(".") || /\.(localhost|local|internal|lan|home|ts\.net)$/.test(host)) return true;
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+  }
+  return false;
+}
+// IPv6 loopback, unspecified, private (fc00::/7), link-local (fe80::/10) and
+// IPv4 written as IPv6.
+const LOCAL_V6 = /^(::1?|f[cd][0-9a-f]{0,2}:.*|fe[89ab][0-9a-f]?:.*|::ffff:.*)$/;
 
 /** An answer's bytes, or null once it passes BODY_LIMIT (the rest isn't read). */
 async function readCapped(response) {
@@ -152,10 +176,10 @@ export async function handle(request, { ask = (question) => confirm(question) } 
   if (url.hostname === "index.crates.io" && url.pathname === "/config.json") return { status: 200, headers: [["content-type", "application/json"]], body: new TextEncoder().encode(CRATES_CONFIG).buffer };
   url.protocol = "https:";
   if (url.port === "80") url.port = "";
-  // FCC itself (the PC server or the phone app's own site) is never reachable
-  // from inside Linux: a program there could otherwise read FCC's own pages
-  // and data through the page's connection.
-  if (ownSite(url)) {
+  // FCC itself (the PC server or the phone app's own site) and local
+  // addresses are never reachable from inside Linux: a program there could
+  // otherwise read or change FCC through the page's connection.
+  if (offLimits(url)) {
     log({ what: describe(method, url), status: "blocked" });
     return text(403, "FCC Linux can't reach FCC itself.");
   }
@@ -194,7 +218,12 @@ export async function handle(request, { ask = (question) => confirm(question) } 
     }
   }
   let response;
-  const send = (address) => fetch(address, { method, headers, body: ["GET", "HEAD"].includes(method) ? undefined : request.body, redirect: "follow", credentials: "omit" });
+  // A change (POST and the rest) never follows a redirect: the browser would
+  // send it on before FCC could see where to, so a site can't bounce one
+  // into FCC or the home network. Reads follow, and where they end is checked
+  // before anything comes back.
+  const reading = ["GET", "HEAD"].includes(method);
+  const send = (address) => fetch(address, { method, headers, body: reading ? undefined : request.body, redirect: reading ? "follow" : "manual", credentials: "omit" });
   try {
     response = await send(url.href);
   } catch {
@@ -205,7 +234,11 @@ export async function handle(request, { ask = (question) => confirm(question) } 
       return text(502, `${url.hostname} doesn't let apps in a browser reach it, so FCC Linux can't use it from the phone.`);
     }
   }
-  if (response.url && ownSite(new URL(response.url))) {
+  if (response.type === "opaqueredirect") {
+    log({ what: describe(method, url), status: "redirect" });
+    return text(502, `${url.hostname} answered this ${method} with a redirect; FCC Linux doesn't follow redirects for changes.`);
+  }
+  if (response.url && offLimits(new URL(response.url))) {
     log({ what: describe(method, url), status: "blocked" });
     return text(403, "FCC Linux can't reach FCC itself.");
   }

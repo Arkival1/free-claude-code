@@ -11,7 +11,6 @@ const ROOT = "/projects";
 const MARK = "/tmp/.fcc-projects-mark";
 const BATCH = 120_000; // characters of commands per run
 const OUT_MAX = 40; // changed files read per round
-const OUT_LIMIT = 2000; // most changed files brought back in one sync
 const NEXT = `${MARK}.next`;
 const CHANGED = "/tmp/.fcc-projects-changed";
 const sent = new Map(); // "slug/path" -> the text last written in or read out
@@ -30,8 +29,19 @@ function base64Text(text) {
 }
 const safe = (path) => !String(path).split("/").some((part) => part === ".." || part === "") && !String(path).startsWith("/");
 
+// One sync at a time: syncIn and syncOut share the mark and its lists, so a
+// second call waits for the first to finish.
+let queue = Promise.resolve();
+function oneAtATime(work) {
+  const run = queue.then(work, work);
+  queue = run.catch(() => null);
+  return run;
+}
+
 /** Write every project's changed files into FCC Linux; returns how many. */
-export async function syncIn(machine) {
+export const syncIn = (machine) => oneAtATime(() => syncInNow(machine));
+
+async function syncInNow(machine) {
   const lines = [];
   const done = [];
   let count = 0;
@@ -70,7 +80,9 @@ export async function syncIn(machine) {
 
 /** Bring files changed under /projects back into their projects (after a
  * command); returns the paths brought back. */
-export async function syncOut(machine, agentName = "FCC Linux") {
+export const syncOut = (machine, agentName = "FCC Linux") => oneAtATime(() => syncOutNow(machine, agentName));
+
+async function syncOutNow(machine, agentName) {
   // The next mark is set when the list is made, and only becomes the mark
   // once every listed file is back: files beyond one round are never skipped,
   // and a file changed while this runs is caught next time. Dependency
@@ -82,12 +94,18 @@ export async function syncOut(machine, agentName = "FCC Linux") {
     return [];
   }
   const back = [];
-  const lines = [];
-  for (let from = 1; from <= Math.min(total, OUT_LIMIT); from += OUT_MAX) {
-    const page = await machine.run(`sed -n '${from},${Math.min(from + OUT_MAX - 1, OUT_LIMIT)}p' ${CHANGED}`, { timeoutMs: 60000 });
+  // The whole list, a page at a time (each page handled before the next is
+  // read, so a long list never sits in memory at once).
+  for (let from = 1; from <= total; from += OUT_MAX) {
+    const page = await machine.run(`sed -n '${from},${from + OUT_MAX - 1}p' ${CHANGED}`, { timeoutMs: 60000 });
     if (page.code !== 0) throw new Error("Couldn't list the files changed in FCC Linux.");
-    lines.push(...page.text.split("\n"));
+    await bringBack(machine, page.text.split("\n"), agentName, back);
   }
+  await machine.run(`mv -f ${NEXT} ${MARK}`, { timeoutMs: 30000 });
+  return back;
+}
+
+async function bringBack(machine, lines, agentName, back) {
   for (const line of lines) {
     const relative = line.trim().replace(/^\.\//, "");
     const slash = relative.indexOf("/");
@@ -127,14 +145,6 @@ export async function syncOut(machine, agentName = "FCC Linux") {
     sent.set(key, body);
     back.push(key);
   }
-  if (total > OUT_LIMIT) {
-    // Too many at once: the mark stays, so the rest come back on a later sync
-    // (the ones already back are skipped by their contents).
-    back.push(`(${total - OUT_LIMIT} more changed files not copied yet: sync again)`);
-  } else {
-    await machine.run(`mv -f ${NEXT} ${MARK}`, { timeoutMs: 30000 });
-  }
-  return back;
 }
 
 /** Forget what was written in (after FCC Linux starts fresh). */

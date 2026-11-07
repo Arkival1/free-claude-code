@@ -326,6 +326,16 @@ def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
             status=200, headers={"Access-Control-Allow-Origin": "*"}, body="{}"
         ),
     )
+    page.route(
+        "https://bounce.example.org/**",
+        lambda route: route.fulfill(
+            status=307,
+            headers={
+                "Location": "http://127.0.0.1:9/stop",
+                "Access-Control-Allow-Origin": "*",
+            },
+        ),
+    )
     open_phone(page, admin_base_url, "settings")
     page.expose_function("fccAsk", lambda question: asked.append(question) or True)
     result = page.evaluate(
@@ -340,9 +350,18 @@ def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
             await push('/git/trees', 'POST');
             await push('/git/refs/heads/main', 'PATCH');
             await push('', 'DELETE');
-            return { own: own.status };
+            const local = [];
+            for (const address of ['http://127.0.0.1:8082/x', 'http://192.168.1.5/', 'http://10.0.0.2/', 'http://100.101.2.3/', 'http://pc.tail1234.ts.net/', 'http://printer.local/', 'http://[::1]/', 'http://intranet/']) {
+                local.push((await net.handle({ url: address, method: 'GET' }, { ask })).status);
+            }
+            const bounced = await net.handle({ url: 'http://bounce.example.org/go', method: 'POST', body: 'x' }, { ask });
+            return { own: own.status, local, bounced: bounced.status };
         }"""
     )
     assert result["own"] == 403
+    assert result["local"] == [403] * 8, result["local"]
+    # A change answered with a redirect isn't followed (it could be bounced
+    # into FCC or the home network).
+    assert result["bounced"] == 502
     assert len(asked) == 2, asked  # once for the push, once for the deletion
     assert "push to me/app" in asked[0] and "Allow this one change?" in asked[1]

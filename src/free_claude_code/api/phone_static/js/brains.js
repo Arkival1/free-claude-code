@@ -277,8 +277,12 @@ function parseArgs(raw) {
   }
 }
 
-function normalise(message) {
+/** keepReasoning (Z.ai): its thinking comes back with the tool calls and is
+ * sent back unchanged on the next request, as Z.ai asks, so a multi-step job
+ * keeps its train of thought. Other services get nothing extra. */
+function normalise(message, keepReasoning = false) {
   return {
+    ...(keepReasoning && typeof message.reasoning_content === "string" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}),
     text: stripThinking(message.content || ""),
     tool_calls: (message.tool_calls || []).map((call, index) => ({
       id: call.id || `call_${Date.now()}_${index}`,
@@ -333,5 +337,5 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
     throw new BrainError(`${PROVIDERS[brain].label}: ${detail}`);
   }
   const data = await response.json();
-  return normalise((data.choices && data.choices[0] && data.choices[0].message) || {});
+  return normalise((data.choices && data.choices[0] && data.choices[0].message) || {}, brain === "zai");
 }
