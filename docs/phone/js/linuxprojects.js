@@ -143,7 +143,13 @@ async function bringBack(machine, lines, agentName, back, missed) {
     if (text) {
       const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
       body = new TextDecoder().decode(bytes);
-      if (body.length > MAX_FILE_CHARS) continue;
+      if (body.length > MAX_FILE_CHARS) {
+        // Too long for the phone: Linux's copy stays, and the phone's copy
+        // never writes over it (syncIn skips pending files).
+        pending.add(key);
+        back.push(`${key} (too long for the phone: Linux's copy is kept there)`);
+        continue;
+      }
     } else {
       const kind = /\.png$/i.test(path) ? "png" : /\.gif$/i.test(path) ? "gif" : /\.webp$/i.test(path) ? "webp" : "jpeg";
       body = `data:image/${kind};base64,${data}`;
