@@ -67,6 +67,17 @@ export const CATALOG = [
     note: "Google's small model; good writing.",
     good: ["Helper"],
   },
+  // Qwen3.5 2B squeezed to 3 bits (IQ3) so it fits the page's memory on an
+  // iPhone (the 4-bit file, 1.2 GB, closed the app).
+  {
+    id: "qwen3.5-2b",
+    name: "Qwen3.5 2B (small file)",
+    url: `${HF}/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-UD-IQ3_XXS.gguf`,
+    size: 931823872,
+    context: 2048,
+    note: "Qwen3.5 2B squeezed to 0.93 GB so it fits more iPhones without WebGPU. A bit less sharp than the full 2B.",
+    good: ["Jarvis", "Helper"],
+  },
   // 4 billion parameters, squeezed (IQ3) under the 2 GB a phone browser can
   // load. They start at 2,048 tokens of context so they fit in a 6 GB
   // iPhone's memory (about 2.1 GB in use); crash recovery lowers it further.
@@ -108,6 +119,16 @@ export const CATALOG = [
     size: 2279167154,
     context: 2048,
     note: "4B on the graphics chip: the smartest that runs on an iPhone, about 5–10 words a second on recent ones. Needs WebGPU and about 3 GB of graphics memory (iPhone 15 Pro or newer is safest).",
+    good: ["Jarvis", "Builder"],
+  },
+  {
+    id: "qwen3.5-2b-gpu",
+    name: "Qwen3.5 2B (graphics chip)",
+    engine: "webgpu",
+    url: "https://huggingface.co/mlc-ai/Qwen3.5-2B-q4f16_1-MLC",
+    size: 1083000000,
+    context: 2048,
+    note: "Qwen3.5 2B on the graphics chip: newer and smarter than the 1.7B, good with tools. Needs WebGPU and about 2 GB of graphics memory.",
     good: ["Jarvis", "Builder"],
   },
   {

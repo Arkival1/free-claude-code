@@ -11,7 +11,7 @@
 FCC Phone's second engine. WebLLM runs a model on the phone's graphics chip
 through WebGPU, so the weights live in the chip's memory and not the web
 page's (about 1 GB on an iPhone), which is how a 4B model fits on a phone
-(Models, "Qwen3 4B (graphics chip)"). `js/webgpu.js` loads it only when a
+(Models, "Qwen3 4B (graphics chip)"; also Qwen3.5 2B and Qwen3 1.7B). `js/webgpu.js` loads it only when a
 graphics-chip model is used, gives Jarvis's tools to Qwen3 in its own
 `<tool_call>` format, and passes the model's temperature setting.
 
@@ -23,6 +23,8 @@ The files FCC Phone serves, byte for byte, in
 | `web-llm.js` | the npm package's `lib/index.js` (self-contained ES module) | The engine |
 | `LICENSE` | the npm package's `LICENSE` | Apache 2.0 |
 | `libs/Qwen3-4B-q4f16_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3 4B's program for the graphics chip |
+| `libs/Qwen3.5-2B-q4f16_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3.5 2B (chips with half-size numbers) |
+| `libs/Qwen3.5-2B-q4f32_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3.5 2B (every WebGPU chip) |
 | `libs/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3 1.7B (chips with half-size numbers) |
 | `libs/Qwen3-1.7B-q4f32_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3 1.7B (every WebGPU chip) |
 
@@ -30,10 +32,12 @@ The files FCC Phone serves, byte for byte, in
 served copies still match. The programs ship with FCC, so the phone never
 needs GitHub for them.
 
-The weights (about 2.3 GB for the 4B, 1 GB for the 1.7B) are not kept here:
+The weights (about 2.3 GB for the 4B, 1.1 GB for Qwen3.5 2B, 1 GB for the 1.7B) are not kept here:
 they are Qwen3 (Apache 2.0) converted by the MLC team, and the phone fetches
 them from Hugging Face once, pinned to these commits in `js/webgpu.js`:
 `mlc-ai/Qwen3-4B-q4f16_1-MLC@a5c9fab855e3ccbdfed2e7e69683d75f30332161`,
+`mlc-ai/Qwen3.5-2B-q4f16_1-MLC@dd74e9c8a20c4546df85c844103bff87b6dcacad`,
+`mlc-ai/Qwen3.5-2B-q4f32_1-MLC@d835e5c41aa56174d915e8a3940cde599d3f5a30`,
 `mlc-ai/Qwen3-1.7B-q4f16_1-MLC@80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc`,
 `mlc-ai/Qwen3-1.7B-q4f32_1-MLC@bddd4d584cabe19113f7e4ff46fd9e73b4d3dc89`.
 

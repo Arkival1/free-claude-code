@@ -589,7 +589,7 @@ def test_a_model_too_big_for_the_phone_stops_being_used(
     # The advice is sized to this phone: models clearly smaller than the one
     # that didn't fit, and bigger ones are flagged before they're downloaded.
     expect(page.locator(".warn").first).to_contain_text(
-        "Llama 3.2 1B Instruct or Gemma 3 1B"
+        "Qwen3.5 2B (small file) or Llama 3.2 1B Instruct"
     )
     flagged = page.locator(
         ".item", has=page.get_by_text("Probably too big for this phone")
@@ -740,6 +740,39 @@ def test_a_4b_runs_on_the_graphics_chip_with_tools_and_temperature(
         == 7.5
     )
     assert errors == []
+
+
+def test_qwen3_5_2b_comes_on_the_graphics_chip_and_as_a_small_file(
+    page: Page, admin_base_url: str
+) -> None:
+    page.add_init_script(
+        "Object.defineProperty(navigator, 'gpu', { value: { requestAdapter: async () =>"
+        " ({ features: new Set() }) } });" + FAKE_WEBLLM
+    )
+    open_phone(page, admin_base_url)
+    go(page, "models")
+    # Small enough for the page's memory on an iPhone (under 0.96 GB).
+    expect(page.locator(".item", has_text="Qwen3.5 2B (small file)")).to_contain_text(
+        "889 MB"
+    )
+    # A chip without half-size numbers gets the f32 version, with Qwen3.5's
+    # own stop words.
+    page.get_by_role("button", name="Download Qwen3.5 2B (graphics chip)").click()
+    expect(
+        page.get_by_text("Qwen3.5 2B (graphics chip) is on your phone.")
+    ).to_be_visible()
+    created = page.evaluate("() => window.fccWebLLMCalls.created[0]")
+    assert created["id"] == "Qwen3.5-2B-q4f32_1-MLC"
+    record = created["list"][0]
+    assert record["model_lib"].endswith("/libs/Qwen3.5-2B-q4f32_1_cs1k-webgpu.wasm")
+    assert record["overrides"]["conv_config"]["stop_token_ids"] == [248046, 248044]
+    assert record["overrides"]["context_window_size"] == 2048
+    assert (
+        page.evaluate(
+            f"async () => (await fetch({json.dumps(record['model_lib'])})).status"
+        )
+        == 200
+    )
 
 
 def reopen(page: Page) -> None:

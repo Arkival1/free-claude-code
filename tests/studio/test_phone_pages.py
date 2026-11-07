@@ -172,7 +172,7 @@ def test_the_phone_carries_web_llm_byte_for_byte_with_its_licence():
         "web-llm.js",
         *(f"libs/{p.name}" for p in (served / "libs").glob("*.wasm")),
     ]
-    assert len(files) == 4
+    assert len(files) == 6
     for name in files:
         assert sums[name] == hashlib.sha256((served / name).read_bytes()).hexdigest(), (
             name

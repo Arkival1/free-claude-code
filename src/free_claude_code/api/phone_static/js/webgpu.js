@@ -12,9 +12,17 @@ const HF = "https://huggingface.co/mlc-ai";
 // Each graphics-chip model, pinned to the exact Hugging Face commit FCC was
 // built against; f16 needs the chip's half-size numbers (shader-f16), f32
 // works on every WebGPU chip but needs more memory.
+// Qwen3.5's own settings from WebLLM's list: its two stop words, and only
+// the latest turn kept between calls (FCC sends the whole chat each time).
+const QWEN35 = { max_history_size: 1, conv_config: { stop_token_ids: [248046, 248044] } };
+
 export const GPU_MODELS = {
   "qwen3-4b-gpu": {
     f16: { id: "Qwen3-4B-q4f16_1-MLC", url: `${HF}/Qwen3-4B-q4f16_1-MLC/resolve/a5c9fab855e3ccbdfed2e7e69683d75f30332161/`, lib: "Qwen3-4B-q4f16_1_cs1k-webgpu.wasm" },
+  },
+  "qwen3.5-2b-gpu": {
+    f16: { id: "Qwen3.5-2B-q4f16_1-MLC", url: `${HF}/Qwen3.5-2B-q4f16_1-MLC/resolve/dd74e9c8a20c4546df85c844103bff87b6dcacad/`, lib: "Qwen3.5-2B-q4f16_1_cs1k-webgpu.wasm", overrides: QWEN35 },
+    f32: { id: "Qwen3.5-2B-q4f32_1-MLC", url: `${HF}/Qwen3.5-2B-q4f32_1-MLC/resolve/d835e5c41aa56174d915e8a3940cde599d3f5a30/`, lib: "Qwen3.5-2B-q4f32_1_cs1k-webgpu.wasm", overrides: QWEN35 },
   },
   "qwen3-1.7b-gpu": {
     f16: { id: "Qwen3-1.7B-q4f16_1-MLC", url: `${HF}/Qwen3-1.7B-q4f16_1-MLC/resolve/80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc/`, lib: "Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm" },
@@ -64,7 +72,7 @@ export async function variantFor(modelId) {
 
 function appConfig(version, context) {
   return {
-    model_list: [{ model: version.url, model_id: version.id, model_lib: `${LIBS}${version.lib}`, overrides: { context_window_size: context } }],
+    model_list: [{ model: version.url, model_id: version.id, model_lib: `${LIBS}${version.lib}`, overrides: { ...(version.overrides || {}), context_window_size: context } }],
   };
 }
 
