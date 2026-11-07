@@ -5,7 +5,8 @@ language: en-AU
 reviews:
   profile: chill
   auto_review:
-    enabled: true
+    # Off (owner, 7 November 2026: "Turn code rabbit off").
+    enabled: false
     # The implementer opens a draft pull request for review only (never merged
     # by CodeRabbit or the AI), so drafts are reviewed too.
     drafts: true
