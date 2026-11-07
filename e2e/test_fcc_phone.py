@@ -533,6 +533,60 @@ def test_a_reply_cut_off_by_ios_is_explained_and_the_model_made_lighter(
     expect(page.locator(".hud-line.error")).to_have_count(1)
 
 
+def test_a_model_too_big_for_the_phone_stops_being_used(
+    page: Page, admin_base_url: str
+) -> None:
+    fake_gemini(page)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    page.evaluate(
+        """async () => {
+            const f = window.fccPhone;
+            f.state.models.push({id: 'huge', name: 'Huge Model', ready: true, size: 1,
+                settings: {context: 2048, gpu: true}});
+            f.state.settings.localModel = 'huge';
+            f.state.settings.brain = 'local';
+            await f.save.models();
+            await f.save.settings();
+        }"""
+    )
+    assert (
+        page.evaluate("() => window.fccPhone.brainOf(window.fccPhone.state.agents[0])")
+        == "local"
+    )
+
+    def crash_while_loading() -> None:
+        page.evaluate(
+            """() => localStorage.setItem('fcc-engine-work', JSON.stringify(
+                {stage: 'load', id: 'huge', name: 'Huge Model', context: 2048}))"""
+        )
+        reopen(page)
+
+    # First crash at the smallest context: the graphics chip goes off.
+    crash_while_loading()
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'huge')"
+    )
+    assert model["settings"]["gpu"] is False and not model.get("tooBig")
+    # Second crash at its lightest: too big, and the agents stop using it, so
+    # Jarvis thinks with the cloud key instead of closing the app again.
+    crash_while_loading()
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'huge')"
+    )
+    assert model["tooBig"] is True and model["crashes"] == 2
+    assert (
+        page.evaluate("() => window.fccPhone.brainOf(window.fccPhone.state.agents[0])")
+        == "gemini"
+    )
+    go(page, "models")
+    expect(
+        page.get_by_text("Too big for this phone: it closed FCC Phone")
+    ).to_be_visible()
+    expect(page.get_by_role("button", name="Try Huge Model again")).to_be_visible()
+    expect(page.get_by_role("button", name="Load Huge Model")).to_have_count(0)
+
+
 def reopen(page: Page) -> None:
     """Close and open the app again, as iOS does after it stops it."""
     page.reload()

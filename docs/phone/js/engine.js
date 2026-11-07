@@ -156,13 +156,19 @@ export async function recoverFromCrash() {
     } else if (chosen.gpu) {
       model.settings.gpu = false;
       change = " Studio turned off the graphics chip for it; send your message again.";
+    } else {
+      // Already at its lightest: it doesn't fit this phone. It stays on
+      // Models (Try again) but isn't used, so the agents think with another
+      // brain instead of closing the app again and again.
+      model.tooBig = true;
+      change = ` It's too big for this phone even at its lightest, so FCC Phone stopped using it${state.models.some(usable) ? " and uses your other phone model" : ""}. Pick a smaller one on Models (Qwen3 1.7B or Llama 3.2 1B) or a free cloud brain (More, Settings).`;
     }
     model.crashes = (model.crashes || 0) + 1;
     await save.models();
   }
   status.error =
     `The phone closed FCC Phone while ${work.name} was ${work.stage === "load" ? "loading" : "answering"}, most likely because it needed more memory than iOS allows.` +
-    (change || " Use a smaller model (Qwen3 0.6B on Models) or a free cloud brain (More, Settings).");
+    (change || " Use a smaller model (Qwen3 1.7B or Llama 3.2 1B on Models) or a free cloud brain (More, Settings).");
   feed("Model Control", status.error, "error");
   changed("engine");
   return status.error;
@@ -198,6 +204,18 @@ export const webgpu = () => Boolean(navigator.gpu);
 
 export function modelById(id) {
   return state.models.find((model) => model.id === id);
+}
+
+/** A model the agents may think with: downloaded, and not one that closed
+ * the app at its lightest settings (too big for this phone). */
+export const usable = (model) => Boolean(model && model.ready && !model.tooBig);
+
+/** Try a too-big model again (the user's call, from Models). */
+export async function tryAgain(model) {
+  model.tooBig = false;
+  model.crashes = 0;
+  await save.models();
+  changed("models");
 }
 
 /** Download one catalogue model into the phone's storage. */

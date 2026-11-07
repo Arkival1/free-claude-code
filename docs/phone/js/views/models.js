@@ -103,12 +103,15 @@ function modelRow(model) {
       isDefault ? el("span", { class: "pill gold", text: "default" }) : null,
     ]),
     badges(model),
+    model.tooBig ? el("p", { class: "warn", text: "Too big for this phone: it closed FCC Phone while loading, even at its lightest settings, so the agents don't use it. Try again only if you've closed other apps or changed its settings." }) : null,
     need ? el("small", { class: "muted", text: `Needs about ${bytes(need)} of memory at ${engine.settingsFor(model).context.toLocaleString()} tokens of context.${need > 2.5 * 1024 ** 3 ? " That's a lot for an iPhone: pick a smaller context or model if it crashes." : ""}` }) : null,
     model.lastSpeed ? el("small", { class: "muted", text: `Speed test: ${model.lastSpeed.toFixed(1)} tokens/s (${ago(model.testedAt)})` }) : null,
     el("div", { class: "row" }, [
       loaded
         ? button("Unload", () => engine.unload(), { "aria-label": `Unload ${model.name}` })
-        : button("Load", () => loadNow(model), { class: "primary", "aria-label": `Load ${model.name}` }),
+        : model.tooBig
+          ? button("Try again", () => engine.tryAgain(model).then(() => loadNow(model)), { "aria-label": `Try ${model.name} again` })
+          : button("Load", () => loadNow(model), { class: "primary", "aria-label": `Load ${model.name}` }),
       isDefault ? null : button("Make default", async () => {
         state.settings.localModel = model.id;
         await save.settings();
