@@ -122,6 +122,17 @@ export const CATALOG = [
     good: ["Jarvis", "Builder"],
   },
   {
+    id: "qwen2.5-3b-gpu",
+    name: "Qwen2.5 3B (graphics chip)",
+    engine: "webgpu",
+    url: "https://huggingface.co/mlc-ai/Qwen2.5-3B-Instruct-q4f16_1-MLC",
+    size: 1748010498,
+    context: 4096,
+    reasoning: false,
+    note: "3B on the graphics chip: answers straight away, good with tools, between the 2B and the 4B. Needs WebGPU and about 2.5 GB of graphics memory.",
+    good: ["Jarvis", "Builder"],
+  },
+  {
     id: "qwen3.5-2b-gpu",
     name: "Qwen3.5 2B (graphics chip)",
     engine: "webgpu",
@@ -306,7 +317,7 @@ export async function download(entry, onProgress, signal) {
  * shows straight away whether it fits this phone). */
 async function downloadGpu(entry, onProgress) {
   await gpu.variantFor(entry.id);
-  const record = { id: entry.id, name: entry.name, url: entry.url, engine: "webgpu", source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: { context: entry.context || 2048 }, info: { tools: true, reasoning: true } };
+  const record = { id: entry.id, name: entry.name, url: entry.url, engine: "webgpu", source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: { context: entry.context || 2048 }, info: { tools: true, reasoning: entry.reasoning !== false } };
   state.models = state.models.filter((model) => model.id !== entry.id);
   state.models.push(record);
   await save.models();

@@ -23,6 +23,8 @@ The files FCC Phone serves, byte for byte, in
 | `web-llm.js` | the npm package's `lib/index.js` (self-contained ES module) | The engine |
 | `LICENSE` | the npm package's `LICENSE` | Apache 2.0 |
 | `libs/Qwen3-4B-q4f16_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3 4B's program for the graphics chip |
+| `libs/Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen2.5 3B (chips with half-size numbers) |
+| `libs/Qwen2.5-3B-Instruct-q4f32_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen2.5 3B (every WebGPU chip) |
 | `libs/Qwen3.5-2B-q4f16_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3.5 2B (chips with half-size numbers) |
 | `libs/Qwen3.5-2B-q4f32_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3.5 2B (every WebGPU chip) |
 | `libs/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm` | binary-mlc-llm-libs | Qwen3 1.7B (chips with half-size numbers) |
@@ -36,6 +38,8 @@ The weights (about 2.3 GB for the 4B, 1.1 GB for Qwen3.5 2B, 1 GB for the 1.7B) 
 they are Qwen3 (Apache 2.0) converted by the MLC team, and the phone fetches
 them from Hugging Face once, pinned to these commits in `js/webgpu.js`:
 `mlc-ai/Qwen3-4B-q4f16_1-MLC@a5c9fab855e3ccbdfed2e7e69683d75f30332161`,
+`mlc-ai/Qwen2.5-3B-Instruct-q4f16_1-MLC@7690aaaa46df36b1be0fe93b9c9abac0497eff6c`,
+`mlc-ai/Qwen2.5-3B-Instruct-q4f32_1-MLC@dfa91e859b714acfa489a1464297080656c3460d`,
 `mlc-ai/Qwen3.5-2B-q4f16_1-MLC@dd74e9c8a20c4546df85c844103bff87b6dcacad`,
 `mlc-ai/Qwen3.5-2B-q4f32_1-MLC@d835e5c41aa56174d915e8a3940cde599d3f5a30`,
 `mlc-ai/Qwen3-1.7B-q4f16_1-MLC@80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc`,

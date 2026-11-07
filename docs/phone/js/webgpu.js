@@ -20,6 +20,10 @@ export const GPU_MODELS = {
   "qwen3-4b-gpu": {
     f16: { id: "Qwen3-4B-q4f16_1-MLC", url: `${HF}/Qwen3-4B-q4f16_1-MLC/resolve/a5c9fab855e3ccbdfed2e7e69683d75f30332161/`, lib: "Qwen3-4B-q4f16_1_cs1k-webgpu.wasm" },
   },
+  "qwen2.5-3b-gpu": {
+    f16: { id: "Qwen2.5-3B-Instruct-q4f16_1-MLC", url: `${HF}/Qwen2.5-3B-Instruct-q4f16_1-MLC/resolve/7690aaaa46df36b1be0fe93b9c9abac0497eff6c/`, lib: "Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm" },
+    f32: { id: "Qwen2.5-3B-Instruct-q4f32_1-MLC", url: `${HF}/Qwen2.5-3B-Instruct-q4f32_1-MLC/resolve/dfa91e859b714acfa489a1464297080656c3460d/`, lib: "Qwen2.5-3B-Instruct-q4f32_1_cs1k-webgpu.wasm" },
+  },
   "qwen3.5-2b-gpu": {
     f16: { id: "Qwen3.5-2B-q4f16_1-MLC", url: `${HF}/Qwen3.5-2B-q4f16_1-MLC/resolve/dd74e9c8a20c4546df85c844103bff87b6dcacad/`, lib: "Qwen3.5-2B-q4f16_1_cs1k-webgpu.wasm", overrides: QWEN35 },
     f32: { id: "Qwen3.5-2B-q4f32_1-MLC", url: `${HF}/Qwen3.5-2B-q4f32_1-MLC/resolve/d835e5c41aa56174d915e8a3940cde599d3f5a30/`, lib: "Qwen3.5-2B-q4f32_1_cs1k-webgpu.wasm", overrides: QWEN35 },

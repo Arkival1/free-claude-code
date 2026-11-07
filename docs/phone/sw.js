@@ -23,6 +23,8 @@ const WEBLLM_FILES = [
   "vendor/web-llm/libs/Qwen3-4B-q4f16_1_cs1k-webgpu.wasm",
   "vendor/web-llm/libs/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm",
   "vendor/web-llm/libs/Qwen3-1.7B-q4f32_1_cs1k-webgpu.wasm",
+  "vendor/web-llm/libs/Qwen2.5-3B-Instruct-q4f16_1_cs1k-webgpu.wasm",
+  "vendor/web-llm/libs/Qwen2.5-3B-Instruct-q4f32_1_cs1k-webgpu.wasm",
   "vendor/web-llm/libs/Qwen3.5-2B-q4f16_1_cs1k-webgpu.wasm",
   "vendor/web-llm/libs/Qwen3.5-2B-q4f32_1_cs1k-webgpu.wasm",
 ];

@@ -825,6 +825,43 @@ def test_jarvis_and_his_tools_fit_a_phone_models_context(
     assert result["contexts"][-2:] == [16384, 32768]
 
 
+def test_a_3b_runs_on_the_graphics_chip_without_thinking_mode(
+    page: Page, admin_base_url: str
+) -> None:
+    page.add_init_script(
+        "Object.defineProperty(navigator, 'gpu', { value: { requestAdapter: async () =>"
+        " ({ features: new Set(['shader-f16']) }) } });" + FAKE_WEBLLM
+    )
+    open_phone(page, admin_base_url)
+    go(page, "models")
+    page.get_by_role("button", name="Download Qwen2.5 3B (graphics chip)").click()
+    expect(
+        page.get_by_text("Qwen2.5 3B (graphics chip) is on your phone.")
+    ).to_be_visible()
+    created = page.evaluate("() => window.fccWebLLMCalls.created[0]")
+    assert created["id"] == "Qwen2.5-3B-Instruct-q4f16_1-MLC"
+    record = created["list"][0]
+    assert "/resolve/7690aaaa46df36b1be0fe93b9c9abac0497eff6c/" in record["model"]
+    assert (
+        page.evaluate(
+            f"async () => (await fetch({json.dumps(record['model_lib'])})).status"
+        )
+        == 200
+    )
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("hello")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Hello from the graphics chip."
+    )
+    # Qwen2.5 doesn't think, so no /no_think switch goes in its prompt.
+    system = page.evaluate(
+        "() => window.fccWebLLMCalls.requests[0].messages[0].content"
+    )
+    assert "/no_think" not in system
+
+
 def reopen(page: Page) -> None:
     """Close and open the app again, as iOS does after it stops it."""
     page.reload()
