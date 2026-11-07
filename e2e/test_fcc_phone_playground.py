@@ -583,3 +583,21 @@ def test_a_job_that_deletes_the_last_file_is_not_done(
     assert job["files"] == []
     assert job["status"] == "unfinished"
     assert "FCC's own check" in job["said"]
+
+
+def test_the_job_s_own_words_pick_website_or_game_until_one_is_tapped(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url, look="playground")
+    website = page.get_by_role("button", name="Make a website")
+    game = page.get_by_role("button", name="Make a game")
+    box = page.get_by_label("The task")
+    # A website asked for in words is made as a website, not a game.
+    box.fill("A website for Calm Yoga studio with class times and prices")
+    expect(website).to_have_attribute("aria-pressed", "true")
+    box.fill("a platformer where a cat jumps over boxes")
+    expect(game).to_have_attribute("aria-pressed", "true")
+    # Once the user taps one, their pick stays whatever they type.
+    game.click()
+    box.fill("A website for a bakery")
+    expect(game).to_have_attribute("aria-pressed", "true")
