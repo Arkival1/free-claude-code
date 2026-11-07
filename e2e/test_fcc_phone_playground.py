@@ -533,3 +533,51 @@ def test_a_site_that_fails_fccs_check_is_not_called_done(
         in call["messages"][0]["content"]
     )
     assert page.evaluate("() => window.fccPhone.state.library.length") == 0
+    # Run again reuses the finished steps; FCC checks the project itself, so
+    # the task still isn't called done.
+    page.evaluate(
+        """async () => {
+            const { resumeTask } = await import('./js/tasks.js');
+            resumeTask(window.fccPhone.state.tasks[0].id);
+        }"""
+    )
+    page.wait_for_function(
+        "(before) => !window.fccPhone.state.tasks[0].running && ['done', 'failed'].includes(window.fccPhone.state.tasks[0].status) && window.fccPhone.state.tasks[0].updated_at > before",
+        arg=task["updated_at"],
+        timeout=30000,
+    )
+    again = page.evaluate("() => window.fccPhone.state.tasks[0]")
+    assert again["status"] == "failed", again["summary"]
+    assert page.evaluate("() => window.fccPhone.state.library.length") == 0
+
+
+def deleting_brain(body: dict) -> dict:
+    """A job that deletes the project's only page, then says it's done."""
+    tools_used = [m for m in body["messages"] if m["role"] == "tool"]
+    if not tools_used:
+        return tool_call("delete_file", {"path": "index.html"})
+    return say("Done, all tidy.")
+
+
+def test_a_job_that_deletes_the_last_file_is_not_done(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: a job whose tools can delete files is checked
+    after it, even when it empties the project."""
+    fake_gemini(page, deleting_brain)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    job = page.evaluate(
+        """async () => {
+            const projects = await import('./js/projects.js');
+            const { runTask } = await import('./js/agents.js');
+            const { state, jarvis } = await import('./js/state.js');
+            const project = await projects.createProject('Tidy', 'you');
+            await projects.putFile(project, 'index.html', '<!doctype html><title>x</title><p>Hi</p>', 'you');
+            const said = await runTask(jarvis(), 'tidy the project', { project, tools: ['delete_file'] });
+            return { said, status: state.jobs[0].status, files: Object.keys(project.files) };
+        }"""
+    )
+    assert job["files"] == []
+    assert job["status"] == "unfinished"
+    assert "FCC's own check" in job["said"]

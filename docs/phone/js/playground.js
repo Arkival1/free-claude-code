@@ -15,7 +15,7 @@ import { state, agentById, jarvis, feed, ROLE_PROMPTS } from "./state.js";
 import { runTask, COULDNT_FINISH } from "./agents.js";
 import { think, pinBrain, brainReady } from "./brains.js";
 import { remember } from "./tools.js";
-import { projectById, createProject } from "./projects.js";
+import { projectById, createProject, checkProject } from "./projects.js";
 import { addToLibrary } from "./library.js";
 
 /** Helpers that build parts alongside the main AI: three AIs at once. */
@@ -410,7 +410,9 @@ export async function runPlayground(task, saveTasks) {
         task.project_id = project.id;
       }
       if (work.status === "failed") throw new Error(work.result);
-      unfinished = report.problems || [];
+      // A work step reused from an earlier run (Run again) has no fresh report:
+      // FCC checks the project itself, so a failed task can't become done.
+      unfinished = report.problems || (project ? checkProject(project).filter((problem) => !problem.startsWith("Note: ")) : []);
       if (!reviewers.length) {
         // No advisers: FCC's check decides whether another try is needed.
         if (!unfinished.length) break;

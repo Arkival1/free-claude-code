@@ -765,11 +765,45 @@ def test_a_saved_paid_zai_model_is_swapped_for_the_free_one(
             await save.settings();
             const agent = { ...jarvis(), brain: 'zai', model: '' };
             const reply = await think(agent, 'You are a test.', [{ role: 'user', content: 'hello' }]);
-            return { text: reply.text, saved: state.settings.models.zai };
+            // A paid model typed on an agent card is swapped too.
+            const typed = await think({ ...jarvis(), brain: 'zai', model: 'glm-5.3' }, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+            return { text: reply.text, typed: typed.text, saved: state.settings.models.zai };
         }"""
     )
-    assert sent == ["glm-4.7-flash"]
-    assert said == {"text": "Hi!", "saved": "glm-4.7-flash"}
+    assert sent == ["glm-4.7-flash", "glm-4.7-flash"]
+    assert said == {"text": "Hi!", "typed": "Hi!", "saved": "glm-4.7-flash"}
+
+    # With no free model listed or saved, nothing is sent and it says why.
+    def paid_only(route: Route) -> None:
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json",
+        }
+        if route.request.method == "POST":
+            sent.append("POST")
+            route.fulfill(status=500)
+        else:
+            route.fulfill(
+                headers=headers, body=json.dumps({"data": [{"id": "glm-5.3"}]})
+            )
+
+    page.unroute("https://api.z.ai/**")
+    page.route("https://api.z.ai/**", paid_only)
+    refused = page.evaluate(
+        """async () => {
+            const { state, jarvis } = await import('./js/state.js');
+            const { think } = await import('./js/brains.js');
+            state.settings.models.zai = 'glm-5.3';
+            try {
+                await think({ ...jarvis(), brain: 'zai', model: '' }, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+                return 'sent';
+            } catch (error) {
+                return error.message;
+            }
+        }"""
+    )
+    assert "only its free GLM Flash models" in refused
+    assert sent == ["glm-4.7-flash", "glm-4.7-flash"]
 
 
 def test_four_billion_parameter_models_fit_the_phone(
@@ -786,11 +820,13 @@ def test_four_billion_parameter_models_fit_the_phone(
             const { estimateMemory } = await import('./js/gguf.js');
             // Qwen3 4B: 36 layers, 32 heads (8 for keys and values), 2,560 wide.
             const info = { layers: 36, heads: 32, kvHeads: 8, embedding: 2560 };
+            // Gemma 3 4B: 34 layers, 8 heads (4 for keys and values), 2,560 wide.
+            const gemma = { layers: 34, heads: 8, kvHeads: 4, embedding: 2560 };
             return engine.CATALOG.filter((entry) => / 4B/.test(entry.name)).map((entry) => ({
                 name: entry.name,
                 fits: entry.size < engine.MAX_FILE,
                 context: entry.context,
-                gb: estimateMemory(info, entry.size, entry.context) / 1024 ** 3,
+                gb: estimateMemory(entry.id === 'gemma-3-4b' ? gemma : info, entry.size, entry.context) / 1024 ** 3,
             }));
         }"""
     )

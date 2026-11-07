@@ -240,7 +240,8 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
     let still = "";
     let problems = [];
     const builds = !ctx.partsOnly && (!ctx.tools || ctx.tools.some((name) => CHANGES_FILES.has(name)));
-    if (builds && ctx.project && Object.keys(ctx.project.files || {}).length) {
+    // An emptied project is checked too (it says it has no files).
+    if (builds && ctx.project) {
       try {
         const { checkProject } = await import("./projects.js");
         problems = checkProject(ctx.project).filter((problem) => !problem.startsWith("Note: "));
