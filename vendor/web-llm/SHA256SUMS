@@ -1,0 +1,5 @@
+3bff4c55cd2f0200711517341babcebe7a91a8ef85b983420439fcf26835a674  web-llm.js
+363f4dbb789f0518e52295d1f4685d2d61feae4ac4e2a6a95621e4af29450bd7  libs/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm
+55d24798dbc00bc3ab8a05eb94fb4833d3760c6de911f8f264c3f6e282014fab  libs/Qwen3-1.7B-q4f32_1_cs1k-webgpu.wasm
+2afc399ed01d8ae641beac0528567c8ce22e8c9c7203ba0827c44e13c62be99c  libs/Qwen3-4B-q4f16_1_cs1k-webgpu.wasm
+68b81b32f0c04f8b564820b65e00fda9191ffd5a649ac4addd47c3311f02de7f  mlc-ai-web-llm-0.2.87.tgz

@@ -328,6 +328,13 @@ Notes carried over from the long session that built FCC Studio (LCC).
   `js/art.js`, cache `fcc-phone-art-1`), the `game_art` tool (tools version
   11: main, builder). 3D (4,000 Kenney models) waits: kenney.nl refuses this
   cloud machine; the owner is to pick PC Remote Control or the PC link.
+- Phone models on the graphics chip (owner: "the 4b runs ... temperature
+  settings"): a second engine, WebLLM 0.2.87 (`vendor/web-llm`, `js/webgpu.js`),
+  runs Qwen3 4B / 1.7B through WebGPU, since wllama's whole-file copy into
+  the page tops out near 1 GB on an iPhone. Tools go in the prompt in
+  Qwen3's `<tool_call>` format; each phone model has a Temperature setting.
+  Needs WebGPU (iOS 26, or iOS 18 Safari's Feature Flags). A model that closes
+  the app at its lightest settings is marked too big and skipped.
 - The phone Lab's board computer (owner: single-board computers, Orange Pi
   not Raspberry Pi; "test my designs ... a monitor to see"): `lab/board.js`
   runs Arduino-style JavaScript in a sealed box on a virtual clock, with

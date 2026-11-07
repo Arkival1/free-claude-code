@@ -14,6 +14,16 @@ const LINUX_CACHE = "fcc-phone-linux-2.0";
 // agent uses it, then kept across app updates.
 const ART_CACHE = "fcc-phone-art-1";
 const ART_FILES = ["games/art2d.bin"];
+// The graphics-chip engine (WebLLM, 6.5 MB) and its model programs: kept
+// the first time a graphics-chip model is used, never before.
+const WEBLLM_CACHE = "fcc-phone-webllm-0.2.87";
+const WEBLLM_FILES = [
+  "vendor/web-llm/web-llm.js",
+  "vendor/web-llm/LICENSE",
+  "vendor/web-llm/libs/Qwen3-4B-q4f16_1_cs1k-webgpu.wasm",
+  "vendor/web-llm/libs/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm",
+  "vendor/web-llm/libs/Qwen3-1.7B-q4f32_1_cs1k-webgpu.wasm",
+];
 const LINUX_FILES = [
   "linux/libv86.js",
   "linux/v86.wasm",
@@ -96,6 +106,7 @@ const SHELL = [
   "js/agents.js",
   "js/brains.js",
   "js/engine.js",
+  "js/webgpu.js",
   "js/gguf.js",
   "js/inspect.js",
   "js/learn.js",
@@ -149,7 +160,7 @@ self.addEventListener("activate", (event) => {
       .then((names) =>
         Promise.all(
           names
-            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE, LINUX_CACHE, ART_CACHE].includes(name))
+            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE, LINUX_CACHE, ART_CACHE, WEBLLM_CACHE].includes(name))
             .map((name) => caches.delete(name))
         )
       )
@@ -177,7 +188,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (url.origin !== self.location.origin || url.pathname.includes("/studio/api/") || url.pathname.includes("/linux/fs/")) return;
-  const heavy = GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? GODOT_CACHE : LINUX_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? LINUX_CACHE : ART_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? ART_CACHE : "";
+  const heavy = GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? GODOT_CACHE : LINUX_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? LINUX_CACHE : ART_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? ART_CACHE : WEBLLM_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? WEBLLM_CACHE : "";
   if (heavy) {
     event.respondWith(
       caches.open(heavy).then((cache) =>

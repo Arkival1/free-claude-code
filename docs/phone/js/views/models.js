@@ -3,6 +3,7 @@
 import { state, save, changed, onChange } from "../state.js";
 import { el, button, card, notify, openSheet, closeSheet, bytes, meter, ago } from "../ui.js";
 import * as engine from "../engine.js";
+import { hasWebGPU } from "../webgpu.js";
 import { brainOf } from "../brains.js";
 
 const downloads = new Map(); // id -> {done, total, controller}
@@ -170,7 +171,8 @@ function settingsSheet(model) {
     el("label", {}, ["Context (how much it remembers at once)", context]),
     el("p", { class: "muted small", text: "More context uses more memory. 4,096 suits most chats; the Builder likes 8,192 for bigger pages." }),
     el("label", {}, ["Temperature (how adventurous its answers are)", temperature, shown]),
-    el("label", { class: "check" }, [gpu, el("span", { text: "Use the graphics chip (faster)" })]),
+    // Graphics-chip models always run on the chip.
+    model.engine === "webgpu" ? null : el("label", { class: "check" }, [gpu, el("span", { text: "Use the graphics chip (faster)" })]),
     button("Save", async () => {
       model.settings = { ...model.settings, context: Number(context.value), gpu: gpu.checked, temperature: Number(temperature.value) };
       await save.models();
@@ -263,10 +265,14 @@ function catalogCard() {
           // After a model was too big here, bigger ones are flagged before
           // they're downloaded.
           engine.likelyFits(entry) ? null : el("small", { class: "warn", text: `Probably too big for this phone: a ${bytes(engine.tooBigSize())} model already was.` }),
+          // Graphics-chip models need WebGPU: say how to switch it on.
+          entry.engine === "webgpu" && !hasWebGPU()
+            ? el("small", { class: "warn", text: "Needs WebGPU. On iOS 18: Settings, Apps, Safari, Advanced, Feature Flags, turn on WebGPU, then open FCC Phone in Safari (not Chrome). iOS 26 has it on." })
+            : null,
         ]),
         have && have.ready
           ? el("span", { class: "pill good", text: "on phone" })
-          : button(downloads.has(entry.id) ? "…" : "Download", () => startDownload(entry), { class: "primary", "aria-label": `Download ${entry.name}`, disabled: downloads.has(entry.id) }),
+          : button(downloads.has(entry.id) ? "…" : "Download", () => startDownload(entry), { class: "primary", "aria-label": `Download ${entry.name}`, disabled: downloads.has(entry.id) || (entry.engine === "webgpu" && !hasWebGPU()) }),
       ]);
     }),
     el("p", { class: "muted small", text: `Your default brain: ${brainOf({ brain: "default" }) === "local" ? "this phone" : state.settings.brain || "not set"}.` }),

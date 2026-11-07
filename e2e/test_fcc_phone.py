@@ -1,5 +1,6 @@
 """FCC Phone on an iPhone 12 Pro screen: the command center, team, models, and PC link."""
 
+import itertools
 import json
 import re
 import struct
@@ -627,6 +628,120 @@ def test_a_phone_model_has_a_temperature_setting(
     assert chosen == {"context": 2048, "gpu": False, "temperature": 1.2}
 
 
+FAKE_WEBLLM = """
+window.fccWebLLMCalls = { created: [], requests: [] };
+window.fccWebLLM = {
+  CreateMLCEngine: async (id, config, chatOptions) => {
+    window.fccWebLLMCalls.created.push({ id, list: config.appConfig.model_list, chatOptions });
+    config.initProgressCallback({ progress: 0.5, text: 'Fetching' });
+    config.initProgressCallback({ progress: 1, text: 'Ready' });
+    return {
+      unload: async () => {},
+      chat: { completions: { create: async (request) => {
+        window.fccWebLLMCalls.requests.push(request);
+        const last = request.messages[request.messages.length - 1].content;
+        const content = last.includes('<tool_response>')
+          ? '<think></think>Done: I will remember that.'
+          : last.includes('gym')
+            ? '<tool_call>{"name": "remember", "arguments": {"text": "Gym is on Mondays."}}</tool_call>'
+            : 'Hello from the graphics chip.';
+        return { choices: [{ message: { role: 'assistant', content } }],
+                 usage: { completion_tokens: 9, extra: { decode_tokens_per_s: 7.5, prefill_tokens_per_s: 40 } } };
+      } } },
+    };
+  },
+  deleteModelAllInfoInCache: async () => {},
+};
+"""
+
+
+def test_without_webgpu_the_graphics_chip_models_say_how_to_turn_it_on(
+    page: Page, admin_base_url: str
+) -> None:
+    page.add_init_script(
+        "Object.defineProperty(navigator, 'gpu', { value: undefined });"
+    )
+    open_phone(page, admin_base_url)
+    go(page, "models")
+    row = page.locator(".item", has_text="Qwen3 4B (graphics chip)")
+    expect(row).to_contain_text("Feature Flags, turn on WebGPU")
+    expect(
+        row.get_by_role("button", name="Download Qwen3 4B (graphics chip)")
+    ).to_be_disabled()
+
+
+def test_a_4b_runs_on_the_graphics_chip_with_tools_and_temperature(
+    page: Page, admin_base_url: str
+) -> None:
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    # A phone with WebGPU (half-size numbers) and a stand-in WebLLM.
+    page.add_init_script(
+        "Object.defineProperty(navigator, 'gpu', { value: { requestAdapter: async () =>"
+        " ({ features: new Set(['shader-f16']) }) } });" + FAKE_WEBLLM
+    )
+    open_phone(page, admin_base_url)
+    go(page, "models")
+    page.get_by_role("button", name="Download Qwen3 4B (graphics chip)").click()
+    expect(
+        page.get_by_text("Qwen3 4B (graphics chip) is on your phone.")
+    ).to_be_visible()
+    created = page.evaluate("() => window.fccWebLLMCalls.created[0]")
+    assert created["id"] == "Qwen3-4B-q4f16_1-MLC"
+    record = created["list"][0]
+    assert record["model_lib"].endswith(
+        "/vendor/web-llm/libs/Qwen3-4B-q4f16_1_cs1k-webgpu.wasm"
+    )
+    assert "/resolve/a5c9fab855e3ccbdfed2e7e69683d75f30332161/" in record["model"]
+    assert record["overrides"]["context_window_size"] == 2048
+    # FCC's own copy of the model program is served with the phone.
+    assert (
+        page.evaluate(
+            f"async () => (await fetch({json.dumps(record['model_lib'])})).status"
+        )
+        == 200
+    )
+
+    # Warmer answers: the temperature setting reaches the engine.
+    page.get_by_role("button", name="Settings for Qwen3 4B (graphics chip)").click()
+    expect(page.get_by_label("Use the graphics chip")).to_have_count(0)
+    page.get_by_label("Temperature").fill("0.8")
+    page.get_by_role("button", name="Save").click()
+
+    # Jarvis thinks with it, tools included (Qwen3's own <tool_call> format).
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("my gym is on mondays")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Done: I will remember that.", timeout=15000
+    )
+    assert page.evaluate(
+        "() => window.fccPhone.state.memories.some((m) => m.text.includes('Gym is on Mondays'))"
+    )
+    requests = page.evaluate("() => window.fccWebLLMCalls.requests")
+    first, second = requests[0], requests[1]
+    assert first["messages"][0]["role"] == "system"
+    assert (
+        "<tools>" in first["messages"][0]["content"]
+        and '"remember"' in first["messages"][0]["content"]
+    )
+    assert first["temperature"] == 0.8
+    assert second["messages"][-1]["role"] == "user"
+    assert "<tool_response>" in second["messages"][-1]["content"]
+    assert "<tool_call>" in second["messages"][-2]["content"]
+    roles = [m["role"] for m in second["messages"]]
+    assert all(a != b for a, b in itertools.pairwise(roles))
+    # Its speed is measured like any phone model.
+    assert (
+        page.evaluate(
+            "async () => (await import('./js/engine.js')).status.lastSpeed.tokensPerSecond"
+        )
+        == 7.5
+    )
+    assert errors == []
+
+
 def reopen(page: Page) -> None:
     """Close and open the app again, as iOS does after it stops it."""
     page.reload()
@@ -916,7 +1031,7 @@ def test_four_billion_parameter_models_fit_the_phone(
             const info = { layers: 36, heads: 32, kvHeads: 8, embedding: 2560 };
             // Gemma 3 4B: 34 layers, 8 heads (4 for keys and values), 2,560 wide.
             const gemma = { layers: 34, heads: 8, kvHeads: 4, embedding: 2560 };
-            return engine.CATALOG.filter((entry) => / 4B/.test(entry.name)).map((entry) => ({
+            return engine.CATALOG.filter((entry) => / 4B/.test(entry.name) && entry.engine !== 'webgpu').map((entry) => ({
                 name: entry.name,
                 fits: entry.size < engine.MAX_FILE,
                 context: entry.context,

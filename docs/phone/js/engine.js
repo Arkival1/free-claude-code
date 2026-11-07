@@ -5,6 +5,7 @@ import { Wllama } from "../vendor/wllama.min.js";
 import { readGguf, estimateMemory } from "./gguf.js";
 import { state, save, changed, feed } from "./state.js";
 import { uid } from "./ui.js";
+import * as gpu from "./webgpu.js";
 
 const WLLAMA_VERSION = "3.6.1";
 const CDN = `https://cdn.jsdelivr.net/npm/@wllama`;
@@ -96,6 +97,29 @@ export const CATALOG = [
     note: "Google's 4B: the best writer here. Needs a 6 GB iPhone.",
     good: ["Helper", "Designer"],
   },
+  // On the graphics chip (WebLLM, the second engine): the weights live in the
+  // chip's memory, not the page's, so a 4B fits where the files above can't.
+  // Needs WebGPU (iOS 26, or iOS 18 with Safari's WebGPU flag on).
+  {
+    id: "qwen3-4b-gpu",
+    name: "Qwen3 4B (graphics chip)",
+    engine: "webgpu",
+    url: "https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC",
+    size: 2279167154,
+    context: 2048,
+    note: "4B on the graphics chip: the smartest that runs on an iPhone, about 5–10 words a second on recent ones. Needs WebGPU and about 3 GB of graphics memory (iPhone 15 Pro or newer is safest).",
+    good: ["Jarvis", "Builder"],
+  },
+  {
+    id: "qwen3-1.7b-gpu",
+    name: "Qwen3 1.7B (graphics chip)",
+    engine: "webgpu",
+    url: "https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC",
+    size: 980000000,
+    context: 2048,
+    note: "1.7B on the graphics chip: quick, fits more iPhones. Needs WebGPU.",
+    good: ["Jarvis", "Helper"],
+  },
 ];
 
 export const MAX_FILE = 2 * 1024 * 1024 * 1024;
@@ -153,7 +177,7 @@ export async function recoverFromCrash() {
     if (chosen.context > 2048) {
       model.settings.context = 2048;
       change = ` Studio lowered its context to 2,048 tokens so it needs less memory; send your message again.`;
-    } else if (chosen.gpu) {
+    } else if (chosen.gpu && model.engine !== "webgpu") {
       model.settings.gpu = false;
       change = " Studio turned off the graphics chip for it; send your message again.";
     } else {
@@ -219,12 +243,12 @@ export function tooBigSize() {
 
 /** Whether a catalog model is likely to fit: clearly smaller (under 80%)
  * than the smallest model this phone couldn't load. */
-export const likelyFits = (entry) => entry.size < 0.8 * tooBigSize();
+export const likelyFits = (entry) => entry.engine === "webgpu" || entry.size < 0.8 * tooBigSize();
 
 /** Models on the catalog that are likely to fit, biggest first: what to
  * suggest after one was too big. */
 export function suggestions(limit = 2) {
-  const fits = CATALOG.filter(likelyFits).sort((a, b) => b.size - a.size);
+  const fits = CATALOG.filter((entry) => entry.engine !== "webgpu" && likelyFits(entry)).sort((a, b) => b.size - a.size);
   return fits.length ? fits.slice(0, limit).map((entry) => entry.name).join(" or ") : "";
 }
 
@@ -239,6 +263,7 @@ export async function tryAgain(model) {
 /** Download one catalogue model into the phone's storage. */
 export async function download(entry, onProgress, signal) {
   if (state.models.some((model) => model.url === entry.url && model.ready)) return modelById(entry.id);
+  if (entry.engine === "webgpu") return downloadGpu(entry, onProgress);
   const record = { id: entry.id, name: entry.name, url: entry.url, source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: entry.context ? { context: entry.context } : {} };
   state.models = state.models.filter((model) => model.id !== entry.id);
   state.models.push(record);
@@ -251,6 +276,35 @@ export async function download(entry, onProgress, signal) {
   await save.models();
   changed("models");
   feed("Model Control", `${entry.name} is on this phone.`);
+  return record;
+}
+
+/** A graphics-chip model: WebLLM downloads it into the phone's storage the
+ * first time it starts it, so downloading is starting it once (which also
+ * shows straight away whether it fits this phone). */
+async function downloadGpu(entry, onProgress) {
+  await gpu.variantFor(entry.id);
+  const record = { id: entry.id, name: entry.name, url: entry.url, engine: "webgpu", source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: { context: entry.context || 2048 }, info: { tools: true, reasoning: true } };
+  state.models = state.models.filter((model) => model.id !== entry.id);
+  state.models.push(record);
+  await save.models();
+  changed("models");
+  const run = queue.then(async () => {
+    noteWork("load", record);
+    try {
+      await gpu.load(entry.id, settingsFor(record).context, (fraction) => onProgress && onProgress(Math.round(fraction * entry.size), entry.size));
+    } finally {
+      clearWork();
+    }
+    loaded = { id: record.id, key: gpu.loadedKey() };
+    status.loadedId = record.id;
+  });
+  queue = run.catch(() => {});
+  await run;
+  record.ready = true;
+  await save.models();
+  changed("models");
+  feed("Model Control", `${entry.name} is on this phone and running on the graphics chip.`);
   return record;
 }
 
@@ -303,9 +357,10 @@ async function blobsOf(model) {
 
 export async function remove(model) {
   if (status.loadedId === model.id) await unload();
-  const w = engine();
+  const w = model.engine === "webgpu" ? null : engine();
   try {
-    if (model.source === "file") await w.cacheManager.delete(model.key);
+    if (model.engine === "webgpu") await gpu.remove(model.id);
+    else if (model.source === "file") await w.cacheManager.delete(model.key);
     else {
       const found = (await w.modelManager.getModels({ includeInvalid: true })).find((item) => item.url === model.url);
       if (found) await found.remove();
@@ -379,6 +434,7 @@ async function load(model) {
 export async function unload() {
   await queue.catch(() => {});
   if (wllama && wllama.isModelLoaded()) await wllama.exit();
+  await gpu.unload();
   loaded = null;
   status.loadedId = null;
   changed("engine");
@@ -393,6 +449,7 @@ function friendly(error) {
 
 /** One chat completion on the phone, in the OpenAI shape. One at a time. */
 export function chat(model, { messages, tools, maxTokens = 1024, temperature = settingsFor(model).temperature }) {
+  if (model.engine === "webgpu") return chatGpu(model, { messages, tools, maxTokens, temperature });
   const run = queue.then(async () => {
     await load(model);
     const started = performance.now();
@@ -428,6 +485,43 @@ export function chat(model, { messages, tools, maxTokens = 1024, temperature = s
     changed("engine");
     const message = (response.choices && response.choices[0] && response.choices[0].message) || {};
     return message;
+  });
+  queue = run.catch(() => {});
+  return run;
+}
+
+/** One answer from a graphics-chip model (WebLLM). Tools go in the prompt
+ * the way Qwen3 was trained, so Jarvis's tools work on it too. */
+function chatGpu(model, { messages, tools, maxTokens, temperature }) {
+  const run = queue.then(async () => {
+    const chosen = settingsFor(model);
+    status.error = "";
+    try {
+      if (!(loaded && loaded.id === model.id && loaded.key === gpu.loadedKey() && loaded.key.endsWith(`:${chosen.context}`))) {
+        if (wllama && wllama.isModelLoaded()) await wllama.exit();
+        status.loading = model.id;
+        changed("engine");
+        noteWork("load", model);
+        await limited(gpu.load(model.id, chosen.context), LOAD_LIMIT_MS, `${model.name} took more than 4 minutes to start, so it was stopped. Try Qwen3 1.7B (graphics chip) or a free cloud brain.`);
+        loaded = { id: model.id, key: gpu.loadedKey() };
+        status.loadedId = model.id;
+        feed("Model Control", `${model.name} loaded on the graphics chip.`);
+      }
+      noteWork("answer", model);
+      const reply = await limited(gpu.chat({ messages, tools: tools && tools.length ? tools : undefined, maxTokens, temperature }), ANSWER_LIMIT_MS, `${model.name} took more than 6 minutes to answer, so it was stopped.`);
+      status.lastSpeed = { tokensPerSecond: reply.speed, readPerSecond: reply.readSpeed, model: model.id, at: Date.now() };
+      return reply.message;
+    } catch (error) {
+      await gpu.unload();
+      loaded = null;
+      status.loadedId = null;
+      status.error = friendly(error);
+      throw new Error(status.error);
+    } finally {
+      clearWork();
+      status.loading = null;
+      changed("engine");
+    }
   });
   queue = run.catch(() => {});
   return run;
