@@ -319,11 +319,18 @@ export async function remove(model) {
   changed("models");
 }
 
+// Temperature: how adventurous the model's word choices are (0 = always the
+// most likely word, higher = more varied). 0.5 suits agents that use tools.
+export const DEFAULT_TEMPERATURE = 0.5;
+export const TEMPERATURE_MAX = 1.5;
+
 export function settingsFor(model) {
   const base = state.settings.engine;
+  const temperature = Number(model.settings.temperature ?? base.temperature ?? DEFAULT_TEMPERATURE);
   return {
     context: model.settings.context || base.context,
     gpu: model.settings.gpu ?? base.gpu,
+    temperature: Number.isFinite(temperature) ? Math.min(TEMPERATURE_MAX, Math.max(0, temperature)) : DEFAULT_TEMPERATURE,
   };
 }
 
@@ -385,7 +392,7 @@ function friendly(error) {
 }
 
 /** One chat completion on the phone, in the OpenAI shape. One at a time. */
-export function chat(model, { messages, tools, maxTokens = 1024, temperature = 0.5 }) {
+export function chat(model, { messages, tools, maxTokens = 1024, temperature = settingsFor(model).temperature }) {
   const run = queue.then(async () => {
     await load(model);
     const started = performance.now();

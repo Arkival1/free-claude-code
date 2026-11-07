@@ -160,12 +160,19 @@ function settingsSheet(model) {
   const context = el("select", { "aria-label": "Context" }, engine.CONTEXTS.map((value) => el("option", { value: String(value), text: `${value.toLocaleString()} tokens` })));
   context.value = String(chosen.context);
   const gpu = el("input", { type: "checkbox", checked: chosen.gpu, "aria-label": "Use the graphics chip" });
+  const temperature = el("input", { type: "range", min: "0", max: String(engine.TEMPERATURE_MAX), step: "0.1", value: String(chosen.temperature), "aria-label": "Temperature" });
+  const feel = (value) => (value <= 0.2 ? "exact: the same answer every time" : value <= 0.6 ? "balanced: best for building and tools" : value <= 1 ? "creative: more varied writing" : "wild: surprising, makes more mistakes");
+  const shown = el("span", { class: "small muted", text: `${chosen.temperature.toFixed(1)} · ${feel(chosen.temperature)}` });
+  temperature.addEventListener("input", () => {
+    shown.textContent = `${Number(temperature.value).toFixed(1)} · ${feel(Number(temperature.value))}`;
+  });
   openSheet(`${model.name} settings`, [
     el("label", {}, ["Context (how much it remembers at once)", context]),
     el("p", { class: "muted small", text: "More context uses more memory. 4,096 suits most chats; the Builder likes 8,192 for bigger pages." }),
+    el("label", {}, ["Temperature (how adventurous its answers are)", temperature, shown]),
     el("label", { class: "check" }, [gpu, el("span", { text: "Use the graphics chip (faster)" })]),
     button("Save", async () => {
-      model.settings = { context: Number(context.value), gpu: gpu.checked };
+      model.settings = { ...model.settings, context: Number(context.value), gpu: gpu.checked, temperature: Number(temperature.value) };
       await save.models();
       changed("models");
       closeSheet();

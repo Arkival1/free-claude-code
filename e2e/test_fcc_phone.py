@@ -587,12 +587,44 @@ def test_a_model_too_big_for_the_phone_stops_being_used(
     expect(page.get_by_role("button", name="Load Huge Model")).to_have_count(0)
     # The advice is sized to this phone: models clearly smaller than the one
     # that didn't fit, and bigger ones are flagged before they're downloaded.
-    expect(page.locator(".warn").first).to_contain_text("Llama 3.2 1B Instruct or Gemma 3 1B")
+    expect(page.locator(".warn").first).to_contain_text(
+        "Llama 3.2 1B Instruct or Gemma 3 1B"
+    )
     flagged = page.locator(
         ".item", has=page.get_by_text("Probably too big for this phone")
     )
     expect(flagged.filter(has_text="Qwen3 1.7B")).to_have_count(1)
     expect(flagged.filter(has_text="Llama 3.2 1B")).to_have_count(0)
+
+
+def test_a_phone_model_has_a_temperature_setting(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    page.evaluate(
+        """async () => {
+            const f = window.fccPhone;
+            f.state.models.push({id: 'warm', name: 'Warm Model', ready: true, size: 1,
+                settings: {context: 2048, gpu: false}});
+            await f.save.models();
+        }"""
+    )
+    go(page, "models")
+    page.get_by_role("button", name="Settings for Warm Model").click()
+    slider = page.get_by_label("Temperature")
+    expect(slider).to_have_value("0.5")
+    slider.fill("1.2")
+    expect(page.get_by_text("1.2 · wild")).to_be_visible()
+    page.get_by_role("button", name="Save").click()
+    chosen = page.evaluate(
+        """async () => {
+            const engine = await import('./js/engine.js');
+            const model = window.fccPhone.state.models.find((m) => m.id === 'warm');
+            return engine.settingsFor(model);
+        }"""
+    )
+    # Saved without losing the other settings; chats use it from now on.
+    assert chosen == {"context": 2048, "gpu": False, "temperature": 1.2}
 
 
 def reopen(page: Page) -> None:
