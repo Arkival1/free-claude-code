@@ -502,7 +502,8 @@ func _ready() -> void:
 \tvar walker := Node2D.new()
 \tadd_child(walker)
 \tKit.wander(walker, 1.0, 4.0)
-\tawait get_tree().create_timer(2.5).timeout
+\t# The wanderer waits up to 2.5 s before its first step.
+\tawait get_tree().create_timer(4.0, true, true).timeout
 \tprint("KIT %d %s %d %s" % [fonts, styles, made, walker.position != Vector2.ZERO])
 """
 

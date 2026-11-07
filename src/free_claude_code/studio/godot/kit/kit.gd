@@ -75,6 +75,13 @@ static func fit_screen(window: Window, touch_short := 0) -> void:
 		var want := Vector2i(short, long) if upright else Vector2i(long, short)
 		if window.content_scale_size != want:
 			window.content_scale_size = want
+	# One handler per window: a restarted scene calling this again replaces
+	# the old one instead of adding another.
+	if window.has_meta("fcc_fit"):
+		var old: Callable = window.get_meta("fcc_fit")
+		if window.size_changed.is_connected(old):
+			window.size_changed.disconnect(old)
+	window.set_meta("fcc_fit", turn)
 	window.size_changed.connect(turn)
 	turn.call()
 

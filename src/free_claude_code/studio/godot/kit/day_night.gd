@@ -17,6 +17,7 @@ var _sky_horizon := Color.WHITE
 var _ground_horizon := Color.WHITE
 var _background := Color.WHITE
 var _ambient := Color.WHITE
+var _fog := Color.WHITE
 
 ## The light's tint through the day (white at noon keeps the scene's colours).
 const TINT := [
@@ -42,6 +43,7 @@ func _ready() -> void:
 		var env := world.environment
 		_background = env.background_color
 		_ambient = env.ambient_light_color
+		_fog = env.fog_light_color
 		if env.sky and env.sky.sky_material is ProceduralSkyMaterial:
 			var sky := env.sky.sky_material as ProceduralSkyMaterial
 			_sky_top = sky.sky_top_color
@@ -80,3 +82,4 @@ func _process(delta: float) -> void:
 			sky.sky_horizon_color = _sky_horizon * tint
 			sky.ground_horizon_color = _ground_horizon * tint
 		env.ambient_light_color = _ambient * tint
+		env.fog_light_color = _fog * tint

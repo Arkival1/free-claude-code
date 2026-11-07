@@ -305,6 +305,21 @@ def test_the_v2_file_list_is_v86s_format_and_names_say_where_files_live(tmp_path
     assert by_name["etc"][3] == stat.S_IFDIR | 0o755  # made for etc/big
 
 
+def test_a_cut_off_cached_blob_is_made_again(tmp_path):
+    """A build stopped mid-write leaves a short blob; the next build checks it
+    and packs the file again instead of shipping the broken bytes."""
+    build = build2_script()
+    build.BLOBS = tmp_path / "blobs"
+    body = bytes(range(256)) * 50
+    good = build.blob(body)
+    cached = next(build.BLOBS.glob("*.zst"))
+    cached.write_bytes(good[: len(good) // 2])
+    assert zstd.decompress(build.blob(body)) == body
+    assert cached.read_bytes() == good
+    cached.write_bytes(build.blob(b"other"))
+    assert zstd.decompress(build.blob(body)) == body
+
+
 def test_the_v2_start_up_system_mounts_the_real_one_over_9p():
     build = build2_script()
     assert "mount -t 9p host9p /newroot -o trans=virtio" in build.INIT

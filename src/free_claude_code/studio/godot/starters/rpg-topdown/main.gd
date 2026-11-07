@@ -136,8 +136,11 @@ func say(text: String) -> void:
 	box.visible = true
 
 
-func _add_person(at: Vector2, frame: Vector2i, who: String) -> StaticBody2D:
-	var body := StaticBody2D.new()
+func _add_person(at: Vector2, frame: Vector2i, who: String) -> CharacterBody2D:
+	# A CharacterBody2D, so a wandering person stops at walls and the player
+	# (Kit.wander moves it with move_and_slide) instead of walking through.
+	var body := CharacterBody2D.new()
+	body.motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 	body.position = at
 	body.set_meta("who", who)
 	body.add_child(_sprite(frame, preload("res://assets/characters.png")))

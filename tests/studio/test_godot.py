@@ -110,6 +110,7 @@ def test_the_2d_starters_fill_an_upright_phone_and_3d_starters_keep_sizes():
     for name in ("third-person-3d", "action-3d"):
         files = godot.starter_files(name)
         assert b'window/stretch/mode="canvas_items"' in files["project.godot"]
+        assert b'window/stretch/aspect="expand"' in files["project.godot"]
         assert b"Kit.fit_screen(get_window()" in files["main.gd"]
 
 

@@ -285,9 +285,18 @@ def blob(body: bytes) -> bytes:
     BLOBS.mkdir(parents=True, exist_ok=True)
     cached = BLOBS / f"{hashlib.sha256(body).hexdigest()}-{ZSTD_LEVEL}.zst"
     if cached.exists():
-        return cached.read_bytes()
+        packed = cached.read_bytes()
+        # A build stopped mid-write leaves a cut-off blob: check it unpacks to
+        # the same bytes before reusing it, else make it again.
+        try:
+            if zstd.decompress(packed) == body:
+                return packed
+        except zstd.ZstdError:
+            pass
     packed = zstd.compress(body, level=ZSTD_LEVEL)
-    cached.write_bytes(packed)
+    part = cached.with_suffix(".part")
+    part.write_bytes(packed)
+    part.replace(cached)
     return packed
 
 
