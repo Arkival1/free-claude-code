@@ -770,3 +770,35 @@ def test_a_saved_paid_zai_model_is_swapped_for_the_free_one(
     )
     assert sent == ["glm-4.7-flash"]
     assert said == {"text": "Hi!", "saved": "glm-4.7-flash"}
+
+
+def test_four_billion_parameter_models_fit_the_phone(
+    page: Page, admin_base_url: str
+) -> None:
+    """Owner: 4B models on the phone. Each 4B download is under the 2 GB a
+    phone browser can load, starts at 2,048 tokens of context, and needs
+    about 2.1 GB, under the 2.5 GB the Models page warns about."""
+    open_phone(page, admin_base_url, "models")
+    expect(page.get_by_text("Qwen3 4B Instruct")).to_be_visible()
+    found = page.evaluate(
+        """async () => {
+            const engine = await import('./js/engine.js');
+            const { estimateMemory } = await import('./js/gguf.js');
+            // Qwen3 4B: 36 layers, 32 heads (8 for keys and values), 2,560 wide.
+            const info = { layers: 36, heads: 32, kvHeads: 8, embedding: 2560 };
+            return engine.CATALOG.filter((entry) => / 4B/.test(entry.name)).map((entry) => ({
+                name: entry.name,
+                fits: entry.size < engine.MAX_FILE,
+                context: entry.context,
+                gb: estimateMemory(info, entry.size, entry.context) / 1024 ** 3,
+            }));
+        }"""
+    )
+    assert [row["name"] for row in found] == [
+        "Qwen3 4B Instruct",
+        "Qwen3 4B (thinking)",
+        "Gemma 3 4B",
+    ]
+    for row in found:
+        assert row["fits"] and row["context"] == 2048, row
+        assert row["gb"] < 2.5, row

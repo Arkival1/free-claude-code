@@ -206,7 +206,7 @@ function addCard() {
     }
   });
   return card("Add a model from Files", [
-    el("p", { class: "muted", text: "Any .gguf model: from your iPhone's Files app, iCloud Drive, or a download. Studio reads it and says what it can do. Under 2 GB works best; a 0.5–3B model at Q4_K_M suits an iPhone." }),
+    el("p", { class: "muted", text: "Any .gguf model: from your iPhone's Files app, iCloud Drive, or a download. Studio reads it and says what it can do. Under 2 GB works best: a 0.5–3B model at Q4_K_M, or a 4B model at IQ3 or Q3_K_S on a 6 GB iPhone." }),
     el("label", { class: "drop" }, [input, el("strong", { text: "Choose a .gguf file" }), el("small", { class: "muted", text: "It's copied into the app, so it works offline." })]),
     adding.fraction === null ? null : meter(adding.fraction),
     el("p", { class: "muted", role: "status", text: adding.status }),

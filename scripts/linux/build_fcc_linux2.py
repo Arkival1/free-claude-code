@@ -247,6 +247,7 @@ def kernel_and_modules(
     order: list[str] = []
 
     def visit(path: str) -> None:
+        """Add a module after everything it needs (each once)."""
         if path in order:
             return
         for dep in reversed(needs.get(path, [])):
@@ -393,6 +394,7 @@ def file_list(root, names: dict[str, str]) -> list:
             node["kids"][parts[-1]] = {"leaf": name}
 
     def emit(label: str, node: dict) -> list:
+        """One entry of the list: a file, a link, or a folder with its own."""
         if "leaf" in node:
             path = node["leaf"]
             info, body = root[path]
@@ -433,6 +435,8 @@ def file_list(root, names: dict[str, str]) -> list:
 
 
 def build(out: Path) -> dict:
+    """Build FCC Linux 2 into `out` (kernel, initrd, file list, packs and the
+    manifest) and return the manifest."""
     root: dict[str, tuple[tarfile.TarInfo, bytes | None]] = {}
     owner: dict[str, str] = {}
     base_size = base.unpack(base.fetch(*base.MINIROOTFS), root, LEAVE_OUT)
@@ -599,6 +603,7 @@ def build(out: Path) -> dict:
 
 
 def main() -> None:
+    """Build it and print what went in."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=OUT)
     report = build(parser.parse_args().out)

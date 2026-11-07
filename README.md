@@ -3034,7 +3034,9 @@ repository's `docs/` folder:
 2. On the iPhone, open `https://<you>.github.io/<repo>/phone/` in **Safari**,
    tap **Share → Add to Home Screen → Add**.
 3. Open FCC Phone from its icon, go to **Models**, and download Qwen3 0.6B (or
-   add a `.gguf` from Files). Tick **Use a model on this phone as every
+   add a `.gguf` from Files). A 6 GB iPhone (12 Pro or newer) also runs the
+   4B models there (Qwen3 4B Instruct, Qwen3 4B thinking, Gemma 3 4B: about
+   1.7 GB each, squeezed to fit, at 2,048 tokens of context). Tick **Use a model on this phone as every
    agent's default brain**, then talk to Jarvis on **Home**.
 
 (Studio on the PC also serves it at `/phone/`, for example
