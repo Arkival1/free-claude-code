@@ -73,7 +73,10 @@ async function syncInNow(machine) {
       }
     }
   }
-  lines.push(TOUCH);
+  // The mark is only made here when there isn't one yet: moving it would skip
+  // files changed in Linux that syncOut hasn't brought back (files written
+  // here come back unchanged and are skipped by their contents).
+  lines.push(`[ -f ${MARK} ] || ${TOUCH}`);
   await flush();
   return count;
 }
@@ -133,10 +136,11 @@ async function bringBack(machine, lines, agentName, back) {
       sent.set(key, body);
       continue;
     }
-    // Changed on both sides since FCC wrote it in: the phone's copy stays and
-    // Linux's comes in beside it, so neither is lost (a kept session brings
-    // its record back, so this holds after reopening too).
-    if (sent.has(key) && project.files[path] !== sent.get(key)) {
+    // Changed on both sides since FCC wrote it in, or the phone has its own
+    // copy and there's no record of what was written in (a kept session whose
+    // record was lost): the phone's copy stays and Linux's comes in beside
+    // it, so neither is lost.
+    if (project.files[path] !== undefined && (!sent.has(key) || project.files[path] !== sent.get(key))) {
       await putFile(project, `${path}.from-linux${text ? ".txt" : path.slice(path.lastIndexOf("."))}`, body, agentName).catch(() => null);
       back.push(`${slug}/${path} (both changed: Linux's copy kept beside it)`);
       continue;

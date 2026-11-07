@@ -714,3 +714,59 @@ def test_a_key_free_ai_stays_off_until_switched_on_and_free_keys_stay_free(
     expect(
         page.get_by_text("1 models; using nvidia/nemotron-3-ultra-550b-a55b")
     ).to_be_visible()
+
+
+def test_a_saved_paid_zai_model_is_swapped_for_the_free_one(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: Z.ai is offered as free, so a paid model saved
+    before the free-only list (or typed on an agent) is never sent."""
+    sent: list[str] = []
+
+    def zai(route: Route) -> None:
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json",
+        }
+        if route.request.method == "OPTIONS":
+            route.fulfill(
+                status=204, headers={**headers, "Access-Control-Allow-Headers": "*"}
+            )
+        elif route.request.url.endswith("/models"):
+            route.fulfill(
+                headers=headers,
+                body=json.dumps(
+                    {
+                        "data": [
+                            {"id": "glm-5.3-flash"},
+                            {"id": "glm-4.7-flash"},
+                            {"id": "glm-5.3"},
+                        ]
+                    }
+                ),
+            )
+        else:
+            sent.append(json.loads(route.request.post_data or "{}").get("model", ""))
+            route.fulfill(
+                headers=headers,
+                body=json.dumps(
+                    {"choices": [{"message": {"role": "assistant", "content": "Hi!"}}]}
+                ),
+            )
+
+    page.route("https://api.z.ai/**", zai)
+    open_phone(page, admin_base_url)
+    said = page.evaluate(
+        """async () => {
+            const { state, jarvis, save } = await import('./js/state.js');
+            const { think } = await import('./js/brains.js');
+            state.settings.keys.zai = 'zai-test-key';
+            state.settings.models.zai = 'glm-5.3-flash';
+            await save.settings();
+            const agent = { ...jarvis(), brain: 'zai', model: '' };
+            const reply = await think(agent, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+            return { text: reply.text, saved: state.settings.models.zai };
+        }"""
+    )
+    assert sent == ["glm-4.7-flash"]
+    assert said == {"text": "Hi!", "saved": "glm-4.7-flash"}

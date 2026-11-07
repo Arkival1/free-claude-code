@@ -30,9 +30,11 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import stat
 import sys
 import tarfile
+import tempfile
 import zlib
 from compression import zstd
 from pathlib import Path
@@ -294,9 +296,12 @@ def blob(body: bytes) -> bytes:
         except zstd.ZstdError:
             pass
     packed = zstd.compress(body, level=ZSTD_LEVEL)
-    part = cached.with_suffix(".part")
-    part.write_bytes(packed)
-    part.replace(cached)
+    # A file of its own per write (two builds at once never share one), then
+    # moved into place in one step.
+    handle, name = tempfile.mkstemp(dir=BLOBS, suffix=".part")
+    with os.fdopen(handle, "wb") as part:
+        part.write(packed)
+    Path(name).replace(cached)
     return packed
 
 

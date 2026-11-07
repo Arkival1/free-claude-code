@@ -232,9 +232,12 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
     // own record, its feed line and the report all say so.
     // A check that breaks (say a file restored from an odd backup) keeps the
     // agent's work and handover, and says the check couldn't run.
+    // Only for jobs that build: a helper's parts and an adviser's read-only
+    // turn aren't the finished project.
     let still = "";
     let problems = [];
-    if (ctx.project && Object.keys(ctx.project.files || {}).length) {
+    const builds = !ctx.partsOnly && (!ctx.tools || ctx.tools.some((name) => ["write_file", "edit_file", "start_project"].includes(name)));
+    if (builds && ctx.project && Object.keys(ctx.project.files || {}).length) {
       try {
         const { checkProject } = await import("./projects.js");
         problems = checkProject(ctx.project).filter((problem) => !problem.startsWith("Note: "));
@@ -244,10 +247,10 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
       }
     }
     if (report) report.problems = problems;
-    job.status = "done";
+    job.status = problems.length ? "unfinished" : "done";
     job.result = `${result}${still}`;
     job.problems = Boolean(still);
-    await addTurn(agent, { role: "assistant", text: result });
+    await addTurn(agent, { role: "assistant", text: `${result}${still}` });
     // The agent that did the work and every agent that handed the job down
     // (Jarvis included) get the app to download.
     for (const id of ctx.chain) await handOver(state.agents.find((item) => item.id === id), ctx.built);

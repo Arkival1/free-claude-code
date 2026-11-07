@@ -255,7 +255,7 @@ export async function listModels(brain) {
   if (brain === "requesty") rows = rows.filter((row) => row.input_price === 0 && row.output_price === 0 && row.api === "chat" && row.supports_tool_calling);
   if (brain === "nous") rows = rows.filter((row) => row.id.endsWith(":free"));
   // Z.ai's free models are its GLM 4.x Flash ones (newer Flash models are paid).
-  if (brain === "zai") rows = rows.filter((row) => /^glm-4\.\d+-flash$/.test(row.id));
+  if (brain === "zai") rows = rows.filter((row) => ZAI_FREE.test(row.id));
   if (brain === "ovh") rows = rows.filter((row) => !/whisper|tts|embed|bge|guard|diffusion|VL-/i.test(row.id));
   rows.sort((a, b) => a.id.localeCompare(b.id));
   state.modelLists[brain] = rows;
@@ -280,6 +280,9 @@ function parseArgs(raw) {
 /** keepReasoning (Z.ai): its thinking comes back with the tool calls and is
  * sent back unchanged on the next request, as Z.ai asks, so a multi-step job
  * keeps its train of thought. Other services get nothing extra. */
+/** Z.ai's free models (its other Flash models are paid). */
+const ZAI_FREE = /^glm-4\.\d+-flash$/;
+
 function normalise(message, keepReasoning = false) {
   return {
     ...(keepReasoning && typeof message.reasoning_content === "string" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}),
@@ -315,6 +318,13 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
     model = modelOf(agent, brain);
   }
   if (!model) throw new BrainError(`Pick a model for ${PROVIDERS[brain].label} in Settings.`);
+  // Z.ai is offered as free: only its free Flash models are ever sent (a paid
+  // one saved before, or typed on an agent, is swapped for the free one).
+  if (brain === "zai" && !ZAI_FREE.test(model)) {
+    await listModels(brain).catch(() => []);
+    model = ZAI_FREE.test(state.settings.models.zai || "") ? state.settings.models.zai : "";
+    if (!model) throw new BrainError("Z.ai: only its free GLM Flash models are used. Pick one in Settings.");
+  }
   const useTools = tools.length && !state.settings.noTools[`${brain}:${model}`];
   const body = { model, messages: [{ role: "system", content: system }, ...messages], temperature: 0.5, max_tokens: maxTokens };
   if (useTools) body.tools = tools;

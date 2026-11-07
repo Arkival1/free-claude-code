@@ -365,3 +365,36 @@ def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
     assert result["bounced"] == 502
     assert len(asked) == 2, asked  # once for the push, once for the deletion
     assert "push to me/app" in asked[0] and "Allow this one change?" in asked[1]
+
+
+def test_a_phone_file_without_a_sync_record_is_never_overwritten(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: when the record of what FCC wrote into Linux is
+    missing (a kept session whose record was lost), a Linux file that differs
+    from the phone's comes in beside it instead of replacing it."""
+    page.set_default_timeout(WAIT)
+    open_phone(page, admin_base_url, "settings")
+    result = page.evaluate(
+        """async () => {
+            const projects = await import('./js/projects.js');
+            const sync = await import('./js/linuxprojects.js');
+            const project = await projects.createProject('Kept', 'you');
+            await projects.putFile(project, 'index.html', 'phone copy', 'you');
+            sync.forgetSynced();
+            const linuxCopy = btoa('linux copy');
+            const machine = {
+                run: async (command) => {
+                    if (command.includes('find .')) return { code: 0, text: '1' };
+                    if (command.startsWith('sed -n')) return { code: 0, text: `./${project.slug}/index.html` };
+                    if (command.startsWith('base64')) return { code: 0, text: linuxCopy };
+                    return { code: 0, text: '' };
+                },
+            };
+            const back = await sync.syncOut(machine, 'you');
+            return { back, files: project.files };
+        }"""
+    )
+    assert result["files"]["index.html"] == "phone copy"
+    assert result["files"]["index.html.from-linux.txt"] == "linux copy"
+    assert "both changed" in result["back"][0]
