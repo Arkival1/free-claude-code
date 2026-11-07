@@ -542,7 +542,7 @@ def test_a_model_too_big_for_the_phone_stops_being_used(
     page.evaluate(
         """async () => {
             const f = window.fccPhone;
-            f.state.models.push({id: 'huge', name: 'Huge Model', ready: true, size: 1,
+            f.state.models.push({id: 'huge', name: 'Huge Model', ready: true, size: 1200000000,
                 settings: {context: 2048, gpu: true}});
             f.state.settings.localModel = 'huge';
             f.state.settings.brain = 'local';
@@ -585,6 +585,14 @@ def test_a_model_too_big_for_the_phone_stops_being_used(
     ).to_be_visible()
     expect(page.get_by_role("button", name="Try Huge Model again")).to_be_visible()
     expect(page.get_by_role("button", name="Load Huge Model")).to_have_count(0)
+    # The advice is sized to this phone: models clearly smaller than the one
+    # that didn't fit, and bigger ones are flagged before they're downloaded.
+    expect(page.locator(".warn").first).to_contain_text("Llama 3.2 1B Instruct or Gemma 3 1B")
+    flagged = page.locator(
+        ".item", has=page.get_by_text("Probably too big for this phone")
+    )
+    expect(flagged.filter(has_text="Qwen3 1.7B")).to_have_count(1)
+    expect(flagged.filter(has_text="Llama 3.2 1B")).to_have_count(0)
 
 
 def reopen(page: Page) -> None:

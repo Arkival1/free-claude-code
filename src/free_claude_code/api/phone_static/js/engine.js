@@ -161,7 +161,8 @@ export async function recoverFromCrash() {
       // Models (Try again) but isn't used, so the agents think with another
       // brain instead of closing the app again and again.
       model.tooBig = true;
-      change = ` It's too big for this phone even at its lightest, so FCC Phone stopped using it${state.models.some(usable) ? " and uses your other phone model" : ""}. Pick a smaller one on Models (Qwen3 1.7B or Llama 3.2 1B) or a free cloud brain (More, Settings).`;
+      const smaller = suggestions();
+      change = ` It's too big for this phone even at its lightest, so FCC Phone stopped using it${state.models.some(usable) ? " and uses your other phone model" : ""}. ${smaller ? `Try a smaller one on Models (${smaller})` : "Use a smaller model"} or a free cloud brain (More, Settings: a free Google Gemini key works well).`;
     }
     model.crashes = (model.crashes || 0) + 1;
     await save.models();
@@ -209,6 +210,23 @@ export function modelById(id) {
 /** A model the agents may think with: downloaded, and not one that closed
  * the app at its lightest settings (too big for this phone). */
 export const usable = (model) => Boolean(model && model.ready && !model.tooBig);
+
+/** The size this phone couldn't load: the smallest model that was too big
+ * (Infinity until one was). */
+export function tooBigSize() {
+  return Math.min(Infinity, ...state.models.filter((model) => model.tooBig && model.size > 1).map((model) => model.size));
+}
+
+/** Whether a catalog model is likely to fit: clearly smaller (under 80%)
+ * than the smallest model this phone couldn't load. */
+export const likelyFits = (entry) => entry.size < 0.8 * tooBigSize();
+
+/** Models on the catalog that are likely to fit, biggest first: what to
+ * suggest after one was too big. */
+export function suggestions(limit = 2) {
+  const fits = CATALOG.filter(likelyFits).sort((a, b) => b.size - a.size);
+  return fits.length ? fits.slice(0, limit).map((entry) => entry.name).join(" or ") : "";
+}
 
 /** Try a too-big model again (the user's call, from Models). */
 export async function tryAgain(model) {

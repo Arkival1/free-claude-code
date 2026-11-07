@@ -250,7 +250,13 @@ function catalogCard() {
     ...engine.CATALOG.map((entry) => {
       const have = state.models.find((model) => model.id === entry.id);
       return el("div", { class: "item" }, [
-        el("div", { class: "grow" }, [el("strong", { text: entry.name }), el("small", { text: `${bytes(entry.size)} · ${entry.note} Good for ${entry.good.join(", ")}.` })]),
+        el("div", { class: "grow" }, [
+          el("strong", { text: entry.name }),
+          el("small", { text: `${bytes(entry.size)} · ${entry.note} Good for ${entry.good.join(", ")}.` }),
+          // After a model was too big here, bigger ones are flagged before
+          // they're downloaded.
+          engine.likelyFits(entry) ? null : el("small", { class: "warn", text: `Probably too big for this phone: a ${bytes(engine.tooBigSize())} model already was.` }),
+        ]),
         have && have.ready
           ? el("span", { class: "pill good", text: "on phone" })
           : button(downloads.has(entry.id) ? "…" : "Download", () => startDownload(entry), { class: "primary", "aria-label": `Download ${entry.name}`, disabled: downloads.has(entry.id) }),

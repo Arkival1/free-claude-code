@@ -310,7 +310,7 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
     const model = localModelOf(agent);
     if (!model) throw new BrainError("No model on this phone yet. Open Models and download one (Qwen3 0.6B is a quick start).");
     if (!model.ready) throw new BrainError(`${model.name} hasn't finished downloading. Open Models to finish it.`);
-    if (model.tooBig) throw new BrainError(`${model.name} is too big for this phone (it closed the app while loading). Pick a smaller model on Models (Qwen3 1.7B or Llama 3.2 1B), or add a free cloud key in More, Settings.`);
+    if (model.tooBig) throw new BrainError(`${model.name} is too big for this phone (it closed the app while loading). ${engine.suggestions() ? `Try a smaller model on Models (${engine.suggestions()})` : "Try a smaller model on Models"}, or add a free cloud key in More, Settings.`);
     const system2 = model.info && model.info.reasoning ? `${system}\n\n/no_think` : system;
     const message = await engine.chat(model, { messages: [{ role: "system", content: system2 }, ...messages], tools, maxTokens: Math.min(maxTokens, 1024) });
     return normalise(message);
