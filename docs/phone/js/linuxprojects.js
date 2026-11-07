@@ -172,7 +172,14 @@ async function bringBack(machine, lines, agentName, back, missed) {
       if (!back.projects.includes(project)) back.projects.push(project);
       continue;
     }
-    await putFile(project, path, body, agentName);
+    try {
+      await putFile(project, path, body, agentName);
+    } catch {
+      // Not saved: the mark stays and syncIn leaves Linux's copy alone.
+      missed.push(relative);
+      pending.add(key);
+      continue;
+    }
     sent.set(key, body);
     pending.delete(key);
     back.push(key);

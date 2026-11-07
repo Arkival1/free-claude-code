@@ -412,7 +412,12 @@ export async function runPlayground(task, saveTasks) {
       if (work.status === "failed") throw new Error(work.result);
       // A work step reused from an earlier run (Run again) has no fresh report:
       // FCC checks the project itself, so a failed task can't become done.
-      unfinished = report.problems || (project ? checkProject(project).filter((problem) => !problem.startsWith("Note: ")) : []);
+      try {
+        unfinished = report.problems || (project ? checkProject(project).filter((problem) => !problem.startsWith("Note: ")) : []);
+      } catch (error) {
+        // A check that breaks keeps the work; the step just isn't counted done.
+        unfinished = [`FCC couldn't check the project (${error.message}).`];
+      }
       // A try that leaves the project failing FCC's check isn't a finished
       // step (Run again does it again); it shows as unfinished, not done.
       if (unfinished.length && work.status === "done") {

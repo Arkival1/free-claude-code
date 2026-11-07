@@ -251,6 +251,8 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
         problems = [...problems, ...found];
         still += `\n\nFCC's own check of ${project.name} still finds ${found.length} problem(s), so it isn't finished:\n${found.slice(0, 6).map((problem) => `- ${problem}`).join("\n")}\nDon't tell the user it's done: have them fixed first.`;
       } catch (error) {
+        // A check that couldn't run isn't a pass: the job stays unfinished.
+        problems = [...problems, `FCC couldn't check ${project.name} (${error.message}).`];
         still += `\n\nFCC couldn't check ${project.name} (${error.message}), so whether it works isn't known yet.`;
       }
     }

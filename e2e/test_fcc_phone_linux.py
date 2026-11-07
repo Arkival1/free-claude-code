@@ -366,8 +366,12 @@ def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
                 Object.defineProperty(answer, 'url', { value: 'http://192.168.1.5/admin' });
                 return answer;
             };
-            const followed = await net.handle({ url: 'http://pypi.org/simple/x/', method: 'GET' }, { ask });
-            window.fetch = realFetch;
+            let followed;
+            try {
+                followed = await net.handle({ url: 'http://pypi.org/simple/x/', method: 'GET' }, { ask });
+            } finally {
+                window.fetch = realFetch;
+            }
             return { own: own.status, local, bounced: bounced.status, bouncedRead: bouncedRead.status, followed: followed.status, followMode };
         }"""
     )
