@@ -169,7 +169,7 @@ function settingsSheet(model) {
   });
   openSheet(`${model.name} settings`, [
     el("label", {}, ["Context (how much it remembers at once)", context]),
-    el("p", { class: "muted small", text: "More context uses more memory. 4,096 suits most chats; the Builder likes 8,192 for bigger pages." }),
+    el("p", { class: "muted small", text: "More context uses more memory. Jarvis with all his tools likes 16,384; 32,768 is for small models or the graphics chip, and can close the app on bigger ones (FCC then makes it lighter). Old messages are trimmed to fit." }),
     el("label", {}, ["Temperature (how adventurous its answers are)", temperature, shown]),
     // Graphics-chip models always run on the chip.
     model.engine === "webgpu" ? null : el("label", { class: "check" }, [gpu, el("span", { text: "Use the graphics chip (faster)" })]),

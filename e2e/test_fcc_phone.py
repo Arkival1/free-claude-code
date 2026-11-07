@@ -693,7 +693,7 @@ def test_a_4b_runs_on_the_graphics_chip_with_tools_and_temperature(
         "/vendor/web-llm/libs/Qwen3-4B-q4f16_1_cs1k-webgpu.wasm"
     )
     assert "/resolve/a5c9fab855e3ccbdfed2e7e69683d75f30332161/" in record["model"]
-    assert record["overrides"]["context_window_size"] == 2048
+    assert record["overrides"]["context_window_size"] == 4096
     # FCC's own copy of the model program is served with the phone.
     assert (
         page.evaluate(
@@ -766,13 +766,63 @@ def test_qwen3_5_2b_comes_on_the_graphics_chip_and_as_a_small_file(
     record = created["list"][0]
     assert record["model_lib"].endswith("/libs/Qwen3.5-2B-q4f32_1_cs1k-webgpu.wasm")
     assert record["overrides"]["conv_config"]["stop_token_ids"] == [248046, 248044]
-    assert record["overrides"]["context_window_size"] == 2048
+    assert record["overrides"]["context_window_size"] == 4096
     assert (
         page.evaluate(
             f"async () => (await fetch({json.dumps(record['model_lib'])})).status"
         )
         == 200
     )
+
+
+def test_jarvis_and_his_tools_fit_a_phone_models_context(
+    page: Page, admin_base_url: str
+) -> None:
+    seen = fake_gemini(page)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("hello")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text("Hi")
+    tools = seen[-1]["tools"]
+    result = page.evaluate(
+        """async (tools) => {
+            const engine = await import('./js/engine.js');
+            const chars = (value) => JSON.stringify(value).length;
+            const system = { role: 'system', content: 'You are Jarvis. '.repeat(140) };
+            const history = [];
+            for (let turn = 0; turn < 40; turn += 1) {
+                history.push({ role: 'user', content: `question ${turn} `.repeat(30) });
+                history.push({ role: 'assistant', content: `answer ${turn} `.repeat(30) });
+            }
+            const latest = { role: 'user', content: 'Make me a website for my cafe.' };
+            const fit = engine.fitToContext({ messages: [system, ...history, latest], tools, maxTokens: 1024, context: 8192, name: 'Qwen' });
+            let error = '';
+            try {
+                engine.fitToContext({ messages: [system, { role: 'user', content: 'x'.repeat(30000) }], tools, maxTokens: 1024, context: 2048, name: 'Qwen' });
+            } catch (e) { error = e.message; }
+            return {
+                full: chars(tools), compact: chars(fit.tools), names: fit.tools.map((t) => t.function.name),
+                total: Math.ceil((chars(fit.messages) + chars(fit.tools)) / 3.2) + fit.maxTokens,
+                first: fit.messages[0].role, last: fit.messages[fit.messages.length - 1].content,
+                kept: fit.messages.length, answer: fit.maxTokens, error,
+                contexts: engine.CONTEXTS,
+            };
+        }""",
+        tools,
+    )
+    # Every tool is still there, in about two-thirds of the space.
+    assert result["names"] == [tool["function"]["name"] for tool in tools]
+    assert result["compact"] < result["full"] * 0.75, result
+    # The oldest turns go; the system message and the request stay; it fits.
+    assert result["first"] == "system"
+    assert result["last"] == "Make me a website for my cafe."
+    assert result["kept"] < 82 and result["total"] <= 8192 and result["answer"] == 1024
+    # Too big even then: it says which setting to change.
+    assert "pick a bigger context (16,384" in result["error"]
+    assert result["contexts"][-2:] == [16384, 32768]
 
 
 def reopen(page: Page) -> None:

@@ -117,7 +117,7 @@ export const CATALOG = [
     engine: "webgpu",
     url: "https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC",
     size: 2279167154,
-    context: 2048,
+    context: 4096,
     note: "4B on the graphics chip: the smartest that runs on an iPhone, about 5–10 words a second on recent ones. Needs WebGPU and about 3 GB of graphics memory (iPhone 15 Pro or newer is safest).",
     good: ["Jarvis", "Builder"],
   },
@@ -127,7 +127,7 @@ export const CATALOG = [
     engine: "webgpu",
     url: "https://huggingface.co/mlc-ai/Qwen3.5-2B-q4f16_1-MLC",
     size: 1083000000,
-    context: 2048,
+    context: 4096,
     note: "Qwen3.5 2B on the graphics chip: newer and smarter than the 1.7B, good with tools. Needs WebGPU and about 2 GB of graphics memory.",
     good: ["Jarvis", "Builder"],
   },
@@ -137,14 +137,15 @@ export const CATALOG = [
     engine: "webgpu",
     url: "https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC",
     size: 980000000,
-    context: 2048,
+    context: 4096,
     note: "1.7B on the graphics chip: quick, fits more iPhones. Needs WebGPU.",
     good: ["Jarvis", "Helper"],
   },
 ];
 
 export const MAX_FILE = 2 * 1024 * 1024 * 1024;
-const CONTEXTS = [2048, 4096, 8192];
+// 16k and 32k need far more memory: for small models, or the graphics chip.
+const CONTEXTS = [2048, 4096, 8192, 16384, 32768];
 export { CONTEXTS };
 
 let wllama = null;
@@ -469,7 +470,83 @@ function friendly(error) {
 }
 
 /** One chat completion on the phone, in the OpenAI shape. One at a time. */
+// Tools a phone model always keeps, however small its context.
+const CORE_TOOLS = new Set(["remember", "recall", "calculate", "weather", "wikipedia", "todo", "ask_agent", "start_task", "start_project", "write_file", "edit_file", "read_file", "list_files", "check_project"]);
+
+// Rough characters per token for these models' tokenizers (English, JSON).
+const CHARS_PER_TOKEN = 3.2;
+const tokensOf = (value) => Math.ceil(JSON.stringify(value ?? "").length / CHARS_PER_TOKEN);
+
+function shorten(text, max) {
+  const value = String(text || "").replace(/\s+/g, " ").trim();
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const stop = cut.lastIndexOf(". ");
+  return stop > max / 3 ? cut.slice(0, stop + 1) : `${cut.trimEnd()}…`;
+}
+
+function trimSchema(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(trimSchema);
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "description") out.description = shorten(value, 60);
+    else if (key === "properties") out.properties = Object.fromEntries(Object.entries(value || {}).map(([name, part]) => [name, trimSchema(part)]));
+    else out[key] = typeof value === "object" ? trimSchema(value) : value;
+  }
+  return out;
+}
+
+/** The same tools with shorter descriptions: a phone model's context is
+ * small, and the long how-to text (the lab tool alone is 4,000 characters)
+ * is in each tool's guide action anyway. */
+export function compactTools(tools) {
+  return (tools || []).map((tool) => {
+    const fn = tool.function || tool;
+    return { type: "function", function: { name: fn.name, description: shorten(fn.description, 160), parameters: trimSchema(fn.parameters) } };
+  });
+}
+
+/** Fit a chat into a phone model's context: shorter tool descriptions, then
+ * the oldest turns dropped (never the system message or the latest request
+ * and what follows it), then a shorter answer; if it still can't fit, say so
+ * plainly with the setting to change. */
+export function fitToContext({ messages, tools, maxTokens, context, name = "This model" }) {
+  let fitTools = tools && tools.length ? compactTools(tools) : undefined;
+  const toolSize = () => (fitTools && fitTools.length ? tokensOf(fitTools) : 0);
+  const size = (list) => tokensOf(list) + toolSize();
+  const list = [...messages];
+  const room = context - 64;
+  let lastUser = list.map((message) => message.role).lastIndexOf("user");
+  while (size(list) + maxTokens > room) {
+    const index = list.findIndex((message, at) => at > 0 && message.role !== "system");
+    if (index < 0 || index >= lastUser) break;
+    list.splice(index, 1);
+    lastUser -= 1;
+    // A dropped request's tool results go with it.
+    while (index < lastUser && list[index] && list[index].role === "tool") {
+      list.splice(index, 1);
+      lastUser -= 1;
+    }
+  }
+  // Still too big: the biggest tools sit this turn out (the Lab, Linux,
+  // Godot...), never the everyday ones, so a small context still chats.
+  while (fitTools && fitTools.length && size(list) + Math.min(maxTokens, 512) > room) {
+    const droppable = fitTools.filter((tool) => !CORE_TOOLS.has(tool.function.name));
+    if (!droppable.length) break;
+    const biggest = droppable.reduce((a, b) => (tokensOf(a) >= tokensOf(b) ? a : b));
+    fitTools = fitTools.filter((tool) => tool !== biggest);
+  }
+  if (fitTools && !fitTools.length) fitTools = undefined;
+  const answer = Math.min(maxTokens, room - size(list));
+  if (answer < 256) {
+    throw new Error(`${name} needs about ${Math.ceil((size(list) + 256) / 1024)}K tokens of context for this, but it's set to ${context.toLocaleString()}. On Models, tap Settings on it and pick a bigger context (16,384 suits Jarvis and his tools), or use a free cloud brain for big jobs.`);
+  }
+  return { messages: list, tools: fitTools, maxTokens: answer };
+}
+
 export function chat(model, { messages, tools, maxTokens = 1024, temperature = settingsFor(model).temperature }) {
+  ({ messages, tools, maxTokens } = fitToContext({ messages, tools: model.engine === "webgpu" || (model.info && model.info.tools) ? tools : undefined, maxTokens, context: settingsFor(model).context, name: model.name }));
   if (model.engine === "webgpu") return chatGpu(model, { messages, tools, maxTokens, temperature });
   const run = queue.then(async () => {
     await load(model);
