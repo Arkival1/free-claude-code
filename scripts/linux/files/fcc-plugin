@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""fcc-plugin: call a plugin you switched on in FCC (More, Plugins).
+
+    fcc-plugin NAME URL
+
+NAME is the plugin's name as FCC lists it; URL is the https address to call.
+FCC adds the plugin's key outside Linux (write {key} where the key goes), so
+the key never enters FCC Linux.
+"""
+
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+if len(sys.argv) != 3:
+    print(__doc__.strip(), file=sys.stderr)
+    sys.exit(2)
+query = urllib.parse.urlencode({"plugin": sys.argv[1], "url": sys.argv[2]})
+try:
+    with urllib.request.urlopen(f"http://fcc.plugins/call?{query}", timeout=60) as answer:
+        sys.stdout.write(answer.read().decode(errors="replace"))
+except urllib.error.HTTPError as error:
+    print(f"fcc-plugin: {error.read().decode(errors='replace').strip()}", file=sys.stderr)
+    sys.exit(1)
+except urllib.error.URLError as error:
+    print(f"fcc-plugin: FCC didn't answer ({error.reason}).", file=sys.stderr)
+    sys.exit(1)

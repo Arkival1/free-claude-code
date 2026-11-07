@@ -13,6 +13,7 @@ import { game3dFiles, useLab, GAME3D_ABOUT } from "./lab.js";
 import { useWorkshop } from "./workshop.js";
 import { useWebKit } from "./webkit.js";
 import { useGodot, isGodotProject } from "./godot.js";
+import { useArt, ART_COUNT } from "./art.js";
 import { SKILLS } from "./skills.js";
 import { searchPhotos, findPhoto, photoData, describe as describePhoto } from "./photos.js";
 
@@ -82,11 +83,13 @@ export const SPECS = {
     },
   },
   linux: {
-    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time), interrupt (Ctrl-C: stop what's running so the terminal is back at its prompt). Commands only run at the prompt: if the user has a program open (nano, htop), say so instead of interrupting it. It has python3, lua5.4, bash, nano, tmux, sqlite3, jq, bc, make, htop and lynx; files live in /root. Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
+    description: "FCC Linux, a small Linux of FCC's own running on this phone (Alpine-based, 32-bit x86, in a sealed box with no internet): run (a shell command; you get its output and exit code), write (put a text file at path with content), read (a file's text), info (what's installed), keep (save the session so its files are there next time), interrupt (Ctrl-C: stop what's running so the terminal is back at its prompt), sync (bring the user's FCC Projects in and changes back), practice (start a self-teaching session only when the user asks you to practise or learn coding; minutes 0 only if they asked for no limit). Test your code for bugs before saying it works. When you fix a real problem in FCC Linux, save what you learned with remember (kind lesson). The user's FCC Projects are folders in /projects (/projects/<project>/...): work on them there and changed files go back to FCC Projects after each run. Commands only run at the prompt: if the user has a program open (nano, htop), say so instead of interrupting it. It has every language: C/C++ (gcc, g++, cmake, make, gdb), Rust (rustc, cargo), Go, Java 8 (javac, java), Node.js (npm), Python 3.12 (pip), Ruby, PHP, Perl, Lua, plus git, bash, nano, tmux, sqlite3 and jq; files live in /root. A language's files download the first time it's used (give that run seconds: 300). Use it to run and test programs, scripts and data work for the user. The user sees the same terminal on Lab, FCC Linux.",
     parameters: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["run", "write", "read", "info", "keep", "interrupt"] },
+        action: { type: "string", enum: ["run", "write", "read", "info", "keep", "interrupt", "sync", "practice"] },
+        languages: text("practice: which courses, comma-separated (python, c, cpp, rust, go, java, javascript, web, ruby, php, bash, lua, perl, sql); all if left out."),
+        minutes: { type: "number", description: "practice: how long (0 = no limit, when the user asks for that)." },
         command: text("run: the shell command (bash; no keyboard input: it reads nothing)."),
         path: text("write or read: the file's path, e.g. /root/hello.py."),
         content: text("write: the file's whole text."),
@@ -104,6 +107,19 @@ export const SPECS = {
         starter: { type: "string", enum: ["action-3d", "third-person-3d", "platformer-2d", "rpg-topdown"], description: "start: which starter." },
         project: text("check: the project's name (the current project if left out)."),
         seconds: { type: "number", description: "check: how long to run it once it shows its first frame (3 to 30, default 8)." },
+      },
+      required: ["action"],
+    },
+  },
+  game_art: {
+    description: `FCC's ${ART_COUNT} free 2D game sprites (Kenney, CC0): characters, enemies, tiles, items, vehicles, spaceships, cards, UI buttons, icons, effects. guide (how to use them), packs (what each pack holds), search (find sprites by words; gives ids), add (copy sprites by id into the current project as art/<pack>/<file>.png). Use them in every 2D game instead of drawing placeholder shapes.`,
+    parameters: {
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["guide", "packs", "search", "add"] },
+        query: text("search: words, e.g. 'platformer character', 'tiny dungeon', 'coin', 'spaceship'."),
+        pack: text("search: only this pack (from packs)."),
+        ids: text("add: sprite ids from search, separated by commas (up to 60)."),
       },
       required: ["action"],
     },
@@ -189,7 +205,7 @@ export const SPECS = {
     },
   },
   start_project: {
-    description: `Start (or switch to) a project, a folder of files for a website or app. For a new one, pick the closest starter template (${Object.entries(TEMPLATES).map(([name, t]) => `${name}: ${t.about}`).join("; ")}; ${GAME3D_ABOUT}), then make it the user's.`,
+    description: `Start (or switch to) a project, a folder of files for a website or app. For a new one, pick the closest starter template (${Object.entries(TEMPLATES).map(([name, t]) => `${name}: ${t.about}`).join("; ")}; ${GAME3D_ABOUT}), then make it the user's. A 2D game (platformer, top-down RPG, puzzle, shooter) starts from game and gets its sprites from game_art; game3d is only for a 3D action game.`,
     parameters: {
       type: "object",
       properties: { name: text("The project's name."), template: { type: "string", enum: [...Object.keys(TEMPLATES), "game3d"], description: "A starter template for a new project." } },
@@ -292,6 +308,13 @@ export function specsFor(agent, ctx = {}) {
 const partsOnly = (path) => `${path} is the main AI's file. As a helper you write only under parts/ (for example parts/${path.split("/").pop()}); nothing was changed.`;
 
 /** Run one tool call for an agent. ctx: {project, depth, chain}. Returns text. */
+/** Projects Linux changed during a job (FCC checks each one after it). */
+function noteLinuxProjects(ctx, back) {
+  if (!ctx) return;
+  ctx.linuxProjects = ctx.linuxProjects || [];
+  for (const project of back.projects || []) if (!ctx.linuxProjects.includes(project)) ctx.linuxProjects.push(project);
+}
+
 export async function runTool(agent, call, ctx) {
   const args = call.arguments || {};
   const allowed = toolsFor(agent, ctx);
@@ -339,7 +362,16 @@ export async function runTool(agent, call, ctx) {
           if (!command) return "Say the command to run.";
           const result = await machine.run(command, { timeoutMs: Math.min(300, Math.max(1, Number(args.seconds) || 60)) * 1000 });
           feed(agent.name, `Ran in FCC Linux: ${command.slice(0, 80)}`);
-          return `exit code ${result.code}\n${clip(result.text) || "(no output)"}`;
+          // Files changed in /projects go back into their FCC projects.
+          const { syncOut } = await import("./linuxprojects.js");
+          let failed = "";
+          const back = await syncOut(machine, agent.name).catch((error) => {
+            failed = `\n(Couldn't copy changes back to FCC Projects: ${error.message}. Some files may not be in Projects yet; run the linux tool's sync to try again.)`;
+            return [];
+          });
+          noteLinuxProjects(ctx, back);
+          const saved = (back.length ? `\n(Saved back to FCC Projects: ${back.slice(0, 8).join(", ")}${back.length > 8 ? "…" : ""})` : "") + failed;
+          return `exit code ${result.code}\n${clip(result.text) || "(no output)"}${saved}`;
         }
         if (action === "write") {
           const path = String(args.path || "").trim();
@@ -364,19 +396,39 @@ export async function runTool(agent, call, ctx) {
           feed(agent.name, "Pressed Ctrl-C in FCC Linux.");
           return (await machine.waitIdle(3000)) ? "Sent Ctrl-C: the terminal is back at its prompt." : "Sent Ctrl-C, but something still holds the terminal (a program that ignores Ctrl-C, like nano or htop: its quit key is Ctrl-X or q). Ask the user to close it.";
         }
-        return "action is run, write, read, info, keep or interrupt.";
+        if (action === "sync") {
+          const { syncIn, syncOut } = await import("./linuxprojects.js");
+          const back = await syncOut(machine, agent.name);
+          noteLinuxProjects(ctx, back);
+          const wrote = await syncIn(machine);
+          return `Projects are in /projects (one folder each). Wrote ${wrote} changed file(s) in; brought ${back.length} back to FCC Projects.`;
+        }
+        if (action === "practice") {
+          const { startPractice } = await import("./practice.js");
+          const languages = String(args.languages || "").split(/[\s,]+/).filter(Boolean);
+          // No limit only when the user says so; otherwise an hour.
+          const minutes = args.minutes === 0 || args.minutes === "0" ? 0 : Math.max(5, Number(args.minutes) || 60);
+          const started = await startPractice({ ...(languages.length ? { languages } : {}), minutes });
+          return `Practice started (${started.languages.join(", ")}${started.until === Infinity ? ", no time limit" : ""}). It runs while FCC is open; skills wait for the user's OK on More, Jarvis learns.`;
+        }
+        return "action is run, write, read, info, keep, interrupt, sync or practice.";
       }
       case "godot": {
         if (args.project) ctx.project = projects.findProject(String(args.project)) || ctx.project;
         if (!ctx.project && args.action === "check") ctx.project = state.projects.find((project) => isGodotProject(project)) || null;
         return await useGodot(args, ctx, (project, path, body) => projects.putFile(project, path, body, agent.name));
       }
+      case "game_art":
+        return await useArt(args, ctx, (project, path, body) => projects.putFile(project, path, body, agent.name));
       case "use_plugin":
         return await usePlugin(args);
       case "start_task": {
         const { startTask } = await import("./tasks.js");
         const task = await startTask(String(args.goal || ""), agent.name);
-        return `Started the job on this phone (${task.id}): planning the steps now. The user can follow it on More, Tasks.`;
+        // The team does the job's steps in order: handing its parts out again
+        // as well would put two agents on the same work.
+        ctx.taskStarted = task.id;
+        return `Started the job on this phone (${task.id}): planning the steps now; the team does them in order. Don't hand its parts out with ask_agent as well. Tell the user it has started and that they can follow it on More, Tasks.`;
       }
       case "pc_task": {
         if (args.action === "status") {
@@ -508,6 +560,7 @@ export async function runTool(agent, call, ctx) {
       }
       case "ask_agent":
         if (!hooks.delegate) return "Teammates can't be reached right now.";
+        if (ctx.taskStarted) return `The job is already running on Tasks (${ctx.taskStarted}), and its steps go to the team in order. Don't hand out its parts as well: tell the user it has started.`;
         return await hooks.delegate(agent, String(args.agent || ""), String(args.task || ""), String(args.project || ""), ctx);
       case "team_status":
         return hooks.teamStatus ? hooks.teamStatus() : "Nobody is working.";
@@ -902,6 +955,10 @@ export async function addTodo(textValue, due, by) {
 async function todo(agent, args) {
   const action = String(args.action || "list").toLowerCase();
   if (action === "add") {
+    // The same open item again isn't a new one (small models add it over and over).
+    const same = String(args.text || "").trim().toLowerCase();
+    const open = state.todos.find((item) => !item.done && String(item.text || "").trim().toLowerCase() === same);
+    if (same && open) return `Already on the list: ${open.text} [id ${open.id}]. Don't add it again.`;
     const item = await addTodo(String(args.text || ""), String(args.due || ""), agent.name);
     feed(agent.name, `Added to your list: ${item.text}`);
     return `Added: ${item.text}${item.due_at ? ` (reminder ${new Date(item.due_at).toLocaleString()})` : ""} [id ${item.id}]`;

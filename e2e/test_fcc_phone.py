@@ -533,8 +533,362 @@ def test_a_reply_cut_off_by_ios_is_explained_and_the_model_made_lighter(
     expect(page.locator(".hud-line.error")).to_have_count(1)
 
 
+def test_a_model_too_big_for_the_phone_stops_being_used(
+    page: Page, admin_base_url: str
+) -> None:
+    fake_gemini(page)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    page.evaluate(
+        """async () => {
+            const f = window.fccPhone;
+            f.state.models.push({id: 'huge', name: 'Huge Model', ready: true, size: 1,
+                settings: {context: 2048, gpu: true}});
+            f.state.settings.localModel = 'huge';
+            f.state.settings.brain = 'local';
+            await f.save.models();
+            await f.save.settings();
+        }"""
+    )
+    assert (
+        page.evaluate("() => window.fccPhone.brainOf(window.fccPhone.state.agents[0])")
+        == "local"
+    )
+
+    def crash_while_loading() -> None:
+        page.evaluate(
+            """() => localStorage.setItem('fcc-engine-work', JSON.stringify(
+                {stage: 'load', id: 'huge', name: 'Huge Model', context: 2048}))"""
+        )
+        reopen(page)
+
+    # First crash at the smallest context: the graphics chip goes off.
+    crash_while_loading()
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'huge')"
+    )
+    assert model["settings"]["gpu"] is False and not model.get("tooBig")
+    # Second crash at its lightest: too big, and the agents stop using it, so
+    # Jarvis thinks with the cloud key instead of closing the app again.
+    crash_while_loading()
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'huge')"
+    )
+    assert model["tooBig"] is True and model["crashes"] == 2
+    assert (
+        page.evaluate("() => window.fccPhone.brainOf(window.fccPhone.state.agents[0])")
+        == "gemini"
+    )
+    go(page, "models")
+    expect(
+        page.get_by_text("Too big for this phone: it closed FCC Phone")
+    ).to_be_visible()
+    expect(page.get_by_role("button", name="Try Huge Model again")).to_be_visible()
+    expect(page.get_by_role("button", name="Load Huge Model")).to_have_count(0)
+
+
 def reopen(page: Page) -> None:
     """Close and open the app again, as iOS does after it stops it."""
     page.reload()
     page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
     page.evaluate("() => window.fccPhone.ready")
+
+
+def test_jarvis_hears_when_a_teammate_calls_unfinished_work_done(
+    page: Page, admin_base_url: str
+) -> None:
+    """Small models report "done" over failing checks (found running Jarvis on
+    a local Qwen): FCC checks the project itself and tells Jarvis."""
+
+    def lazy_builder(body: dict) -> dict:
+        system = body["messages"][0]["content"]
+        last = body["messages"][-1]
+        if "You are Builder" in system:
+            if last["role"] == "user":
+                return tool_call(
+                    "write_file",
+                    {
+                        "path": "index.html",
+                        "content": "<h1>Sunrise</h1><p>Lorem ipsum</p>",
+                    },
+                )
+            return say("All done, no issues.")
+        return team_brain(body)
+
+    seen = fake_gemini(page, lazy_builder)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Have Builder make a page for my bakery")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Builder finished", timeout=15000
+    )
+    reports = [
+        message["content"]
+        for call in seen
+        if "You are Jarvis" in call["messages"][0]["content"]
+        for message in call["messages"]
+        if message["role"] == "tool" and "Builder finished" in str(message["content"])
+    ]
+    assert reports, "Jarvis got the Builder's report"
+    assert "FCC's own check of Sunrise Bakery still finds" in reports[-1]
+    assert "placeholder text" in reports[-1]
+
+
+CEREBRAS = "https://api.cerebras.ai/v1"
+
+
+def test_more_free_cloud_ais_can_be_jarvis_brain_or_adviser(
+    page: Page, admin_base_url: str
+) -> None:
+    """Free cloud AIs that answer apps in a phone browser (checked against
+    the free-LLM-API lists): Cerebras, Mistral, Hugging Face and Cohere sit
+    beside Gemini, Groq and OpenRouter. A saved key picks the best model,
+    Jarvis falls back to it with no other brain, and replies come from it."""
+    asked: list[dict] = []
+
+    def cerebras(route: Route) -> None:
+        if route.request.url.endswith("/models"):
+            rows = [{"id": "llama3.1-8b"}, {"id": "gpt-oss-120b"}, {"id": "qwen-3-32b"}]
+            route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+            return
+        asked.append(json.loads(route.request.post_data or "{}"))
+        route.fulfill(
+            headers=CORS,
+            body=json.dumps({"choices": [{"message": say("Hello from Cerebras.")}]}),
+        )
+
+    page.route(f"{CEREBRAS}/**", cerebras)
+    open_phone(page, admin_base_url)
+    go(page, "settings")
+    for label in ("Cerebras", "Mistral", "Hugging Face", "Cohere"):
+        expect(page.get_by_label(f"{label} key")).to_be_visible()
+    page.get_by_label("Cerebras key").fill("test-cerebras-key")
+    page.get_by_role("button", name="Save Cerebras").click()
+    expect(page.get_by_text("using gpt-oss-120b")).to_be_visible()
+    brain = page.evaluate(
+        "async () => (await import('./js/brains.js')).brainOf(window.fccPhone.state.agents.find((a) => a.id === 'jarvis'))"
+    )
+    assert brain == "cerebras"
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Hi")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text(
+        "Hello from Cerebras."
+    )
+    assert asked and asked[-1]["model"] == "gpt-oss-120b"
+    backup = page.evaluate(
+        "async () => JSON.stringify((await import('./js/state.js')).state.settings.keys)"
+    )
+    assert "test-cerebras-key" in backup  # kept on the phone (backups drop keys)
+
+
+OVH = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
+REQUESTY = "https://router.requesty.ai/v1"
+
+
+def test_a_key_free_ai_stays_off_until_switched_on_and_free_keys_stay_free(
+    page: Page, admin_base_url: str
+) -> None:
+    """OVHcloud answers with no key: FCC never uses it until the user switches
+    it on, and then sends no key at all. Requesty and Nous carry paid models
+    too: FCC lists and picks only their free ones."""
+    asked: list[tuple[dict, dict]] = []
+
+    def ovh(route: Route) -> None:
+        if route.request.url.endswith("/models"):
+            rows = [
+                {"id": "whisper-large-v3"},
+                {"id": "gpt-oss-20b"},
+                {"id": "gpt-oss-120b"},
+            ]
+            route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+            return
+        asked.append(
+            (route.request.headers, json.loads(route.request.post_data or "{}"))
+        )
+        route.fulfill(
+            headers=CORS,
+            body=json.dumps({"choices": [{"message": say("Hi from OVH.")}]}),
+        )
+
+    def requesty(route: Route) -> None:
+        rows = [
+            {
+                "id": "openai/gpt-6",
+                "api": "chat",
+                "input_price": 1e-06,
+                "output_price": 1e-05,
+                "supports_tool_calling": True,
+            },
+            {
+                "id": "nvidia/nemotron-3-ultra-550b-a55b",
+                "api": "chat",
+                "input_price": 0,
+                "output_price": 0,
+                "supports_tool_calling": True,
+            },
+            {
+                "id": "poolside/laguna-xs.2",
+                "api": "chat",
+                "input_price": 0,
+                "output_price": 0,
+                "supports_tool_calling": False,
+            },
+        ]
+        route.fulfill(headers=CORS, body=json.dumps({"data": rows}))
+
+    page.route(f"{OVH}/**", ovh)
+    page.route(f"{REQUESTY}/**", requesty)
+    open_phone(page, admin_base_url)
+    ready = "async (name) => (await import('./js/brains.js')).brainReady(name)"
+    assert page.evaluate(ready, "ovh") is False
+    go(page, "settings")
+    page.get_by_role("button", name="Switch on OVHcloud AI (no key)").click()
+    expect(page.get_by_text("using gpt-oss-120b")).to_be_visible()
+    assert page.evaluate(ready, "ovh") is True
+    go(page, "home")
+    talk = page.get_by_label("Message Jarvis")
+    talk.fill("Hi")
+    talk.press("Enter")
+    expect(page.locator(".hud-line.assistant").last).to_contain_text("Hi from OVH.")
+    headers, body = asked[-1]
+    assert "authorization" not in {name.lower() for name in headers}
+    assert body["model"] == "gpt-oss-120b"
+
+    go(page, "settings")
+    page.get_by_role("button", name="Switch off OVHcloud AI (no key)").click()
+    expect(page.get_by_text("Switched off: FCC sends nothing to it.")).to_be_visible()
+    assert page.evaluate(ready, "ovh") is False
+    page.get_by_label("Requesty (free models) key").fill("test-requesty-key")
+    page.get_by_role("button", name="Save Requesty (free models)").click()
+    expect(
+        page.get_by_text("1 models; using nvidia/nemotron-3-ultra-550b-a55b")
+    ).to_be_visible()
+
+
+def test_a_saved_paid_zai_model_is_swapped_for_the_free_one(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: Z.ai is offered as free, so a paid model saved
+    before the free-only list (or typed on an agent) is never sent."""
+    sent: list[str] = []
+
+    def zai(route: Route) -> None:
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json",
+        }
+        if route.request.method == "OPTIONS":
+            route.fulfill(
+                status=204, headers={**headers, "Access-Control-Allow-Headers": "*"}
+            )
+        elif route.request.url.endswith("/models"):
+            route.fulfill(
+                headers=headers,
+                body=json.dumps(
+                    {
+                        "data": [
+                            {"id": "glm-5.3-flash"},
+                            {"id": "glm-4.7-flash"},
+                            {"id": "glm-5.3"},
+                        ]
+                    }
+                ),
+            )
+        else:
+            sent.append(json.loads(route.request.post_data or "{}").get("model", ""))
+            route.fulfill(
+                headers=headers,
+                body=json.dumps(
+                    {"choices": [{"message": {"role": "assistant", "content": "Hi!"}}]}
+                ),
+            )
+
+    page.route("https://api.z.ai/**", zai)
+    open_phone(page, admin_base_url)
+    said = page.evaluate(
+        """async () => {
+            const { state, jarvis, save } = await import('./js/state.js');
+            const { think } = await import('./js/brains.js');
+            state.settings.keys.zai = 'zai-test-key';
+            state.settings.models.zai = 'glm-5.3-flash';
+            await save.settings();
+            const agent = { ...jarvis(), brain: 'zai', model: '' };
+            const reply = await think(agent, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+            // A paid model typed on an agent card is swapped too.
+            const typed = await think({ ...jarvis(), brain: 'zai', model: 'glm-5.3' }, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+            return { text: reply.text, typed: typed.text, saved: state.settings.models.zai };
+        }"""
+    )
+    assert sent == ["glm-4.7-flash", "glm-4.7-flash"]
+    assert said == {"text": "Hi!", "typed": "Hi!", "saved": "glm-4.7-flash"}
+
+    # With no free model listed or saved, nothing is sent and it says why.
+    def paid_only(route: Route) -> None:
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json",
+        }
+        if route.request.method == "POST":
+            sent.append("POST")
+            route.fulfill(status=500)
+        else:
+            route.fulfill(
+                headers=headers, body=json.dumps({"data": [{"id": "glm-5.3"}]})
+            )
+
+    page.unroute("https://api.z.ai/**")
+    page.route("https://api.z.ai/**", paid_only)
+    refused = page.evaluate(
+        """async () => {
+            const { state, jarvis } = await import('./js/state.js');
+            const { think } = await import('./js/brains.js');
+            state.settings.models.zai = 'glm-5.3';
+            try {
+                await think({ ...jarvis(), brain: 'zai', model: '' }, 'You are a test.', [{ role: 'user', content: 'hello' }]);
+                return 'sent';
+            } catch (error) {
+                return error.message;
+            }
+        }"""
+    )
+    assert "only its free GLM Flash models" in refused
+    assert sent == ["glm-4.7-flash", "glm-4.7-flash"]
+
+
+def test_four_billion_parameter_models_fit_the_phone(
+    page: Page, admin_base_url: str
+) -> None:
+    """Owner: 4B models on the phone. Each 4B download is under the 2 GB a
+    phone browser can load, starts at 2,048 tokens of context, and needs
+    about 2.1 GB, under the 2.5 GB the Models page warns about."""
+    open_phone(page, admin_base_url, "models")
+    expect(page.get_by_text("Qwen3 4B Instruct")).to_be_visible()
+    found = page.evaluate(
+        """async () => {
+            const engine = await import('./js/engine.js');
+            const { estimateMemory } = await import('./js/gguf.js');
+            // Qwen3 4B: 36 layers, 32 heads (8 for keys and values), 2,560 wide.
+            const info = { layers: 36, heads: 32, kvHeads: 8, embedding: 2560 };
+            // Gemma 3 4B: 34 layers, 8 heads (4 for keys and values), 2,560 wide.
+            const gemma = { layers: 34, heads: 8, kvHeads: 4, embedding: 2560 };
+            return engine.CATALOG.filter((entry) => / 4B/.test(entry.name)).map((entry) => ({
+                name: entry.name,
+                fits: entry.size < engine.MAX_FILE,
+                context: entry.context,
+                gb: estimateMemory(entry.id === 'gemma-3-4b' ? gemma : info, entry.size, entry.context) / 1024 ** 3,
+            }));
+        }"""
+    )
+    assert [row["name"] for row in found] == [
+        "Qwen3 4B Instruct",
+        "Qwen3 4B (thinking)",
+        "Gemma 3 4B",
+    ]
+    for row in found:
+        assert row["fits"] and row["context"] == 2048, row
+        assert row["gb"] < 2.5, row

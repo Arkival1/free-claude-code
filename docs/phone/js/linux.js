@@ -1,5 +1,5 @@
-// FCC Linux on the phone: a small custom Linux (Alpine-based, built by
-// scripts/linux/build_fcc_linux.py) running in the v86 emulator inside a
+// FCC Linux on the phone: FCC's own Linux (Alpine-based, with every language,
+// built by scripts/linux/build_fcc_linux2.py) running in the v86 emulator inside a
 // sealed box: an iframe with an origin of its own (sandbox="allow-scripts"), a
 // content policy with no network, the engine and the system handed in by
 // message. Its terminal is xterm.js on the serial line. The first boot is
@@ -8,13 +8,17 @@
 // Jarvis runs commands through the same serial line (lab/linux tool).
 
 import { digest } from "./sha256.js";
+import { useManifest, readFile, readList, setActivity, pruneOld } from "./linuxfiles.js";
+import { handle as netHandle } from "./linuxnet.js";
+import { store } from "./store.js";
 
-export const LINUX_VERSION = "1.1";
-const MEMORY_MB = 192;
-// rootfstype=ramfs: the system lives in memory without tmpfs's half-of-RAM cap
-// (its files alone take most of that); init_on_free=1 zeroes freed memory, so
-// snapshots compress well.
-const CMDLINE = "console=ttyS0,115200 quiet loglevel=3 rootfstype=ramfs tsc=reliable mitigations=off random.trust_cpu=on init_on_free=1";
+export const LINUX_VERSION = "2.0";
+// Compilers (Rust, Go, C++) need room; memory nobody uses stays zero, so
+// snapshots stay small (init_on_free=1 zeroes what's freed).
+const MEMORY_MB = 512;
+// The kernel starts a tiny system (the initrd) that opens the real one over
+// 9p: its files come from the page (js/linuxfiles.js), fetched as they're used.
+const CMDLINE = "console=ttyS0,115200 quiet loglevel=3 tsc=reliable mitigations=off random.trust_cpu=on init_on_free=1";
 const FILES = {
   libv86: ["linux/libv86.js", "e257912c4a1129e36a86c1e2df69904ab969d87bffd24aa6676e84d6ddffc1c6"],
   wasm: ["linux/v86.wasm", "2f0c4150f266415b754a84a32e6f8e4c975a1d3abb94c78b047fa30027db1ef1"],
@@ -22,8 +26,10 @@ const FILES = {
   vgaBios: ["linux/vgabios.bin", "a4bc0d80cc3ca028c73dafa8fee396b8d054ce87ebd8abfbd31b06b437607880"],
   xterm: ["linux/xterm.js", "1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495"],
   xtermCss: ["linux/xterm.css", "ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6"],
-  kernel: ["linux/fcc-linux.kernel", "1c3ff14102200692a49019d091262ade97dcb6fc7ae1bd56ae2f94fae4033b2d"],
-  initrd: ["linux/fcc-linux.initrd", "1f5b5f0215908d8459b923fe5e3f7cf55206e3dd91e2e3d57a911a555a4cdb32"],
+  kernel: ["linux/fcc-linux.kernel", "f37a5f89fefb28023b824fc71e814d2b6cc34bc27567fcdc5db75b3b95de6b2c"],
+  initrd: ["linux/fcc-linux.initrd", "1fcc5236166073d5d93e7599902b992b0553d9371890dd800546c4f4a4d8f936"],
+  // What's in the system: the file list and each pack with its SHA-256.
+  manifest: ["linux/fcc-linux.json", "736a6663f44b2c4c3dff110819f9c318d3083626f66163c61734d7fa86cad46e"],
 };
 /** A short hash of text (FNV-1a), for keys. */
 function shortHash(text) {
@@ -32,8 +38,8 @@ function shortHash(text) {
   return hash.toString(16).padStart(8, "0");
 }
 /** Snapshots belong to this exact system, engine, memory and kernel options. */
-const SNAPSHOT_KEY = `${LINUX_VERSION}-${MEMORY_MB}-${shortHash(CMDLINE)}-${FILES.kernel[1].slice(0, 12)}-${FILES.initrd[1].slice(0, 12)}-${FILES.wasm[1].slice(0, 12)}`;
-export const DOWNLOAD_BYTES = 27_863_582;
+const SNAPSHOT_KEY = `${LINUX_VERSION}-${MEMORY_MB}-${shortHash(CMDLINE)}-${FILES.kernel[1].slice(0, 12)}-${FILES.initrd[1].slice(0, 12)}-${FILES.manifest[1].slice(0, 12)}-${FILES.wasm[1].slice(0, 12)}`;
+export const DOWNLOAD_BYTES = 12_119_434;
 
 /** Base64 of text (UTF-8), in pieces, so big files don't overflow the stack. */
 function base64(text) {
@@ -83,7 +89,10 @@ export function loadLinux(onProgress) {
       const loaded = await Promise.all(names.map((name) => fetchChecked(FILES[name], count)));
       const out = Object.fromEntries(names.map((name, i) => [name, loaded[i]]));
       const text = (buffer) => new TextDecoder().decode(buffer);
-      return { ...out, libv86: text(out.libv86), xterm: text(out.xterm), xtermCss: text(out.xtermCss) };
+      const manifest = JSON.parse(text(out.manifest));
+      useManifest(manifest, new URL("../linux/", import.meta.url));
+      pruneOld().catch(() => 0);
+      return { ...out, manifest, libv86: text(out.libv86), xterm: text(out.xterm), xtermCss: text(out.xtermCss) };
     })().catch((error) => {
       files = null;
       throw error;
@@ -146,6 +155,9 @@ async function forget(kind) {
   }
 }
 export const forgetSession = () => forget("session");
+const SYNCED_KEY = "linux-synced";
+/** The projects record kept with the session (empty without one). */
+export const keptSynced = () => store.get(SYNCED_KEY, []);
 /** Is a session kept? (Counts it; doesn't unpack it.) */
 export async function hasSession() {
   try {
@@ -177,9 +189,81 @@ function linuxBox() {
       document.head.append(tag);
     });
   addEventListener("error", (event) => send({ type: "crash", text: String(event.message || "error").slice(0, 300) }));
+  // The box has no network: v86 asks for the system's files with
+  // XMLHttpRequest, and this stand-in asks the page, which checks and serves
+  // them (a pack it can't get yet answers 503, and v86 tries again later).
+  const asks = new Map();
+  let askNumber = 0;
+  window.XMLHttpRequest = class BoxRequest {
+    constructor() {
+      this.readyState = 0;
+      this.status = 0;
+      this.response = null;
+      this.responseType = "";
+      this.aborted = false;
+    }
+    open(method, url) {
+      this.url = String(url);
+      this.readyState = 1;
+    }
+    setRequestHeader() {}
+    getResponseHeader() {
+      return null;
+    }
+    abort() {
+      this.aborted = true;
+    }
+    send() {
+      askNumber += 1;
+      asks.set(askNumber, this);
+      send({ type: "get", id: askNumber, url: this.url });
+    }
+  };
+  // Programs inside reach the web only through the page too: v86's network
+  // card hands each http request to fetch, and this stand-in passes it on;
+  // the page (js/linuxnet.js) decides, and makes the real https request.
+  const nets = new Map();
+  let netNumber = 0;
+  window.fetch = (input, init = {}) =>
+    new Promise((resolve, reject) => {
+      netNumber += 1;
+      nets.set(netNumber, { resolve, reject });
+      const url = typeof input === "string" ? input : String((input && input.url) || input);
+      const headers = [...new Headers(init.headers || (input && input.headers) || [])];
+      const raw = init.body;
+      const body = raw instanceof Uint8Array ? raw.slice().buffer : raw instanceof ArrayBuffer ? raw : typeof raw === "string" ? new TextEncoder().encode(raw).buffer : undefined;
+      send({ type: "net", id: netNumber, url, method: init.method || "GET", headers, body }, body ? [body] : []);
+    });
+  const netAnswer = (job) => {
+    const waiting = nets.get(job.id);
+    nets.delete(job.id);
+    if (!waiting) return;
+    const empty = [101, 204, 205, 304].includes(job.status);
+    try {
+      waiting.resolve(new Response(empty ? null : job.body, { status: job.status, headers: job.headers }));
+    } catch (error) {
+      waiting.reject(error);
+    }
+  };
+  const answer = (job) => {
+    const request = asks.get(job.id);
+    asks.delete(job.id);
+    if (!request || request.aborted) return;
+    request.readyState = 4;
+    if (job.error) {
+      request.status = job.retry ? 503 : 404;
+    } else {
+      request.status = 200;
+      request.response = request.responseType === "json" ? JSON.parse(job.text) : job.bytes;
+    }
+    if (request.onreadystatechange) request.onreadystatechange();
+    if (request.onload) request.onload();
+  };
   addEventListener("message", async (event) => {
     const job = event.data;
     if (event.source !== parent || !job) return;
+    if (job.type === "got") return answer(job);
+    if (job.type === "netback") return netAnswer(job);
     try {
       if (job.type === "boot" && !emulator) {
         const style = document.createElement("style");
@@ -199,11 +283,26 @@ function linuxBox() {
           screen_container: document.getElementById("screen"),
           serial_container_xtermjs: document.getElementById("term"),
         };
+        // The system's files, over 9p (tag host9p); a restored machine already
+        // knows its file list, so only a fresh boot reads it.
+        options.filesystem = job.state ? { baseurl: "fs/" } : { baseurl: "fs/", basefs: "fs/list.json" };
+        options.net_device = { type: "ne2k", relay_url: "fetch" };
         if (job.state) options.initial_state = { buffer: job.state };
         else Object.assign(options, { bzimage: { buffer: job.files.kernel }, initrd: { buffer: job.files.initrd }, cmdline: job.cmdline });
         emulator = new V86(options);
         emulator.add_listener("serial0-output-byte", (byte) => (pending += String.fromCharCode(byte)));
         emulator.add_listener("emulator-ready", () => {
+          // Say when the user types, so FCC never types over a half-typed line.
+          const term = emulator.serial_adapter && emulator.serial_adapter.term;
+          let told = 0;
+          if (term && term.onData) {
+            term.onData(() => {
+              if (Date.now() - told > 250) {
+                told = Date.now();
+                send({ type: "typed" });
+              }
+            });
+          }
           fit();
           send({ type: "ready", restored: Boolean(job.state) });
         });
@@ -252,9 +351,31 @@ const BOX_HTML = `<!doctype html><html><head><meta charset="utf-8">
 
 /* --------------------------------------------------------- the machine */
 
+const IDLE_MARK = "\x1b]fcc;idle\x07";
 let current = null;
 /** The FCC Linux that's running (one at a time), or null. */
 export const runningLinux = () => current;
+let lastProblem = "";
+/** Has FCC Linux stopped by itself, with a reason not shown yet? */
+export const hasProblem = () => Boolean(lastProblem);
+/** Why FCC Linux last stopped by itself ("" if it didn't); reading it clears it. */
+export function takeProblem() {
+  const problem = lastProblem;
+  lastProblem = "";
+  return problem;
+}
+// What FCC Linux is fetching now (a pack the first time it's used): the
+// screen shows it, since a program waits meanwhile.
+const activityWatchers = new Set();
+/** Watch what FCC Linux is fetching ("" when nothing); returns a stop function. */
+export function watchActivity(watch) {
+  activityWatchers.add(watch);
+  return () => activityWatchers.delete(watch);
+}
+setActivity((text) => {
+  if (current) current.activity = text;
+  for (const watch of activityWatchers) watch(text);
+});
 
 /**
  * Start FCC Linux in `host` (the terminal shows there). Resolves when it's
@@ -297,7 +418,27 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
   // Is the shell at its prompt? bash says so with markers (PROMPT_COMMAND:
   // idle, PS0: busy). Kept and saved machines were kept at their prompt.
   const idleWaiters = new Set();
+  // Every line FCC types brings exactly one prompt back; a prompt nobody at
+  // FCC is owed is the user's (projects then bring changed files back).
+  let owed = 0;
+  let markerTail = "";
+  const countPrompts = (text) => {
+    const scan = markerTail + text;
+    let at = scan.indexOf(IDLE_MARK);
+    let users = 0;
+    while (at >= 0) {
+      if (at + IDLE_MARK.length > markerTail.length) {
+        if (owed > 0) owed -= 1;
+        else users += 1;
+      }
+      at = scan.indexOf(IDLE_MARK, at + 1);
+    }
+    markerTail = scan.slice(-(IDLE_MARK.length - 1));
+    if (users) machine.promptAt = Date.now();
+    if (users && machine.ready && machine.onUserIdle) machine.onUserIdle();
+  };
   const setIdle = (value) => {
+    if (!value && machine.idle) machine.busyAt = Date.now();
     machine.idle = value;
     if (!value) return;
     for (const done of [...idleWaiters]) done(true);
@@ -337,9 +478,35 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
     const message = event.data;
     if (message.type === "loaded") {
       // Copies: the box keeps its own; ours stay for the next start.
-      const files = { ...parts, wasm: parts.wasm.slice(0), bios: parts.bios.slice(0), vgaBios: parts.vgaBios.slice(0), kernel: state ? null : parts.kernel.slice(0), initrd: state ? null : parts.initrd.slice(0) };
+      const files = { libv86: parts.libv86, xterm: parts.xterm, xtermCss: parts.xtermCss, wasm: parts.wasm.slice(0), bios: parts.bios.slice(0), vgaBios: parts.vgaBios.slice(0), kernel: state ? null : parts.kernel.slice(0), initrd: state ? null : parts.initrd.slice(0) };
       onStatus(state ? "Opening FCC Linux…" : "Starting FCC Linux for the first time (about 15–40 s; after this it opens in a second)…");
       post({ type: "boot", files, state, memoryMb: MEMORY_MB, cmdline: CMDLINE, fontSize: 12 });
+    } else if (message.type === "get") {
+      const id = message.id;
+      const url = String(message.url || "");
+      (url.endsWith("list.json") ? readList().then((text) => ({ text })) : readFile(url).then((bytes) => ({ bytes })))
+        .then((reply) => post({ type: "got", id, ...reply }, reply.bytes ? [reply.bytes] : []))
+        .catch((error) => {
+          machine.activity = error.message;
+          for (const watch of activityWatchers) watch(error.message);
+          if (error.retry === false) {
+            // v86 waits for ever on anything but "try again" (5xx), so a file
+            // that can never come (a bad checksum, a missing pack) stops FCC
+            // Linux and says why, instead of leaving a program hanging.
+            lastProblem = error.message;
+            machine.stop();
+            for (const watch of activityWatchers) watch(error.message);
+            return;
+          }
+          post({ type: "got", id, error: error.message, retry: true });
+        });
+    } else if (message.type === "typed") {
+      machine.lastTyped = Date.now();
+    } else if (message.type === "net") {
+      const id = message.id;
+      netHandle(message)
+        .catch(() => ({ status: 502, headers: [["content-type", "text/plain"]], body: new TextEncoder().encode("FCC couldn't make that request.\n").buffer }))
+        .then((reply) => post({ type: "netback", id, ...reply }, reply.body ? [reply.body] : []));
     } else if (message.type === "out") {
       output += message.text;
       if (output.length > 400_000) output = output.slice(-200_000);
@@ -348,6 +515,7 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
       const busyAt = fresh.lastIndexOf("\x1b]fcc;busy\x07");
       settle();
       if (idleAt >= 0 || busyAt >= 0) setIdle(idleAt > busyAt);
+      countPrompts(String(message.text));
       // A fresh boot is ready at its first prompt; a restored one answers a command instead.
       if (!machine.ready && !state && /fcc\x1b\[0m:/.test(output)) markReady("boot");
     } else if (message.type === "ready") {
@@ -446,7 +614,15 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
     async keep() {
       // Kept at its prompt, so it opens ready for commands.
       if (!(await waitIdle(3000))) throw new Error("Something is running in FCC Linux (nano, htop, python, tmux…). Close it so the terminal is back at its prompt, then Keep.");
-      return writeSnapshot("session", await machine.capture());
+      // Linux lets go of its file cache first (freed memory is zeroed), so
+      // the snapshot holds your work, not copies of the compilers.
+      await machine.run("sync; echo 3 > /proc/sys/vm/drop_caches", { timeoutMs: 30000 }).catch(() => null);
+      const size = await writeSnapshot("session", await machine.capture());
+      // What FCC wrote into /projects goes with the session, so syncing after
+      // it reopens still notices a file changed on both sides.
+      const { syncedRecord } = await import("./linuxprojects.js");
+      await store.set(SYNCED_KEY, syncedRecord());
+      return size;
     },
     stop() {
       if (closed) return;
@@ -466,7 +642,10 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
     const id = nextId();
     const encoded = base64(command);
     // Ctrl-E Ctrl-U first: anything half-typed at the prompt is cleared, not run with it.
-    const line = (text) => post({ type: "send", text: `\x05\x15 ${text}\n` });
+    const line = (text) => {
+      owed += 1;
+      post({ type: "send", text: `\x05\x15 ${text}\n` });
+    };
     return new Promise((resolve, reject) => {
       let over = false;
       const finish = (error, result) => {

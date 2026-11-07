@@ -1,13 +1,19 @@
 /* FCC Phone service worker: the app, and the on-phone engine once fetched,
    open with no connection. AI, weather, and PC calls are never cached. */
-const VERSION = "2.13.0";
+const VERSION = "2.15.0";
 const CACHE = `fcc-phone-${VERSION}`;
 const ENGINE_CACHE = "fcc-phone-engine-3.6.1";
 // Godot's web player (about 10 MB): fetched the first time a game runs, then
 // kept on the phone across app updates (js/godot.js checks its checksums).
 const GODOT_CACHE = "fcc-phone-godot-4.7.2";
-// FCC Linux (about 25 MB): fetched the first time it starts, then kept.
-const LINUX_CACHE = "fcc-phone-linux-1.1";
+// FCC Linux's engine, kernel and manifest: fetched the first time it starts,
+// then kept. Its system packs (linux/fs/) skip this worker: js/linuxfiles.js
+// checks and keeps them itself, so they aren't stored twice.
+const LINUX_CACHE = "fcc-phone-linux-2.0";
+// FCC's 2D game art (8 MB, js/art.js checks it): fetched the first time an
+// agent uses it, then kept across app updates.
+const ART_CACHE = "fcc-phone-art-1";
+const ART_FILES = ["games/art2d.bin"];
 const LINUX_FILES = [
   "linux/libv86.js",
   "linux/v86.wasm",
@@ -17,12 +23,20 @@ const LINUX_FILES = [
   "linux/xterm.css",
   "linux/fcc-linux.kernel",
   "linux/fcc-linux.initrd",
+  "linux/fcc-linux.json",
 ];
+// FCC's Godot kit fonts (about 4 MB) are kept with it, fetched the first
+// time a game uses the kit.
 const GODOT_FILES = [
   "godot/godot.js",
   "godot/godot.wasm.gz",
   "godot/godot.audio.worklet.js",
   "godot/godot.audio.position.worklet.js",
+  "godot/fcc/fonts/emoji.ttf",
+  "godot/fcc/fonts/fantasy.ttf",
+  "godot/fcc/fonts/pixel.ttf",
+  "godot/fcc/fonts/symbols.ttf",
+  "godot/fcc/fonts/symbols2.ttf",
 ];
 const SHELL = [
   "./",
@@ -61,12 +75,20 @@ const SHELL = [
   "js/webkit.js",
   "js/godot.js",
   "js/sha256.js",
+  "js/linuxfiles.js",
+  "js/linuxnet.js",
+  "js/linuxprojects.js",
+  "js/lessons.js",
+  "js/practice.js",
+  "js/views/practice.js",
   "js/linux.js",
   "js/views/linux.js",
-  "linux/fcc-linux.json",
   "js/views/godot.js",
   "godot/pack.js",
   "godot/starters.js",
+  "godot/kit.js",
+  "js/art.js",
+  "js/art2d.js",
   "js/views/webkit.js",
   "js/plugins.js",
   "js/apis.js",
@@ -127,7 +149,7 @@ self.addEventListener("activate", (event) => {
       .then((names) =>
         Promise.all(
           names
-            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE, LINUX_CACHE].includes(name))
+            .filter((name) => name.startsWith("fcc-phone-") && ![CACHE, ENGINE_CACHE, GODOT_CACHE, LINUX_CACHE, ART_CACHE].includes(name))
             .map((name) => caches.delete(name))
         )
       )
@@ -154,8 +176,8 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
-  if (url.origin !== self.location.origin || url.pathname.includes("/studio/api/")) return;
-  const heavy = GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? GODOT_CACHE : LINUX_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? LINUX_CACHE : "";
+  if (url.origin !== self.location.origin || url.pathname.includes("/studio/api/") || url.pathname.includes("/linux/fs/")) return;
+  const heavy = GODOT_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? GODOT_CACHE : LINUX_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? LINUX_CACHE : ART_FILES.some((name) => url.pathname.endsWith(`/${name}`)) ? ART_CACHE : "";
   if (heavy) {
     event.respondWith(
       caches.open(heavy).then((cache) =>

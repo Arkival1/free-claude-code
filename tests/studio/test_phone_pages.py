@@ -52,11 +52,17 @@ def test_the_app_installs_as_its_own_home_screen_app():
     # Every link is relative, so it works at /phone/ and on GitHub Pages alike.
     assert 'href="/' not in page and 'src="/' not in page
     worker = (PHONE_DIR / "sw.js").read_text()
+    # FCC Linux's system packs (linux/fs/) are kept by js/linuxfiles.js, not
+    # the worker (so they aren't stored twice); the worker lets them through.
     shipped = [
         str(path.relative_to(PHONE_DIR))
         for path in PHONE_DIR.rglob("*")
-        if path.is_file() and path.suffix != ".txt" and path.name != "sw.js"
+        if path.is_file()
+        and path.suffix != ".txt"
+        and path.name != "sw.js"
+        and not str(path.relative_to(PHONE_DIR)).startswith("linux/fs/")
     ]
+    assert '"/linux/fs/"' in worker
     for name in shipped:
         assert f'"{name}"' in worker, f"sw.js must cache {name} for offline use"
 
@@ -83,6 +89,10 @@ async def test_the_pc_serves_the_phone_app(make_studio):
             godot = await client.get("/phone/godot/godot.wasm.gz")
             assert godot.headers["content-type"] == "application/gzip"
             assert godot.content[:2] == b"\x1f\x8b"
+            # FCC's Godot kit fonts (the phone checks their checksums).
+            font = await client.get("/phone/godot/fcc/fonts/emoji.ttf")
+            assert font.status_code == 200
+            assert font.headers["content-type"] == "font/ttf"
             for bad in (
                 "/phone/secret.txt",
                 "/phone/..%2Fstudio_static%2Fstudio.js",

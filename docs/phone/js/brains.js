@@ -26,6 +26,65 @@ export const PROVIDERS = {
     keyUrl: "https://openrouter.ai/keys",
     note: "Many free models; about 50 free messages a day.",
   },
+  // More free cloud AIs (from the free-LLM-API lists, checked 2026-11-06 to
+  // answer apps in a phone browser): any of them can guide Jarvis as an
+  // adviser at no cost. NVIDIA NIM, GitHub Models and SambaNova refuse apps
+  // in a browser, so they aren't here.
+  cerebras: {
+    label: "Cerebras",
+    base: "https://api.cerebras.ai/v1",
+    keyUrl: "https://cloud.cerebras.ai",
+    note: "Free tier, extremely fast, big open models (gpt-oss 120B, Qwen, Llama).",
+  },
+  mistral: {
+    label: "Mistral",
+    base: "https://api.mistral.ai/v1",
+    keyUrl: "https://console.mistral.ai/api-keys",
+    note: "Free Experiment plan (sign-up asks for a phone number); Mistral's own models.",
+  },
+  huggingface: {
+    label: "Hugging Face",
+    base: "https://router.huggingface.co/v1",
+    keyUrl: "https://huggingface.co/settings/tokens",
+    note: "A free account gets a small monthly credit across many open models.",
+  },
+  cohere: {
+    label: "Cohere",
+    base: "https://api.cohere.ai/compatibility/v1",
+    keyUrl: "https://dashboard.cohere.com/api-keys",
+    note: "Free trial key, about 1,000 calls a month (Command models).",
+  },
+  ovh: {
+    label: "OVHcloud AI (no key)",
+    base: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+    keyUrl: "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/catalog/",
+    noKey: true,
+    note: "Free with no sign-up and no key (EU, rate-limited): gpt-oss 120B, Qwen, Llama. Off until you switch it on here.",
+  },
+  requesty: {
+    label: "Requesty (free models)",
+    base: "https://router.requesty.ai/v1",
+    keyUrl: "https://app.requesty.ai/api-keys",
+    note: "A router with a dozen free models (Nemotron Ultra, Gemma); FCC uses only the free ones.",
+  },
+  nous: {
+    label: "Nous Portal (free models)",
+    base: "https://inference-api.nousresearch.com/v1",
+    keyUrl: "https://portal.nousresearch.com",
+    note: "Free plan with its :free models; FCC uses only those.",
+  },
+  aion: {
+    label: "Aion Labs",
+    base: "https://api.aionlabs.ai/v1",
+    keyUrl: "https://www.aionlabs.ai/app/api-keys/",
+    note: "Free plan with a daily allowance, no card.",
+  },
+  zai: {
+    label: "Z.ai (GLM Flash)",
+    base: "https://api.z.ai/api/paas/v4",
+    keyUrl: "https://z.ai/manage-apikey/apikey-list",
+    note: "Its GLM Flash model is free.",
+  },
   custom: {
     label: "Other (OpenAI-compatible)",
     base: "",
@@ -37,9 +96,14 @@ export const PROVIDERS = {
     note: "Thinks with your PC's main AI. The PC must be on and paired.",
   },
 };
-export const CLOUD = ["gemini", "groq", "openrouter", "custom"];
+export const CLOUD = ["gemini", "groq", "openrouter", "cerebras", "mistral", "huggingface", "cohere", "ovh", "requesty", "nous", "aion", "zai", "custom"];
 
 export class BrainError extends Error {}
+
+/** What a key-free service's "key" is set to once the user switches it on
+ * (it stays off until then, so the phone never sends anything to it
+ * unasked); no Authorization header goes with it. */
+export const NO_KEY = "no-key-needed";
 
 /** The brain the agent (or the default) is set to. */
 export const chosenBrain = (agent) => (agent.brain && agent.brain !== "default" ? agent.brain : state.settings.brain);
@@ -48,7 +112,7 @@ export const chosenBrain = (agent) => (agent.brain && agent.brain !== "default" 
  * that is: a model on this phone, then a cloud API key, and the PC last, so
  * the phone never relies on the PC (owner, 6.108). Memory rules follow the
  * brain really used (isPrivate reads this). */
-export const FALLBACK_ORDER = ["local", "gemini", "groq", "openrouter", "custom", "pc"];
+export const FALLBACK_ORDER = ["local", "gemini", "groq", "cerebras", "mistral", "openrouter", "requesty", "nous", "huggingface", "zai", "aion", "cohere", "ovh", "custom", "pc"];
 
 // A turn pins its agent's brain at the start (agents.js), like the PC: if
 // that brain goes away mid-turn the turn stops, instead of moving what a
@@ -82,7 +146,10 @@ export const baseOf = (brain) => (brain === "custom" ? state.settings.customBase
 
 export function localModelOf(agent) {
   const id = (agent.brain === "local" && agent.model) || state.settings.localModel;
-  return engine.modelById(id) || state.models.find((model) => model.ready);
+  const chosen = engine.modelById(id);
+  // A model too big for this phone is skipped for one that fits.
+  if (chosen && !chosen.tooBig) return chosen;
+  return state.models.find(engine.usable) || chosen;
 }
 
 export function modelOf(agent, brain = brainOf(agent)) {
@@ -96,7 +163,7 @@ export function modelOf(agent, brain = brainOf(agent)) {
 }
 
 export function brainReady(brain) {
-  if (brain === "local") return state.models.some((model) => model.ready);
+  if (brain === "local") return state.models.some(engine.usable);
   if (brain === "pc") return Boolean(state.settings.pc && state.settings.pc.token);
   return Boolean(brain && state.settings.keys[brain] && baseOf(brain));
 }
@@ -155,6 +222,22 @@ export function bestModel(brain, rows) {
     pool.sort((a, b) => (b.context_length || 0) - (a.context_length || 0));
     return (pool[0] && pool[0].id) || "";
   }
+  const first = (patterns) => {
+    for (const pattern of patterns) {
+      const found = ids.find((id) => pattern.test(id));
+      if (found) return found;
+    }
+    return ids[0] || "";
+  };
+  if (brain === "cerebras") return first([/gpt-oss-120b/, /qwen-3-235b/, /llama-3\.3-70b/, /llama/]);
+  if (brain === "mistral") return first([/^mistral-large-latest$/, /^mistral-medium-latest$/, /^mistral-small-latest$/]);
+  if (brain === "huggingface") return first([/^openai\/gpt-oss-120b$/, /^Qwen\/Qwen3\.5-27B$/, /^Qwen\/Qwen3/, /^meta-llama\//]);
+  if (brain === "cohere") return first([/^command-a(?!.*(vision|reasoning|translate))/, /^command-r-plus/, /^command/]);
+  if (brain === "ovh") return first([/^gpt-oss-120b$/, /^Qwen3\.5-397B/, /^Meta-Llama-3_3-70B/, /^gpt-oss/]);
+  if (brain === "requesty") return first([/nemotron-3-ultra/, /nemotron-3-super/, /gemma-4-31b/, /nemotron/]);
+  if (brain === "nous") return first([/beam-1\.0-501b/, /step-3\.7-flash/, /longcat/, /:free$/]);
+  if (brain === "aion") return first([/^aion-labs\/aion-3\.5$/, /^aion-labs\/aion-3\.0$/, /aion/]);
+  if (brain === "zai") return first([/^glm-4\.7-flash$/, /^glm-4\.[\d]+-flash$/]);
   return ids[0] || "";
 }
 
@@ -162,7 +245,7 @@ export async function listModels(brain) {
   const base = baseOf(brain);
   const key = state.settings.keys[brain];
   if (!base) throw new BrainError("Add the service's address first.");
-  const response = await request(`${base}/models`, { headers: key ? { Authorization: `Bearer ${key}` } : {} }, 20000);
+  const response = await request(`${base}/models`, { headers: key && key !== NO_KEY ? { Authorization: `Bearer ${key}` } : {} }, 20000);
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) throw new BrainError(`${PROVIDERS[brain].label} refused that key. Check it and paste it again.`);
     throw new BrainError(`${PROVIDERS[brain].label}: ${await errorText(response)}`);
@@ -170,6 +253,13 @@ export async function listModels(brain) {
   const body = await response.json();
   let rows = (body.data || body.models || []).map((row) => ({ ...row, id: cleanId(row.id || row.name) }));
   if (brain === "openrouter") rows = rows.filter((row) => row.id.endsWith(":free"));
+  // Free keys stay on free models: Requesty's priced at 0 (and able to use
+  // tools), Nous's :free ones.
+  if (brain === "requesty") rows = rows.filter((row) => row.input_price === 0 && row.output_price === 0 && row.api === "chat" && row.supports_tool_calling);
+  if (brain === "nous") rows = rows.filter((row) => row.id.endsWith(":free"));
+  // Z.ai's free models are its GLM 4.x Flash ones (newer Flash models are paid).
+  if (brain === "zai") rows = rows.filter((row) => ZAI_FREE.test(row.id));
+  if (brain === "ovh") rows = rows.filter((row) => !/whisper|tts|embed|bge|guard|diffusion|VL-/i.test(row.id));
   rows.sort((a, b) => a.id.localeCompare(b.id));
   state.modelLists[brain] = rows;
   if (!state.settings.models[brain] || !rows.some((row) => row.id === state.settings.models[brain])) {
@@ -190,8 +280,15 @@ function parseArgs(raw) {
   }
 }
 
-function normalise(message) {
+/** keepReasoning (Z.ai): its thinking comes back with the tool calls and is
+ * sent back unchanged on the next request, as Z.ai asks, so a multi-step job
+ * keeps its train of thought. Other services get nothing extra. */
+/** Z.ai's free models (its other Flash models are paid). */
+const ZAI_FREE = /^glm-4\.\d+-flash$/;
+
+function normalise(message, keepReasoning = false) {
   return {
+    ...(keepReasoning && typeof message.reasoning_content === "string" && message.reasoning_content ? { reasoning_content: message.reasoning_content } : {}),
     text: stripThinking(message.content || ""),
     tool_calls: (message.tool_calls || []).map((call, index) => ({
       id: call.id || `call_${Date.now()}_${index}`,
@@ -213,6 +310,7 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
     const model = localModelOf(agent);
     if (!model) throw new BrainError("No model on this phone yet. Open Models and download one (Qwen3 0.6B is a quick start).");
     if (!model.ready) throw new BrainError(`${model.name} hasn't finished downloading. Open Models to finish it.`);
+    if (model.tooBig) throw new BrainError(`${model.name} is too big for this phone (it closed the app while loading). Pick a smaller model on Models (Qwen3 1.7B or Llama 3.2 1B), or add a free cloud key in More, Settings.`);
     const system2 = model.info && model.info.reasoning ? `${system}\n\n/no_think` : system;
     const message = await engine.chat(model, { messages: [{ role: "system", content: system2 }, ...messages], tools, maxTokens: Math.min(maxTokens, 1024) });
     return normalise(message);
@@ -224,10 +322,23 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
     model = modelOf(agent, brain);
   }
   if (!model) throw new BrainError(`Pick a model for ${PROVIDERS[brain].label} in Settings.`);
+  // Z.ai is offered as free: only its free Flash models are ever sent (a paid
+  // one saved before, or typed on an agent, is swapped for the free one).
+  if (brain === "zai" && !ZAI_FREE.test(model)) {
+    // A list that can't load (key, network) says why, unless a free model is
+    // already saved to fall back on.
+    let failed = null;
+    await listModels(brain).catch((error) => {
+      failed = error;
+    });
+    model = ZAI_FREE.test(state.settings.models.zai || "") ? state.settings.models.zai : "";
+    if (!model) throw failed || new BrainError("Z.ai: only its free GLM Flash models are used. Pick one in Settings.");
+  }
   const useTools = tools.length && !state.settings.noTools[`${brain}:${model}`];
   const body = { model, messages: [{ role: "system", content: system }, ...messages], temperature: 0.5, max_tokens: maxTokens };
   if (useTools) body.tools = tools;
-  const headers = { Authorization: `Bearer ${state.settings.keys[brain]}`, "Content-Type": "application/json" };
+  const headers = { "Content-Type": "application/json" };
+  if (state.settings.keys[brain] !== NO_KEY) headers.Authorization = `Bearer ${state.settings.keys[brain]}`;
   if (brain === "openrouter") {
     headers["HTTP-Referer"] = location.origin;
     headers["X-Title"] = "FCC Phone";
@@ -245,5 +356,5 @@ export async function think(agent, system, messages, tools = [], { maxTokens = 1
     throw new BrainError(`${PROVIDERS[brain].label}: ${detail}`);
   }
   const data = await response.json();
-  return normalise((data.choices && data.choices[0] && data.choices[0].message) || {});
+  return normalise((data.choices && data.choices[0] && data.choices[0].message) || {}, brain === "zai");
 }

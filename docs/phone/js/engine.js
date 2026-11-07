@@ -66,6 +66,36 @@ export const CATALOG = [
     note: "Google's small model; good writing.",
     good: ["Helper"],
   },
+  // 4 billion parameters, squeezed (IQ3) under the 2 GB a phone browser can
+  // load. They start at 2,048 tokens of context so they fit in a 6 GB
+  // iPhone's memory (about 2.1 GB in use); crash recovery lowers it further.
+  {
+    id: "qwen3-4b-instruct",
+    name: "Qwen3 4B Instruct",
+    url: `${HF}/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-UD-IQ3_XXS.gguf`,
+    size: 1674376800,
+    context: 2048,
+    note: "4B: the smartest here and best with tools; answers straight away. Slower, and needs a 6 GB iPhone (12 Pro or newer).",
+    good: ["Jarvis", "Builder"],
+  },
+  {
+    id: "qwen3-4b",
+    name: "Qwen3 4B (thinking)",
+    url: `${HF}/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-UD-IQ3_XXS.gguf`,
+    size: 1674376992,
+    context: 2048,
+    note: "4B that thinks before answering: best for hard questions. Slowest; needs a 6 GB iPhone.",
+    good: ["Researcher", "Tester"],
+  },
+  {
+    id: "gemma-3-4b",
+    name: "Gemma 3 4B",
+    url: `${HF}/unsloth/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-UD-IQ3_XXS.gguf`,
+    size: 1710751616,
+    context: 2048,
+    note: "Google's 4B: the best writer here. Needs a 6 GB iPhone.",
+    good: ["Helper", "Designer"],
+  },
 ];
 
 export const MAX_FILE = 2 * 1024 * 1024 * 1024;
@@ -126,13 +156,19 @@ export async function recoverFromCrash() {
     } else if (chosen.gpu) {
       model.settings.gpu = false;
       change = " Studio turned off the graphics chip for it; send your message again.";
+    } else {
+      // Already at its lightest: it doesn't fit this phone. It stays on
+      // Models (Try again) but isn't used, so the agents think with another
+      // brain instead of closing the app again and again.
+      model.tooBig = true;
+      change = ` It's too big for this phone even at its lightest, so FCC Phone stopped using it${state.models.some(usable) ? " and uses your other phone model" : ""}. Pick a smaller one on Models (Qwen3 1.7B or Llama 3.2 1B) or a free cloud brain (More, Settings).`;
     }
     model.crashes = (model.crashes || 0) + 1;
     await save.models();
   }
   status.error =
     `The phone closed FCC Phone while ${work.name} was ${work.stage === "load" ? "loading" : "answering"}, most likely because it needed more memory than iOS allows.` +
-    (change || " Use a smaller model (Qwen3 0.6B on Models) or a free cloud brain (More, Settings).");
+    (change || " Use a smaller model (Qwen3 1.7B or Llama 3.2 1B on Models) or a free cloud brain (More, Settings).");
   feed("Model Control", status.error, "error");
   changed("engine");
   return status.error;
@@ -170,10 +206,22 @@ export function modelById(id) {
   return state.models.find((model) => model.id === id);
 }
 
+/** A model the agents may think with: downloaded, and not one that closed
+ * the app at its lightest settings (too big for this phone). */
+export const usable = (model) => Boolean(model && model.ready && !model.tooBig);
+
+/** Try a too-big model again (the user's call, from Models). */
+export async function tryAgain(model) {
+  model.tooBig = false;
+  model.crashes = 0;
+  await save.models();
+  changed("models");
+}
+
 /** Download one catalogue model into the phone's storage. */
 export async function download(entry, onProgress, signal) {
   if (state.models.some((model) => model.url === entry.url && model.ready)) return modelById(entry.id);
-  const record = { id: entry.id, name: entry.name, url: entry.url, source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: {} };
+  const record = { id: entry.id, name: entry.name, url: entry.url, source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: entry.context ? { context: entry.context } : {} };
   state.models = state.models.filter((model) => model.id !== entry.id);
   state.models.push(record);
   await save.models();
