@@ -124,7 +124,7 @@ async function history(agent) {
 
 /** The tool loop: think, run the tools asked for, think again, until a reply. */
 /** Tools whose answer doesn't change within one turn. */
-const LOOKUPS = new Set(["skill", "wikipedia", "read_page", "web_search", "recall", "library", "game_art", "find_images", "list_photos", "team_status"]);
+const LOOKUPS = new Set(["skill", "wikipedia", "read_page", "web_search", "recall", "library", "game_art", "find_images", "list_photos"]);
 
 async function loop(agent, system, convo, ctx, { maxRounds, onTool }) {
   const tools = specsFor(agent, ctx);
@@ -144,6 +144,8 @@ async function loop(agent, system, convo, ctx, { maxRounds, onTool }) {
       const key = LOOKUPS.has(call.name) && !(call.name === "game_art" && call.arguments && call.arguments.action === "add") ? `${call.name}:${JSON.stringify(call.arguments || {})}` : "";
       const repeat = key && seen.has(key);
       if (key) seen.add(key);
+      // Saving a memory can change what recall finds: recall may run again.
+      if (call.name === "remember") for (const done of [...seen]) if (done.startsWith("recall:")) seen.delete(done);
       const result = repeat ? `You already did exactly this (${call.name}); its answer is above. Don't repeat it: use what you found and do the next step.` : await runTool(agent, call, ctx);
       if (onTool) await onTool(call, result);
       convo.push({ role: "tool", tool_call_id: call.id, content: result.slice(0, 16000) });
@@ -225,21 +227,23 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
         changed("team");
       },
     });
-    job.status = "done";
-    job.result = result;
-    await addTurn(agent, { role: "assistant", text: result });
-    // The agent that did the work and every agent that handed the job down
-    // (Jarvis included) get the app to download.
-    for (const id of ctx.chain) await handOver(state.agents.find((item) => item.id === id), ctx.built);
-    feed(agent.name, `Finished: ${result.split("\n")[0].slice(0, 120)}`, "done");
     // FCC checks the project itself, so an agent can't report a job done
-    // while the project still fails FCC's checks (small models do).
+    // while the project still fails FCC's checks (small models do): the job's
+    // own record, its feed line and the report all say so.
     let still = "";
     if (ctx.project && Object.keys(ctx.project.files || {}).length) {
       const { checkProject } = await import("./projects.js");
       const problems = checkProject(ctx.project).filter((problem) => !problem.startsWith("Note: "));
       if (problems.length) still = `\n\nFCC's own check of ${ctx.project.name} still finds ${problems.length} problem(s), so it isn't finished:\n${problems.slice(0, 6).map((problem) => `- ${problem}`).join("\n")}\nDon't tell the user it's done: have them fixed first.`;
     }
+    job.status = "done";
+    job.result = `${result}${still}`;
+    job.problems = Boolean(still);
+    await addTurn(agent, { role: "assistant", text: result });
+    // The agent that did the work and every agent that handed the job down
+    // (Jarvis included) get the app to download.
+    for (const id of ctx.chain) await handOver(state.agents.find((item) => item.id === id), ctx.built);
+    feed(agent.name, still ? `Finished, but FCC's check still finds problems in ${ctx.project.name}` : `Finished: ${result.split("\n")[0].slice(0, 120)}`, still ? "error" : "done");
     return `${agent.name} finished${ctx.project ? ` (project ${ctx.project.name})` : ""}: ${result}${still}`;
   } catch (error) {
     job.status = "failed";

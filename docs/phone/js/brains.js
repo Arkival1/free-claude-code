@@ -234,7 +234,7 @@ export function bestModel(brain, rows) {
   if (brain === "requesty") return first([/nemotron-3-ultra/, /nemotron-3-super/, /gemma-4-31b/, /nemotron/]);
   if (brain === "nous") return first([/beam-1\.0-501b/, /step-3\.7-flash/, /longcat/, /:free$/]);
   if (brain === "aion") return first([/^aion-labs\/aion-3\.5$/, /^aion-labs\/aion-3\.0$/, /aion/]);
-  if (brain === "zai") return first([/^glm-[\d.]+-flash$/, /flash/]);
+  if (brain === "zai") return first([/^glm-4\.7-flash$/, /^glm-4\.[\d]+-flash$/]);
   return ids[0] || "";
 }
 
@@ -254,6 +254,8 @@ export async function listModels(brain) {
   // tools), Nous's :free ones.
   if (brain === "requesty") rows = rows.filter((row) => row.input_price === 0 && row.output_price === 0 && row.api === "chat" && row.supports_tool_calling);
   if (brain === "nous") rows = rows.filter((row) => row.id.endsWith(":free"));
+  // Z.ai's free models are its GLM 4.x Flash ones (newer Flash models are paid).
+  if (brain === "zai") rows = rows.filter((row) => /^glm-4\.\d+-flash$/.test(row.id));
   if (brain === "ovh") rows = rows.filter((row) => !/whisper|tts|embed|bge|guard|diffusion|VL-/i.test(row.id));
   rows.sort((a, b) => a.id.localeCompare(b.id));
   state.modelLists[brain] = rows;

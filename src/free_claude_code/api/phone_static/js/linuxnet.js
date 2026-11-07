@@ -97,6 +97,40 @@ async function plugin(url) {
  * body }. ask(question) shows the user a yes/no (for GitHub changes). Returns
  * { status, headers, body (ArrayBuffer) }.
  */
+/** The calls fcc-github push makes (the only ones a 10-minute OK covers). */
+const PUSH_STEPS = [
+  ["POST", /^\/repos\/[^/]+\/[^/]+\/git\/(blobs|trees|commits)$/],
+  ["PATCH", /^\/repos\/[^/]+\/[^/]+\/git\/refs\/heads\/.+$/],
+];
+
+/** True for the address FCC itself is served from (any scheme). */
+const ownSite = (url) => Boolean(globalThis.location && location.host) && url.host === location.host;
+
+/** An answer's bytes, or null once it passes BODY_LIMIT (the rest isn't read). */
+async function readCapped(response) {
+  if (!response.body) return new ArrayBuffer(0);
+  const reader = response.body.getReader();
+  const parts = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > BODY_LIMIT) {
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out.buffer;
+}
+
 export async function handle(request, { ask = (question) => confirm(question) } = {}) {
   let url;
   try {
@@ -118,6 +152,13 @@ export async function handle(request, { ask = (question) => confirm(question) } 
   if (url.hostname === "index.crates.io" && url.pathname === "/config.json") return { status: 200, headers: [["content-type", "application/json"]], body: new TextEncoder().encode(CRATES_CONFIG).buffer };
   url.protocol = "https:";
   if (url.port === "80") url.port = "";
+  // FCC itself (the PC server or the phone app's own site) is never reachable
+  // from inside Linux: a program there could otherwise read FCC's own pages
+  // and data through the page's connection.
+  if (ownSite(url)) {
+    log({ what: describe(method, url), status: "blocked" });
+    return text(403, "FCC Linux can't reach FCC itself.");
+  }
   const headers = new Headers();
   // Only headers a browser may send without asking the site first: anything
   // else makes the browser ask (a preflight), which most sites refuse. GitHub
@@ -136,16 +177,19 @@ export async function handle(request, { ask = (question) => confirm(question) } 
     const token = settings().githubToken;
     if (token) headers.set("authorization", `Bearer ${token}`);
     if (!["GET", "HEAD"].includes(method)) {
-      // One OK covers one repository for ten minutes (a push is several calls);
-      // anything else on GitHub (GraphQL, an organisation) asks every time.
+      // One OK covers one repository's push for ten minutes (a push is several
+      // calls: new blobs, a tree, a commit, then moving the branch). Any other
+      // change (deleting the repo, its settings, GraphQL, an organisation)
+      // asks every time.
       const repo = (/^\/repos\/([^/]+\/[^/]+)/.exec(url.pathname) || [])[1] || "";
-      if (!repo || !((approved.get(repo) || 0) > Date.now())) {
-        const ok = await ask(repo ? `FCC Linux wants to change ${repo} on GitHub (${method} ${url.pathname.slice(0, 80)}).\n\nAllow changes to ${repo} for the next 10 minutes?` : `FCC Linux wants to change something on GitHub (${method} ${url.pathname.slice(0, 80)}).\n\nAllow this one change?`);
+      const pushing = Boolean(repo) && PUSH_STEPS.some(([verb, path]) => verb === method && path.test(url.pathname));
+      if (!pushing || !((approved.get(repo) || 0) > Date.now())) {
+        const ok = await ask(pushing ? `FCC Linux wants to push to ${repo} on GitHub (${method} ${url.pathname.slice(0, 80)}).\n\nAllow pushing to ${repo} for the next 10 minutes?` : `FCC Linux wants to change something on GitHub (${method} ${url.pathname.slice(0, 80)}).\n\nAllow this one change?`);
         if (!ok) {
           log({ what: describe(method, url), status: "denied" });
           return text(403, "The user said no to this GitHub change.");
         }
-        if (repo) approved.set(repo, Date.now() + APPROVAL_MS);
+        if (pushing) approved.set(repo, Date.now() + APPROVAL_MS);
       }
     }
   }
@@ -161,8 +205,19 @@ export async function handle(request, { ask = (question) => confirm(question) } 
       return text(502, `${url.hostname} doesn't let apps in a browser reach it, so FCC Linux can't use it from the phone.`);
     }
   }
-  let body = await response.arrayBuffer();
-  if (body.byteLength > BODY_LIMIT) return text(413, `${url.hostname} sent more than ${BODY_LIMIT / 1048576} MB in one answer.`);
+  if (response.url && ownSite(new URL(response.url))) {
+    log({ what: describe(method, url), status: "blocked" });
+    return text(403, "FCC Linux can't reach FCC itself.");
+  }
+  // The size cap holds while the answer arrives, so a huge download stops
+  // before it fills the phone's memory.
+  const tooBig = () => text(413, `${url.hostname} sent more than ${BODY_LIMIT / 1048576} MB in one answer.`);
+  if (Number(response.headers.get("content-length")) > BODY_LIMIT) {
+    response.body?.cancel().catch(() => {});
+    return tooBig();
+  }
+  let body = await readCapped(response);
+  if (!body) return tooBig();
   const rule = REWRITE.find(([host]) => host.test(url.hostname));
   const kind = response.headers.get("content-type") || "";
   if (rule && /json|html|text|xml/.test(kind)) {

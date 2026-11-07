@@ -357,8 +357,12 @@ export async function runTool(agent, call, ctx) {
           feed(agent.name, `Ran in FCC Linux: ${command.slice(0, 80)}`);
           // Files changed in /projects go back into their FCC projects.
           const { syncOut } = await import("./linuxprojects.js");
-          const back = await syncOut(machine, agent.name).catch(() => []);
-          const saved = back.length ? `\n(Saved back to FCC Projects: ${back.slice(0, 8).join(", ")}${back.length > 8 ? "…" : ""})` : "";
+          let failed = "";
+          const back = await syncOut(machine, agent.name).catch((error) => {
+            failed = `\n(Couldn't copy changes back to FCC Projects: ${error.message}. Some files may not be in Projects yet; run the linux tool's sync to try again.)`;
+            return [];
+          });
+          const saved = (back.length ? `\n(Saved back to FCC Projects: ${back.slice(0, 8).join(", ")}${back.length > 8 ? "…" : ""})` : "") + failed;
           return `exit code ${result.code}\n${clip(result.text) || "(no output)"}${saved}`;
         }
         if (action === "write") {

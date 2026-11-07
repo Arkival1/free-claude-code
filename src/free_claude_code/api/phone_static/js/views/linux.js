@@ -3,20 +3,24 @@
 // lives in a dock on the page (not in this screen), so it keeps running when
 // you look elsewhere and Jarvis can use the same one.
 import { el, button, notify, go } from "../ui.js";
-import { startLinux, runningLinux, forgetSession, hasSession, loadLinux, watchActivity, takeProblem, hasProblem } from "../linux.js";
+import { startLinux, runningLinux, forgetSession, hasSession, loadLinux, watchActivity, takeProblem, hasProblem, keptSynced } from "../linux.js";
 import { status as filesStatus, getEverything, hasManifest } from "../linuxfiles.js";
 import { internetOn, setInternet, githubTokenSaved, setGithubToken, netLog, watchNet } from "../linuxnet.js";
 import { state } from "../state.js";
-import { syncIn, syncOut, forgetSynced } from "../linuxprojects.js";
+import { syncIn, syncOut, forgetSynced, restoreSynced } from "../linuxprojects.js";
 
 /** Your projects as /projects/<name> in FCC Linux: written in once it's
  * ready, and changed files brought back after commands you type. */
 function shareProjects(machine) {
   let pending = null;
-  forgetSynced(); // a new machine: write everything in again
-  // A kept session may hold edits made in Linux that never came back: bring
-  // those back first, then write the phone's files in.
-  syncOut(machine, "you")
+  // A fresh machine: write everything in again. A kept session brings back
+  // its record of what FCC wrote in, so a file changed on both sides since is
+  // noticed; edits made in Linux that never came back come back first, then
+  // the phone's files are written in.
+  const record = machine.booted === "session" ? keptSynced().catch(() => []) : Promise.resolve([]);
+  record
+    .then((entries) => (machine.booted === "session" ? restoreSynced(entries) : forgetSynced()))
+    .then(() => syncOut(machine, "you"))
     .catch(() => [])
     .then(() => syncIn(machine))
     .catch((error) => notify(error.message));

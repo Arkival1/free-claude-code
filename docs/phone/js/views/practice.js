@@ -38,7 +38,7 @@ export function render(view) {
         el("p", { class: "muted", text: `He teaches himself in FCC Linux: for each lesson he writes a program and its tests, runs them and fixes his code until they pass, then tests it for flaws. FCC runs his check itself, so only real passes count. ${passed} of ${LESSON_COUNT} lessons learned.` }),
         now
           ? el("div", {}, [
-              el("p", { role: "status", text: `Practising now${now.current ? `: ${COURSES[now.current.lang].name}, lesson ${now.current.number} (${now.current.topic})` : ""}. ${now.passed} of ${now.done} passed so far${now.until !== Infinity ? `; stops at ${new Date(now.until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}. Keep FCC open (an iPhone pauses apps in the background).` }),
+              el("p", { role: "status", text: `Practising now${now.current ? `: ${COURSES[now.current.lang].name}, lesson ${now.current.number} (${now.current.topic})` : ""}. ${now.passed} of ${now.done} passed so far${now.until !== Infinity ? `; stops at ${new Date(now.until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}, once the lesson running then is finished and checked` : ""}. Keep FCC open (an iPhone pauses apps in the background).` }),
               button("Stop practising", () => {
                 stopPractice();
                 notify("Jarvis stops after this lesson.");

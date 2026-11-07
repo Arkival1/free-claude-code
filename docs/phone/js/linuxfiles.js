@@ -126,7 +126,9 @@ export async function readList() {
     const bytes = new Uint8Array(await response.arrayBuffer());
     if ((await digest(bytes)) !== row.sha256) throw Object.assign(new Error("FCC Linux's file list isn't what FCC shipped (its checksum is wrong), so it wasn't used."), { retry: false });
     blob = new Blob([bytes]);
-    await packsDo("readwrite", (store) => store.put({ sha256: row.sha256, blob, at: Date.now() }, row.sha256));
+    // Keeping it is a nicety: if the phone's storage refuses, the checked copy
+    // in hand is used (like fetchPack does).
+    await packsDo("readwrite", (store) => store.put({ sha256: row.sha256, blob, at: Date.now() }, row.sha256)).catch(() => false);
   }
   return new Response(blob.stream().pipeThrough(new DecompressionStream("gzip"))).text();
 }

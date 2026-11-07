@@ -310,3 +310,39 @@ def test_a_backup_never_carries_fcc_linuxs_github_token(
     backup = json.loads(Path(caught.value.path()).read_text(encoding="utf-8"))
     assert "ghp_secret" not in json.dumps(backup)
     assert backup["settings"]["linux"] == {"internet": False}
+
+
+def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: a program in FCC Linux can't reach FCC's own
+    address through the gateway; an OK to push covers only the push calls (a
+    repo deletion still asks); an answer over the cap stops as it arrives."""
+    page.set_default_timeout(WAIT)
+    asked: list[str] = []
+    page.route(
+        "https://api.github.com/**",
+        lambda route: route.fulfill(
+            status=200, headers={"Access-Control-Allow-Origin": "*"}, body="{}"
+        ),
+    )
+    open_phone(page, admin_base_url, "settings")
+    page.expose_function("fccAsk", lambda question: asked.append(question) or True)
+    result = page.evaluate(
+        """async () => {
+            const net = await import('./js/linuxnet.js');
+            await net.setInternet(true);
+            await net.setGithubToken('ghp_test_token');
+            const ask = async (question) => window.fccAsk(question);
+            const own = await net.handle({ url: `http://${location.host}/phone/js/state.js`, method: 'GET' }, { ask });
+            const push = (path, method) => net.handle({ url: `https://api.github.com/repos/me/app${path}`, method, body: '{}' }, { ask });
+            await push('/git/blobs', 'POST');
+            await push('/git/trees', 'POST');
+            await push('/git/refs/heads/main', 'PATCH');
+            await push('', 'DELETE');
+            return { own: own.status };
+        }"""
+    )
+    assert result["own"] == 403
+    assert len(asked) == 2, asked  # once for the push, once for the deletion
+    assert "push to me/app" in asked[0] and "Allow this one change?" in asked[1]

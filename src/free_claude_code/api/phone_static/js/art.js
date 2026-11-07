@@ -94,9 +94,12 @@ export async function useArt(args, ctx, putFile) {
     if (!ctx.project) return "Open or start a project first, then add the sprites.";
     const ids = (Array.isArray(args.ids) ? args.ids : String(args.ids || "").split(/[\s,]+/)).filter(Boolean).slice(0, MAX_ADD);
     if (!ids.length) return "add needs ids from search (like a12, a340).";
+    // Every id is checked before anything is written, so a bad one doesn't
+    // leave half the sprites added and unreported.
+    const unknown = ids.filter((id) => indexOf(id) < 0);
+    if (unknown.length) return `No sprite ${unknown.join(", ")}; search first (ids look like a123). Nothing was added.`;
     const added = [];
     for (const id of ids) {
-      if (indexOf(id) < 0) return `No sprite ${id}; search first (ids look like a123).`;
       const path = artPath(id);
       await putFile(ctx.project, path, await artPicture(id));
       added.push(path);

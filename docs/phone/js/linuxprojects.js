@@ -10,12 +10,16 @@ import { putFile, TEXT_TYPES, PICTURE_TYPES, isPicture, MAX_FILE_CHARS } from ".
 const ROOT = "/projects";
 const MARK = "/tmp/.fcc-projects-mark";
 const BATCH = 120_000; // characters of commands per run
-const OUT_MAX = 40; // changed files brought back after one command
+const OUT_MAX = 40; // changed files read per round
+const OUT_LIMIT = 2000; // most changed files brought back in one sync
+const NEXT = `${MARK}.next`;
+const CHANGED = "/tmp/.fcc-projects-changed";
 const sent = new Map(); // "slug/path" -> the text last written in or read out
 // File times in FCC Linux are whole seconds: the mark is set two seconds back,
 // so a file changed just after a sync still counts (unchanged ones are
 // skipped by their contents).
-const TOUCH = `touch -d "$(date -d @$(( $(date +%s) - 2 )) '+%Y-%m-%d %H:%M:%S')" ${MARK}`;
+const touchAt = (file) => `touch -d "$(date -d @$(( $(date +%s) - 2 )) '+%Y-%m-%d %H:%M:%S')" ${file}`;
+const TOUCH = touchAt(MARK);
 const quote = (text) => `'${String(text).replace(/'/g, "'\\''")}'`;
 
 function base64Text(text) {
@@ -67,10 +71,24 @@ export async function syncIn(machine) {
 /** Bring files changed under /projects back into their projects (after a
  * command); returns the paths brought back. */
 export async function syncOut(machine, agentName = "FCC Linux") {
-  const listed = await machine.run(`[ -d ${ROOT} ] && [ -f ${MARK} ] && cd ${ROOT} && find . -type f -newer ${MARK} | head -${OUT_MAX}; ${TOUCH}`, { timeoutMs: 60000 }).catch(() => null);
-  if (!listed || !listed.text.trim()) return [];
+  // The next mark is set when the list is made, and only becomes the mark
+  // once every listed file is back: files beyond one round are never skipped,
+  // and a file changed while this runs is caught next time. Dependency
+  // folders don't take places in the list.
+  const listed = await machine.run(`[ -d ${ROOT} ] && [ -f ${MARK} ] && cd ${ROOT} && ${touchAt(NEXT)} && find . -type f -newer ${MARK} -not -path '*/node_modules/*' -not -path '*/.git/*' > ${CHANGED} && wc -l < ${CHANGED}`, { timeoutMs: 60000 }).catch(() => null);
+  const total = listed && listed.code === 0 ? Number.parseInt(listed.text.trim().split("\n").pop(), 10) || 0 : 0;
+  if (!total) {
+    if (listed && listed.code === 0) await machine.run(`mv -f ${NEXT} ${MARK}`, { timeoutMs: 30000 }).catch(() => null);
+    return [];
+  }
   const back = [];
-  for (const line of listed.text.split("\n")) {
+  const lines = [];
+  for (let from = 1; from <= Math.min(total, OUT_LIMIT); from += OUT_MAX) {
+    const page = await machine.run(`sed -n '${from},${Math.min(from + OUT_MAX - 1, OUT_LIMIT)}p' ${CHANGED}`, { timeoutMs: 60000 });
+    if (page.code !== 0) throw new Error("Couldn't list the files changed in FCC Linux.");
+    lines.push(...page.text.split("\n"));
+  }
+  for (const line of lines) {
     const relative = line.trim().replace(/^\.\//, "");
     const slash = relative.indexOf("/");
     if (slash < 1) continue;
@@ -98,7 +116,8 @@ export async function syncOut(machine, agentName = "FCC Linux") {
       continue;
     }
     // Changed on both sides since FCC wrote it in: the phone's copy stays and
-    // Linux's comes in beside it, so neither is lost.
+    // Linux's comes in beside it, so neither is lost (a kept session brings
+    // its record back, so this holds after reopening too).
     if (sent.has(key) && project.files[path] !== sent.get(key)) {
       await putFile(project, `${path}.from-linux${text ? ".txt" : path.slice(path.lastIndexOf("."))}`, body, agentName).catch(() => null);
       back.push(`${slug}/${path} (both changed: Linux's copy kept beside it)`);
@@ -108,10 +127,26 @@ export async function syncOut(machine, agentName = "FCC Linux") {
     sent.set(key, body);
     back.push(key);
   }
+  if (total > OUT_LIMIT) {
+    // Too many at once: the mark stays, so the rest come back on a later sync
+    // (the ones already back are skipped by their contents).
+    back.push(`(${total - OUT_LIMIT} more changed files not copied yet: sync again)`);
+  } else {
+    await machine.run(`mv -f ${NEXT} ${MARK}`, { timeoutMs: 30000 });
+  }
   return back;
 }
 
 /** Forget what was written in (after FCC Linux starts fresh). */
 export function forgetSynced() {
   sent.clear();
+}
+
+/** What FCC last wrote in or read out, kept with a kept session ... */
+export const syncedRecord = () => [...sent];
+/** ... and brought back when that session reopens, so a file changed on both
+ * sides is still noticed (instead of Linux's copy replacing the phone's). */
+export function restoreSynced(entries) {
+  sent.clear();
+  for (const [key, body] of Array.isArray(entries) ? entries : []) sent.set(key, body);
 }

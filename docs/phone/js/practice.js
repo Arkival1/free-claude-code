@@ -23,8 +23,14 @@ export async function practiceData() {
   if (!data) data = Object.assign({ progress: {}, skills: [], notes: [] }, await store.get(KEY, {}));
   return data;
 }
+let unsavedWarned = false;
 async function keep() {
-  await store.set(KEY, data);
+  // Kept in memory either way; if the phone's storage refuses, say so once,
+  // so the user knows this progress goes when FCC closes.
+  if (!(await store.set(KEY, data)) && !unsavedWarned) {
+    unsavedWarned = true;
+    feed(jarvis().name, "Practice progress couldn't be saved on this phone (its storage is full or blocked), so it will be lost when FCC closes.", "error");
+  }
   for (const watch of watchers) watch();
   changed("practice");
 }

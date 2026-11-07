@@ -10,6 +10,7 @@
 import { digest } from "./sha256.js";
 import { useManifest, readFile, readList, setActivity, pruneOld } from "./linuxfiles.js";
 import { handle as netHandle } from "./linuxnet.js";
+import { store } from "./store.js";
 
 export const LINUX_VERSION = "2.0";
 // Compilers (Rust, Go, C++) need room; memory nobody uses stays zero, so
@@ -154,6 +155,9 @@ async function forget(kind) {
   }
 }
 export const forgetSession = () => forget("session");
+const SYNCED_KEY = "linux-synced";
+/** The projects record kept with the session (empty without one). */
+export const keptSynced = () => store.get(SYNCED_KEY, []);
 /** Is a session kept? (Counts it; doesn't unpack it.) */
 export async function hasSession() {
   try {
@@ -613,7 +617,12 @@ async function startOnce(host, { onProgress, onStatus = () => {}, fresh = false 
       // Linux lets go of its file cache first (freed memory is zeroed), so
       // the snapshot holds your work, not copies of the compilers.
       await machine.run("sync; echo 3 > /proc/sys/vm/drop_caches", { timeoutMs: 30000 }).catch(() => null);
-      return writeSnapshot("session", await machine.capture());
+      const size = await writeSnapshot("session", await machine.capture());
+      // What FCC wrote into /projects goes with the session, so syncing after
+      // it reopens still notices a file changed on both sides.
+      const { syncedRecord } = await import("./linuxprojects.js");
+      await store.set(SYNCED_KEY, syncedRecord());
+      return size;
     },
     stop() {
       if (closed) return;

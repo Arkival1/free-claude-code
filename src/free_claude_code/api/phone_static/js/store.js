@@ -42,12 +42,16 @@ export const store = {
     }
     return memoryOnly.has(key) ? memoryOnly.get(key) : fallback;
   },
+  /** Save a value; true once it's on the phone's storage, false when only
+   * this visit keeps it (storage blocked or full). */
   async set(key, value) {
     memoryOnly.set(key, value);
     try {
-      await run("readwrite", (kv) => (kv ? kv.put(value, key) : null));
+      const saved = await run("readwrite", (kv) => (kv ? kv.put(value, key) : null));
+      return saved !== null && saved !== undefined;
     } catch {
       /* kept in memory for this visit */
+      return false;
     }
   },
   async remove(key) {
