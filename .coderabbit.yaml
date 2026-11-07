@@ -9,6 +9,9 @@ reviews:
     # The implementer opens a draft pull request for review only (never merged
     # by CodeRabbit or the AI), so drafts are reviewed too.
     drafts: true
+    # The review-only pull request targets this branch, not main.
+    base_branches:
+      - "coderabbit/.*"
   path_filters:
     - "!docs/**"
     - "!vendor/**"
