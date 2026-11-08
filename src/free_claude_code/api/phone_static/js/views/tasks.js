@@ -10,7 +10,7 @@ import { startTask, stopTask, resumeTask, isRunning } from "../tasks.js";
 import { startPlayground, said } from "../playground.js";
 
 const REFRESH_MS = 5000;
-const MARK = { done: "✓", running: "●", working: "●", planning: "…", failed: "✕", stopped: "■", skipped: "–", waiting: "○" };
+const MARK = { done: "✓", unfinished: "!", running: "●", working: "●", planning: "…", failed: "✕", stopped: "■", skipped: "–", waiting: "○" };
 // A Playground job's stages.
 const STAGE = { kickoff: "Advice", help: "Helper's part", work: "The work", review: "Check" };
 

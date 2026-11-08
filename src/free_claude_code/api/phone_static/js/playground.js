@@ -15,7 +15,7 @@ import { state, agentById, jarvis, feed, ROLE_PROMPTS } from "./state.js";
 import { runTask, COULDNT_FINISH } from "./agents.js";
 import { think, pinBrain, brainReady } from "./brains.js";
 import { remember } from "./tools.js";
-import { projectById, createProject } from "./projects.js";
+import { projectById, createProject, checkProject } from "./projects.js";
 import { addToLibrary } from "./library.js";
 
 /** Helpers that build parts alongside the main AI: three AIs at once. */
@@ -380,6 +380,9 @@ export async function runPlayground(task, saveTasks) {
     }
     const reviewers = advisers.slice(0, MAX_ADVISERS);
     let verdict = reviewers.length ? "" : "Done";
+    // What FCC's own check of the project still finds after the latest try.
+    let unfinished = [];
+    const fixList = (problems) => `- FCC's own check: ${problems.slice(0, 6).join(" / ")}`;
     for (let pass = 1; pass <= MAX_PASSES; pass += 1) {
       // 2. The main AI does the job (or fixes it) with its own hands, while the
       // helpers build their parts beside it on the first try.
@@ -407,7 +410,26 @@ export async function runPlayground(task, saveTasks) {
         task.project_id = project.id;
       }
       if (work.status === "failed") throw new Error(work.result);
-      if (!reviewers.length) break;
+      // A work step reused from an earlier run (Run again) has no fresh report:
+      // FCC checks the project itself, so a failed task can't become done.
+      try {
+        unfinished = report.problems || (project ? checkProject(project).filter((problem) => !problem.startsWith("Note: ")) : []);
+      } catch (error) {
+        // A check that breaks keeps the work; the step just isn't counted done.
+        unfinished = [`FCC couldn't check the project (${error.message}).`];
+      }
+      // A try that leaves the project failing FCC's check isn't a finished
+      // step (Run again does it again); it shows as unfinished, not done.
+      if (unfinished.length && work.status === "done") {
+        work.status = "unfinished";
+        await saveTasks();
+      }
+      if (!reviewers.length) {
+        // No advisers: FCC's check decides whether another try is needed.
+        if (!unfinished.length) break;
+        advice = fixList(unfinished);
+        continue;
+      }
       // 3. The advisers check the work.
       const reviews = reviewers.map((adviser) => stepFor(task, "review", pass, adviser, "Check the work"));
       const reviewBrief = adviseBrief(
@@ -423,11 +445,11 @@ export async function runPlayground(task, saveTasks) {
         break;
       }
       const approved = (step) => approves(said(step));
-      if (checked.every(approved)) {
+      if (checked.every(approved) && !unfinished.length) {
         verdict = "Done";
         break;
       }
-      advice = notes(checked.filter((step) => !approved(step)));
+      advice = [notes(checked.filter((step) => !approved(step))), unfinished.length ? fixList(unfinished) : ""].filter(Boolean).join("\n");
       verdict = "Done, with notes the advisers still had";
       // What the check found becomes a lesson in the main AI's own mind.
       const found = checked.filter((step) => !approved(step) && !step.kept);
@@ -439,8 +461,11 @@ export async function runPlayground(task, saveTasks) {
     // 4. Each AI keeps what it learned in its own mind.
     const story = task.steps.map((step) => `${step.agent} (${step.do}): ${step.result.slice(0, 400)}`).join("\n");
     for (const agent of [hands, ...helpers, ...reviewers]) await reflect(agent, task, story);
+    // Still failing FCC's own check after every try: not finished, and not
+    // put in the library as if it were.
+    if (unfinished.length) verdict = `Not finished: FCC's own check still finds ${unfinished.length} problem(s)`;
     // 5. The finished work waits in the library for the user's approval.
-    if (project && filesOf(project).length && !task.libraryId) {
+    if (project && filesOf(project).length && !task.libraryId && !unfinished.length) {
       try {
         const item = await addToLibrary({ kind: task.type, title: project.name, notes: task.goal, project, by: hands.name, approved: false });
         task.libraryId = item.id;
@@ -454,9 +479,9 @@ export async function runPlayground(task, saveTasks) {
     const short = missing.length ? ` ${missing.join(" and ")} couldn't finish ${missing.length > 1 ? "their parts" : "its part"}.` : "";
     if (missing.length) feed(hands.name, `${missing.join(" and ")} couldn't finish ${missing.length > 1 ? "their parts" : "its part"} of ${task.goal.slice(0, 60)}`, "error");
     const shown = filesOf(project).filter((path) => !path.startsWith("parts/")).length;
-    task.status = "done";
+    task.status = unfinished.length ? "failed" : "done";
     task.summary = `${verdict || "Done"}.${short} Project: ${project.name} (${shown} files${task.libraryId ? "; it's in your Library to approve" : ""}).\n${last ? last.result : ""}`.trim();
-    feed(hands.name, `Finished in the Playground: ${task.goal.slice(0, 80)}`, "done");
+    feed(hands.name, `${unfinished.length ? "Not finished (FCC's check still finds problems)" : "Finished"} in the Playground: ${task.goal.slice(0, 80)}`, unfinished.length ? "error" : "done");
   } catch (error) {
     if (error instanceof Stopped || task.stopping) {
       task.status = "stopped";

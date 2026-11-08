@@ -91,6 +91,8 @@ def test_the_phone_opens_in_the_manus_look_unless_asked(
     # Picking the HUD in Settings sticks, even without ?look=hud.
     page.evaluate("location.hash = 'settings'")
     page.get_by_role("button", name="HUD").click()
+    # Saved first (the look switches after the save), then opened again.
+    page.wait_for_function("() => document.body.dataset.look === 'hud'")
     page.reload()
     page.wait_for_function("() => window.fccPhone && window.fccPhone.ready")
     assert page.evaluate("() => document.body.dataset.look") == "hud"

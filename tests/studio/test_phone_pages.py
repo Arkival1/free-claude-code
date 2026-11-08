@@ -52,11 +52,17 @@ def test_the_app_installs_as_its_own_home_screen_app():
     # Every link is relative, so it works at /phone/ and on GitHub Pages alike.
     assert 'href="/' not in page and 'src="/' not in page
     worker = (PHONE_DIR / "sw.js").read_text()
+    # FCC Linux's system packs (linux/fs/) are kept by js/linuxfiles.js, not
+    # the worker (so they aren't stored twice); the worker lets them through.
     shipped = [
         str(path.relative_to(PHONE_DIR))
         for path in PHONE_DIR.rglob("*")
-        if path.is_file() and path.suffix != ".txt" and path.name != "sw.js"
+        if path.is_file()
+        and path.suffix != ".txt"
+        and path.name != "sw.js"
+        and not str(path.relative_to(PHONE_DIR)).startswith("linux/fs/")
     ]
+    assert '"/linux/fs/"' in worker
     for name in shipped:
         assert f'"{name}"' in worker, f"sw.js must cache {name} for offline use"
 
@@ -83,6 +89,10 @@ async def test_the_pc_serves_the_phone_app(make_studio):
             godot = await client.get("/phone/godot/godot.wasm.gz")
             assert godot.headers["content-type"] == "application/gzip"
             assert godot.content[:2] == b"\x1f\x8b"
+            # FCC's Godot kit fonts (the phone checks their checksums).
+            font = await client.get("/phone/godot/fcc/fonts/emoji.ttf")
+            assert font.status_code == 200
+            assert font.headers["content-type"] == "font/ttf"
             for bad in (
                 "/phone/secret.txt",
                 "/phone/..%2Fstudio_static%2Fstudio.js",
@@ -145,3 +155,31 @@ def test_the_phone_lab_runs_on_the_pc_labs_tables_and_build_your_own_x():
         ["Git", "Python", "Write yourself a Git!", "https://wyag.thb.lt/", ""],
         ["Git", "C", "Chess Engine In C", "https://youtube.com/x", "video"],
     ]
+
+
+def test_the_phone_carries_web_llm_byte_for_byte_with_its_licence():
+    """The graphics-chip engine (WebLLM 0.2.87) and its three model programs
+    are FCC's own copies, matching the checksums in vendor/web-llm."""
+    import hashlib
+
+    sums: dict[str, str] = {}
+    root = Path(__file__).resolve().parents[2] / "vendor" / "web-llm"
+    for line in (root / "SHA256SUMS").read_text().splitlines():
+        digest, name = line.split()
+        sums[name] = digest
+    served = PHONE_DIR / "vendor" / "web-llm"
+    files = [
+        "web-llm.js",
+        *(f"libs/{p.name}" for p in (served / "libs").glob("*.wasm")),
+    ]
+    assert len(files) == 8
+    for name in files:
+        assert sums[name] == hashlib.sha256((served / name).read_bytes()).hexdigest(), (
+            name
+        )
+    assert "Apache License" in (served / "LICENSE").read_text()
+    # The engine names the files it loads, pinned to their commits.
+    engine = (PHONE_DIR / "js" / "webgpu.js").read_text()
+    for name in files[1:]:
+        assert name.removeprefix("libs/") in engine
+    assert "/resolve/main/" not in engine

@@ -4,6 +4,7 @@ extends Node2D
 ## '*' flowers, 'P' player, 'W' wizard, 'V' villager, 'K' key, 'C' chest.
 ## Art: Kenney's Tiny Town and Tiny Dungeon (CC0).
 
+const Kit := preload("res://fcc/kit.gd")
 const TILE := 16
 const MAP := [
 	"TTTTTTTTTTTTTTTTTTTTTTTTT",
@@ -32,12 +33,18 @@ var quest := "talk"  # talk -> find -> return -> done
 var nearby: Node2D = null
 var key_item: Area2D
 var chest: Sprite2D
+var touch: CanvasLayer
 
 
 func _ready() -> void:
+	# FCC's kit: symbols and emoji in every text, textures, particles, life.
+	Kit.use_fonts()
 	_add_inputs()
+	# Forest green past the map's edge (seen on tall screens).
+	RenderingServer.set_default_clear_color(Color("#2f5e2a"))
 	# Touch controls on a phone (hidden on a computer).
-	var touch: CanvasLayer = preload("res://touch_pad.gd").new()
+	touch = preload("res://touch_pad.gd").new()
+	touch.set("max_zoom", 2.5)
 	touch.set("buttons", [["talk", "TALK", Vector2(-120, -140), 60.0]])
 	touch.set("vertical", true)
 	add_child(touch)
@@ -67,7 +74,8 @@ func _ready() -> void:
 				"W":
 					_add_person(at, Vector2i(0, 7), "wizard")
 				"V":
-					_add_person(at, Vector2i(3, 8), "villager")
+					# The villager strolls about (FCC kit); the wizard stays put.
+					Kit.wander(_add_person(at, Vector2i(3, 8), "villager"), 1.5, 0.8)
 				"K":
 					key_item = _add_key(at)
 				"C":
@@ -82,8 +90,16 @@ func _ready() -> void:
 	camera.limit_bottom = MAP.size() * TILE
 	camera.position_smoothing_enabled = true
 	player.add_child(camera)
+	# Held upright, the village fills the top of the screen and the controls
+	# get the bottom.
+	touch.call("fit", camera, Vector2(MAP[0].length() * TILE, MAP.size() * TILE))
+	# The village lives: day turns to night and back (4 minutes a day).
+	add_child(Kit.day_night(240.0))
 	_make_dialogue()
-	say("Use the arrows or WASD to walk. Press E to talk.")
+	if touch.visible:
+		say("Move with the stick on the left. Tap TALK next to someone to talk.")
+	else:
+		say("Use the arrows or WASD to walk. Press E to talk.")
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -120,8 +136,11 @@ func say(text: String) -> void:
 	box.visible = true
 
 
-func _add_person(at: Vector2, frame: Vector2i, who: String) -> void:
-	var body := StaticBody2D.new()
+func _add_person(at: Vector2, frame: Vector2i, who: String) -> CharacterBody2D:
+	# A CharacterBody2D, so a wandering person stops at walls and the player
+	# (Kit.wander moves it with move_and_slide) instead of walking through.
+	var body := CharacterBody2D.new()
+	body.motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 	body.position = at
 	body.set_meta("who", who)
 	body.add_child(_sprite(frame, preload("res://assets/characters.png")))
@@ -144,6 +163,7 @@ func _add_person(at: Vector2, frame: Vector2i, who: String) -> void:
 			nearby = null)
 	body.add_child(reach)
 	add_child(body)
+	return body
 
 
 func _add_key(at: Vector2) -> Area2D:
@@ -191,6 +211,32 @@ func _make_dialogue() -> void:
 	box.add_child(dialogue)
 	layer.add_child(box)
 	add_child(layer)
+	get_viewport().size_changed.connect(_fit_text)
+	_fit_text()
+
+
+## The talk box never covers the touch controls and its text grows with the
+## screen, so it stays readable on a phone: held upright it sits at the top
+## of the controls panel (the whole village stays in view); otherwise along
+## the bottom, clear of the buttons on the right, growing upwards to fit.
+func _fit_text() -> void:
+	var screen := get_viewport().get_visible_rect().size
+	var grow := maxf(1.0, minf(screen.x, screen.y) / 216.0)
+	var room: float = touch.call("controls_room")
+	var buttons := 0.0
+	if touch.visible and room == 0.0:
+		buttons = 200.0 * float(touch.call("size_scale"))
+	box.offset_left = 8 * grow
+	box.offset_right = -8 * grow - buttons
+	if room > 0.0:
+		box.grow_vertical = Control.GROW_DIRECTION_END
+		box.offset_top = -room + 8 * grow
+		box.offset_bottom = box.offset_top + 30 * grow
+	else:
+		box.grow_vertical = Control.GROW_DIRECTION_BEGIN
+		box.offset_bottom = -8 * grow
+		box.offset_top = box.offset_bottom - 30 * grow
+	dialogue.add_theme_font_size_override("font_size", int(9 * grow))
 
 
 func _make_tile_set() -> TileSet:

@@ -3,6 +3,7 @@
 import { state, save, changed, onChange } from "../state.js";
 import { el, button, card, notify, openSheet, closeSheet, bytes, meter, ago } from "../ui.js";
 import * as engine from "../engine.js";
+import { hasWebGPU } from "../webgpu.js";
 import { brainOf } from "../brains.js";
 
 const downloads = new Map(); // id -> {done, total, controller}
@@ -103,12 +104,15 @@ function modelRow(model) {
       isDefault ? el("span", { class: "pill gold", text: "default" }) : null,
     ]),
     badges(model),
+    model.tooBig ? el("p", { class: "warn", text: "Too big for this phone: it closed FCC Phone while loading, even at its lightest settings, so the agents don't use it. Try again only if you've closed other apps or changed its settings." }) : null,
     need ? el("small", { class: "muted", text: `Needs about ${bytes(need)} of memory at ${engine.settingsFor(model).context.toLocaleString()} tokens of context.${need > 2.5 * 1024 ** 3 ? " That's a lot for an iPhone: pick a smaller context or model if it crashes." : ""}` }) : null,
     model.lastSpeed ? el("small", { class: "muted", text: `Speed test: ${model.lastSpeed.toFixed(1)} tokens/s (${ago(model.testedAt)})` }) : null,
     el("div", { class: "row" }, [
       loaded
         ? button("Unload", () => engine.unload(), { "aria-label": `Unload ${model.name}` })
-        : button("Load", () => loadNow(model), { class: "primary", "aria-label": `Load ${model.name}` }),
+        : model.tooBig
+          ? button("Try again", () => engine.tryAgain(model).then(() => loadNow(model)), { "aria-label": `Try ${model.name} again` })
+          : button("Load", () => loadNow(model), { class: "primary", "aria-label": `Load ${model.name}` }),
       isDefault ? null : button("Make default", async () => {
         state.settings.localModel = model.id;
         await save.settings();
@@ -157,12 +161,20 @@ function settingsSheet(model) {
   const context = el("select", { "aria-label": "Context" }, engine.CONTEXTS.map((value) => el("option", { value: String(value), text: `${value.toLocaleString()} tokens` })));
   context.value = String(chosen.context);
   const gpu = el("input", { type: "checkbox", checked: chosen.gpu, "aria-label": "Use the graphics chip" });
+  const temperature = el("input", { type: "range", min: "0", max: String(engine.TEMPERATURE_MAX), step: "0.1", value: String(chosen.temperature), "aria-label": "Temperature" });
+  const feel = (value) => (value <= 0.2 ? "exact: the same answer every time" : value <= 0.6 ? "balanced: best for building and tools" : value <= 1 ? "creative: more varied writing" : "wild: surprising, makes more mistakes");
+  const shown = el("span", { class: "small muted", text: `${chosen.temperature.toFixed(1)} · ${feel(chosen.temperature)}` });
+  temperature.addEventListener("input", () => {
+    shown.textContent = `${Number(temperature.value).toFixed(1)} · ${feel(Number(temperature.value))}`;
+  });
   openSheet(`${model.name} settings`, [
     el("label", {}, ["Context (how much it remembers at once)", context]),
-    el("p", { class: "muted small", text: "More context uses more memory. 4,096 suits most chats; the Builder likes 8,192 for bigger pages." }),
-    el("label", { class: "check" }, [gpu, el("span", { text: "Use the graphics chip (faster)" })]),
+    el("p", { class: "muted small", text: "More context uses more memory. Jarvis with all his tools likes 16,384; 32,768 is for small models or the graphics chip, and can close the app on bigger ones (FCC then makes it lighter). Old messages are trimmed to fit." }),
+    el("label", {}, ["Temperature (how adventurous its answers are)", temperature, shown]),
+    // Graphics-chip models always run on the chip.
+    model.engine === "webgpu" ? null : el("label", { class: "check" }, [gpu, el("span", { text: "Use the graphics chip (faster)" })]),
     button("Save", async () => {
-      model.settings = { context: Number(context.value), gpu: gpu.checked };
+      model.settings = { ...model.settings, context: Number(context.value), gpu: gpu.checked, temperature: Number(temperature.value) };
       await save.models();
       changed("models");
       closeSheet();
@@ -206,7 +218,7 @@ function addCard() {
     }
   });
   return card("Add a model from Files", [
-    el("p", { class: "muted", text: "Any .gguf model: from your iPhone's Files app, iCloud Drive, or a download. Studio reads it and says what it can do. Under 2 GB works best; a 0.5–3B model at Q4_K_M suits an iPhone." }),
+    el("p", { class: "muted", text: "Any .gguf model: from your iPhone's Files app, iCloud Drive, or a download. Studio reads it and says what it can do. Under 2 GB works best: a 0.5–3B model at Q4_K_M, or a 4B model at IQ3 or Q3_K_S on a 6 GB iPhone." }),
     el("label", { class: "drop" }, [input, el("strong", { text: "Choose a .gguf file" }), el("small", { class: "muted", text: "It's copied into the app, so it works offline." })]),
     adding.fraction === null ? null : meter(adding.fraction),
     el("p", { class: "muted", role: "status", text: adding.status }),
@@ -247,10 +259,20 @@ function catalogCard() {
     ...engine.CATALOG.map((entry) => {
       const have = state.models.find((model) => model.id === entry.id);
       return el("div", { class: "item" }, [
-        el("div", { class: "grow" }, [el("strong", { text: entry.name }), el("small", { text: `${bytes(entry.size)} · ${entry.note} Good for ${entry.good.join(", ")}.` })]),
+        el("div", { class: "grow" }, [
+          el("strong", { text: entry.name }),
+          el("small", { text: `${bytes(entry.size)} · ${entry.note} Good for ${entry.good.join(", ")}.` }),
+          // After a model was too big here, bigger ones are flagged before
+          // they're downloaded.
+          engine.likelyFits(entry) ? null : el("small", { class: "warn", text: `Probably too big for this phone: a ${bytes(engine.tooBigSize())} model already was.` }),
+          // Graphics-chip models need WebGPU: say how to switch it on.
+          entry.engine === "webgpu" && !hasWebGPU()
+            ? el("small", { class: "warn", text: "Needs WebGPU. On iOS 18: Settings, Apps, Safari, Advanced, Feature Flags, turn on WebGPU, then open FCC Phone in Safari (not Chrome). iOS 26 has it on." })
+            : null,
+        ]),
         have && have.ready
           ? el("span", { class: "pill good", text: "on phone" })
-          : button(downloads.has(entry.id) ? "…" : "Download", () => startDownload(entry), { class: "primary", "aria-label": `Download ${entry.name}`, disabled: downloads.has(entry.id) }),
+          : button(downloads.has(entry.id) ? "…" : "Download", () => startDownload(entry), { class: "primary", "aria-label": `Download ${entry.name}`, disabled: downloads.has(entry.id) || (entry.engine === "webgpu" && !hasWebGPU()) }),
       ]);
     }),
     el("p", { class: "muted small", text: `Your default brain: ${brainOf({ brain: "default" }) === "local" ? "this phone" : state.settings.brain || "not set"}.` }),
