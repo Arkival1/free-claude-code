@@ -803,11 +803,30 @@ def test_jarvis_and_his_tools_fit_a_phone_models_context(
             try {
                 engine.fitToContext({ messages: [system, { role: 'user', content: 'x'.repeat(30000) }], tools, maxTokens: 1024, context: 2048, name: 'Qwen' });
             } catch (e) { error = e.message; }
+            // A short greeting at 2,048 (where crash recovery leaves a model):
+            // answered without tools, never a context error.
+            const jarvis = { role: 'system', content: 'You are Jarvis, the main AI. '.repeat(80) };
+            const hello = engine.fitToContext({ messages: [jarvis, { role: 'user', content: 'hello jarvis' }], tools, maxTokens: 1024, context: 2048, name: 'Qwen' });
+            // A job that needs tools: the everyday tools if they fit, else a
+            // plain explanation (never a bare budget error).
+            let toolJob = '';
+            let jobTools = [];
+            try {
+                const job = engine.fitToContext({ messages: [jarvis, { role: 'user', content: 'build me a website for my cafe' }], tools, maxTokens: 1024, context: 2048, name: 'Qwen' });
+                jobTools = (job.tools || []).map((t) => t.function.name);
+            } catch (e) { toolJob = e.message; }
+            let bigJob = '';
+            try {
+                const longJarvis = { role: 'system', content: 'You are Jarvis, the main AI. '.repeat(200) };
+                engine.fitToContext({ messages: [longJarvis, { role: 'user', content: 'build me a website for my cafe' }], tools, maxTokens: 1024, context: 2048, name: 'Qwen' });
+            } catch (e) { bigJob = e.message; }
             return {
                 full: chars(tools), compact: chars(fit.tools), names: fit.tools.map((t) => t.function.name),
                 total: Math.ceil((chars(fit.messages) + chars(fit.tools)) / 3.2) + fit.maxTokens,
                 first: fit.messages[0].role, last: fit.messages[fit.messages.length - 1].content,
-                kept: fit.messages.length, answer: fit.maxTokens, error,
+                kept: fit.messages.length, answer: fit.maxTokens, error, toolJob, jobTools, bigJob,
+                hello: { tools: hello.tools || null, lean: hello.lean, last: hello.messages[hello.messages.length - 1].content,
+                         total: Math.ceil(chars(hello.messages) / 3.2) + hello.maxTokens, answer: hello.maxTokens },
                 contexts: engine.CONTEXTS,
             };
         }""",
@@ -820,8 +839,16 @@ def test_jarvis_and_his_tools_fit_a_phone_models_context(
     assert result["first"] == "system"
     assert result["last"] == "Make me a website for my cafe."
     assert result["kept"] < 82 and result["total"] <= 8192 and result["answer"] == 1024
-    # Too big even then: it says which setting to change.
-    assert "pick a bigger context (16,384" in result["error"]
+    # Too big even then: it says which setting to change, or PocketPal.
+    assert "pick 8,192 or more" in result["error"] and "PocketPal" in result["error"]
+    hello = result["hello"]
+    assert hello["tools"] is None and hello["lean"] is True
+    assert hello["last"] == "hello jarvis"
+    assert hello["total"] <= 2048 and hello["answer"] >= 256
+    assert result["toolJob"] == "" and "remember" in result["jobTools"]
+    assert (
+        "too small for this job" in result["bigJob"] and "PocketPal" in result["bigJob"]
+    )
     assert result["contexts"][-2:] == [16384, 32768]
 
 
