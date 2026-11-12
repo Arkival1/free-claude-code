@@ -1,7 +1,7 @@
 // Everything the app knows, loaded from the phone and saved back as it changes.
 import { store } from "./store.js";
 
-export const VERSION = "2.15.0";
+export const VERSION = "2.16.0";
 
 export const PHONE_TOOLS = {
   remember: "Memory",
@@ -188,6 +188,8 @@ export const state = {
   studies: [],
   tasks: [],
   library: [],
+  // PocketPal's current task (js/pocketpal.js), kept so it survives a reload.
+  pocketpal: null,
   blueprints: [],
   bench: defaultBench(),
   models: [],
@@ -214,6 +216,7 @@ export const save = {
   library: () => store.set("library", state.library),
   blueprints: () => store.set("blueprints", state.blueprints),
   bench: () => store.set("bench", state.bench),
+  pocketpal: () => store.set("pocketpal", state.pocketpal),
   models: () => store.set("models", state.models),
   photos: () => store.set("photos", state.photos),
   chat: (id) => store.set(`chat:${id}`, state.chats[id] || []),
@@ -243,6 +246,7 @@ export async function load() {
   for (const key of ["memories", "pcMemories", "projects", "rooms", "todos", "studies", "tasks", "models", "photos", "library", "blueprints"]) {
     state[key] = await store.get(key, []);
   }
+  state.pocketpal = await store.get("pocketpal", null);
   const bench = await store.get("bench", {});
   const blank = defaultBench();
   state.bench = { ...blank, ...bench };

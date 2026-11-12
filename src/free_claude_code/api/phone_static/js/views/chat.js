@@ -137,7 +137,7 @@ export async function render(view, agentId) {
       : [
           card("Start here", [
             el("p", { text: `${agent.name} needs a brain. Put a free AI on this phone, or add a free cloud AI key.` }),
-            el("div", { class: "row" }, [button("Model control", () => go("models"), { class: "primary" }), button("Settings", () => go("settings"))]),
+            el("div", { class: "row" }, [button("Model control", () => go("models"), { class: "primary" }), button("Settings", () => go("settings")), button("PocketPal", () => go("pocketpal"))]),
           ]),
         ]),
     messages,
