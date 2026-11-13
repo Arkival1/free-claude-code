@@ -1,0 +1,10 @@
+{
+  "name": "Hearthbox",
+  "short_name": "Hearthbox",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14161f",
+  "theme_color": "#14161f",
+  "icons": []
+}
