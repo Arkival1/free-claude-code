@@ -56,6 +56,7 @@ export class AiVoices {
     this.busy = true;
     c.ai = "pending";
     c.aiT = Date.now();
+    c.aiSimT = sim.time;
     const { system, user, names } = aiPrompt(sim, c);
     this.call(system, user)
       .then((raw) => {

@@ -23,3 +23,17 @@ def test_the_village_lives_without_a_screen(seed: str) -> None:
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
     assert "PASS" in result.stdout
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_edge_cases_from_review() -> None:
+    """Fact cap during a party, two parties, fires across a save, stuck plans,
+    a village with no buildings, and the same seed telling the same story."""
+    result = subprocess.run(
+        ["node", str(GAME / "test" / "edges.mjs")],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]

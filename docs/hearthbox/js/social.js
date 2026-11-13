@@ -91,6 +91,7 @@ export function learn(sim, a, fact, how = "saw", from = null, going = undefined)
 }
 
 export function partyWant(sim, a, fact) {
+  if (!fact) return 0;
   const host = sim.agentById(fact.data.host);
   let want = 0.55;
   if (host) want += aff(a, host) / 150;

@@ -629,6 +629,7 @@ function runAction(sim, a, dt) {
       }
     }
     moveAlong(sim, a, dt);
+    if (a.action !== ac) return;
     if (!a.path.length) {
       ac.phase = "do";
       arrive(sim, a);

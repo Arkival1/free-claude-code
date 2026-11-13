@@ -408,8 +408,12 @@ export class Sim {
     };
     this.facts.set(f.id, f);
     if (this.facts.size > 220) {
-      const oldest = this.facts.keys().next().value;
-      this.facts.delete(oldest);
+      const keep = new Set(this.parties.filter((p) => !p.over).map((p) => p.fact));
+      for (const id of this.facts.keys()) {
+        if (keep.has(id)) continue;
+        this.facts.delete(id);
+        break;
+      }
     }
     const radius = o.radius ?? 8;
     for (const a of this.agents) {
@@ -663,6 +667,31 @@ export class Sim {
     }
   }
 
+  // A village whose plan can't be paid for in three days gives it up, so it can grow again.
+  dropStuckPlans(v) {
+    for (const b of [...this.buildings]) {
+      if (b.village !== v.id || b.done || b.funded || b.byPlayer) continue;
+      if (this.time - b.born < 3 * DAY) continue;
+      this.removeBuilding(b);
+      this.event(`${v.name} gave up on its ${BUILDINGS[b.type].name.toLowerCase()} plan: not enough materials.`, "📐");
+    }
+  }
+
+  // A village that lost every building puts up a new hall where its people are.
+  rebuildHall(v) {
+    const mem = this.members(v);
+    if (!mem.length) return false;
+    const cx = Math.floor(mem.reduce((s, a) => s + a.x, 0) / mem.length);
+    const cy = Math.floor(mem.reduce((s, a) => s + a.y, 0) / mem.length);
+    const spot = this.world.nearest(cx, cy, 14, (i, x, y) => this.canPlace("townhall", x - 1, y - 1, 1));
+    if (!spot) return false;
+    const hall = this.placeBuilding("townhall", spot.x - 1, spot.y - 1, v, { done: true });
+    if (!hall) return false;
+    v.hall = hall.id;
+    this.addFact("built", `the people of ${v.name} raised a new town hall`, { x: spot.x, y: spot.y, radius: 10, imp: 7, icon: "🏛️", toast: true });
+    return true;
+  }
+
   autoBuild(v) {
     if (!this.settings.autoGrow) return;
     if (this.buildings.some((b) => b.village === v.id && !b.done && !b.byPlayer)) return;
@@ -772,7 +801,8 @@ export class Sim {
       this.event("It started to rain.", "🌧️");
     }
     for (const v of this.villages) {
-      if (!this.hallOf(v)) continue;
+      if (!this.hallOf(v) && !this.rebuildHall(v)) continue;
+      this.dropStuckPlans(v);
       this.assignHomes(v);
       if (hour % 2 === 0) this.assignJobs(v);
       this.autoBuild(v);
@@ -827,7 +857,11 @@ export class Sim {
   updateParties() {
     for (const p of this.parties) {
       const f = this.facts.get(p.fact);
-      if (!f || p.over) continue;
+      if (p.over) continue;
+      if (!f) {
+        p.over = true;
+        continue;
+      }
       if (!p.started && this.time >= p.at) {
         p.started = true;
         const going = this.agents.filter((a) => a.goingTo && a.goingTo.includes(p.fact)).length;
@@ -848,7 +882,7 @@ export class Sim {
         }
         if (host) {
           remember(this, host, `${guests.length} people came to my party. ${guests.length >= 4 ? "What a night!" : "I hoped more would come."}`, 8, "life");
-          if (host.goal && host.goal.kind === "party") host.goal = null;
+          if (host.goal && host.goal.kind === "party" && host.goal.fact === p.fact) host.goal = null;
         }
         for (const a of this.agents) if (a.goingTo) a.goingTo = a.goingTo.filter((id) => id !== p.fact);
         this.addFact("partydone", `${guests.length} guests came to ${this.nameOf(p.host)}'s party at ${p.place}`, { x: p.x, y: p.y, radius: 3, about: guests, imp: 5, icon: "🎊", toast: true });
@@ -1166,6 +1200,7 @@ export class Sim {
       settings: this.settings,
       stats: this.stats,
       names: [...this.names],
+      fires: this.fires.map((i) => [i, Math.round(this.world.fire[i])]),
     };
   }
 
@@ -1194,6 +1229,12 @@ export class Sim {
     s.settings = { ...s.settings, ...o.settings };
     s.stats = o.stats;
     s.names = new Map(o.names);
+    for (const [i, f] of o.fires || []) {
+      if (f > 0 && s.world.fire[i] === 0) {
+        s.world.fire[i] = f;
+        s.fires.push(i);
+      }
+    }
     s._lastHour = Math.floor(s.time / 60);
     return s;
   }

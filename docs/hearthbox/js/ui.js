@@ -867,9 +867,14 @@ export class UI {
     if (t && t.kind === "pick") {
       const b = s.nearestAgent(w.x, w.y - 0.4, radius);
       const a = s.agentById(t.who);
-      if (b && a && b !== a) {
+      if (!a) {
+        this.setTool(null);
+        this.toast({ icon: "🪦", text: "They're no longer with us." });
+        return;
+      }
+      if (b && b !== a) {
         const res = s.whisper(a, t.for, { target: b.id });
-        this.toast({ icon: "💭", text: res.msg || "Done." });
+        this.toast({ icon: "💭", text: res.msg || (res.ok ? "Done." : "That didn't take.") });
         this.setTool(null);
         this.selectAgent(a.id, false);
       }

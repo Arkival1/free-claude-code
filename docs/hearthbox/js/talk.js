@@ -95,7 +95,7 @@ export function updateConversations(sim, dt) {
       continue;
     }
     if (sim.time < c.next) continue;
-    if (c.ai === "pending" && c.lines.length >= 1 && Date.now() - c.aiT < 25000) {
+    if (c.ai === "pending" && c.lines.length >= 1 && Date.now() - c.aiT < 25000 && sim.time - c.aiSimT < 240) {
       c.next = sim.time + 1;
       continue;
     }
@@ -160,7 +160,7 @@ function candidates(sim, s, l) {
   // Parties.
   for (const p of sim.parties) {
     if (p.over || p.at < sim.time - 60) continue;
-    if (s.knowsSet.has(p.fact) && !l.knowsSet.has(p.fact)) add("party", p.host === s.id ? 16 : 9 * gossipy, { fact: p.fact });
+    if (sim.facts.has(p.fact) && s.knowsSet.has(p.fact) && !l.knowsSet.has(p.fact)) add("party", p.host === s.id ? 16 : 9 * gossipy, { fact: p.fact });
   }
   // A planted idea, then news.
   for (let i = s.knows.length - 1, seen = 0; i >= 0 && seen < 30; i--, seen++) {
