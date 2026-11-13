@@ -673,6 +673,7 @@ export class Sim {
       if (b.village !== v.id || b.done || b.funded || b.byPlayer) continue;
       if (this.time - b.born < 3 * DAY) continue;
       this.removeBuilding(b);
+      v.skip = { ...(v.skip || {}), [b.type]: this.time + 3 * DAY };
       this.event(`${v.name} gave up on its ${BUILDINGS[b.type].name.toLowerCase()} plan: not enough materials.`, "📐");
     }
   }
@@ -680,7 +681,8 @@ export class Sim {
   // A village that lost every building puts up a new hall where its people are.
   rebuildHall(v) {
     const mem = this.members(v);
-    if (!mem.length) return false;
+    // Only when nothing finished is left: otherwise the store moved to another building.
+    if (!mem.length || this.buildings.some((b) => b.village === v.id && b.done)) return false;
     const cx = Math.floor(mem.reduce((s, a) => s + a.x, 0) / mem.length);
     const cy = Math.floor(mem.reduce((s, a) => s + a.y, 0) / mem.length);
     const spot = this.world.nearest(cx, cy, 14, (i, x, y) => this.canPlace("townhall", x - 1, y - 1, 1));
@@ -714,7 +716,7 @@ export class Sim {
     else if (!count("tower") && (pop >= 17 || this.animals.some((n) => n.kind === "wolf"))) type = "tower";
     else if (!count("temple") && pop >= 20 && v.stock.gold >= 10) type = "temple";
     else if (!count("statue") && pop >= 22 && v.stock.gold >= 5) type = "statue";
-    if (!type) return;
+    if (!type || (v.skip && v.skip[type] > this.time)) return;
     const spot = this.findSpot(v, type);
     if (!spot) return;
     const b = this.placeBuilding(type, spot.x, spot.y, v);
@@ -860,6 +862,9 @@ export class Sim {
       if (p.over) continue;
       if (!f) {
         p.over = true;
+        for (const a of this.agents) if (a.goingTo) a.goingTo = a.goingTo.filter((id) => id !== p.fact);
+        const host = this.agentById(p.host);
+        if (host && host.goal && host.goal.fact === p.fact) host.goal = null;
         continue;
       }
       if (!p.started && this.time >= p.at) {

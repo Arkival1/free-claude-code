@@ -51,18 +51,35 @@ const check = (name, ok, extra = "") => {
   check("fires saved", n > 0 && back.fires.length === n, `${n} -> ${back.fires.length}`);
 }
 
-// 5. A village plan nobody can pay for is dropped, so the village grows again.
+// 5. A village plan nobody can pay for is kept for a while, then dropped and not re-placed at once.
 {
   const s = Sim.create(5);
   const v = s.villages[0];
+  s.settings.autoGrow = true;
   const spot = s.findSpot(v, "temple");
   const b = s.placeBuilding("temple", spot.x, spot.y, v);
   v.stock.gold = 0;
-  s.advance(4 * 1440);
-  check("stuck plan dropped", !s.buildingById(b.id) || s.buildingById(b.id).funded);
+  s.advance(2 * 1440);
+  check("unpaid plan kept for two days", !!s.buildingById(b.id) && !s.buildingById(b.id).funded);
+  v.stock.gold = 0;
+  s.advance(1.2 * 1440);
+  check("unpaid plan dropped after three days", !s.buildingById(b.id));
+  check("same plan not placed again at once", !s.buildings.some((x) => x.type === "temple" && !x.done && !x.byPlayer));
 }
 
-// 8. A village that loses every building raises a new hall.
+// 8. Erasing the hall while houses stand moves the store; no free hall appears.
+{
+  const s = Sim.create(6);
+  const v = s.villages[0];
+  const hall = s.hallOf(v);
+  s.power("erase", hall.x + 1, hall.y + 1);
+  s.advance(1440);
+  const now = s.hallOf(v);
+  check("store moved to another building", !!now && now.type !== "townhall");
+  check("no free town hall after erasing it", !s.buildings.some((b) => b.village === v.id && b.type === "townhall"));
+}
+
+// 8b. A village that loses every building raises one new hall, once.
 {
   const s = Sim.create(6);
   const v = s.villages[0];
@@ -75,6 +92,7 @@ const check = (name, ok, extra = "") => {
   }
   check("no crash without buildings", !threw, threw && threw.message);
   check("hall rebuilt", !!s.hallOf(v));
+  check("only one hall", s.buildings.filter((b) => b.village === v.id && b.type === "townhall").length === 1);
 }
 
 // The same seed gives the same story (no AI voices).
