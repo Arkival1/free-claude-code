@@ -1,19 +1,20 @@
 // Optional: let an OpenAI-compatible model (LM Studio, or a cloud service with
 // the player's own key) write the villagers' words. Rules still decide events.
 import { aiPrompt, parseAiLines } from "./talk.js";
+import { store } from "./store.js";
 
 const KEY = "hearthbox.ai";
 
 export class AiVoices {
   constructor() {
-    this.cfg = Object.assign({ on: false, url: "http://localhost:1234/v1", model: "", key: "" }, JSON.parse(localStorage.getItem(KEY) || "{}"));
+    this.cfg = Object.assign({ on: false, url: "http://localhost:1234/v1", model: "", key: "" }, store.json(KEY));
     this.busy = false;
     this.ok = 0;
     this.fail = 0;
     this.lastError = "";
   }
   saveCfg() {
-    localStorage.setItem(KEY, JSON.stringify(this.cfg));
+    store.set(KEY, JSON.stringify(this.cfg));
   }
   status() {
     if (!this.cfg.on) return "Off: villagers use their own words.";

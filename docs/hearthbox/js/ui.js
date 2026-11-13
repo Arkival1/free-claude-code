@@ -2,6 +2,7 @@
 import { BUILDINGS, BUILD_MENU, IDEAS, JOBS, TRAITS, WORK_JOBS } from "./data.js";
 import { currentStep, moodParts } from "./agent.js";
 import { relLabel } from "./social.js";
+import { store } from "./store.js";
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const $ = (id) => document.getElementById(id);
@@ -59,7 +60,7 @@ export class UI {
     this.vi = 0;
     this.whisperOpen = false;
     this.pointers = new Map();
-    this.opts = Object.assign({ names: true, bubbles: "near" }, JSON.parse(localStorage.getItem("hearthbox.opts") || "{}"));
+    this.opts = Object.assign({ names: true, bubbles: "near" }, store.json("hearthbox.opts"));
     this._last = 0;
     this._feedLast = null;
   }
@@ -650,7 +651,7 @@ export class UI {
           a.action = null;
         }
       }
-      localStorage.setItem("hearthbox.opts", JSON.stringify(this.opts));
+      store.set("hearthbox.opts", JSON.stringify(this.opts));
       el.blur();
       this.renderSheet(true);
     }

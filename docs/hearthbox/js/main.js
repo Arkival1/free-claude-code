@@ -3,6 +3,7 @@ import { Sim } from "./sim.js";
 import { Renderer } from "./render.js";
 import { UI } from "./ui.js";
 import { AiVoices } from "./ai.js";
+import { store } from "./store.js";
 
 const SAVE_KEY = "hearthbox.save.v1";
 const MIN_PER_SEC = 4; // game minutes per real second at normal speed
@@ -33,16 +34,10 @@ const game = {
     this.save();
   },
   save() {
-    try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(this.sim.serialize()));
-      return true;
-    } catch (e) {
-      console.warn("Save failed", e);
-      return false;
-    }
+    return store.set(SAVE_KEY, JSON.stringify(this.sim.serialize()));
   },
   load() {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = store.get(SAVE_KEY);
     if (!raw) return null;
     try {
       return Sim.deserialize(JSON.parse(raw));
