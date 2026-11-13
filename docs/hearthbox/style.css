@@ -12,6 +12,9 @@
   --safe-t: env(safe-area-inset-top, 0px);
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input, textarea, select { -webkit-user-select: text; user-select: text; }
+html, body, button, #sheet, #tabs, #top { touch-action: manipulation; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; overscroll-behavior: none; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
 #app { position: fixed; inset: 0; }
@@ -44,8 +47,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 #tabs button b { font-size: 19px; font-weight: 400; line-height: 1.2; }
 #tabs button.on { color: var(--text); background: rgba(255,255,255,0.08); }
 
-#sheet { position: absolute; left: 0; right: 0; bottom: calc(var(--safe-b) + 58px); max-height: 50vh; background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; display: flex; flex-direction: column; z-index: 6; box-shadow: 0 -10px 30px rgba(0,0,0,0.35); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-#sheet.tall { max-height: 82vh; }
+#sheet { position: absolute; left: 0; right: 0; bottom: calc(var(--safe-b) + 58px); max-height: 50vh; max-height: 50dvh; background: var(--panel); border-top: 1px solid var(--line); border-radius: 18px 18px 0 0; display: flex; flex-direction: column; z-index: 6; box-shadow: 0 -10px 30px rgba(0,0,0,0.35); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+#sheet.tall { max-height: 82vh; max-height: 82dvh; }
 .grab { display: flex; justify-content: center; padding: 7px 0 3px; cursor: pointer; }
 .grab span { width: 42px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.25); }
 #sheetBody { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 12px 14px; overscroll-behavior: contain; }

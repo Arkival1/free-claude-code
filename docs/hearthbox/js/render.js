@@ -803,6 +803,18 @@ function outline(ctx, b, z) {
   ctx.strokeRect(b.x - 0.1, b.y - 0.35, b.w + 0.2, b.h + 0.45);
 }
 
+// Text sized in tiles, drawn at a whole-pixel font so every browser renders it.
+function worldText(ctx, text, x, y, size, z) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1 / z, 1 / z);
+  ctx.font = `${Math.max(6, Math.round(size * z))}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
 function drawAgent(ctx, sim, a, now, z, sel) {
   const child = a.age < 14;
   const s = child ? 0.7 : 1;
@@ -834,8 +846,7 @@ function drawAgent(ctx, sim, a, now, z, sel) {
     ctx.arc(x + 0.28 * s, y - 0.1, 0.11 * s, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = "#fff";
-    ctx.font = "0.3px system-ui";
-    ctx.fillText("z", x + 0.4, y - 0.4 - ((now / 800) % 1) * 0.2);
+    worldText(ctx, "z", x + 0.4, y - 0.4 - ((now / 800) % 1) * 0.2, 0.3, z);
     return;
   }
   const moving = a.action && a.action.phase === "walk";
@@ -878,8 +889,7 @@ function drawAgent(ctx, sim, a, now, z, sel) {
   }
   if (a.partner != null && sim.agentById(a.partner) && Math.abs(sim.agentById(a.partner).x - x) < 1.5 && Math.abs(sim.agentById(a.partner).y - y) < 1.5) {
     ctx.fillStyle = "#ff6b8a";
-    ctx.font = "0.28px system-ui";
-    ctx.fillText("♥", x, hy - 0.3);
+    worldText(ctx, "♥", x, hy - 0.3, 0.28, z);
   }
 }
 

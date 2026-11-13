@@ -434,6 +434,7 @@ export class UI {
         <p>🏗️ Build: place blueprints; builders fetch wood and stone. Villages also grow by themselves.</p>
         <p>⚡ Play god: fire, meteors, wolves, rain, blessings, plague. Drop a villager far away to found a rival village.</p>
         <p>The game saves itself every half minute in this browser.</p>
+        <p>📱 iPhone: open it in Safari, tap Share, then Add to Home Screen. It opens full screen and plays offline.</p>
       </div>
       <p class="muted small">Hearthbox · day ${s.day} · seed ${s.seed}</p>`;
   }

@@ -59,6 +59,12 @@ function boot() {
   game.ui = new UI(game);
   game.ui.init();
   window.addEventListener("resize", () => game.r.resize());
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", () => game.r.resize());
+  // iOS Safari ignores user-scalable=no; stop its own pinch zoom (double-tap zoom is off in CSS).
+  for (const ev of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname))) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) game.save();
   });

@@ -2,6 +2,7 @@
 the village survives, people talk, a whispered party spreads, something new
 gets built, and the save loads back."""
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -37,3 +38,16 @@ def test_edge_cases_from_review() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+
+
+def test_offline_cache_lists_every_game_file() -> None:
+    """iPhone home-screen play works offline only if sw.js caches every file."""
+    sw = (GAME / "sw.js").read_text(encoding="utf-8")
+    listed = set(re.findall(r'"([\w./-]+\.(?:html|css|js|png|webmanifest))"', sw))
+    on_disk = {f"js/{p.name}" for p in (GAME / "js").glob("*.js")}
+    on_disk |= {p.name for p in GAME.glob("icon-*.png")}
+    on_disk |= {"index.html", "style.css", "manifest.webmanifest"}
+    assert on_disk <= listed, sorted(on_disk - listed)
+    assert all((GAME / name).exists() for name in listed - {"sw.js"})
+    html = (GAME / "index.html").read_text(encoding="utf-8")
+    assert 'rel="apple-touch-icon" href="icon-180.png"' in html
