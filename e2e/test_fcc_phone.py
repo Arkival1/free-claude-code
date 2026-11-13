@@ -766,7 +766,7 @@ def test_qwen3_5_2b_comes_on_the_graphics_chip_and_as_a_small_file(
     record = created["list"][0]
     assert record["model_lib"].endswith("/libs/Qwen3.5-2B-q4f32_1_cs1k-webgpu.wasm")
     assert record["overrides"]["conv_config"]["stop_token_ids"] == [248046, 248044]
-    assert record["overrides"]["context_window_size"] == 4096
+    assert record["overrides"]["context_window_size"] == 40960
     assert (
         page.evaluate(
             f"async () => (await fetch({json.dumps(record['model_lib'])})).status"
@@ -849,7 +849,7 @@ def test_jarvis_and_his_tools_fit_a_phone_models_context(
     assert (
         "too small for this job" in result["bigJob"] and "PocketPal" in result["bigJob"]
     )
-    assert result["contexts"][-2:] == [16384, 32768]
+    assert result["contexts"][-3:] == [16384, 32768, 40960]
 
 
 def test_a_3b_runs_on_the_graphics_chip_without_thinking_mode(
@@ -887,6 +887,28 @@ def test_a_3b_runs_on_the_graphics_chip_without_thinking_mode(
         "() => window.fccWebLLMCalls.requests[0].messages[0].content"
     )
     assert "/no_think" not in system
+
+
+def test_a_crash_at_40k_steps_the_context_down_one_size(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    page.evaluate(
+        """async () => {
+            const f = window.fccPhone;
+            f.state.models.push({id: 'long', name: 'Long Model', ready: true, size: 1,
+                engine: 'webgpu', settings: {context: 40960}});
+            await f.save.models();
+            localStorage.setItem('fcc-engine-work', JSON.stringify(
+                {stage: 'load', id: 'long', name: 'Long Model', context: 40960}));
+        }"""
+    )
+    reopen(page)
+    model = page.evaluate(
+        "() => window.fccPhone.state.models.find((m) => m.id === 'long')"
+    )
+    # Not straight to 2,048: one size down, so most of the memory is kept.
+    assert model["settings"]["context"] == 32768 and not model.get("tooBig")
 
 
 def reopen(page: Page) -> None:

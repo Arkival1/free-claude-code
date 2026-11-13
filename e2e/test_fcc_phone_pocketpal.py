@@ -130,6 +130,22 @@ def test_pocketpal_uses_fccs_tools_and_asks_before_changing_anything(
     expect(page.locator("#pocketpal-state")).to_have_text("Done")
 
 
+def test_pocketpal_gets_jarviss_long_term_memory(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url)
+    page.evaluate(
+        """async () => {
+            const { remember } = await import('./js/tools.js');
+            const jarvis = window.fccPhone.state.agents.find((a) => a.role === 'main');
+            await remember(jarvis, 'The cafe is called Sunrise and opens at 7am.');
+        }"""
+    )
+    start(page, "Write the opening hours for my cafe")
+    prompt = page.locator("#prompt").input_value()
+    assert "What you remember" in prompt and "Sunrise and opens at 7am" in prompt
+
+
 def test_bad_replies_are_blocked_where_the_user_can_see_why(
     page: Page, admin_base_url: str
 ) -> None:

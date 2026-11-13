@@ -138,8 +138,8 @@ export const CATALOG = [
     engine: "webgpu",
     url: "https://huggingface.co/mlc-ai/Qwen3.5-2B-q4f16_1-MLC",
     size: 1083000000,
-    context: 4096,
-    note: "Qwen3.5 2B on the graphics chip: newer and smarter than the 1.7B, good with tools. Needs WebGPU and about 2 GB of graphics memory.",
+    context: 40960,
+    note: "Qwen3.5 2B on the graphics chip with 40,960 tokens of context: it remembers long chats and big jobs (its design keeps that memory small). Needs WebGPU and about 2 GB of graphics memory.",
     good: ["Jarvis", "Builder"],
   },
   {
@@ -156,7 +156,9 @@ export const CATALOG = [
 
 export const MAX_FILE = 2 * 1024 * 1024 * 1024;
 // 16k and 32k need far more memory: for small models, or the graphics chip.
-const CONTEXTS = [2048, 4096, 8192, 16384, 32768];
+// 40,960 is for Qwen3.5 2B on the graphics chip: only 6 of its 24 layers keep
+// a memory of past tokens, so 40K needs about 0.5 GB more, not 4-6 GB.
+const CONTEXTS = [2048, 4096, 8192, 16384, 32768, 40960];
 export { CONTEXTS };
 
 let wllama = null;
@@ -207,9 +209,12 @@ export async function recoverFromCrash() {
   if (model) {
     model.settings = model.settings || {};
     const chosen = settingsFor(model);
-    if (chosen.context > 2048) {
-      model.settings.context = 2048;
-      change = ` Studio lowered its context to 2,048 tokens so it needs less memory; send your message again.`;
+    // One size down at a time (40K, 32K, 16K...), so a big context isn't lost
+    // to one crash.
+    const lower = [...CONTEXTS].reverse().find((value) => value < chosen.context);
+    if (chosen.context > 2048 && lower) {
+      model.settings.context = lower;
+      change = ` Studio lowered its context to ${lower.toLocaleString()} tokens so it needs less memory; send your message again.`;
     } else if (chosen.gpu && model.engine !== "webgpu") {
       model.settings.gpu = false;
       change = " Studio turned off the graphics chip for it; send your message again.";
