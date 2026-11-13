@@ -1,0 +1,44 @@
+# FCC for iPhone: builds the app on GitHub's Mac and keeps FCC.ipa as a
+# download (Actions, this run, Artifacts). It isn't signed: Sideloadly signs
+# it with your Apple ID when it installs it (see ios/FCC/README.md).
+name: FCC iPhone app
+
+on:
+  push:
+    paths:
+      - "ios/FCC/**"
+      - ".github/workflows/fcc-ios-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Make the Xcode project
+        working-directory: ios/FCC
+        run: xcodegen generate
+      - name: Build for iPhone (unsigned)
+        working-directory: ios/FCC
+        run: |
+          xcodebuild -project FCC.xcodeproj -scheme FCC -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Pack FCC.ipa
+        working-directory: ios/FCC
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/FCC.app Payload/
+          zip -qry FCC.ipa Payload
+          ls -l FCC.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FCC-iPhone-app
+          path: ios/FCC/FCC.ipa
+          retention-days: 30
