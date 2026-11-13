@@ -110,3 +110,4 @@ label.field input, label.field select { margin-top: 4px; }
 canvas.chart { width: 100%; height: 70px; background: rgba(255,255,255,0.04); border-radius: 10px; display: block; }
 .close { margin-left: auto; font-size: 18px; padding: 2px 8px; color: var(--dim); }
 .help p { margin: 6px 0; color: #cfd3e0; }
+.btn.armed { outline: 2px solid var(--bad); }

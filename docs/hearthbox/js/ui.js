@@ -593,7 +593,7 @@ export class UI {
       case "god": {
         const a = s.agentById(this.sel);
         if (!a) return;
-        if (el.dataset.p === "smite" && !confirm(`Strike down ${a.name}?`)) return;
+        if (el.dataset.p === "smite" && !this.twice("smite" + a.id, el, `Tap 💀 again to strike down ${a.name}`)) return;
         const r = s.power(el.dataset.p, a.x, a.y);
         if (r.msg) this.toast({ icon: "⚡", text: r.msg });
         this.renderSheet(true);
@@ -616,7 +616,7 @@ export class UI {
         this.toast({ icon: "💾", text: "Saved." });
         break;
       case "new": {
-        if (!confirm("Start a new world? This one will be replaced.")) return;
+        if (!this.twice("new", el, "Tap again: this world will be replaced")) return;
         const seed = parseInt(($("seed") || {}).value, 10);
         this.g.newWorld(Number.isFinite(seed) ? seed : undefined);
         break;
@@ -660,6 +660,18 @@ export class UI {
       cfg[el.dataset.ai] = el.type === "checkbox" ? el.checked : el.value.trim();
       this.g.ai.saveCfg();
     }
+  }
+
+  // Pop-up confirms are blocked in some frames, so dangerous buttons need a second tap.
+  twice(key, el, text) {
+    if (this.armed && this.armed.key === key && Date.now() < this.armed.until) {
+      this.armed = null;
+      return true;
+    }
+    this.armed = { key, until: Date.now() + 4000 };
+    el.classList.add("armed");
+    this.toast({ icon: "⚠️", text });
+    return false;
   }
 
   doWhisper(kind) {
