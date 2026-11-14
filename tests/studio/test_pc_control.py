@@ -64,11 +64,33 @@ def test_each_level_runs_asks_or_refuses(tmp_path: Path) -> None:
         "taskkill /PID 4242",
         "dir ..\\..\\free-claude-code",
         "r^m x",
+        "start calc",
+        "& .\\tool",
+        ". .\\setup",
+        ".\\tool --go",
+        "Invoke-Item x",
+        "explorer .",
+        "wmic process call create calc",
+        "sc create svc binPath= x",
     ):
         assert verdict(pc, "pc_run", command=risky) == "ask", risky
     # Plain reading and git still run on their own.
-    for plain in ("dir", "git status", "git log --oneline -5", "type notes.txt"):
+    for plain in (
+        "dir",
+        "git status",
+        "git log --oneline -5",
+        "type notes.txt",
+        "dir && git status",
+    ):
         assert verdict(pc, "pc_run", command=plain) == "auto", plain
+    # Writing a file Windows runs, or into a Startup folder, asks at Full.
+    for path in ("go.bat", "x.ps1", "link.lnk", "Startup/notes.txt"):
+        assert (
+            verdict(pc, "pc_files", action="write", path=path, content="x") == "ask"
+        ), path
+    assert (
+        verdict(pc, "pc_files", action="write", path="game.gd", content="x") == "auto"
+    )
 
 
 def test_some_things_are_never_allowed_at_any_level(

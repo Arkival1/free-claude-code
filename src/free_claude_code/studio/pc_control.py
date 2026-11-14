@@ -74,9 +74,21 @@ _RISKY = re.compile(
     r"|powershell|pwsh|cmd|bash|sh|wsl|wscript|cscript|mshta|rundll32|regsvr32"
     r"|certutil|bitsadmin|msbuild|installutil)(\.exe)?\b"
     r"|\b(stop-process|taskkill|kill)\b|\b(set-content|out-file|add-content)\b.*\.\."
+    # Other ways to start a program: cmd's start, PowerShell's call and
+    # dot-source operators, a program by its path, opening with its app.
+    r"|(^|[;|&(]\s*)(start\s|\.\s+\S|\.[\\/])|(^|[;|(]\s*|&&\s*)&(?!&)\s*\S"
+    r"|\b(invoke-item|ii|explorer|invoke-command|icm|start-job|wmic|schtasks|at)(\.exe)?\b"
+    # Packages fetched from the internet and run at once.
+    r"|\b(npx|pnpx|bunx)\b|\b(yarn|pnpm)\s+dlx\b"
+    r"|\bsc(\.exe)?\s+(create|config|start|stop|delete)\b"
     # Climbing out of his folders.
     r"|\.\.[\\/]",
     re.IGNORECASE,
+)
+# Files Windows runs when opened or at sign-in: writing them asks at Full.
+_RUNNABLE = frozenset(
+    {".exe", ".msi", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".wsf"}
+    | {".lnk", ".url", ".reg", ".scr", ".com", ".hta", ".jar", ".dll"}
 )
 # Escapes that hide words from the checks above (f^ormat, "for"mat, f`ormat).
 _ESCAPES = re.compile(r"[\^`\"']")
@@ -263,6 +275,11 @@ class PcControl:
             if self._level == "look":
                 return Decision("deny", "PC control is at Look: reading only.")
             if self._level == "ask" or action in {"delete", "move"}:
+                return Decision("ask")
+            target = self.resolve(str(arguments.get("path", "")))
+            if target.suffix.lower() in _RUNNABLE or any(
+                part.lower() == "startup" for part in target.parts
+            ):
                 return Decision("ask")
             return Decision("auto")
         if tool == PC_RUN:

@@ -7972,7 +7972,7 @@
     off: "Off: no PC tools",
     look: "Look: reads files and folders only",
     ask: "Ask: every change waits for your OK",
-    full: "Full: works on his own (deleting, moving, installs and programs still ask)",
+    full: "Full: works on his own (deleting, moving, installs, scripts and code runners still ask)",
   };
   let pcState = null;
   const pcPanelShown = () => !sheet.hidden && sheetTitle.textContent === "Jarvis's PC";

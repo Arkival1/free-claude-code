@@ -41,8 +41,14 @@ For the owner's laptop (Lenovo Legion Y7000P: i7-9750H, 16 GB, GTX 1660 Ti
 - **Off**: no PC tools.
 - **Look**: reads files and folders only.
 - **Ask**: every change waits for your OK.
-- **Full**: works on his own; deleting, moving, installing, running
-  programs and scripts, and other risky commands still ask.
+- **Full**: works on his own; these still ask: deleting and moving,
+  installing, scripts and code runners (Python, Node, PowerShell, cmd, WSL
+  and the like), starting programs by path or with `start`, packages run
+  straight from the internet (npx), killing processes, climbing out of his
+  folders, and writing files Windows runs (.bat, .ps1, .exe, shortcuts) or
+  anything in a Startup folder. Encoded PowerShell never runs. These checks
+  read the command's text, so they're a second line: another program he
+  names runs on its own at Full, which is why Stop and Ask exist.
 
 **Never, at any level:** Windows' own folders (read only), FCC's code and
 keys (`%USERPROFILE%\.fcc`, `trading-keys.vault`), saved passwords and
