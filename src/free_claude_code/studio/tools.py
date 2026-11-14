@@ -1941,7 +1941,11 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 )
 
 TOOL_SPEC_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
-ALL_TOOL_NAMES: tuple[str, ...] = tuple(spec.name for spec in TOOL_SPECS)
+# The PC tools aren't in "every tool": only AgentRunner._pc_view hands them
+# out (the main AI, on the local model, with PC control on).
+ALL_TOOL_NAMES: tuple[str, ...] = tuple(
+    spec.name for spec in TOOL_SPECS if spec.name not in PC_TOOLS
+)
 """Every tool Studio has."""
 MAIN_ONLY_TOOLS = frozenset({MANAGE_AGENT_TOOL})
 PRIVATE_TOOLS = frozenset(
@@ -1958,6 +1962,7 @@ DEFAULT_TOOL_NAMES: tuple[str, ...] = tuple(
     spec.name
     for spec in TOOL_SPECS
     if spec.name not in DELEGATION_TOOLS
+    and spec.name not in PC_TOOLS
     and spec.name
     not in {
         APP_HELP_TOOL,

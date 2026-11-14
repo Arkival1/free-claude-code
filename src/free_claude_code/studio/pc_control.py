@@ -19,8 +19,6 @@ they are a second line, not a sandbox: the Stop button, the levels and a PC
 kept for Jarvis are the first.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import os
