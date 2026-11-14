@@ -53,11 +53,28 @@ def test_each_level_runs_asks_or_refuses(tmp_path: Path) -> None:
         "pip install x",
         "setup.exe",
         "run.ps1",
+        # Programs that run other code ask too, whatever they're told to do.
+        "python -c \"import shutil; shutil.rmtree('Documents')\"",
+        "py game.py",
+        "node -e \"require('fs').rmSync('x', {recursive: true})\"",
+        "powershell -Command Remove-Item x",
+        "cmd /c rd x",
+        "wsl rm -rf x",
+        "Stop-Process -Id 4242",
+        "taskkill /PID 4242",
+        "dir ..\\..\\free-claude-code",
+        "r^m x",
     ):
         assert verdict(pc, "pc_run", command=risky) == "ask", risky
+    # Plain reading and git still run on their own.
+    for plain in ("dir", "git status", "git log --oneline -5", "type notes.txt"):
+        assert verdict(pc, "pc_run", command=plain) == "auto", plain
 
 
-def test_some_things_are_never_allowed_at_any_level(tmp_path: Path) -> None:
+def test_some_things_are_never_allowed_at_any_level(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FCC_TEST_DATA", str(tmp_path / "data"))
     pc = control(tmp_path, "full")
     for command in (
         "format c:",
@@ -71,6 +88,15 @@ def test_some_things_are_never_allowed_at_any_level(tmp_path: Path) -> None:
         f"type {Path.home() / '.fcc' / 'keys.json'}",
         f"dir {tmp_path / 'data'}",
         'copy "Login Data" x',
+        # Escapes and variables don't hide a never-allowed command.
+        "f^ormat c:",
+        '"format" c:',
+        "shut`down /s",
+        "type %USERPROFILE%\\.fcc\\keys.json",
+        "Get-Content $env:FCC_TEST_DATA\\pc-control.json",
+        # Encoded PowerShell can't be read, so it never runs.
+        "powershell -enc ZQBjAGgAbwAgAGgAaQA=",
+        "pwsh -EncodedCommand ZQBjAGgAbwA=",
     ):
         assert verdict(pc, "pc_run", command=command) == "deny", command
     for path in (
@@ -111,6 +137,22 @@ def test_stop_kills_a_running_command(tmp_path: Path) -> None:
         job = asyncio.create_task(pc.execute("sleep 30", cwd=tmp_path, timeout=60))
         await asyncio.sleep(0.3)
         assert pc.state()["running"] == 1
+        await pc.stop()
+        _, text, _ = await job
+        return text, time.monotonic() - started
+
+    text, took = asyncio.run(scenario())
+    assert took < 10 and "Stopped by the owner" in text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a POSIX sleep")
+def test_stop_while_a_command_is_starting_still_kills_it(tmp_path: Path) -> None:
+    pc = control(tmp_path, "full")
+
+    async def scenario() -> tuple[str, float]:
+        started = time.monotonic()
+        # Stop lands before the new process is tracked.
+        job = asyncio.create_task(pc.execute("sleep 30", cwd=tmp_path, timeout=60))
         await pc.stop()
         _, text, _ = await job
         return text, time.monotonic() - started
@@ -325,3 +367,42 @@ async def test_the_routes_show_and_stop_and_only_this_pc_changes_the_level(
     with pytest.raises(HTTPException):
         await studio_routes.pc_control_resume(request=remote, studio=studio, _=None)
     assert studio.pc_control.stopped
+
+
+@pytest.mark.asyncio
+async def test_stop_turns_down_pc_steps_waiting_for_approval(
+    make_studio, tmp_path: Path
+) -> None:
+    respond, _, box = hands_script(tmp_path)
+    studio, _ = await pc_studio(
+        make_studio, tmp_path, respond, f"{LOCAL_MODEL_PREFIX}qwen", box=box
+    )
+    ran: list[str] = []
+
+    async def run() -> tuple[int, str, bool]:
+        ran.append("ran")
+        return 0, "done", False
+
+    async def ask(command: str):
+        return await studio._commands.request(
+            agent_id="a",
+            agent_name="Jarvis",
+            chat_id="c",
+            site_id="",
+            command=command,
+            cwd=tmp_path,
+            policy="ask",
+            timeout=5,
+            run=run,
+        )
+
+    pc_step = asyncio.create_task(ask("[PC] del notes.txt"))
+    other = asyncio.create_task(ask("npm test"))
+    while len(await studio.pending_commands()) < 2:
+        await asyncio.sleep(0.01)
+    await studio.stop_pc()
+    result = await asyncio.wait_for(pc_step, 5)
+    assert result.request.status == "denied" and not ran
+    # Other agents' commands are left for the owner to decide.
+    assert [r.command for r in await studio.pending_commands()] == ["npm test"]
+    other.cancel()

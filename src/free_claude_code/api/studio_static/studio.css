@@ -3054,3 +3054,118 @@ h3.subhead {
 .free-services .free-service {
   overflow-wrap: anywhere;
 }
+
+/* Jarvis's PC: the Stop button sits over every page, the HUD and sheets. */
+.pc-guard {
+  position: fixed;
+  top: calc(var(--safe-top) + 8px);
+  right: calc(var(--safe-right) + 64px);
+  z-index: 30;
+  display: flex;
+  gap: 6px;
+}
+
+.pc-guard[hidden] { display: none; }
+
+.pc-guard button {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.pc-stop {
+  background: #d7263d;
+  color: #fff;
+}
+
+.pc-guard[data-state="stopped"] .pc-stop {
+  background: #3a3f47;
+  color: #ffd1d6;
+  border-color: #d7263d;
+}
+
+.pc-guard[data-state="off"] .pc-stop {
+  background: #7a1f2b;
+}
+
+.pc-panel-button {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.pc-big {
+  width: 100%;
+  margin: 4px 0 14px;
+}
+
+/* Not .danger: Content Farm's stylesheet recolours every .danger. */
+button.pc-big-stop {
+  min-height: var(--tap);
+  border: 1px solid #d7263d;
+  border-radius: 12px;
+  background: #d7263d;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.pc-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.pc-field textarea {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px;
+}
+
+.pc-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.pc-log-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.pc-log-text {
+  flex-basis: 100%;
+  font-family: var(--mono, ui-monospace, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pc-log-when { opacity: 0.7; }
+
+.pc-log-tag {
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.pc-deny .pc-log-tag { color: var(--bad); border-color: var(--bad); }
+
+/* Narrow screens: under the app bar, so the page title stays readable. */
+@media (max-width: 640px) {
+  .pc-guard {
+    top: calc(var(--safe-top) + 66px);
+    right: calc(var(--safe-right) + 10px);
+  }
+}

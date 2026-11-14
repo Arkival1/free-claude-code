@@ -1232,8 +1232,8 @@ async def pc_control_stop(
     studio: StudioService = Depends(get_studio), _: None = Access
 ) -> JsonObject:
     """The Stop button: works from anywhere the owner is signed in."""
-    await studio.pc_control.stop()
-    return _pc_state(studio)
+    killed = await studio.stop_pc()
+    return {**_pc_state(studio), "killed": killed}
 
 
 @router.post("/studio/api/pc-control/resume")

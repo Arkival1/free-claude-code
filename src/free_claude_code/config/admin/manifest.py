@@ -1375,6 +1375,19 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_PC_CONTROL",
+        "Jarvis Controls This PC",
+        "studio",
+        "boolean",
+        settings_attr="studio_pc_control",
+        description=(
+            "Jarvis, the main AI, gets hands on this PC (run commands, work "
+            "with files) while he thinks on a local model. Server and cloud "
+            "AIs never do; advisers only get the web. A red Stop button shows "
+            "on every page; the PC panel sets how much he may do on his own."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LOCAL_MODEL_TURNS",
         "Local Models Take Turns",
         "studio",

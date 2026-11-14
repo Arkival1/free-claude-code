@@ -7960,6 +7960,163 @@
     );
   }
 
+  /* --------------------------------------------------------- Jarvis's PC */
+  // While Jarvis has hands on this PC, a red Stop shows on every page (and
+  // over the HUD and any open sheet). Stop works from anywhere the owner is
+  // signed in; resuming and changing what he may do work only on the PC.
+
+  const pcGuard = document.getElementById("pc-guard");
+  const pcStop = document.getElementById("pc-stop");
+  const pcPanelButton = document.getElementById("pc-panel");
+  const PC_LEVELS = {
+    off: "Off: no PC tools",
+    look: "Look: reads files and folders only",
+    ask: "Ask: every change waits for your OK",
+    full: "Full: works on his own (deleting, moving, installs and programs still ask)",
+  };
+  let pcState = null;
+  const pcPanelShown = () => !sheet.hidden && sheetTitle.textContent === "Jarvis's PC";
+
+  function showPcGuard(state) {
+    pcState = state;
+    pcGuard.hidden = !(state && state.enabled);
+    if (pcGuard.hidden) return;
+    pcGuard.dataset.state = state.stopped ? "stopped" : state.active ? "on" : "off";
+    pcStop.textContent = state.stopped ? "Jarvis stopped" : "■ Stop Jarvis";
+    pcStop.title = state.stopped
+      ? "Jarvis can't touch this PC. Open the PC panel to let him carry on."
+      : "Stop Jarvis now: ends anything he's running on this PC.";
+    // Don't redraw under the owner's typing.
+    const typing = sheetBody.contains(document.activeElement) && document.activeElement.matches("input, textarea, select");
+    if (pcPanelShown() && !typing) fillPcPanel();
+  }
+
+  async function refreshPc() {
+    // Quietly: no token prompt from the poll, and offline keeps the last state.
+    const headers = {};
+    const key = token();
+    if (key) headers["x-api-key"] = key;
+    try {
+      const response = await fetch("/studio/api/pc-control", { headers });
+      if (response.ok) showPcGuard(await response.json());
+    } catch {
+      // Offline: keep showing the last state.
+    }
+  }
+
+  async function stopJarvis() {
+    pcStop.disabled = true;
+    try {
+      const state = await post("/studio/api/pc-control/stop");
+      showPcGuard(state);
+      notify(state.killed ? `Jarvis stopped. Ended ${state.killed} running.` : "Jarvis stopped. He can't touch this PC.");
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      pcStop.disabled = false;
+    }
+  }
+
+  async function pcChange(path, payload, done) {
+    try {
+      showPcGuard(await post(path, payload));
+      if (pcPanelShown()) fillPcPanel();
+      if (done) notify(done);
+    } catch (error) {
+      notify(error.message);
+    }
+  }
+
+  function pcLogRow(row) {
+    const when = new Date(row.at || 0).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const tag = row.verdict || row.status || (row.result ? "result" : "");
+    return el("li", { class: `pc-log-row${tag ? ` pc-${tag}` : ""}` }, [
+      el("span", { class: "pc-log-when", text: when }),
+      el("strong", { text: row.who || "" }),
+      tag ? el("span", { class: "pc-log-tag", text: tag }) : null,
+      el("span", { class: "pc-log-text", text: row.text || "" }),
+    ]);
+  }
+
+  function fillPcPanel() {
+    const state = pcState || {};
+    const big = state.stopped
+      ? el("button", {
+          class: "primary pc-big",
+          type: "button",
+          text: "Let Jarvis carry on",
+          onclick: () => pcChange("/studio/api/pc-control/resume", {}, "Jarvis can use the PC again."),
+        })
+      : el("button", { class: "pc-big pc-big-stop", type: "button", text: "■ Stop Jarvis now", onclick: stopJarvis });
+    const level = el(
+      "select",
+      {},
+      Object.entries(PC_LEVELS).map(([value, label]) =>
+        el("option", { value, text: label, selected: state.level === value }),
+      ),
+    );
+    level.addEventListener("change", () =>
+      pcChange("/studio/api/pc-control/level", { level: level.value }, "Saved."),
+    );
+    const roots = el("textarea", { rows: "3" });
+    roots.value = (state.roots || []).join("\n");
+    const saveRoots = el("button", {
+      class: "secondary",
+      type: "button",
+      text: "Save folders",
+      onclick: () =>
+        pcChange(
+          "/studio/api/pc-control/roots",
+          { roots: roots.value.split("\n").map((line) => line.trim()).filter(Boolean) },
+          "Folders saved.",
+        ),
+    });
+    const log = (state.log || []).slice(-40).reverse();
+    sheetBody.replaceChildren(
+      el("p", {
+        class: "muted",
+        text: state.stopped
+          ? "Stopped. Jarvis can't run anything or change files on this PC until you let him carry on (only from this PC)."
+          : state.active
+            ? `Jarvis has hands on this PC while he thinks on the local model.${state.running ? ` Running now: ${state.running}.` : ""} Server and cloud AIs never do.`
+            : "Jarvis has no PC tools at this level.",
+      }),
+      big,
+      el("label", { class: "pc-field" }, [el("span", { text: "What he may do on his own" }), level]),
+      el("label", { class: "pc-field" }, [el("span", { text: "His folders (one per line)" }), roots]),
+      saveRoots,
+      el("p", {
+        class: "muted",
+        text: "Never, at any level: Windows' own folders, FCC's code and keys, saved passwords, banking, buying, or wiping a drive.",
+      }),
+      el("h3", { text: "What he did" }),
+      log.length
+        ? el("ol", { class: "pc-log" }, log.map(pcLogRow))
+        : el("p", { class: "muted", text: "Nothing yet." }),
+    );
+  }
+
+  function openPcPanel() {
+    openSheet("Jarvis's PC", []);
+    fillPcPanel();
+    refreshPc();
+  }
+
+  pcStop.addEventListener("click", () => (pcState && pcState.stopped ? openPcPanel() : stopJarvis()));
+  pcPanelButton.addEventListener("click", openPcPanel);
+  // Ctrl+Alt+Pause (or Ctrl+Alt+S) stops Jarvis from any Studio page.
+  document.addEventListener("keydown", (event) => {
+    if (!event.ctrlKey || !event.altKey) return;
+    if (event.key !== "Pause" && event.key.toLowerCase() !== "s") return;
+    if (!pcState || !pcState.enabled || pcState.stopped) return;
+    event.preventDefault();
+    stopJarvis();
+  });
+  refreshPc();
+  setInterval(() => {
+    if (!document.hidden || !pcGuard.hidden) refreshPc();
+  }, 5000);
+
   registerWorker();
   render();
 })();

@@ -6150,6 +6150,16 @@ class StudioService:
         except CommandError as error:
             raise StudioError(str(error)) from error
 
+    async def stop_pc(self) -> int:
+        """The Stop button: kill Jarvis's PC commands, refuse his next steps,
+        and turn down the PC steps still waiting for the owner's OK."""
+        killed = await self.pc_control.stop()
+        for request in await self._commands.pending():
+            if request.command.startswith("[PC] "):
+                with contextlib.suppress(CommandError):
+                    await self._commands.decide(request.id, approve=False)
+        return killed
+
     # ----------------------------------------------------------------- rooms
 
     async def create_room(

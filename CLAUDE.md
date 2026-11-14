@@ -368,6 +368,16 @@ Notes carried over from the long session that built FCC Studio (LCC).
   fighter.gd, player.gd, boss.gd, camera_rig.gd, hud.gd, shaders), and the
   godot-dev skill's section 3 says how to keep games looking that good.
   Real-Godot tests run with `FCC_GODOT_BIN` set.
+- Jarvis's PC (owner, for the Legion laptop: "give control to the local
+  model ... only 3 max, Jarvis is the main one ... API models will never
+  ever have access to the main PC"): `studio/pc_control.py`, `pc_run` /
+  `pc_files` in `tools.py`, `_pc_view` in `agents.py`, the Stop button and
+  PC panel in `studio.js`; plan in `plans/fcc-pc-control.md`. Only the main
+  AI on a `local/` model, unsealed, gets the PC tools; with PC control on he
+  gets no delegation tools, advisers (max 2) get web tools only, API models
+  never get the PC. Stop works from anywhere and survives a restart;
+  resume, level and folders only from the PC. Next: his own browser
+  (YouTube, Reddit, websites; logins and posting ask), apps and games.
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

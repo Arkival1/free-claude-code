@@ -55,7 +55,9 @@ _NEVER = re.compile(
     r"|\bshutdown\b|\b(stop|restart)-computer\b|\bbitlocker|\bmanage-bde\b"
     r"|\b(remove-item|rd|rmdir|del|erase)\b[^|;&]*\b[a-z]:\\?[\"']?\s*($|[|;&])"
     r"|\bset-executionpolicy\b.*\bunrestricted\b.*\b(localmachine)\b"
-    r"|\bstop-process\b.*\b(python|uvicorn|fcc)\b|\btaskkill\b.*\b(python|fcc)",
+    r"|\bstop-process\b.*\b(python|uvicorn|fcc)\b|\btaskkill\b.*\b(python|fcc)"
+    # Hidden (encoded) PowerShell: nobody can read what it would do.
+    r"|\b(powershell|pwsh)(\.exe)?\b.*\s[-/](e|ec|en|enc|encodedcommand)\b",
     re.IGNORECASE,
 )
 # Ask first even at the full level: deleting, installing, running programs,
@@ -65,9 +67,35 @@ _RISKY = re.compile(
     r"|\b(winget|choco|scoop|msiexec)\b|\bpip3?\s+install\b|\bnpm\s+(i|install)\s+(-g|--global)\b"
     r"|\b(invoke-expression|iex)\b|\bset-executionpolicy\b|-verb\s+runas\b"
     r"|\b(invoke-webrequest|iwr|curl|wget)\b.*\|"
-    r"|\.(exe|msi|bat|cmd|ps1|vbs|js|jar|scr)\b|\bstart-process\b|\breg(\.exe)?\s+(add|delete|import)\b",
+    r"|\.(exe|msi|bat|cmd|ps1|vbs|js|mjs|py|pyw|jar|scr|lnk)\b|\bstart-process\b"
+    r"|\breg(\.exe)?\s+(add|delete|import)\b"
+    # Programs that run other code: interpreters, shells, script hosts.
+    r"|\b(python[0-9.]*|pythonw|py|node|deno|bun|ruby|perl|php|java|javaw|lua|tclsh"
+    r"|powershell|pwsh|cmd|bash|sh|wsl|wscript|cscript|mshta|rundll32|regsvr32"
+    r"|certutil|bitsadmin|msbuild|installutil)(\.exe)?\b"
+    r"|\b(stop-process|taskkill|kill)\b|\b(set-content|out-file|add-content)\b.*\.\."
+    # Climbing out of his folders.
+    r"|\.\.[\\/]",
     re.IGNORECASE,
 )
+# Escapes that hide words from the checks above (f^ormat, "for"mat, f`ormat).
+_ESCAPES = re.compile(r"[\^`\"']")
+_ENV = re.compile(
+    r"%([A-Za-z_][A-Za-z0-9_()]*)%|\$env:([A-Za-z_][A-Za-z0-9_]*)|\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"
+)
+
+
+def _plain(command: str) -> str:
+    """The command with escapes removed and environment variables filled in."""
+    text = _ESCAPES.sub("", command)
+
+    def fill(match: re.Match[str]) -> str:
+        name = next(group for group in match.groups() if group)
+        return os.environ.get(name, match.group(0))
+
+    return _ENV.sub(fill, text).replace("~", str(Path.home()))
+
+
 # Password stores and keys: never read or written, wherever they are.
 _SECRET_PARTS = (
     "login data",
@@ -249,7 +277,11 @@ class PcControl:
                 reason = self.path_reason(str(cwd), write=False)
                 if reason:
                     return Decision("deny", reason)
-            if self._level == "ask" or _RISKY.search(command):
+            if (
+                self._level == "ask"
+                or _RISKY.search(command)
+                or _RISKY.search(_plain(command))
+            ):
                 return Decision("ask")
             return Decision("auto")
         return Decision("deny", f"{tool} isn't a PC tool.")
@@ -258,9 +290,10 @@ class PcControl:
         text = command.strip()
         if not text:
             return "A command is required."
-        if _NEVER.search(text):
+        plain = _plain(text)
+        if _NEVER.search(text) or _NEVER.search(plain):
             return "That command is never allowed (it could wreck the PC, its security or the Stop button)."
-        lowered = text.lower()
+        lowered = f"{text}\n{plain}".lower()
         for path in self._protected:
             if str(path).lower() in lowered:
                 return "That command touches FCC's own data or code, which Jarvis never changes."
@@ -317,6 +350,9 @@ class PcControl:
         )
         self._running.add(process)
         try:
+            if self._stopped:
+                # Stop landed while the process was starting.
+                await _kill_tree(process)
             try:
                 stdout, _ = await asyncio.wait_for(process.communicate(), timeout)
                 timed_out = False
