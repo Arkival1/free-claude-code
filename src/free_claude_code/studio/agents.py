@@ -20,6 +20,7 @@ from .lab.bench import LAB_PROMPT
 from .lab.requests import lab_job
 from .limits import brief_limit, daily_limit
 from .llm import (
+    LOCAL_MODEL_PREFIX,
     THINKING_ONLY,
     ChatMessage,
     LLMReply,
@@ -32,6 +33,7 @@ from .llm import (
 )
 from .memory import MemoryService, server_area
 from .models import Agent, AgentRun, Chat, Idea, Message, TunePack, now_ms
+from .pc_control import ADVISER_TOOLS, PC_TOOLS
 from .recall_messages import Found, recall_note, search
 from .store import StudioStore
 from .team_models import model_label
@@ -39,9 +41,11 @@ from .tools import (
     CHANGER_TOOL,
     CHECK_PROJECT_TOOL,
     COMMAND_TOOL,
+    DELEGATION_TOOLS,
     FINISH_TOOL,
     LEAD_TOOLS,
     MAIN_ROLE,
+    MANAGE_AGENT_TOOL,
     NEW_PROJECT_TOOLS,
     NOT_IN_THE_SHED,
     PARALLEL_TOOLS,
@@ -943,11 +947,15 @@ class AgentRunner:
                     "tools": tuple(t for t in agent.tools if t not in SEALED_TOOLS),
                 }
             )
+        pc = self._toolbox.pc_control
+        if pc is not None or any(tool in PC_TOOLS for tool in agent.tools):
+            agent = self._pc_view(agent, lead=lead, sealed=sealed)
         if not lead:
             # An adviser looks and thinks; it never directs anyone.
             return agent, sealed, ()
         if agent.role == MAIN_ROLE:
-            return agent, sealed, None
+            # With PC control on, Jarvis works alone with his two advisers.
+            return agent, sealed, (() if pc is not None else None)
         if agent.role == "guide":
             return agent, sealed, ()
         free = self._toolbox.delegation_allowed(agent.role, agent.tools)
@@ -964,6 +972,35 @@ class AgentRunner:
             agent.model_copy(update={"tools": (*agent.tools, *missing)}),
             sealed,
             servers,
+        )
+
+    def _pc_view(self, agent: Agent, *, lead: bool, sealed: bool) -> Agent:
+        """PC control: the PC tools go to the main AI alone, working (not
+        advising), thinking on the local model, with the owner's PC control
+        on. Advisers keep only the web and the tool list (to suggest tools);
+        nobody else is handed work."""
+        pc = self._toolbox.pc_control
+        tools = tuple(tool for tool in agent.tools if tool not in PC_TOOLS)
+        if pc is not None:
+            model = agent.model or self._default_model
+            if (
+                lead
+                and agent.role == MAIN_ROLE
+                and not sealed
+                and model.startswith(LOCAL_MODEL_PREFIX)
+                and pc.active
+            ):
+                tools = (*tools, *sorted(PC_TOOLS))
+            if not lead:
+                tools = tuple(tool for tool in tools if tool in ADVISER_TOOLS)
+            elif agent.role == MAIN_ROLE:
+                tools = tuple(
+                    tool
+                    for tool in tools
+                    if tool not in DELEGATION_TOOLS and tool != MANAGE_AGENT_TOOL
+                )
+        return (
+            agent.model_copy(update={"tools": tools}) if tools != agent.tools else agent
         )
 
     async def _server_team(self, agent: Agent) -> tuple[str, ...]:
@@ -1111,6 +1148,7 @@ class AgentRunner:
             main_memory=agent.role == MAIN_ROLE
             and self._main_own_memory
             and not sealed,
+            pc_hands=any(tool in PC_TOOLS for tool in agent.tools),
         )
 
     async def _history(self, agent: Agent, chat: Chat) -> list[ChatMessage]:

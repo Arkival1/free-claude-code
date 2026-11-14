@@ -894,6 +894,10 @@ class Settings(BaseModel):
     studio_local_backup: bool = Field(
         default=True, validation_alias="STUDIO_LOCAL_BACKUP"
     )
+    # Jarvis's PC: the main AI, on the local model only, controls this PC
+    # (levels Off/Look/Ask/Full and a Stop button, studio/pc_control.py) with
+    # at most two web-only advisers. Off unless the owner switches it on.
+    studio_pc_control: bool = Field(default=False, validation_alias="STUDIO_PC_CONTROL")
     studio_all_tools: bool = Field(default=True, validation_alias="STUDIO_ALL_TOOLS")
     studio_mcp_server: bool = Field(default=True, validation_alias="STUDIO_MCP_SERVER")
     studio_local_control: bool = Field(

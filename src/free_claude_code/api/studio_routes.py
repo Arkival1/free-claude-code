@@ -1202,6 +1202,82 @@ async def deny_command(
     return (await studio.decide_command(request_id, approve=False)).model_dump()
 
 
+class PcLevelBody(BaseModel):
+    level: str
+
+
+class PcRootsBody(BaseModel):
+    roots: list[str]
+
+
+def _pc_state(studio: StudioService) -> JsonObject:
+    pc = studio.pc_control
+    return {
+        "enabled": studio.settings.studio_pc_control,
+        **pc.state(),
+        "log": pc.recent(80),
+    }
+
+
+@router.get("/studio/api/pc-control")
+async def pc_control_state(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Jarvis's PC control: the level, Stop, his folders and what he did."""
+    return _pc_state(studio)
+
+
+@router.post("/studio/api/pc-control/stop")
+async def pc_control_stop(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The Stop button: works from anywhere the owner is signed in."""
+    await studio.pc_control.stop()
+    return _pc_state(studio)
+
+
+@router.post("/studio/api/pc-control/resume")
+async def pc_control_resume(
+    request: Request, studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """Let Jarvis carry on after Stop (only from this PC)."""
+    require_loopback_admin(request)
+    studio.pc_control.resume()
+    return _pc_state(studio)
+
+
+@router.post("/studio/api/pc-control/level")
+async def pc_control_level(
+    body: PcLevelBody,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Off, Look, Ask or Full (only from this PC)."""
+    require_loopback_admin(request)
+    try:
+        studio.pc_control.set_level(body.level)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _pc_state(studio)
+
+
+@router.post("/studio/api/pc-control/roots")
+async def pc_control_roots(
+    body: PcRootsBody,
+    request: Request,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """The folders Jarvis may work in (only from this PC)."""
+    require_loopback_admin(request)
+    try:
+        studio.pc_control.set_roots(body.roots)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return _pc_state(studio)
+
+
 @router.get("/studio/api/rooms")
 async def list_rooms(
     studio: StudioService = Depends(get_studio), _: None = Access

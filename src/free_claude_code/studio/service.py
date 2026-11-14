@@ -265,6 +265,7 @@ from .page_try import (
     try_page,
     try_url,
 )
+from .pc_control import PcControl
 from .phone_link import (
     MAX_MEMORY_CHARS,
     MAX_PULL,
@@ -1091,6 +1092,13 @@ class StudioService:
         self._tasks: set[asyncio.Task[object]] = set()
         self._room_locks: dict[str, asyncio.Lock] = {}
         self._commands = CommandBroker(store=store)
+        # Jarvis's hands on this PC (STUDIO_PC_CONTROL): FCC's data and keys
+        # and FCC's own code are never his to touch.
+        fcc_code = app_root() or Path(__file__).resolve().parents[1]
+        self.pc_control = PcControl(
+            data_root=self._data_root,
+            protected=(fcc_code, Path.home() / ".fcc"),
+        )
         self._lora = LoraTrainer(
             store=store,
             router=self._router,
@@ -1896,6 +1904,7 @@ class StudioService:
             new_project=self._new_chat_project,
             game_vault=self.game_vault,
             godot=self.godot,
+            pc_control=self.pc_control if settings.studio_pc_control else None,
         )
 
     async def _new_chat_project(self, context: ToolContext, title: str) -> str:

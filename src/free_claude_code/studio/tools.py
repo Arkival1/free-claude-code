@@ -74,6 +74,7 @@ from .page_try import (
     parse_steps,
     try_page,
 )
+from .pc_control import FILE_ACTIONS, PC_FILES, PC_RUN, PC_TOOLS, PcControl
 from .photos import PhotoError, PhotoLibrary
 from .photos import describe as describe_photo
 from .platforms import PlatformError, PlatformPage, PlatformReader, platform_of
@@ -383,6 +384,45 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "type": "object",
             "properties": {"path": {"type": "string"}},
             "required": ["path"],
+        },
+    ),
+    ToolSpec(
+        name=PC_RUN,
+        description=(
+            "Run one command on this PC (Windows: cmd; start PowerShell with "
+            'powershell -NoProfile -Command "..."). For programs, builds, '
+            "installs, Godot, git. It has a time limit, so never start servers "
+            "that keep running. Risky steps wait for the owner's OK; the owner "
+            "can stop you at any time."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The command line."},
+                "cwd": {
+                    "type": "string",
+                    "description": "The folder to run it in (default: your home folder).",
+                },
+            },
+            "required": ["command"],
+        },
+    ),
+    ToolSpec(
+        name=PC_FILES,
+        description=(
+            "Files and folders on this PC: list, read, write, append, mkdir, "
+            "move or delete. Paths are absolute or inside your home folder. "
+            "Deleting and moving wait for the owner's OK."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": list(FILE_ACTIONS)},
+                "path": {"type": "string", "description": "The file or folder."},
+                "content": {"type": "string", "description": "write/append: the text."},
+                "to": {"type": "string", "description": "move: where it goes."},
+            },
+            "required": ["action", "path"],
         },
     ),
     ToolSpec(
@@ -1943,6 +1983,9 @@ NOT_IN_THE_SHED = frozenset(
     {
         *MAIN_ONLY_TOOLS,
         *DELEGATION_TOOLS,
+        # PC control is never picked up from the shed: only the main AI on
+        # the local model gets it (AgentRunner._pc_view).
+        *PC_TOOLS,
         AGENT_MODEL_TOOL,
         TODO_TOOL,
         SYSTEM_STATUS_TOOL,
@@ -2089,6 +2132,9 @@ class ToolContext:
     AI): an agent on this PC directs the agents on server AIs only."""
     main_memory: bool = False
     """The main AI keeps its own memory and reads every agent's."""
+    pc_hands: bool = False
+    """Jarvis on the local model with PC control on: the only one whose PC
+    tool calls run (AgentRunner._private_view decides it each turn)."""
 
     def may_direct(self, name: str) -> bool:
         return self.directs is None or name.casefold() in {
@@ -2234,7 +2280,9 @@ class AgentToolbox:
         new_project: Callable[[ToolContext, str], Awaitable[str]] | None = None,
         game_vault: GameVault | None = None,
         godot: GodotEngine | None = None,
+        pc_control: PcControl | None = None,
     ) -> None:
+        self._pc_control = pc_control
         self._godot_engine = godot
         """Godot on this PC (downloaded once into the Repo vault)."""
         self._game_vault = game_vault
@@ -2286,6 +2334,9 @@ class AgentToolbox:
             for name in ALL_TOOL_NAMES
             if name not in names
             and name not in {TOOLSHED_TOOL, CHANGER_TOOL}
+            # PC control is never granted here: AgentRunner._private_view
+            # gives it to the main AI alone, and only on the local model.
+            and name not in PC_TOOLS
             and (role == MAIN_ROLE or name not in MAIN_ONLY_TOOLS)
         )
         return (*names, *extra)
@@ -2297,6 +2348,11 @@ class AgentToolbox:
         return name in DELEGATION_TOOLS or (
             name in NETWORK_TOOLS and not self.web_enabled
         )
+
+    @property
+    def pc_control(self) -> PcControl | None:
+        """The owner's PC-control switches, when this PC has them on."""
+        return self._pc_control
 
     @property
     def every_tool_allowed(self) -> bool:
@@ -2351,6 +2407,9 @@ class AgentToolbox:
         while agents may have every tool."""
         if self._delegate is None or role == "guide":
             return False
+        if self._pc_control is not None:
+            # Jarvis's PC: he works alone with his two advisers.
+            return False
         # Any agent given ask_agent on its card may hand work to a teammate,
         # a subagent, or a repo agent, whether or not Every Tool is on.
         return role == MAIN_ROLE or ASK_AGENT_TOOL in names
@@ -2390,6 +2449,8 @@ class AgentToolbox:
                     return await self._delete_file(call, context)
                 case "run_command":
                     return await self._run_command(call, context)
+                case "pc_run" | "pc_files":
+                    return await self._pc_call(call, context)
                 case "remember":
                     return await self._remember(call, context)
                 case "recall":
@@ -4193,6 +4254,86 @@ class AgentToolbox:
         return ToolOutcome(
             text=f"Deleted {path}." if deleted else f"{path} did not exist.",
             data={"tool": "delete_file", "site_id": site_id, "path": path},
+        )
+
+    async def _pc_call(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
+        """Jarvis's hands on this PC: decided by the owner's level, approved
+        through the same Approve/Deny as project commands, logged."""
+        pc = self._pc_control
+        if pc is None:
+            raise CommandError("PC control isn't switched on for this PC.")
+        if not context.pc_hands:
+            # Checked again here, not only when tools are handed out: only the
+            # main AI on the local model ever touches the PC.
+            return ToolOutcome(
+                text="Not done: only Jarvis on the local model controls this PC.",
+                data={"tool": call.name, "verdict": "deny"},
+                failed=True,
+            )
+        arguments = dict(call.arguments)
+        decision = pc.decide(call.name, arguments)
+        pc.log(
+            context.agent_name,
+            f"{call.name} {json.dumps(arguments)[:400]}",
+            verdict=decision.verdict,
+        )
+        if decision.verdict == "deny":
+            return ToolOutcome(
+                text=f"Not done: {decision.reason}",
+                data={"tool": call.name, "verdict": "deny"},
+                failed=True,
+            )
+        if call.name == PC_FILES and decision.verdict == "auto":
+            text = await asyncio.to_thread(pc.files, arguments)
+            pc.log(context.agent_name, text[:300], result=True)
+            return ToolOutcome(text=text, data={"tool": call.name, "verdict": "auto"})
+        if self._commands is None:
+            raise CommandError("Approvals aren't available, so this step can't run.")
+        if call.name == PC_FILES:
+            shown = f"{arguments.get('action')} {arguments.get('path')}" + (
+                f" → {arguments.get('to')}" if arguments.get("to") else ""
+            )
+
+            async def run_files() -> tuple[int, str, bool]:
+                if pc.stopped:
+                    return 1, "Stopped by the owner.", False
+                return 0, await asyncio.to_thread(pc.files, arguments), False
+
+            run = run_files
+            cwd = pc.roots[0]
+        else:
+            shown = str(arguments.get("command", ""))
+            cwd = pc.resolve(str(arguments.get("cwd") or pc.roots[0]))
+
+            async def run_command() -> tuple[int, str, bool]:
+                if pc.stopped:
+                    return 1, "Stopped by the owner.", False
+                return await pc.execute(shown, cwd=cwd, timeout=self._command_timeout)
+
+            run = run_command
+        result = await self._commands.request(
+            agent_id=context.agent_id,
+            agent_name=context.agent_name,
+            chat_id=context.chat_id,
+            site_id=context.site_id or "",
+            command=f"[PC] {shown}",
+            cwd=cwd,
+            policy="ask" if decision.verdict == "ask" else "auto",
+            timeout=self._command_timeout,
+            run=run,
+        )
+        request = result.request
+        pc.log(
+            context.agent_name, result.text[:300], result=True, status=request.status
+        )
+        return ToolOutcome(
+            text=result.text,
+            data={
+                "tool": call.name,
+                "request_id": request.id,
+                "status": request.status,
+            },
+            failed=request.status != "ran" or (request.exit_code or 0) != 0,
         )
 
     async def _run_command(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
