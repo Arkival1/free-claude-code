@@ -138,8 +138,8 @@ export const CATALOG = [
     engine: "webgpu",
     url: "https://huggingface.co/mlc-ai/Qwen3.5-2B-q4f16_1-MLC",
     size: 1083000000,
-    context: 4096,
-    note: "Qwen3.5 2B on the graphics chip: newer and smarter than the 1.7B, good with tools. Needs WebGPU and about 2 GB of graphics memory.",
+    context: 40960,
+    note: "Qwen3.5 2B on the graphics chip with 40,960 tokens of context: it remembers long chats and big jobs (its design keeps that memory small). Needs WebGPU and about 2 GB of graphics memory.",
     good: ["Jarvis", "Builder"],
   },
   {
@@ -156,7 +156,9 @@ export const CATALOG = [
 
 export const MAX_FILE = 2 * 1024 * 1024 * 1024;
 // 16k and 32k need far more memory: for small models, or the graphics chip.
-const CONTEXTS = [2048, 4096, 8192, 16384, 32768];
+// 40,960 is for Qwen3.5 2B on the graphics chip: only 6 of its 24 layers keep
+// a memory of past tokens, so 40K needs about 0.5 GB more, not 4-6 GB.
+const CONTEXTS = [2048, 4096, 8192, 16384, 32768, 40960];
 export { CONTEXTS };
 
 let wllama = null;
@@ -207,9 +209,12 @@ export async function recoverFromCrash() {
   if (model) {
     model.settings = model.settings || {};
     const chosen = settingsFor(model);
-    if (chosen.context > 2048) {
-      model.settings.context = 2048;
-      change = ` Studio lowered its context to 2,048 tokens so it needs less memory; send your message again.`;
+    // One size down at a time (40K, 32K, 16K...), so a big context isn't lost
+    // to one crash.
+    const lower = [...CONTEXTS].reverse().find((value) => value < chosen.context);
+    if (chosen.context > 2048 && lower) {
+      model.settings.context = lower;
+      change = ` Studio lowered its context to ${lower.toLocaleString()} tokens so it needs less memory; send your message again.`;
     } else if (chosen.gpu && model.engine !== "webgpu") {
       model.settings.gpu = false;
       change = " Studio turned off the graphics chip for it; send your message again.";
@@ -484,6 +489,16 @@ function friendly(error) {
 // Tools a phone model always keeps, however small its context.
 const CORE_TOOLS = new Set(["remember", "recall", "calculate", "weather", "wikipedia", "todo", "ask_agent", "start_task", "start_project", "write_file", "edit_file", "read_file", "list_files", "check_project"]);
 
+// Words that mean a request needs Jarvis's tools (making, saving, looking
+// things up). Anything else short is ordinary chat, which works without them.
+const TOOL_WORDS = /\b(make|build|create|write|code|edit|fix|remember|recall|save|search|look up|find|weather|todo|remind|website|site|page|game|app|file|project|lab|linux|godot|calculate|plugin|task|draw|picture|photo|download)\b/i;
+const textOfMessage = (message) => (typeof message.content === "string" ? message.content : Array.isArray(message.content) ? message.content.filter((part) => part.type === "text").map((part) => part.text).join(" ") : "");
+
+/** Ordinary chat (a greeting, a short question) needs no tools. */
+export const ordinaryChat = (text) => String(text || "").trim().length <= 200 && !TOOL_WORDS.test(String(text || ""));
+
+export class ContextLimit extends Error {}
+
 // Rough characters per token for these models' tokenizers (English, JSON).
 const CHARS_PER_TOKEN = 3.2;
 const tokensOf = (value) => Math.ceil(JSON.stringify(value ?? "").length / CHARS_PER_TOKEN);
@@ -549,11 +564,33 @@ export function fitToContext({ messages, tools, maxTokens, context, name = "This
     fitTools = fitTools.filter((tool) => tool !== biggest);
   }
   if (fitTools && !fitTools.length) fitTools = undefined;
+  let lean = false;
+  const request = lastUser >= 0 ? textOfMessage(list[lastUser]) : "";
+  // Ordinary chat in a small context: the tools step aside so the answer has
+  // room (a greeting at 2,048 just answers).
+  if (fitTools && ordinaryChat(request) && size(list) + Math.min(maxTokens, 512) > room) {
+    fitTools = undefined;
+    lean = true;
+  }
+  if (fitTools && size(list) + 256 > room) {
+    if (!ordinaryChat(request)) {
+      throw new ContextLimit(`${name} is set to ${context.toLocaleString()} tokens of context, too small for this job with Jarvis's tools. On Models, tap Settings on it and pick 8,192 or more, use a cloud brain, or send it to PocketPal (Chat, PocketPal).`);
+    }
+    fitTools = undefined;
+    lean = true;
+  }
+  // Still too big (a long system message): keep its start and the request.
+  if (size(list) + 256 > room && list[0] && list[0].role === "system") {
+    const spare = room - 256 - size(list.slice(1)) - 16;
+    if (spare > 64) {
+      list[0] = { ...list[0], content: `${String(list[0].content).slice(0, Math.floor(spare * CHARS_PER_TOKEN))}\n…` };
+    }
+  }
   const answer = Math.min(maxTokens, room - size(list));
   if (answer < 256) {
-    throw new Error(`${name} needs about ${Math.ceil((size(list) + 256) / 1024)}K tokens of context for this, but it's set to ${context.toLocaleString()}. On Models, tap Settings on it and pick a bigger context (16,384 suits Jarvis and his tools), or use a free cloud brain for big jobs.`);
+    throw new ContextLimit(`${name} needs about ${Math.ceil((size(list) + 256) / 1024)}K tokens of context for this, but it's set to ${context.toLocaleString()}. On Models, tap Settings on it and pick a bigger context, use a cloud brain, or send it to PocketPal (Chat, PocketPal).`);
   }
-  return { messages: list, tools: fitTools, maxTokens: answer };
+  return { messages: list, tools: fitTools, maxTokens: answer, lean };
 }
 
 export function chat(model, { messages, tools, maxTokens = 1024, temperature = settingsFor(model).temperature }) {

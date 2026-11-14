@@ -4,6 +4,7 @@ import { el, card, go } from "../ui.js";
 
 export const ITEMS = [
   ["tasks", "▶", "Tasks", "Give Jarvis a whole job: he plans it and the team does it"],
+  ["pocketpal", "✋", "PocketPal", "Your PocketPal app thinks and FCC does the work: files, projects, memory. You approve each change"],
   ["hq", "▦", "HQ", "Your PC's team at work, station by station"],
   ["projects", "⚒", "Projects", "Websites and apps the Builder makes"],
   ["trade", "₿", "Trading", "Your PC's Trading Bank: watch, approve, stop"],

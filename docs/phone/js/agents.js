@@ -6,7 +6,9 @@ import { startStudy } from "./learn.js";
 import { words } from "./ui.js";
 import { benchNow, benchBusy } from "./workshop.js";
 
-const HISTORY_TURNS = 20;
+// The last 60 turns go to the brain; a phone model's small context trims the
+// oldest to fit (engine.fitToContext), a big one (40K) keeps them all.
+const HISTORY_TURNS = 60;
 const MAX_HANDOFF_DEPTH = 2;
 
 export const isBusy = (agent) => state.busy.has(agent.id);

@@ -30,6 +30,8 @@ import * as hq from "./views/hq.js";
 import * as playground from "./views/playground.js";
 import * as library from "./views/library.js";
 import * as lab from "./views/lab.js";
+import * as pocketpal from "./views/pocketpal.js";
+import "./pocketpal.js";
 
 const view = $("view");
 const TITLES = {
@@ -54,6 +56,7 @@ const TITLES = {
   library: "Library",
   lab: "Lab",
   practice: "Jarvis learns",
+  pocketpal: "PocketPal",
 };
 // Two looks (Settings, Look): the HUD (the command centre and the whole team)
 // and the Playground (one main AI does the work, the others advise).
@@ -135,6 +138,7 @@ async function render() {
     plugins: () => plugins.render(view, param),
     tasks: () => tasks.render(view, param),
     hq: () => hq.render(view),
+    pocketpal: () => pocketpal.render(view),
     practice: async () => (await import("./views/practice.js")).render(view, param),
   };
   try {
