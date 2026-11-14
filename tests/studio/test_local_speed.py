@@ -1,0 +1,314 @@
+"""Local models answer sooner: a reusable prompt start and no hidden thinking."""
+
+import json
+
+import httpx
+import pytest
+
+from free_claude_code.studio.llm import (
+    NO_THINK_SWITCH,
+    ChatMessage,
+    LocalOpenAILLM,
+    ToolSpec,
+    parse_tool_directives,
+    strip_thinking,
+    visible_reply,
+)
+
+TOOL = ToolSpec(
+    name="recall",
+    description="Search memory.",
+    parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+)
+
+
+def runtime(sent: list[dict], content: str = "Hello.") -> httpx.MockTransport:
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": content}}], "model": "m"},
+        )
+
+    return httpx.MockTransport(answer)
+
+
+@pytest.mark.asyncio
+async def test_the_prompt_starts_with_what_never_changes():
+    sent: list[dict] = []
+    llm = LocalOpenAILLM(base_url="http://localhost:1234/v1", transport=runtime(sent))
+
+    for memory in ("remembers A", "remembers B"):
+        await llm.complete(
+            [ChatMessage(role="user", content="hi")],
+            system=f"You are Jarvis.\n\n{memory}",
+            tools=(TOOL,),
+        )
+
+    first, second = (body["messages"][0]["content"] for body in sent)
+    assert first.startswith("You can use tools.")
+    assert first.endswith(NO_THINK_SWITCH)
+    shared = len(first.split("remembers")[0])
+    assert first[:shared] == second[:shared], "only the end differs between turns"
+    assert sent[0]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert sent[0]["cache_prompt"] is True
+
+
+@pytest.mark.asyncio
+async def test_thinking_can_be_left_on():
+    sent: list[dict] = []
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1", transport=runtime(sent), fast=lambda: False
+    )
+
+    await llm.complete([ChatMessage(role="user", content="hi")], system="Be brief.")
+
+    assert "chat_template_kwargs" not in sent[0]
+    assert NO_THINK_SWITCH not in sent[0]["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_a_reasoning_models_thinking_never_reaches_the_user():
+    sent: list[dict] = []
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1",
+        transport=runtime(sent, "<think>The user greets me.</think>\n\nHello there."),
+    )
+
+    reply = await llm.complete([ChatMessage(role="user", content="hi")])
+
+    assert reply.text == "Hello there."
+
+
+def test_thinking_is_stripped_in_every_shape():
+    assert strip_thinking("<think>a\nb</think>Answer") == "Answer"
+    assert strip_thinking("opened in the prompt</think>\nAnswer") == "Answer"
+    assert strip_thinking("<think>ran out of tokens") == ""
+    assert strip_thinking("Plain answer.") == "Plain answer."
+
+
+def sse(*pieces: str) -> bytes:
+    lines = [
+        "data: "
+        + json.dumps({"model": "m", "choices": [{"delta": {"content": piece}}]})
+        for piece in pieces
+    ]
+    lines.append(
+        "data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": "stop"}]})
+    )
+    lines.append("data: [DONE]")
+    return ("\n\n".join(lines) + "\n\n").encode()
+
+
+def streaming_runtime(sent: list[dict], body: bytes, kind="text/event-stream"):
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, content=body, headers={"content-type": kind})
+
+    return httpx.MockTransport(answer)
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_reply_shows_its_words_as_they_arrive():
+    sent: list[dict] = []
+    shown: list[str] = []
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1",
+        transport=streaming_runtime(sent, sse("<think>hm", "</think>Hel", "lo there.")),
+    )
+
+    reply = await llm.complete_streaming(
+        [ChatMessage(role="user", content="hi")], on_text=shown.append
+    )
+
+    assert sent[0]["stream"] is True
+    assert shown == ["Hel", "Hello there."], "thinking never shows"
+    assert reply.text == "Hello there."
+    assert reply.stop_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_tool_call_shows_nothing_and_still_runs():
+    shown: list[str] = []
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1",
+        transport=streaming_runtime(
+            [], sse('{"tool": "recall", ', '"arguments": {"query": "x"}}')
+        ),
+    )
+
+    reply = await llm.complete_streaming(
+        [ChatMessage(role="user", content="hi")], on_text=shown.append, tools=(TOOL,)
+    )
+
+    assert shown == []
+    assert reply.tool_calls[0].name == "recall"
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_that_ignores_streaming_still_answers():
+    shown: list[str] = []
+    whole = json.dumps({"choices": [{"message": {"content": "All at once."}}]})
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1",
+        transport=streaming_runtime([], whole.encode(), "application/json"),
+    )
+
+    reply = await llm.complete_streaming(
+        [ChatMessage(role="user", content="hi")], on_text=shown.append
+    )
+
+    assert reply.text == "All at once."
+
+
+def test_what_a_person_sees_while_a_reply_is_written():
+    assert visible_reply('{"final": "Hi th') == "Hi th"
+    assert visible_reply('{"final": "Done.\\nBye"}') == "Done.\nBye"
+    assert visible_reply('{"tool": "web_se') == ""
+    assert visible_reply("<think>planning") == ""
+    assert visible_reply("Plain words") == "Plain words"
+
+
+def test_several_tool_calls_come_back_from_one_reply():
+    calls, final = parse_tool_directives(
+        '[{"tool": "web_search", "arguments": {"query": "a"}},'
+        ' {"tool": "web_search", "arguments": {"query": "b"}}]'
+    )
+    assert final is None
+    assert [call.arguments["query"] for call in calls] == ["a", "b"]
+    assert len({call.id for call in calls}) == 2
+
+    fenced, _ = parse_tool_directives(
+        '```json\n[{"tool": "recall", "arguments": {"query": "x"}}]\n```'
+    )
+    assert [call.name for call in fenced] == ["recall"]
+    single, _ = parse_tool_directives('{"tool": "recall", "arguments": {}}')
+    assert [call.name for call in single] == ["recall"]
+    assert parse_tool_directives('{"final": "Done."}') == ((), "Done.")
+
+
+def reasoning_sse(
+    pieces: list[str], *, finish: str, key: str = "reasoning_content"
+) -> bytes:
+    """LM Studio's stream when everything lands in the reasoning field."""
+    lines = [
+        "data: " + json.dumps({"model": "m", "choices": [{"delta": {key: piece}}]})
+        for piece in pieces
+    ]
+    lines.append(
+        "data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": finish}]})
+    )
+    lines.append("data: [DONE]")
+    return ("\n\n".join(lines) + "\n\n").encode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["reasoning_content", "reasoning"])
+async def test_an_answer_filed_as_reasoning_is_still_the_answer(key):
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1",
+        transport=streaming_runtime(
+            [],
+            reasoning_sse(["Hello, ", "I'm the Researcher."], finish="stop", key=key),
+        ),
+    )
+
+    reply = await llm.complete_streaming(
+        [ChatMessage(role="user", content="hello")], on_text=lambda _: None
+    )
+
+    assert reply.text == "Hello, I'm the Researcher."
+
+
+@pytest.mark.asyncio
+async def test_a_reply_that_was_all_thinking_says_so():
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1",
+        transport=streaming_runtime(
+            [],
+            reasoning_sse(["Let me think about", " this for a long"], finish="length"),
+        ),
+    )
+
+    reply = await llm.complete_streaming(
+        [ChatMessage(role="user", content="hello")], on_text=lambda _: None
+    )
+
+    assert reply.text == ""
+    assert reply.stop_reason == "thinking_only"
+
+
+@pytest.mark.asyncio
+async def test_a_non_streamed_answer_in_reasoning_content_is_read():
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "model": "m",
+                "choices": [
+                    {
+                        "message": {"content": "", "reasoning_content": "Hi there."},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1", transport=httpx.MockTransport(answer)
+    )
+
+    reply = await llm.complete([ChatMessage(role="user", content="hello")])
+
+    assert reply.text == "Hi there."
+
+
+def test_local_models_get_a_brief_tool_list():
+    from free_claude_code.studio.llm import tool_protocol_instructions
+    from free_claude_code.studio.tools import MAIN_TOOL_NAMES, tool_specs
+
+    specs = tool_specs(MAIN_TOOL_NAMES)
+    full = tool_protocol_instructions(specs)
+    brief = tool_protocol_instructions(specs, brief=True)
+
+    assert len(brief) < len(full) * 0.75
+    assert "- web_search: Search the web and return result titles and URLs." in brief
+    assert "Arguments: query (required): What to search for." in brief
+    assert "```html" not in brief, "no file-writing example for agents that can't"
+
+
+@pytest.mark.asyncio
+async def test_a_local_request_sends_the_brief_list():
+    sent: list[dict] = []
+    llm = LocalOpenAILLM(base_url="http://localhost:1234/v1", transport=runtime(sent))
+
+    await llm.complete([ChatMessage(role="user", content="hi")], tools=(TOOL,))
+
+    system = sent[0]["messages"][0]["content"]
+    assert "- recall: Search memory. Arguments: query." in system
+
+
+@pytest.mark.asyncio
+async def test_the_room_a_model_was_loaded_with_is_read_from_lm_studio():
+    def answer(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v0/models"
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "jarvis-4b",
+                        "state": "loaded",
+                        "loaded_context_length": 4096,
+                    },
+                    {"id": "other", "state": "not-loaded", "max_context_length": 32768},
+                ]
+            },
+        )
+
+    llm = LocalOpenAILLM(
+        base_url="http://localhost:1234/v1", transport=httpx.MockTransport(answer)
+    )
+
+    assert await llm.context_length("jarvis-4b") == 4096
+    assert await llm.context_length("other") is None

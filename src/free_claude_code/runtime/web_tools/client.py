@@ -213,7 +213,9 @@ class HTTPWebToolsClient:
                     response.raise_for_status()
                     content_type = response.headers.get("content-type", "text/plain")
                     final_url = str(response.url)
-                    encoding = response.get_encoding() or "utf-8"
+                    # get_encoding() needs a fully read body, but the body is
+                    # streamed under a cap, so use the declared charset.
+                    encoding = response.charset or "utf-8"
                     body_bytes = await _read_aiohttp_body_capped(
                         response, constants._MAX_WEB_FETCH_RESPONSE_BYTES
                     )

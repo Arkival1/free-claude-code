@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agency Name</title>
+  <meta name="description" content="A build-first digital agency. Websites, systems and campaigns that ship.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#services">Skip to services</a>
+  <header class="bar" id="top">
+    <a class="brand" data-brand href="#top">Agency Name</a>
+    <button class="menu" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav id="nav" aria-label="Main">
+      <a href="#services">[01] Services</a>
+      <a href="#numbers">[02] Numbers</a>
+      <a href="#contact">[03] Contact</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <p class="tag">FILE 001 / DIGITAL WORKS / EST. 2018</p>
+      <h1 id="hero-title">WE BUILD<br><span>THINGS THAT</span><br>SHIP.</h1>
+      <div class="hero-foot">
+        <p>Websites, internal tools and campaigns for teams that need it done, not discussed.</p>
+        <a class="block-btn" href="#contact">Book a call &rarr;</a>
+      </div>
+    </section>
+
+    <section id="services" class="services" aria-labelledby="services-title">
+      <h2 id="services-title">SERVICES</h2>
+      <ol class="list">
+        <li><span class="num">01</span><h3>Websites</h3><p>Fast, accessible sites your team can edit.</p></li>
+        <li><span class="num">02</span><h3>Systems</h3><p>Dashboards and tools that replace the spreadsheet.</p></li>
+        <li><span class="num">03</span><h3>Campaigns</h3><p>Launch pages, ads and email that measure what works.</p></li>
+        <li><span class="num">04</span><h3>Care</h3><p>Monthly upkeep: updates, fixes, reports.</p></li>
+      </ol>
+    </section>
+
+    <section id="numbers" class="numbers" aria-labelledby="numbers-title">
+      <h2 id="numbers-title" class="visually-hidden">In numbers</h2>
+      <div class="stat"><strong>212</strong><span>PROJECTS SHIPPED</span></div>
+      <div class="stat"><strong>48H</strong><span>FIRST DRAFT</span></div>
+      <div class="stat"><strong>99%</strong><span>ON TIME</span></div>
+    </section>
+
+    <section id="contact" class="contact" aria-labelledby="contact-title">
+      <h2 id="contact-title">START A PROJECT</h2>
+      <form class="form" data-email="studio@example.com" novalidate>
+        <label>NAME<input name="name" autocomplete="name" required></label>
+        <label>EMAIL<input name="email" type="email" autocomplete="email" required></label>
+        <label class="wide">WHAT DO YOU NEED?<textarea name="message" rows="4" required></textarea></label>
+        <button class="block-btn" type="submit">SEND BRIEF &rarr;</button>
+        <p class="note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>&copy; <span data-year></span> <span data-brand-text>Agency Name</span></p>
+    <p>ALL SYSTEMS NOMINAL</p>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

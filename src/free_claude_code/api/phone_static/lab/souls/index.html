@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>FCCTITLE0</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="stage">
+    <canvas id="game" aria-label="FCCTITLE0"></canvas>
+    <div class="bars">
+      <div id="hp" class="bar hp"><i></i></div>
+      <div id="stamina" class="bar stamina"><i></i></div>
+      <span id="flasks">✚ 3</span>
+    </div>
+    <div id="boss" class="boss" hidden><span>Ashen Guardian</span><div class="bar"><i></i></div></div>
+    <p id="hint" class="hint" hidden>Rest at the bonfire: ✚</p>
+    <p id="banner" hidden></p>
+  </main>
+  <script type="module" src="game.js"></script>
+</body>
+</html>

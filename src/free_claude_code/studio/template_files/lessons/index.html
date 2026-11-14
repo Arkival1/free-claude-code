@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>$initial</text></svg>">
+<title>$title</title>
+<meta name="description" content="$title: small-group surf lessons for beginners and improvers on a patrolled Sydney beach, boards and wetsuits included.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Karla:wght@400;600&family=DM+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script src="lessons.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a class="logo" href="#top">$title</a>
+    <nav aria-label="Main"><a href="#lessons">Lessons</a><a href="#report">Surf report</a><a href="#crew">Coaches</a><a href="#safety">Safety</a></nav>
+    <a class="btn" href="#book">Book a lesson</a>
+  </div>
+</header>
+<main id="top">
+  <div class="hero">
+    <canvas id="waves" aria-hidden="true"></canvas>
+    <div class="wrap">
+      <h1>Stand up on your first morning.</h1>
+      <p>Small groups of six, soft-top boards and wetsuits included, on a patrolled beach with gentle rollers. Most first-timers are up by the second hour.</p>
+      <div class="actions"><a class="btn" href="#book">Book a lesson</a><a class="btn line" href="#report">Today's surf</a></div>
+    </div>
+  </div>
+
+  <section id="lessons">
+    <div class="wrap">
+      <div class="head"><p class="eyebrow">Lessons</p><h2>Pick your wave</h2><p>Every lesson starts on the sand with paddling, pop-ups and how to read a rip.</p></div>
+      <div class="lessons">
+        <article class="lesson"><h3>First wave</h3><span class="price">$79<small> · 2 hours</small></span><ul><li>Groups of six, ages 8+</li><li>Board and wetsuit included</li></ul><p>For people who've never surfed. Whitewater only, waist-deep.</p><a class="btn line" href="#book" data-lesson="First wave">Book First wave</a></article>
+        <article class="lesson pick"><h3>Three-day course</h3><span class="price">$199<small> · 3 × 2 hours</small></span><ul><li>Same coach all three days</li><li>Video feedback on day three</li></ul><p>The fastest way to ride green waves by Sunday.</p><a class="btn" href="#book" data-lesson="Three-day course">Book the course</a></article>
+        <article class="lesson"><h3>Private coaching</h3><span class="price">$140<small> · 1.5 hours</small></span><ul><li>One coach, up to two people</li><li>Any level, any break</li></ul><p>For turning, line-ups and getting out the back with confidence.</p><a class="btn line" href="#book" data-lesson="Private coaching">Book private</a></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="report" style="background: var(--paper); border-block: 1px solid var(--line)">
+    <div class="wrap">
+      <div class="head"><p class="eyebrow">Surf report · sample data</p><h2>The next four sessions</h2><p>We teach when the waves are small and clean. If it's too big or too messy, we move your lesson free.</p></div>
+      <div class="report">
+        <table>
+          <thead><tr><th>Session</th><th>Swell</th><th>Wind</th><th>Tide</th><th>For lessons</th></tr></thead>
+          <tbody>
+            <tr><td>Sat 7:00 am</td><td>0.6 m · 9 s</td><td>W 8 km/h (offshore)</td><td>Low 6:42 am</td><td class="good">Ideal</td></tr>
+            <tr><td>Sat 10:00 am</td><td>0.7 m · 9 s</td><td>NE 14 km/h</td><td>Rising</td><td class="good">Good</td></tr>
+            <tr><td>Sun 7:00 am</td><td>1.0 m · 10 s</td><td>SW 12 km/h</td><td>Low 7:30 am</td><td class="fair">Fair, improvers</td></tr>
+            <tr><td>Sun 10:00 am</td><td>1.1 m · 10 s</td><td>S 22 km/h</td><td>Rising</td><td class="fair">Choppy</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Sample numbers for this starter: read them from a forecast service each morning, or remove this table.</p>
+    </div>
+  </section>
+
+  <section id="crew">
+    <div class="wrap">
+      <div class="head"><p class="eyebrow">Coaches</p><h2>Surf Life Saving qualified, all of them</h2></div>
+      <div class="crew">
+        <div class="person"><div class="face" style="background:#146478">JM</div><h3>Jess Morales</h3><p>Head coach. Twelve years teaching, still surfs every dawn before class.</p></div>
+        <div class="person"><div class="face" style="background:#e4572e">KT</div><h3>Kai Tran</h3><p>Runs the kids' groups and the three-day course. Patient beyond belief.</p></div>
+        <div class="person"><div class="face" style="background:#0c3b4a">AB</div><h3>Amara Bello</h3><p>Private coaching and longboards. Former state-level competitor.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="safety" style="background: var(--paper); border-block: 1px solid var(--line)">
+    <div class="wrap">
+      <div class="head"><p class="eyebrow">Safety first</p><h2>Know the flags</h2><p>We only teach between the flags, with a coach in the water for every six learners.</p></div>
+      <div class="flags">
+        <div class="flag"><i style="background: linear-gradient(180deg, #d62828 50%, #f4c430 50%)"></i><div><h3>Red and yellow</h3><p>Patrolled area. Swim and learn between these flags.</p></div></div>
+        <div class="flag"><i style="background:#d62828"></i><div><h3>Red</h3><p>Beach closed. Lessons move to another day, free.</p></div></div>
+        <div class="flag"><i style="background:#f4c430"></i><div><h3>Yellow</h3><p>Take care: conditions may be dangerous.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="book">
+    <div class="wrap book">
+      <div class="head" style="margin: 0"><p class="eyebrow">Book</p><h2>Save your spot</h2><p>Pay on the day. Free reschedule if the surf isn't right. Meet at the green shed by the north ramp, 15 minutes early.</p><p style="margin-top: 0.8rem"><a href="mailto:hello@yourschool.example">hello@yourschool.example</a></p></div>
+      <form id="booking" novalidate data-email="hello@yourschool.example">
+        <div class="field"><label for="name">Name</label><input id="name" autocomplete="name"></div>
+        <div class="pair">
+          <div class="field"><label for="lesson">Lesson</label><select id="lesson"><option>First wave</option><option>Three-day course</option><option>Private coaching</option></select></div>
+          <div class="field"><label for="people">People</label><input id="people" type="number" min="1" max="6" value="1" inputmode="numeric"></div>
+        </div>
+        <div class="pair">
+          <div class="field"><label for="date">Day</label><input id="date" type="date"></div>
+          <div class="field"><label for="level">Surfed before?</label><select id="level"><option>Never</option><option>A few times</option><option>I can catch green waves</option></select></div>
+        </div>
+        <p class="err" id="err" role="alert"></p>
+        <button class="btn" type="submit">Book it</button>
+        <div class="done" id="done" hidden role="status"></div>
+      </form>
+    </div>
+  </section>
+</main>
+<footer><div class="wrap"><span>© $title</span></div></footer>
+
+</body>
+</html>

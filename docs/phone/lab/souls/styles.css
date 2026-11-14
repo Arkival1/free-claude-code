@@ -1,0 +1,173 @@
+/* FCCTITLE0: the HUD over the 3D scene, thumb-sized controls for a phone. */
+:root {
+  --ink: #f2e6d0;
+  --hp: #a8322a;
+  --stamina: #5e8f3a;
+  --gold: #d9b26a;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0d0a0a;
+  color: var(--ink);
+  font: 600 14px/1.3 Georgia, "Times New Roman", serif;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+}
+
+#game {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.bars {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  left: 14px;
+  display: grid;
+  gap: 6px;
+  width: min(46vw, 260px);
+}
+
+.bar {
+  height: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(242, 230, 208, 0.35);
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transition: width 0.15s;
+}
+
+.hp i {
+  background: var(--hp);
+}
+
+.stamina i {
+  background: var(--stamina);
+}
+
+#flasks {
+  color: var(--gold);
+  text-shadow: 0 1px 3px #000;
+}
+
+.boss {
+  position: absolute;
+  left: 50%;
+  bottom: 150px;
+  width: min(80vw, 520px);
+  transform: translateX(-50%);
+  text-align: center;
+  text-shadow: 0 1px 4px #000;
+  letter-spacing: 0.08em;
+}
+
+.boss .bar {
+  margin-top: 4px;
+  height: 8px;
+}
+
+.boss .bar i {
+  background: linear-gradient(90deg, #7a1a12, #c0392b);
+}
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 190px;
+  transform: translateX(-50%);
+  margin: 0;
+  color: var(--gold);
+  text-shadow: 0 1px 4px #000;
+}
+
+#banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 38%;
+  margin: 0;
+  padding: 18px 0;
+  text-align: center;
+  font-size: clamp(28px, 8vw, 54px);
+  letter-spacing: 0.18em;
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.65), transparent);
+}
+
+#banner.dead {
+  color: #b3261e;
+}
+
+#banner.win {
+  color: var(--gold);
+}
+
+/* The kit's touch controls: a joystick on the left, buttons on the right. */
+.lab-stick {
+  position: absolute;
+  left: 22px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 26px);
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  touch-action: none;
+}
+
+.lab-knob {
+  position: absolute;
+  left: 38px;
+  top: 38px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(242, 230, 208, 0.55);
+}
+
+.lab-buttons {
+  position: absolute;
+  right: 18px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
+  display: grid;
+  grid-template-columns: repeat(3, 58px);
+  gap: 10px;
+}
+
+.lab-button {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  border: 1px solid rgba(242, 230, 208, 0.45);
+  background: rgba(20, 14, 12, 0.6);
+  color: var(--ink);
+  font-size: 22px;
+  touch-action: none;
+}
+
+.lab-attack {
+  grid-column: 3;
+  grid-row: 2;
+  width: 66px;
+  height: 66px;
+  background: rgba(120, 30, 20, 0.7);
+}

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>$initial</text></svg>">
+<title>$title</title>
+<meta name="description" content="$title: a small architecture practice designing low-energy homes, schools and workplaces in timber, brick and light.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="styles.css">
+<script src="portfolio.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <a class="logo" href="#work">$title</a>
+    <nav aria-label="Main"><a href="#work">Work</a><a href="#ethos">Practice</a><a href="#contact">Contact</a></nav>
+  </div>
+</header>
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <h1>Buildings that use <em>less</em> and give back more.</h1>
+      <div class="meta">
+        <p>A practice of seven in Redfern. We design low-energy homes, schools and workplaces in timber, recycled brick and daylight.</p>
+        <div class="figures"><span><b>42</b>projects built</span><span><b>7.5★</b>average NatHERS</span><span><b>2014</b>founded</span></div>
+      </div>
+    </div>
+  </div>
+
+  <section id="work">
+    <div class="wrap">
+      <div class="filters" role="group" aria-label="Show projects">
+        <button class="chip" type="button" data-filter="all" aria-pressed="true">All work</button>
+        <button class="chip" type="button" data-filter="home" aria-pressed="false">Homes</button>
+        <button class="chip" type="button" data-filter="public" aria-pressed="false">Public</button>
+        <button class="chip" type="button" data-filter="work" aria-pressed="false">Workplaces</button>
+      </div>
+      <div class="grid" id="grid"></div>
+    </div>
+  </section>
+
+  <section id="ethos">
+    <div class="wrap ethos">
+      <div><p class="label">The practice</p><h2>Four things we won't skip</h2></div>
+      <ol>
+        <li><h3>Orientation first</h3><p>Before any style, we place rooms for winter sun and summer shade. It's the cheapest energy saving there is.</p></li>
+        <li><h3>Materials with a past</h3><p>Recycled brick, reclaimed hardwood and low-carbon concrete wherever the engineer agrees.</p></li>
+        <li><h3>Built to be fixed</h3><p>Screwed, not glued: every building can be repaired, extended and one day taken apart.</p></li>
+        <li><h3>Small, on purpose</h3><p>Seven people and never more than twelve projects at once, so the person who drew it is on site.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="contact">
+    <div class="wrap contact">
+      <h2>Have a site? Let's walk it.</h2>
+      <div><p class="label">Studio</p><p>Level 1, 20 Sample Lane, Redfern NSW 2016</p><p style="margin-top: 0.7rem"><a class="big" href="mailto:studio@yourstudio.example">studio@yourstudio.example</a></p></div>
+    </div>
+  </section>
+</main>
+<footer><div class="wrap"><span>© $title</span></div></footer>
+
+<dialog id="detail" aria-labelledby="dTitle">
+  <div class="art" id="dArt"></div>
+  <div class="body">
+    <p class="label" id="dKind"></p>
+    <h3 id="dTitle"></h3>
+    <p id="dText"></p>
+    <dl id="dFacts"></dl>
+    <button class="close" type="button" id="dClose">Close</button>
+  </div>
+</dialog>
+
+</body>
+</html>

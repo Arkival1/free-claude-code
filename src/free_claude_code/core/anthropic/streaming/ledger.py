@@ -10,6 +10,7 @@ from typing import Any
 
 from loguru import logger
 
+from free_claude_code.core.anthropic.task_policy import normalize_task_arguments
 from free_claude_code.core.token_estimation import estimate_text_tokens
 
 from .emitter import AnthropicSseEmitter
@@ -534,5 +535,4 @@ class AnthropicStreamLedger:
 
 
 def _normalize_task_run_in_background(args_json: dict[str, Any]) -> None:
-    if args_json.get("run_in_background") is not False:
-        args_json["run_in_background"] = False
+    normalize_task_arguments(args_json)

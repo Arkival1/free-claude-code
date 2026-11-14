@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cafe Name</title>
+  <meta name="description" content="Neighbourhood cafe: coffee, breakfast and lunch, seven days.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#menu">Skip to the menu</a>
+  <header class="top" id="top">
+    <a class="brand" data-brand href="#top">Cafe Name</a>
+    <button class="menu" aria-expanded="false" aria-controls="nav">Menu</button>
+    <nav id="nav" aria-label="Main">
+      <a href="#menu">Food &amp; drink</a>
+      <a href="#visit">Visit</a>
+      <a class="book" href="#book">Book a table</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-text">
+        <p class="hello">Good morning, neighbour</p>
+        <h1 id="hero-title">Slow coffee,<br>honest food.</h1>
+        <p>Beans roasted down the road, bread baked at dawn, and a table by the window if you're quick.</p>
+        <a class="cta" href="#book">Book a table</a>
+      </div>
+      <div class="hero-art" aria-hidden="true"><span class="cup"></span><span class="steam"></span></div>
+    </section>
+
+    <section id="menu" class="menu-section" aria-labelledby="menu-title" data-tabs>
+      <h2 id="menu-title">On the menu</h2>
+      <div class="tabs" role="tablist" aria-label="Menu">
+        <button role="tab" data-tab="coffee">Coffee</button>
+        <button role="tab" data-tab="breakfast">Breakfast</button>
+        <button role="tab" data-tab="lunch">Lunch</button>
+      </div>
+      <div role="tabpanel" data-panel="coffee">
+        <ul class="dishes">
+          <li><span>Flat white</span><i></i><b>$5.00</b></li>
+          <li><span>Long black</span><i></i><b>$4.50</b></li>
+          <li><span>Filter of the day</span><i></i><b>$6.00</b></li>
+          <li><span>Chai latte</span><i></i><b>$5.50</b></li>
+        </ul>
+      </div>
+      <div role="tabpanel" data-panel="breakfast" hidden>
+        <ul class="dishes">
+          <li><span>Sourdough, butter, jam</span><i></i><b>$9.00</b></li>
+          <li><span>Eggs your way</span><i></i><b>$16.00</b></li>
+          <li><span>Bircher, berries, honey</span><i></i><b>$14.00</b></li>
+        </ul>
+      </div>
+      <div role="tabpanel" data-panel="lunch" hidden>
+        <ul class="dishes">
+          <li><span>Roast vegetable toastie</span><i></i><b>$15.00</b></li>
+          <li><span>Soup and bread</span><i></i><b>$14.00</b></li>
+          <li><span>Seasonal salad</span><i></i><b>$17.00</b></li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="visit" class="visit" aria-labelledby="visit-title">
+      <h2 id="visit-title">Come and visit</h2>
+      <div class="visit-grid">
+        <div>
+          <h3>Hours</h3>
+          <table class="hours">
+            <tr><th scope="row">Mon to Fri</th><td>6:30 am to 3 pm</td></tr>
+            <tr><th scope="row">Saturday</th><td>7 am to 3 pm</td></tr>
+            <tr><th scope="row">Sunday</th><td>8 am to 2 pm</td></tr>
+          </table>
+        </div>
+        <div>
+          <h3>Find us</h3>
+          <address>12 Corner Street<br>Your Suburb</address>
+          <div class="map" role="img" aria-label="Map placeholder: replace with the cafe's map"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="book" class="book-section" aria-labelledby="book-title">
+      <h2 id="book-title">Book a table</h2>
+      <form class="form" data-email="bookings@example.com" novalidate>
+        <label>Name<input name="name" autocomplete="name" required></label>
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <label>Date<input name="date" type="date" required></label>
+        <label>People<select name="people" required><option>2</option><option>3</option><option>4</option><option>5+</option></select></label>
+        <button class="cta" type="submit">Request booking</button>
+        <p class="note" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>&copy; <span data-year></span> <span data-brand-text>Cafe Name</span></p>
+    <a href="#top">Back to top</a>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

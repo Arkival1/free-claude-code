@@ -198,11 +198,13 @@ async def test_unsupported_shared_credentials_never_send_http(monkeypatch):
     supported = {PROVIDER_CATALOG[row[0]].credential_env for row in CASES}
     all_keys = {d.credential_env for d in PROVIDER_CATALOG.values() if d.credential_env}
     keys = tuple(all_keys - supported)
-    assert len(keys) == 21
+    # 24 with FREELLMAPI_API_KEY and OMNIROUTE_API_KEY (routers on the owner's
+    # PC) and NOTEBOOK_API_KEY (the owner's own notebook): no key-check address.
+    assert len(keys) == 24
     result = await validation.check_credentials(
         Settings.model_construct(), (*keys, "OPENCODE_API_KEY", "MODEL")
     )
-    assert len(result) == 21
+    assert len(result) == 24
     assert all(
         check.status == validation.CredentialStatus.UNVERIFIED for check in result
     )
