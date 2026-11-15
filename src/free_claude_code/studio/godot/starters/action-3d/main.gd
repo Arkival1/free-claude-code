@@ -6,6 +6,7 @@ extends Node3D
 ## arena. Change the place in WORLD, the surfaces in look.gd, the fight in
 ## player.gd and boss.gd. F2 cycles the graphics: Low, Medium, High, Ultra.
 
+const Kit := preload("res://fcc/kit.gd")
 const Look := preload("res://look.gd")
 const PlayerScript := preload("res://player.gd")
 const BossScript := preload("res://boss.gd")
@@ -50,6 +51,11 @@ var _rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
+	# FCC's kit: symbols and emoji in every text; on a phone the screen's
+	# short side counts as 620 pixels, so the health bars, texts and buttons
+	# are a good size however it's held.
+	Kit.use_fonts()
+	Kit.fit_screen(get_window(), 620)
 	_rng.seed = 2024
 	_add_inputs()
 	_add_sky_and_light()

@@ -37,5 +37,10 @@ then `split_core.py` split it into the two parts:
 category, size, address). `SHA256SUMS` holds the files' checksums (a test
 checks them).
 
+FCC Phone carries 4,000 of the core packs' single sprites (owner approved
+on 6 November 2026) in `phone_static/games/art2d.bin`, made by
+`scripts/phone/build_pages.py` (`art_pick`, `art_js`), with the pack licence
+as `games/LICENSE-kenney.txt`; phone agents use the `game_art` tool.
+
 The Builder, Coder, Designer and Developer use it through the `game_assets`
 tool and the `game-dev` skill.

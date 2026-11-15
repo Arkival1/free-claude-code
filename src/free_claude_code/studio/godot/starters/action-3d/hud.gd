@@ -60,12 +60,12 @@ func _ready() -> void:
 	prompt.position = Vector2(-300, -200)
 	prompt.size = Vector2(600, 40)
 	add_child(prompt)
-	help = _label(17, Color("#e9e2d6"))
+	var touch := DisplayServer.is_touchscreen_available()
+	help = _label(22 if touch else 17, Color("#e9e2d6"))
 	help.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	help.position = Vector2(-470, 30)
-	help.size = Vector2(440, 200)
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	if DisplayServer.is_touchscreen_available():
+	if touch:
 		help.text = "Left thumb: move (push far to run)\nRight thumb: turn the camera\nHIT, HEAVY, ROLL, HEAL, LOCK, REST"
 	else:
 		help.text = "WASD move - Shift run - Space roll\nLeft click or J light - Right click or K heavy\nArrows or mouse look - Q lock on - F flask\nE rest at the bonfire - Click grabs the mouse, Esc frees it\nF2 graphics - F3 info - a gamepad works too"
@@ -78,6 +78,31 @@ func _ready() -> void:
 	info.position = Vector2(36, -40)
 	info.visible = false
 	add_child(info)
+	get_viewport().size_changed.connect(_fit)
+	_fit()
+
+
+## Everything fits the screen however it's held: upright, the controls go
+## under the health bars instead of beside them, and the boss's bar, the big
+## messages and the prompt are never wider than the screen.
+func _fit() -> void:
+	var screen := get_viewport().get_visible_rect().size
+	var upright := screen.y > screen.x
+	var wide := minf(440.0, screen.x - 72.0)
+	help.offset_right = -36.0
+	help.offset_left = -36.0 - wide
+	help.offset_top = 130.0 if upright else 30.0
+	help.offset_bottom = help.offset_top + 200.0
+	var boss_wide := minf(760.0, screen.x - 60.0)
+	boss_box.offset_left = -boss_wide / 2.0
+	boss_box.offset_right = boss_wide / 2.0
+	boss_bar.custom_minimum_size.x = boss_wide
+	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	message.offset_left = -screen.x / 2.0
+	message.offset_right = screen.x / 2.0
+	var prompt_wide := minf(600.0, screen.x - 40.0)
+	prompt.offset_left = -prompt_wide / 2.0
+	prompt.offset_right = prompt_wide / 2.0
 
 
 func _bar(color: Color, width: float, height: float) -> ProgressBar:

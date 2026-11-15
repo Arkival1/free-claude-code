@@ -5,7 +5,7 @@
 import { state, onChange, save, changed, jarvis, agentById, MEMORY_KINDS } from "../state.js";
 import { el, button, card, notify, go, ago, words } from "../ui.js";
 import { brainOf, brainReady, PROVIDERS, modelOf, localModelOf } from "../brains.js";
-import { startPlayground, pickAdvisers, pickHelpers, KINDS, MAX_ADVISERS } from "../playground.js";
+import { startPlayground, pickAdvisers, pickHelpers, KINDS, kindOf, MAX_ADVISERS } from "../playground.js";
 import { remember } from "../tools.js";
 
 const MARK = { done: "✓", working: "●", running: "●", planning: "…", failed: "✕", stopped: "■", waiting: "○" };
@@ -26,12 +26,19 @@ const names = (ids) => ids.map((id) => (agentById(id) || { name: "?" }).name).jo
 
 export function renderHome(view) {
   let type = "game";
+  // Until the user taps Make a website / Make a game, the job's own words
+  // decide (a website asked for in words isn't made as a game).
+  let picked = false;
   const box = el("textarea", { "aria-label": "The task", rows: 4, placeholder: KINDS.game.placeholder });
+  const setType = (key) => {
+    type = key;
+    box.placeholder = KINDS[key].placeholder;
+    for (const node of typeButtons) node.setAttribute("aria-pressed", String(node.dataset.type === type));
+  };
   const typeButtons = Object.entries(KINDS).map(([key, kind]) =>
     el("button", { class: "pg-type", type: "button", "aria-pressed": String(key === type), onclick: () => {
-      type = key;
-      box.placeholder = kind.placeholder;
-      for (const node of typeButtons) node.setAttribute("aria-pressed", String(node.dataset.type === type));
+      picked = true;
+      setType(key);
       drawTeam();
     }, "data-type": key }, [el("span", { class: "pg-type-glyph", "aria-hidden": "true", text: kind.glyph }), `Make a ${kind.label.toLowerCase()}`])
   );
@@ -65,11 +72,15 @@ export function renderHome(view) {
     );
   };
   for (const input of [hands, helpers, advisers]) input.addEventListener("change", drawTeam);
-  box.addEventListener("input", drawTeam);
+  box.addEventListener("input", () => {
+    if (!picked && box.value.trim()) setType(kindOf(box.value));
+    drawTeam();
+  });
   // "Ask the AI for one" in the Game Lab starts a 3D game here.
   if (state.labAsk) {
     box.value = state.labAsk;
     state.labAsk = "";
+    setType(kindOf(box.value));
     drawTeam();
   }
   drawTeam();
@@ -77,6 +88,7 @@ export function renderHome(view) {
   const start = async () => {
     const goal = box.value.trim();
     if (!goal) return notify(`Say what ${type === "game" ? "game" : "website"} you want first.`);
+    if (!picked) setType(kindOf(goal));
     try {
       const task = await startPlayground(goal, { type, hands: hands.value, helpers: Number(helpers.value), advisers: advisers.value, project: project.value });
       box.value = "";

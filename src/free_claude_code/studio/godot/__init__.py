@@ -30,6 +30,11 @@ from .. import game_library
 HERE = Path(__file__).resolve().parent
 DEMOS = HERE / "demos.json.gz"
 STARTERS = HERE / "starters"
+KIT = HERE / "kit"
+"""FCC's Godot kit, copied into every starter as res://fcc/: fonts with
+symbols and emoji (SIL OFL, see kit/fonts/OFL.txt), noise textures and
+materials, particles, day and night, wandering (kit.gd)."""
+KIT_FOLDER = "fcc"
 ART = HERE / "art"
 ART_MANIFEST = ART / "art.json.gz"
 ART_LICENCE = ART / "LICENSE-demos.txt"
@@ -238,6 +243,7 @@ def starter_files(name: str, title: str = "") -> dict[str, bytes]:
                 safe = re.sub(r'["\\\n\r]', "", title.strip())[:60]
                 data = data.replace(f'"{STARTER_TITLE}"'.encode(), f'"{safe}"'.encode())
             files[path.relative_to(folder).as_posix()] = data
+    files.update(kit_files())
     by_pack: dict[str, list[tuple[str, str]]] = {}
     for target, (pack, source) in STARTER_ART[name].items():
         by_pack.setdefault(pack, []).append((target, source))
@@ -248,6 +254,16 @@ def starter_files(name: str, title: str = "") -> dict[str, bytes]:
         for target, source in wanted:
             files[target] = found[source]
     return files
+
+
+def kit_files() -> dict[str, bytes]:
+    """FCC's Godot kit as project files (fcc/kit.gd, fcc/fonts/..., with
+    the fonts kept as they are rather than imported)."""
+    return {
+        f"{KIT_FOLDER}/{path.relative_to(KIT).as_posix()}": path.read_bytes()
+        for path in sorted(KIT.rglob("*"))
+        if path.is_file() and not path.name.startswith(".")
+    }
 
 
 _NAME_LINE = re.compile(rb'^config/name=".*"$', re.MULTILINE)

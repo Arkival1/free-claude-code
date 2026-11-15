@@ -5,6 +5,7 @@ import { Wllama } from "../vendor/wllama.min.js";
 import { readGguf, estimateMemory } from "./gguf.js";
 import { state, save, changed, feed } from "./state.js";
 import { uid } from "./ui.js";
+import * as gpu from "./webgpu.js";
 
 const WLLAMA_VERSION = "3.6.1";
 const CDN = `https://cdn.jsdelivr.net/npm/@wllama`;
@@ -66,10 +67,96 @@ export const CATALOG = [
     note: "Google's small model; good writing.",
     good: ["Helper"],
   },
+  // Qwen3.5 2B squeezed to 3 bits (IQ3) so it fits the page's memory on an
+  // iPhone (the 4-bit file, 1.2 GB, closed the app).
+  {
+    id: "qwen3.5-2b",
+    name: "Qwen3.5 2B (small file)",
+    url: `${HF}/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-UD-IQ3_XXS.gguf`,
+    size: 931823872,
+    context: 2048,
+    note: "Qwen3.5 2B squeezed to 0.93 GB so it fits more iPhones without WebGPU. A bit less sharp than the full 2B.",
+    good: ["Jarvis", "Helper"],
+  },
+  // 4 billion parameters, squeezed (IQ3) under the 2 GB a phone browser can
+  // load. They start at 2,048 tokens of context so they fit in a 6 GB
+  // iPhone's memory (about 2.1 GB in use); crash recovery lowers it further.
+  {
+    id: "qwen3-4b-instruct",
+    name: "Qwen3 4B Instruct",
+    url: `${HF}/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-UD-IQ3_XXS.gguf`,
+    size: 1674376800,
+    context: 2048,
+    note: "4B: the smartest here and best with tools; answers straight away. Slower, and needs a 6 GB iPhone (12 Pro or newer).",
+    good: ["Jarvis", "Builder"],
+  },
+  {
+    id: "qwen3-4b",
+    name: "Qwen3 4B (thinking)",
+    url: `${HF}/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-UD-IQ3_XXS.gguf`,
+    size: 1674376992,
+    context: 2048,
+    note: "4B that thinks before answering: best for hard questions. Slowest; needs a 6 GB iPhone.",
+    good: ["Researcher", "Tester"],
+  },
+  {
+    id: "gemma-3-4b",
+    name: "Gemma 3 4B",
+    url: `${HF}/unsloth/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-UD-IQ3_XXS.gguf`,
+    size: 1710751616,
+    context: 2048,
+    note: "Google's 4B: the best writer here. Needs a 6 GB iPhone.",
+    good: ["Helper", "Designer"],
+  },
+  // On the graphics chip (WebLLM, the second engine): the weights live in the
+  // chip's memory, not the page's, so a 4B fits where the files above can't.
+  // Needs WebGPU (iOS 26, or iOS 18 with Safari's WebGPU flag on).
+  {
+    id: "qwen3-4b-gpu",
+    name: "Qwen3 4B (graphics chip)",
+    engine: "webgpu",
+    url: "https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC",
+    size: 2279167154,
+    context: 4096,
+    note: "4B on the graphics chip: the smartest that runs on an iPhone, about 5–10 words a second on recent ones. Needs WebGPU and about 3 GB of graphics memory (iPhone 15 Pro or newer is safest).",
+    good: ["Jarvis", "Builder"],
+  },
+  {
+    id: "qwen2.5-3b-gpu",
+    name: "Qwen2.5 3B (graphics chip)",
+    engine: "webgpu",
+    url: "https://huggingface.co/mlc-ai/Qwen2.5-3B-Instruct-q4f16_1-MLC",
+    size: 1748010498,
+    context: 4096,
+    reasoning: false,
+    note: "3B on the graphics chip: answers straight away, good with tools, between the 2B and the 4B. Needs WebGPU and about 2.5 GB of graphics memory.",
+    good: ["Jarvis", "Builder"],
+  },
+  {
+    id: "qwen3.5-2b-gpu",
+    name: "Qwen3.5 2B (graphics chip)",
+    engine: "webgpu",
+    url: "https://huggingface.co/mlc-ai/Qwen3.5-2B-q4f16_1-MLC",
+    size: 1083000000,
+    context: 4096,
+    note: "Qwen3.5 2B on the graphics chip: newer and smarter than the 1.7B, good with tools. Needs WebGPU and about 2 GB of graphics memory.",
+    good: ["Jarvis", "Builder"],
+  },
+  {
+    id: "qwen3-1.7b-gpu",
+    name: "Qwen3 1.7B (graphics chip)",
+    engine: "webgpu",
+    url: "https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC",
+    size: 980000000,
+    context: 4096,
+    note: "1.7B on the graphics chip: quick, fits more iPhones. Needs WebGPU.",
+    good: ["Jarvis", "Helper"],
+  },
 ];
 
 export const MAX_FILE = 2 * 1024 * 1024 * 1024;
-const CONTEXTS = [2048, 4096, 8192];
+// 16k and 32k need far more memory: for small models, or the graphics chip.
+const CONTEXTS = [2048, 4096, 8192, 16384, 32768];
 export { CONTEXTS };
 
 let wllama = null;
@@ -123,16 +210,23 @@ export async function recoverFromCrash() {
     if (chosen.context > 2048) {
       model.settings.context = 2048;
       change = ` Studio lowered its context to 2,048 tokens so it needs less memory; send your message again.`;
-    } else if (chosen.gpu) {
+    } else if (chosen.gpu && model.engine !== "webgpu") {
       model.settings.gpu = false;
       change = " Studio turned off the graphics chip for it; send your message again.";
+    } else {
+      // Already at its lightest: it doesn't fit this phone. It stays on
+      // Models (Try again) but isn't used, so the agents think with another
+      // brain instead of closing the app again and again.
+      model.tooBig = true;
+      const smaller = suggestions();
+      change = ` It's too big for this phone even at its lightest, so FCC Phone stopped using it${state.models.some(usable) ? " and uses your other phone model" : ""}. ${smaller ? `Try a smaller one on Models (${smaller})` : "Use a smaller model"} or a free cloud brain (More, Settings: a free Google Gemini key works well).`;
     }
     model.crashes = (model.crashes || 0) + 1;
     await save.models();
   }
   status.error =
     `The phone closed FCC Phone while ${work.name} was ${work.stage === "load" ? "loading" : "answering"}, most likely because it needed more memory than iOS allows.` +
-    (change || " Use a smaller model (Qwen3 0.6B on Models) or a free cloud brain (More, Settings).");
+    (change || " Use a smaller model (Qwen3 1.7B or Llama 3.2 1B on Models) or a free cloud brain (More, Settings).");
   feed("Model Control", status.error, "error");
   changed("engine");
   return status.error;
@@ -170,10 +264,40 @@ export function modelById(id) {
   return state.models.find((model) => model.id === id);
 }
 
+/** A model the agents may think with: downloaded, and not one that closed
+ * the app at its lightest settings (too big for this phone). */
+export const usable = (model) => Boolean(model && model.ready && !model.tooBig);
+
+/** The size this phone couldn't load: the smallest model that was too big
+ * (Infinity until one was). */
+export function tooBigSize() {
+  return Math.min(Infinity, ...state.models.filter((model) => model.tooBig && model.size > 1).map((model) => model.size));
+}
+
+/** Whether a catalog model is likely to fit: clearly smaller (under 80%)
+ * than the smallest model this phone couldn't load. */
+export const likelyFits = (entry) => entry.engine === "webgpu" || entry.size < 0.8 * tooBigSize();
+
+/** Models on the catalog that are likely to fit, biggest first: what to
+ * suggest after one was too big. */
+export function suggestions(limit = 2) {
+  const fits = CATALOG.filter((entry) => entry.engine !== "webgpu" && likelyFits(entry)).sort((a, b) => b.size - a.size);
+  return fits.length ? fits.slice(0, limit).map((entry) => entry.name).join(" or ") : "";
+}
+
+/** Try a too-big model again (the user's call, from Models). */
+export async function tryAgain(model) {
+  model.tooBig = false;
+  model.crashes = 0;
+  await save.models();
+  changed("models");
+}
+
 /** Download one catalogue model into the phone's storage. */
 export async function download(entry, onProgress, signal) {
   if (state.models.some((model) => model.url === entry.url && model.ready)) return modelById(entry.id);
-  const record = { id: entry.id, name: entry.name, url: entry.url, source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: {} };
+  if (entry.engine === "webgpu") return downloadGpu(entry, onProgress);
+  const record = { id: entry.id, name: entry.name, url: entry.url, source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: entry.context ? { context: entry.context } : {} };
   state.models = state.models.filter((model) => model.id !== entry.id);
   state.models.push(record);
   await save.models();
@@ -185,6 +309,35 @@ export async function download(entry, onProgress, signal) {
   await save.models();
   changed("models");
   feed("Model Control", `${entry.name} is on this phone.`);
+  return record;
+}
+
+/** A graphics-chip model: WebLLM downloads it into the phone's storage the
+ * first time it starts it, so downloading is starting it once (which also
+ * shows straight away whether it fits this phone). */
+async function downloadGpu(entry, onProgress) {
+  await gpu.variantFor(entry.id);
+  const record = { id: entry.id, name: entry.name, url: entry.url, engine: "webgpu", source: "download", size: entry.size, ready: false, added_at: Date.now(), settings: { context: entry.context || 2048 }, info: { tools: true, reasoning: entry.reasoning !== false } };
+  state.models = state.models.filter((model) => model.id !== entry.id);
+  state.models.push(record);
+  await save.models();
+  changed("models");
+  const run = queue.then(async () => {
+    noteWork("load", record);
+    try {
+      await gpu.load(entry.id, settingsFor(record).context, (fraction) => onProgress && onProgress(Math.round(fraction * entry.size), entry.size));
+    } finally {
+      clearWork();
+    }
+    loaded = { id: record.id, key: gpu.loadedKey() };
+    status.loadedId = record.id;
+  });
+  queue = run.catch(() => {});
+  await run;
+  record.ready = true;
+  await save.models();
+  changed("models");
+  feed("Model Control", `${entry.name} is on this phone and running on the graphics chip.`);
   return record;
 }
 
@@ -237,9 +390,10 @@ async function blobsOf(model) {
 
 export async function remove(model) {
   if (status.loadedId === model.id) await unload();
-  const w = engine();
+  const w = model.engine === "webgpu" ? null : engine();
   try {
-    if (model.source === "file") await w.cacheManager.delete(model.key);
+    if (model.engine === "webgpu") await gpu.remove(model.id);
+    else if (model.source === "file") await w.cacheManager.delete(model.key);
     else {
       const found = (await w.modelManager.getModels({ includeInvalid: true })).find((item) => item.url === model.url);
       if (found) await found.remove();
@@ -253,11 +407,18 @@ export async function remove(model) {
   changed("models");
 }
 
+// Temperature: how adventurous the model's word choices are (0 = always the
+// most likely word, higher = more varied). 0.5 suits agents that use tools.
+export const DEFAULT_TEMPERATURE = 0.5;
+export const TEMPERATURE_MAX = 1.5;
+
 export function settingsFor(model) {
   const base = state.settings.engine;
+  const temperature = Number(model.settings.temperature ?? base.temperature ?? DEFAULT_TEMPERATURE);
   return {
     context: model.settings.context || base.context,
     gpu: model.settings.gpu ?? base.gpu,
+    temperature: Number.isFinite(temperature) ? Math.min(TEMPERATURE_MAX, Math.max(0, temperature)) : DEFAULT_TEMPERATURE,
   };
 }
 
@@ -306,6 +467,7 @@ async function load(model) {
 export async function unload() {
   await queue.catch(() => {});
   if (wllama && wllama.isModelLoaded()) await wllama.exit();
+  await gpu.unload();
   loaded = null;
   status.loadedId = null;
   changed("engine");
@@ -319,7 +481,84 @@ function friendly(error) {
 }
 
 /** One chat completion on the phone, in the OpenAI shape. One at a time. */
-export function chat(model, { messages, tools, maxTokens = 1024, temperature = 0.5 }) {
+// Tools a phone model always keeps, however small its context.
+const CORE_TOOLS = new Set(["remember", "recall", "calculate", "weather", "wikipedia", "todo", "ask_agent", "start_task", "start_project", "write_file", "edit_file", "read_file", "list_files", "check_project"]);
+
+// Rough characters per token for these models' tokenizers (English, JSON).
+const CHARS_PER_TOKEN = 3.2;
+const tokensOf = (value) => Math.ceil(JSON.stringify(value ?? "").length / CHARS_PER_TOKEN);
+
+function shorten(text, max) {
+  const value = String(text || "").replace(/\s+/g, " ").trim();
+  if (value.length <= max) return value;
+  const cut = value.slice(0, max);
+  const stop = cut.lastIndexOf(". ");
+  return stop > max / 3 ? cut.slice(0, stop + 1) : `${cut.trimEnd()}…`;
+}
+
+function trimSchema(schema) {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(trimSchema);
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "description") out.description = shorten(value, 60);
+    else if (key === "properties") out.properties = Object.fromEntries(Object.entries(value || {}).map(([name, part]) => [name, trimSchema(part)]));
+    else out[key] = typeof value === "object" ? trimSchema(value) : value;
+  }
+  return out;
+}
+
+/** The same tools with shorter descriptions: a phone model's context is
+ * small, and the long how-to text (the lab tool alone is 4,000 characters)
+ * is in each tool's guide action anyway. */
+export function compactTools(tools) {
+  return (tools || []).map((tool) => {
+    const fn = tool.function || tool;
+    return { type: "function", function: { name: fn.name, description: shorten(fn.description, 160), parameters: trimSchema(fn.parameters) } };
+  });
+}
+
+/** Fit a chat into a phone model's context: shorter tool descriptions, then
+ * the oldest turns dropped (never the system message or the latest request
+ * and what follows it), then a shorter answer; if it still can't fit, say so
+ * plainly with the setting to change. */
+export function fitToContext({ messages, tools, maxTokens, context, name = "This model" }) {
+  let fitTools = tools && tools.length ? compactTools(tools) : undefined;
+  const toolSize = () => (fitTools && fitTools.length ? tokensOf(fitTools) : 0);
+  const size = (list) => tokensOf(list) + toolSize();
+  const list = [...messages];
+  const room = context - 64;
+  let lastUser = list.map((message) => message.role).lastIndexOf("user");
+  while (size(list) + maxTokens > room) {
+    const index = list.findIndex((message, at) => at > 0 && message.role !== "system");
+    if (index < 0 || index >= lastUser) break;
+    list.splice(index, 1);
+    lastUser -= 1;
+    // A dropped request's tool results go with it.
+    while (index < lastUser && list[index] && list[index].role === "tool") {
+      list.splice(index, 1);
+      lastUser -= 1;
+    }
+  }
+  // Still too big: the biggest tools sit this turn out (the Lab, Linux,
+  // Godot...), never the everyday ones, so a small context still chats.
+  while (fitTools && fitTools.length && size(list) + Math.min(maxTokens, 512) > room) {
+    const droppable = fitTools.filter((tool) => !CORE_TOOLS.has(tool.function.name));
+    if (!droppable.length) break;
+    const biggest = droppable.reduce((a, b) => (tokensOf(a) >= tokensOf(b) ? a : b));
+    fitTools = fitTools.filter((tool) => tool !== biggest);
+  }
+  if (fitTools && !fitTools.length) fitTools = undefined;
+  const answer = Math.min(maxTokens, room - size(list));
+  if (answer < 256) {
+    throw new Error(`${name} needs about ${Math.ceil((size(list) + 256) / 1024)}K tokens of context for this, but it's set to ${context.toLocaleString()}. On Models, tap Settings on it and pick a bigger context (16,384 suits Jarvis and his tools), or use a free cloud brain for big jobs.`);
+  }
+  return { messages: list, tools: fitTools, maxTokens: answer };
+}
+
+export function chat(model, { messages, tools, maxTokens = 1024, temperature = settingsFor(model).temperature }) {
+  ({ messages, tools, maxTokens } = fitToContext({ messages, tools: model.engine === "webgpu" || (model.info && model.info.tools) ? tools : undefined, maxTokens, context: settingsFor(model).context, name: model.name }));
+  if (model.engine === "webgpu") return chatGpu(model, { messages, tools, maxTokens, temperature });
   const run = queue.then(async () => {
     await load(model);
     const started = performance.now();
@@ -355,6 +594,43 @@ export function chat(model, { messages, tools, maxTokens = 1024, temperature = 0
     changed("engine");
     const message = (response.choices && response.choices[0] && response.choices[0].message) || {};
     return message;
+  });
+  queue = run.catch(() => {});
+  return run;
+}
+
+/** One answer from a graphics-chip model (WebLLM). Tools go in the prompt
+ * the way Qwen3 was trained, so Jarvis's tools work on it too. */
+function chatGpu(model, { messages, tools, maxTokens, temperature }) {
+  const run = queue.then(async () => {
+    const chosen = settingsFor(model);
+    status.error = "";
+    try {
+      if (!(loaded && loaded.id === model.id && loaded.key === gpu.loadedKey() && loaded.key.endsWith(`:${chosen.context}`))) {
+        if (wllama && wllama.isModelLoaded()) await wllama.exit();
+        status.loading = model.id;
+        changed("engine");
+        noteWork("load", model);
+        await limited(gpu.load(model.id, chosen.context), LOAD_LIMIT_MS, `${model.name} took more than 4 minutes to start, so it was stopped. Try Qwen3 1.7B (graphics chip) or a free cloud brain.`);
+        loaded = { id: model.id, key: gpu.loadedKey() };
+        status.loadedId = model.id;
+        feed("Model Control", `${model.name} loaded on the graphics chip.`);
+      }
+      noteWork("answer", model);
+      const reply = await limited(gpu.chat({ messages, tools: tools && tools.length ? tools : undefined, maxTokens, temperature }), ANSWER_LIMIT_MS, `${model.name} took more than 6 minutes to answer, so it was stopped.`);
+      status.lastSpeed = { tokensPerSecond: reply.speed, readPerSecond: reply.readSpeed, model: model.id, at: Date.now() };
+      return reply.message;
+    } catch (error) {
+      await gpu.unload();
+      loaded = null;
+      status.loadedId = null;
+      status.error = friendly(error);
+      throw new Error(status.error);
+    } finally {
+      clearWork();
+      status.loading = null;
+      changed("engine");
+    }
   });
   queue = run.catch(() => {});
   return run;

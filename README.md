@@ -2869,18 +2869,64 @@ account, and costs nothing.
   works. A game's saves (`user://`) stay on the phone between plays, per
   game, up to 16 MB; the game's page shows the save and **Start over**
   forgets it.
-- **FCC Linux**: Lab, **FCC Linux** runs FCC's own small Linux (Alpine 3.21,
-  32-bit x86) on the phone in the v86 emulator, in a sealed box with no
-  network: bash, Python 3.12, Lua, nano, tmux, SQLite, jq, bc, make, htop
-  and lynx, in a terminal sized to the phone with keys a phone keyboard
-  lacks (Esc, Tab, Ctrl-C, arrows). The first start downloads 28 MB and
-  boots in about 15 s; after that it opens in about 2 s from a snapshot,
-  and **Keep my session** brings back your files and history next time.
-  Jarvis uses the same machine with the `linux` tool (run, write, read,
-  info, keep, interrupt); his commands only run at the prompt, so nothing
-  is ever typed into a program you have open. It is built by
-  `scripts/linux/build_fcc_linux.py` without running anything downloaded
-  (see `vendor/fcc-linux/README.md`).
+  - **FCC's Godot kit** (`res://fcc/kit.gd`, in every starter on the PC
+    and added on the phone to any game that uses it): fonts with symbols
+    and emoji (Noto, black and white) plus a pixel and a fantasy style
+    (SIL OFL, `vendor/godot-fonts`; the phone fetches them once, about
+    4 MB, and checks them); textures and 3D materials made from Godot's
+    noise (stone, rock, grass, dirt, sand, wood, metal, gold, snow, lava,
+    water, brick); particles (dust, leaves, fireflies, rain, snow,
+    embers); day and night; and wandering NPCs and animals.
+  - **Free cloud brains**: besides Gemini, Groq and OpenRouter, Settings
+    takes free keys for Cerebras, Mistral, Hugging Face, Cohere, Requesty
+    and Nous (FCC lists and picks only their free models), Aion Labs and
+    Z.ai (GLM Flash), and OVHcloud AI Endpoints needs no key at all (off
+    until you press Switch on; Switch off stops it). Picked from the GitHub
+    free-LLM-API lists (amardeeplakshkar, mnfst, open-free-llm-api,
+    mvalentsev, ai-gateways, nejib1) and checked one by one to answer apps
+    in a phone browser; left out: NVIDIA NIM, GitHub Models, SambaNova,
+    Kilo and Ollama Cloud (refuse browser apps), trial-credit-only services,
+    China-only sign-ups, and LLM7 and Pollinations (they hand out other
+    companies' models through shared keys). Any of them can be an agent's
+    brain or a Playground adviser guiding Jarvis on the phone model.
+  - **Game art** (`game_art` tool, Jarvis and the Builder): 4,000 2D
+    sprites from FCC's Kenney packs (CC0): characters, enemies, tiles,
+    items, vehicles, spaceships, cards, UI and icons, from 37 packs. One
+    8 MB file, fetched the first time an agent uses it, checked and kept;
+    agents search it and add sprites to a project as `art/<pack>/<file>.png`.
+  - **Fits the phone either way up**: held upright, the 2D games draw the
+    level in the top of the screen and give the touch controls a panel
+    below; buttons are sized from the screen, so they're the same size on
+    the glass whatever the game's resolution, and never cut off; texts
+    wrap and grow, and say "tap" on a touch screen. The 3D starters keep
+    their texts and buttons readable both ways (`Kit.fit_screen`).
+- **FCC Linux**: Lab, **FCC Linux** runs FCC's own Linux (Alpine 3.21,
+  32-bit x86) on the phone in the v86 emulator, in a sealed box, with every
+  language: C/C++ (gcc, g++, cmake, gdb), Rust (cargo), Go, Java 8, Node.js
+  (npm), Python 3.12 (pip), Ruby, PHP, Perl, Lua and git, plus bash, nano,
+  tmux, SQLite and htop. The first start downloads 12 MB and boots in about
+  12 s; each language's files (433 MB in all) download the first time it's
+  used, or all at once with **Get everything now**. After that it opens in
+  about 2 s, and **Keep my session** brings your files back next time.
+  - **Internet**: off until you switch it on (FCC Linux screen, **Internet
+    and plugins**). Programs inside use `http://` addresses and FCC makes
+    each request as https outside Linux; pip, npm, cargo and go install
+    through it. Sites that don't let apps in a browser reach them don't work
+    from the phone.
+  - **GitHub**: save a GitHub token in FCC (never inside Linux, never in
+    backups); `fcc-github clone OWNER/REPO`, then `push` (FCC asks you first,
+    once per repository for 10 minutes) and `pull`. `fcc-plugin` calls a
+    plugin you switched on; `fcc-net` shows what's on.
+  - **Your projects** are folders in `/projects`: changes there (Jarvis's or
+    yours) come back to Projects.
+  - **Jarvis** uses the same machine with the `linux` tool (run, write, read,
+    info, keep, interrupt, sync, practice); his commands only run at the
+    prompt, so nothing is typed into a program you have open.
+  - **Jarvis learns** (More): he teaches himself 14 courses in FCC Linux; FCC
+    runs each lesson's check itself, learned skills wait for your OK, and he
+    tells you (chat, notification, the page) when he's stuck.
+  Built by `scripts/linux/build_fcc_linux2.py` without running anything
+  downloaded (see `vendor/fcc-linux/README.md`).
 - **Board computer**: an Orange Pi 5, Arduino, ESP32 or Raspberry Pi on the
   Electronics bench runs a program you or Jarvis write (Arduino-style
   JavaScript: `setup()`, `loop()`, `digitalWrite`, `analogRead`, sensors,
@@ -2988,7 +3034,9 @@ repository's `docs/` folder:
 2. On the iPhone, open `https://<you>.github.io/<repo>/phone/` in **Safari**,
    tap **Share → Add to Home Screen → Add**.
 3. Open FCC Phone from its icon, go to **Models**, and download Qwen3 0.6B (or
-   add a `.gguf` from Files). Tick **Use a model on this phone as every
+   add a `.gguf` from Files). A 6 GB iPhone (12 Pro or newer) also runs the
+   4B models there (Qwen3 4B Instruct, Qwen3 4B thinking, Gemma 3 4B: about
+   1.7 GB each, squeezed to fit, at 2,048 tokens of context). Tick **Use a model on this phone as every
    agent's default brain**, then talk to Jarvis on **Home**.
 
 (Studio on the PC also serves it at `/phone/`, for example

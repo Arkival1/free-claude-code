@@ -100,7 +100,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed:
-			if touch.position.x < screen.x * 0.4 and _stick_touch == -1:
+			if touch.position.x < screen.x * 0.4 and _stick_touch == -1 and not _on_button(touch.position):
 				_stick_touch = touch.index
 				_stick_origin = touch.position
 				_base.position = touch.position - Vector2(STICK_RADIUS, STICK_RADIUS)

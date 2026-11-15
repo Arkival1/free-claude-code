@@ -97,6 +97,38 @@ def test_the_phone_starters_and_probe_come_from_studio_godot():
         assert not any(name.endswith(".import") for name in files)
 
 
+def test_the_phone_carries_fccs_godot_kit_once_with_checked_fonts():
+    """The kit's scripts are in godot/kit.js (generated), its fonts beside it
+    byte for byte, each listed with its checksum and kept by the service
+    worker; the starters load res://fcc/ but don't carry their own copy."""
+    spec = importlib.util.spec_from_file_location(
+        "build_pages", ROOT / "scripts" / "phone" / "build_pages.py"
+    )
+    assert spec is not None and spec.loader is not None
+    build_pages = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(build_pages)
+    text = (GODOT / "kit.js").read_text(encoding="utf-8")
+    assert text == build_pages.kit_js()
+    kit = ROOT / "src" / "free_claude_code" / "studio" / "godot" / "kit"
+    found = re.search(r"export const KIT_FONTS = (\[.*\]);\n", text)
+    assert found is not None
+    fonts = json.loads(found.group(1))
+    worker = (PHONE_DIR / "sw.js").read_text(encoding="utf-8")
+    assert len(fonts) == 5
+    for path, digest in fonts:
+        shipped = (PHONE_DIR / path).read_bytes()
+        assert shipped == (kit / "fonts" / Path(path).name).read_bytes()
+        assert hashlib.sha256(shipped).hexdigest() == digest
+        assert f'  "{path}",' in worker
+    assert (GODOT / "fcc" / "fonts" / "OFL.txt").read_bytes() == (
+        kit / "fonts" / "OFL.txt"
+    ).read_bytes()
+    assert '"godot/kit.js"' in worker
+    starters = (GODOT / "starters.js").read_text(encoding="utf-8")
+    assert '"fcc/kit.gd"' not in starters
+    assert 'preload(\\"res://fcc/kit.gd\\")' in starters
+
+
 @pytest.mark.skipif(not REAL_GODOT, reason="set FCC_GODOT_BIN to a Godot 4.7.2 program")
 def test_the_probe_runs_in_real_godot(tmp_path):
     project = tmp_path / "probe"

@@ -1,0 +1,22 @@
+#!/bin/sh
+# fcc-net: what FCC Linux may reach right now (FCC decides, outside Linux).
+case "$1" in
+  ""|status)
+    wget -qO- http://fcc.status/ 2>/dev/null || echo "FCC didn't answer (is this FCC Linux on FCC Phone?)"
+    ;;
+  *)
+    cat <<'HELP'
+fcc-net: FCC Linux's internet.
+
+  fcc-net          what's switched on (internet, GitHub token, plugins)
+
+The internet is off until you switch it on in FCC (Lab, FCC Linux). Then:
+  - use http:// addresses: FCC makes them https outside Linux, e.g.
+      wget -qO- http://api.github.com/zen
+  - pip, npm, cargo and go install packages through FCC;
+  - fcc-github clones, pulls and pushes GitHub repositories;
+  - fcc-plugin calls a plugin you switched on in More, Plugins.
+Sites that don't let apps in a browser reach them don't work from the phone.
+HELP
+    ;;
+esac

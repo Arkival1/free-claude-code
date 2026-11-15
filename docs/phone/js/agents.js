@@ -80,6 +80,9 @@ async function addTurn(agent, turn) {
   changed(`chat:${agent.id}`);
 }
 
+/** A message from an agent in its chat with the user (e.g. Jarvis's practice notes). */
+export const tell = (agent, text) => addTurn(agent, { role: "assistant", text });
+
 // Tools that change a project's files: a turn that used one hands the
 // project over to download, like a file in a chat.
 const BUILDING_TOOLS = new Set(["start_project", "write_file", "edit_file", "delete_file", "use_photo", "restore_file"]);
@@ -120,8 +123,16 @@ async function history(agent) {
 }
 
 /** The tool loop: think, run the tools asked for, think again, until a reply. */
+/** Tools whose answer doesn't change within one turn. */
+/** Tools that can change a project's files (a job with any of them is a build
+ * job, so FCC checks the project after it). */
+const CHANGES_FILES = new Set(["start_project", "write_file", "edit_file", "delete_file", "restore_file", "use_photo", "game_art", "web_kit", "linux", "godot"]);
+// recall isn't one: a teammate can save a shared memory mid-turn.
+const LOOKUPS = new Set(["skill", "wikipedia", "read_page", "web_search", "library", "game_art", "find_images", "list_photos"]);
+
 async function loop(agent, system, convo, ctx, { maxRounds, onTool }) {
   const tools = specsFor(agent, ctx);
+  const seen = new Set();
   const maxTokens = ctx.maxTokens || (agent.role === "builder" ? 4000 : 1200);
   for (let round = 0; round < maxRounds; round += 1) {
     const reply = await think(agent, system, convo, round < maxRounds - 1 ? tools : [], { maxTokens });
@@ -129,10 +140,16 @@ async function loop(agent, system, convo, ctx, { maxRounds, onTool }) {
     convo.push({
       role: "assistant",
       content: reply.text || "",
+      ...(reply.reasoning_content ? { reasoning_content: reply.reasoning_content } : {}),
       tool_calls: reply.tool_calls.map((call) => ({ id: call.id, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })),
     });
     for (const call of reply.tool_calls) {
-      const result = await runTool(agent, call, ctx);
+      // A look-up repeated word for word gives the same answer: say so
+      // instead of fetching it again (small models go round in circles).
+      const key = LOOKUPS.has(call.name) && !(call.name === "game_art" && call.arguments && call.arguments.action === "add") ? `${call.name}:${JSON.stringify(call.arguments || {})}` : "";
+      const repeat = key && seen.has(key);
+      if (key) seen.add(key);
+      const result = repeat ? `You already did exactly this (${call.name}); its answer is above. Don't repeat it: use what you found and do the next step.` : await runTool(agent, call, ctx);
       if (onTool) await onTool(call, result);
       convo.push({ role: "tool", tool_call_id: call.id, content: result.slice(0, 16000) });
     }
@@ -213,14 +230,43 @@ export async function runTask(agent, goal, { project = null, depth = 0, chain = 
         changed("team");
       },
     });
-    job.status = "done";
-    job.result = result;
-    await addTurn(agent, { role: "assistant", text: result });
+    // FCC checks the project itself, so an agent can't report a job done
+    // while the project still fails FCC's checks (small models do): the job's
+    // own record, its feed line and the report all say so.
+    // A check that breaks (say a file restored from an odd backup) keeps the
+    // agent's work and handover, and says the check couldn't run.
+    // Only for jobs that build: a helper's parts and an adviser's read-only
+    // turn aren't the finished project.
+    let still = "";
+    let problems = [];
+    const builds = !ctx.partsOnly && (!ctx.tools || ctx.tools.some((name) => CHANGES_FILES.has(name)));
+    // The job's project (an emptied one too: it says it has no files) and
+    // every project Linux changed during the job.
+    const checked = builds ? [ctx.project, ...(ctx.linuxProjects || [])].filter((project, index, all) => project && all.indexOf(project) === index) : [];
+    const { checkProject } = checked.length ? await import("./projects.js") : {};
+    for (const project of checked) {
+      try {
+        const found = checkProject(project).filter((problem) => !problem.startsWith("Note: "));
+        if (!found.length) continue;
+        problems = [...problems, ...found];
+        still += `\n\nFCC's own check of ${project.name} still finds ${found.length} problem(s), so it isn't finished:\n${found.slice(0, 6).map((problem) => `- ${problem}`).join("\n")}\nDon't tell the user it's done: have them fixed first.`;
+      } catch (error) {
+        // A check that couldn't run isn't a pass: the job stays unfinished.
+        problems = [...problems, `FCC couldn't check ${project.name} (${error.message}).`];
+        still += `\n\nFCC couldn't check ${project.name} (${error.message}), so whether it works isn't known yet.`;
+      }
+    }
+    if (report) report.problems = problems;
+    job.status = problems.length ? "unfinished" : "done";
+    job.result = `${result}${still}`;
+    job.problems = Boolean(still);
+    await addTurn(agent, { role: "assistant", text: `${result}${still}` });
     // The agent that did the work and every agent that handed the job down
     // (Jarvis included) get the app to download.
     for (const id of ctx.chain) await handOver(state.agents.find((item) => item.id === id), ctx.built);
-    feed(agent.name, `Finished: ${result.split("\n")[0].slice(0, 120)}`, "done");
-    return `${agent.name} finished${ctx.project ? ` (project ${ctx.project.name})` : ""}: ${result}`;
+    feed(agent.name, still ? `Finished, but FCC's check still finds problems in ${checked.map((project) => project.name).join(", ")}` : `Finished: ${result.split("\n")[0].slice(0, 120)}`, still ? "error" : "done");
+    // The check comes first, so a long answer cut short never hides it.
+    return `${agent.name} finished${ctx.project ? ` (project ${ctx.project.name})` : ""}: ${still ? `${still.trim()}\n\n` : ""}${result}`;
   } catch (error) {
     job.status = "failed";
     job.result = error.message;

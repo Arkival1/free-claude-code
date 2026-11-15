@@ -407,6 +407,21 @@ def website_brain(body: dict) -> dict:
             )
         if len(tools_used) == 1:
             return tool_call("read_file", {"path": "parts/content.md"})
+        if len(tools_used) == 2:
+            # The page in the studio's own words (FCC's check won't call the
+            # site finished while the template's placeholder text is there).
+            return tool_call(
+                "write_file",
+                {
+                    "path": "index.html",
+                    "content": (
+                        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+                        '<meta name="viewport" content="width=device-width, initial-scale=1">'
+                        "<title>Calm Yoga</title></head><body><main><h1>Calm Yoga</h1>"
+                        "<p>Classes at 7am and 6pm. $20 a class.</p></main></body></html>"
+                    ),
+                },
+            )
         return say("Built the landing page with the studio's classes and prices.")
     return say("Hi!")
 
@@ -460,3 +475,129 @@ def test_the_main_ai_builds_a_website_with_a_helper_and_advisers(
     library = page.evaluate("() => window.fccPhone.state.library")
     assert library[0]["kind"] == "website" and library[0]["approved"] is False
     assert errors == []
+
+
+def lazy_brain(body: dict) -> dict:
+    """The main AI starts a site from the template and calls it done without
+    replacing the template's text (small models do)."""
+    system = body["messages"][0]["content"]
+    messages = body["messages"]
+    asked = str(messages[1].get("content")) if len(messages) > 1 else ""
+    tools_used = [m for m in messages if m["role"] == "tool"]
+    if "Write down what to keep in your own mind" in system:
+        return say(json.dumps({"pattern": "Replace the template's text."}))
+    if "You are the main AI in the user's Playground" in system:
+        if not tools_used and "Work in the project" in asked:
+            name = re.search(r"Work in the project (.+?): start_project", asked)
+            assert name, asked
+            return tool_call(
+                "start_project", {"name": name.group(1), "template": "landing"}
+            )
+        return say("All done, the site is finished.")
+    return say("Hi!")
+
+
+def test_a_site_that_fails_fccs_check_is_not_called_done(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: with no advisers, FCC's own check decides. The
+    main AI gets the check's findings and tries again; still failing after
+    every try, the task says it isn't finished and nothing waits in the
+    library as if it were."""
+    seen = fake_gemini(page, lazy_brain)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    page.evaluate(
+        """async () => {
+            window.fccPhone.state.library = [];
+            const { startPlayground } = await import('./js/playground.js');
+            await startPlayground('a calm yoga studio site', { type: 'website', helpers: 0, advisers: 'none' });
+        }"""
+    )
+    page.wait_for_function(
+        "() => window.fccPhone.state.tasks[0] && ['done', 'failed'].includes(window.fccPhone.state.tasks[0].status)",
+        timeout=30000,
+    )
+    task = page.evaluate("() => window.fccPhone.state.tasks[0]")
+    assert task["status"] == "failed", task["summary"]
+    assert task["summary"].startswith("Not finished: FCC's own check still finds")
+    work = [s for s in task["steps"] if s["stage"] == "work"]
+    assert len(work) == 3
+    # Tries that leave the check failing aren't shown as done.
+    assert {s["status"] for s in work} == {"unfinished"}
+    assert "FCC's own check" in work[0]["result"].split("\n")[0] + work[0]["result"]
+    # The second try was told what FCC's check found.
+    assert any(
+        "FCC's own check: index.html still has the template's placeholder line"
+        in str(call["messages"][1].get("content"))
+        for call in seen
+        if "You are the main AI in the user's Playground"
+        in call["messages"][0]["content"]
+    )
+    assert page.evaluate("() => window.fccPhone.state.library.length") == 0
+    # Run again reuses the finished steps; FCC checks the project itself, so
+    # the task still isn't called done.
+    page.evaluate(
+        """async () => {
+            const { resumeTask } = await import('./js/tasks.js');
+            resumeTask(window.fccPhone.state.tasks[0].id);
+        }"""
+    )
+    page.wait_for_function(
+        "(before) => !window.fccPhone.state.tasks[0].running && ['done', 'failed'].includes(window.fccPhone.state.tasks[0].status) && window.fccPhone.state.tasks[0].updated_at > before",
+        arg=task["updated_at"],
+        timeout=30000,
+    )
+    again = page.evaluate("() => window.fccPhone.state.tasks[0]")
+    assert again["status"] == "failed", again["summary"]
+    assert page.evaluate("() => window.fccPhone.state.library.length") == 0
+
+
+def deleting_brain(body: dict) -> dict:
+    """A job that deletes the project's only page, then says it's done."""
+    tools_used = [m for m in body["messages"] if m["role"] == "tool"]
+    if not tools_used:
+        return tool_call("delete_file", {"path": "index.html"})
+    return say("Done, all tidy.")
+
+
+def test_a_job_that_deletes_the_last_file_is_not_done(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: a job whose tools can delete files is checked
+    after it, even when it empties the project."""
+    fake_gemini(page, deleting_brain)
+    open_phone(page, admin_base_url)
+    use_gemini(page)
+    job = page.evaluate(
+        """async () => {
+            const projects = await import('./js/projects.js');
+            const { runTask } = await import('./js/agents.js');
+            const { state, jarvis } = await import('./js/state.js');
+            const project = await projects.createProject('Tidy', 'you');
+            await projects.putFile(project, 'index.html', '<!doctype html><title>x</title><p>Hi</p>', 'you');
+            const said = await runTask(jarvis(), 'tidy the project', { project, tools: ['delete_file'] });
+            return { said, status: state.jobs[0].status, files: Object.keys(project.files) };
+        }"""
+    )
+    assert job["files"] == []
+    assert job["status"] == "unfinished"
+    assert "FCC's own check" in job["said"]
+
+
+def test_the_job_s_own_words_pick_website_or_game_until_one_is_tapped(
+    page: Page, admin_base_url: str
+) -> None:
+    open_phone(page, admin_base_url, look="playground")
+    website = page.get_by_role("button", name="Make a website")
+    game = page.get_by_role("button", name="Make a game")
+    box = page.get_by_label("The task")
+    # A website asked for in words is made as a website, not a game.
+    box.fill("A website for Calm Yoga studio with class times and prices")
+    expect(website).to_have_attribute("aria-pressed", "true")
+    box.fill("a platformer where a cat jumps over boxes")
+    expect(game).to_have_attribute("aria-pressed", "true")
+    # Once the user taps one, their pick stays whatever they type.
+    game.click()
+    box.fill("A website for a bakery")
+    expect(game).to_have_attribute("aria-pressed", "true")

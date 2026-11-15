@@ -3,10 +3,14 @@ v86 emulator in a sealed box, runs commands and Python, keeps files, has no
 network, opens from a snapshot after the first boot, keeps a session, and
 Jarvis uses it with the linux tool."""
 
+import json
 import re
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page, expect
+
+from free_claude_code.api.studio_routes import PHONE_DIR
 
 from .test_fcc_phone import open_phone
 
@@ -45,20 +49,22 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
                 ran: await call({ action: 'run', command: 'python3 /root/hello.py && lua5.4 -e "print(2^10)"' }),
                 read: await call({ action: 'read', path: '/root/hello.py' }),
                 failed: await call({ action: 'run', command: 'ls /missing' }),
-                network: await call({ action: 'run', command: 'ls /sys/class/net; python3 -c "import socket; socket.create_connection((\'1.1.1.1\', 80), timeout=3)" 2>&1 | tail -1' }),
+                network: await call({ action: 'run', command: 'python3 -c "import urllib.request; urllib.request.urlopen(\'http://example.com\', timeout=20)" 2>&1 | tail -1' }),
             };
         }"""
     )
     assert done["tools"]
-    assert "FCC Linux 1.1" in done["info"] and "Python 3.12" in done["info"]
+    assert "FCC Linux 2.0" in done["info"] and re.search(
+        r"Python\s+3\.12", done["info"]
+    )
     assert done["wrote"].startswith("Wrote /root/hello.py")
     assert done["ran"].startswith("exit code 0") and '{"sum": 5050}' in done["ran"]
     assert "1024" in done["ran"]
     assert done["read"].startswith("import json")
     assert done["failed"].startswith("exit code 1") and "No such file" in done["failed"]
-    # Only the loopback: no network card in the emulated PC.
-    assert re.search(r"exit code \d+\nlo\n", done["network"]), done["network"]
-    assert "Network is unreachable" in done["network"] or "Error" in done["network"]
+    # The network card leads only to FCC, which says no while the internet
+    # switch is off.
+    assert "HTTP Error 403" in done["network"], done["network"]
 
     # Commands run in bash with no keyboard input; a half-typed line at the
     # prompt is cleared, not run; a program left open (cat reading the
@@ -110,3 +116,352 @@ def test_fcc_linux_runs_on_the_phone_and_jarvis_uses_it(
     assert again == "import json"
     page.get_by_role("button", name="Stop").click()
     assert errors == [], errors
+
+
+def test_a_bad_pack_stops_fcc_linux_and_says_why(
+    page: Page, admin_base_url: str
+) -> None:
+    """A pack that fails its checksum is never used, and the program that
+    needed it doesn't hang: FCC Linux stops and the screen says why."""
+    page.set_default_timeout(WAIT)
+    contents = json.loads(
+        (PHONE_DIR / "linux" / "fcc-linux.json").read_text(encoding="utf-8")
+    )
+    go_pack = next(row for row in contents["packs"] if "go" in row["packages"])
+    page.route(
+        f"**/linux/{go_pack['file']}",
+        lambda route: route.fulfill(status=200, body=b"not the real pack"),
+    )
+    open_phone(page, admin_base_url, "lab/linux")
+    page.get_by_role("button", name="▶ Start FCC Linux").click()
+    status = page.locator(".linux-status")
+    expect(status).to_contain_text("Tap the terminal to type", timeout=WAIT)
+    ran = page.evaluate(
+        """async () => {
+            const { runningLinux } = await import('./js/linux.js');
+            return runningLinux().run('go version', { timeoutMs: 120000 });
+        }"""
+    )
+    assert ran["code"] == -1 and "closed" in ran["text"], ran
+    expect(status).to_contain_text("FCC Linux stopped:")
+    expect(status).to_contain_text("checksum is wrong")
+    expect(page.locator(".linux-dock iframe.linux-box")).to_have_count(0)
+
+
+def test_the_internet_switch_github_and_the_token_stay_outside_linux(
+    page: Page, admin_base_url: str
+) -> None:
+    """Off by default: nothing leaves. Switched on: http requests go out as
+    https through FCC, fcc-github clones through GitHub's API with the token
+    FCC adds (never seen inside Linux), and a push waits for the user's OK."""
+    page.set_default_timeout(WAIT)
+    seen: list[dict] = []
+
+    def github(route) -> None:
+        request = route.request
+        seen.append(
+            {
+                "url": request.url,
+                "auth": request.headers.get("authorization", ""),
+                "method": request.method,
+            }
+        )
+        path = request.url.split("api.github.com", 1)[1]
+        answers = {
+            "/zen": "Keep it logically awesome.",
+            "/repos/o/r": json.dumps({"default_branch": "main", "private": True}),
+            "/repos/o/r/commits/main": json.dumps(
+                {"sha": "c" * 40, "commit": {"tree": {"sha": "t" * 40}}}
+            ),
+            f"/repos/o/r/git/trees/{'t' * 40}?recursive=1": json.dumps(
+                {
+                    "truncated": False,
+                    "tree": [
+                        {
+                            "path": "hello.py",
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": "b" * 40,
+                        }
+                    ],
+                }
+            ),
+            f"/repos/o/r/git/blobs/{'b' * 40}": "print('hello from GitHub')\n",
+        }
+        if path in answers:
+            route.fulfill(status=200, body=answers[path])
+        else:
+            route.fulfill(status=404, body=json.dumps({"message": "Not Found"}))
+
+    page.route("https://api.github.com/**", github)
+    open_phone(page, admin_base_url, "lab/linux")
+    expect(page.get_by_role("switch", name="FCC Linux internet")).not_to_be_checked()
+    page.get_by_role("button", name="▶ Start FCC Linux").click()
+    expect(page.locator(".linux-status")).to_contain_text(
+        "Tap the terminal to type", timeout=WAIT
+    )
+    run = """async ([command, seconds]) => {
+        const { runningLinux } = await import('./js/linux.js');
+        return runningLinux().run(command, { timeoutMs: seconds * 1000 });
+    }"""
+    off = page.evaluate(
+        run, ["fcc-net; wget -qO- http://api.github.com/zen; echo exit=$?", 60]
+    )
+    assert "Internet: off" in off["text"] and "exit=1" in off["text"], off
+    assert seen == []
+
+    page.get_by_role("switch", name="FCC Linux internet").check()
+    page.get_by_label("GitHub token").fill("ghp_test_token_never_inside")
+    page.get_by_role("button", name="Save").click()
+    on = page.evaluate(
+        run,
+        [
+            "wget -qO- http://api.github.com/zen; echo; cd /root && fcc-github clone o/r && cat r/hello.py && grep -r ghp_test /root /etc 2>/dev/null | head -1; echo done",
+            240,
+        ],
+    )
+    assert "Keep it logically awesome." in on["text"], on
+    assert "hello from GitHub" in on["text"] and "ghp_test" not in on["text"], on
+    assert all(item["url"].startswith("https://api.github.com/") for item in seen)
+    assert seen[-1]["auth"] == "Bearer ghp_test_token_never_inside"
+
+    # A push asks first; saying no stops it.
+    page.once("dialog", lambda dialog: dialog.dismiss())
+    pushed = page.evaluate(
+        run,
+        [
+            "cd /root/r && echo more >> hello.py && git -c user.name=t -c user.email=t@t commit -qam more && fcc-github push; echo exit=$?",
+            240,
+        ],
+    )
+    assert "said no" in pushed["text"] and "exit=1" in pushed["text"], pushed
+    assert not any(item["method"] == "PATCH" for item in seen)
+    expect(page.locator(".linux-net-log")).to_contain_text("denied")
+
+
+PIXEL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
+
+
+def test_projects_are_folders_in_fcc_linux_both_ways(
+    page: Page, admin_base_url: str
+) -> None:
+    """Each FCC project is /projects/<project> in FCC Linux: its files are
+    there when it opens, and files changed there (by Jarvis or typed in the
+    terminal) come back into the project."""
+    page.set_default_timeout(WAIT)
+    open_phone(page, admin_base_url, "lab/linux")
+    page.evaluate(
+        """async (pixel) => {
+            const projects = await import('./js/projects.js');
+            const project = await projects.createProject('Shop site', 'you');
+            await projects.writeFile(project, 'index.html', '<h1>Shop</h1>\\n', 'you');
+            await projects.putPicture(project, 'img/dot.png', pixel, 'you');
+        }""",
+        PIXEL,
+    )
+    page.get_by_role("button", name="▶ Start FCC Linux").click()
+    expect(page.locator(".linux-status")).to_contain_text(
+        "Tap the terminal to type", timeout=WAIT
+    )
+    done = page.evaluate(
+        r"""async () => {
+            const { runTool } = await import('./js/tools.js');
+            const { runningLinux } = await import('./js/linux.js');
+            const jarvis = window.fccPhone.state.agents.find((a) => a.role === 'main');
+            const ctx = { depth: 0, chain: [], built: new Set() };
+            const call = (args) => runTool(jarvis, { name: 'linux', arguments: args }, ctx);
+            const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+            for (let i = 0; i < 40 && !(await runningLinux().run('ls /projects/shop-site 2>/dev/null')).text.includes('index.html'); i += 1) await wait(500);
+            const out = {};
+            out.inside = await call({ action: 'run', command: 'cat /projects/shop-site/index.html; file /projects/shop-site/img/dot.png' });
+            out.edited = await call({ action: 'run', command: 'sed -i "s/Shop/Shop (built in Linux)/" /projects/shop-site/index.html && echo "body{color:red}" > /projects/shop-site/style.css' });
+            runningLinux().send('echo typed > /projects/shop-site/notes.txt\n');
+            for (let i = 0; i < 40; i += 1) {
+                const project = window.fccPhone.state.projects.find((p) => p.slug === 'shop-site');
+                if (project.files['notes.txt']) break;
+                await wait(500);
+            }
+            const project = window.fccPhone.state.projects.find((p) => p.slug === 'shop-site');
+            out.files = { index: project.files['index.html'], style: project.files['style.css'], notes: project.files['notes.txt'] };
+            return out;
+        }"""
+    )
+    assert "<h1>Shop</h1>" in done["inside"] and "PNG image" in done["inside"], done
+    assert "Saved back to FCC Projects" in done["edited"], done
+    assert done["files"]["index"] == "<h1>Shop (built in Linux)</h1>\n"
+    assert done["files"]["style"] == "body{color:red}\n"
+    assert done["files"]["notes"] == "typed\n"
+
+
+def test_a_backup_never_carries_fcc_linuxs_github_token(
+    page: Page, admin_base_url: str
+) -> None:
+    page.set_default_timeout(WAIT)
+    open_phone(page, admin_base_url, "settings")
+    page.evaluate(
+        """async () => {
+            const net = await import('./js/linuxnet.js');
+            await net.setInternet(true);
+            await net.setGithubToken('ghp_secret_never_in_backups');
+        }"""
+    )
+    with page.expect_download() as caught:
+        page.get_by_role("button", name="Save a backup").click()
+    backup = json.loads(Path(caught.value.path()).read_text(encoding="utf-8"))
+    assert "ghp_secret" not in json.dumps(backup)
+    assert backup["settings"]["linux"] == {"internet": False}
+
+
+def test_the_internet_gateway_guards_fcc_itself_pushes_and_size(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: a program in FCC Linux can't reach FCC's own
+    address through the gateway; an OK to push covers only the push calls (a
+    repo deletion still asks); an answer over the cap stops as it arrives."""
+    page.set_default_timeout(WAIT)
+    asked: list[str] = []
+    page.route(
+        "https://api.github.com/**",
+        lambda route: route.fulfill(
+            status=200, headers={"Access-Control-Allow-Origin": "*"}, body="{}"
+        ),
+    )
+    page.route(
+        "https://bounce.example.org/**",
+        lambda route: route.fulfill(
+            status=307,
+            headers={
+                "Location": "http://127.0.0.1:9/stop",
+                "Access-Control-Allow-Origin": "*",
+            },
+        ),
+    )
+    open_phone(page, admin_base_url, "settings")
+    page.expose_function("fccAsk", lambda question: asked.append(question) or True)
+    result = page.evaluate(
+        """async () => {
+            const net = await import('./js/linuxnet.js');
+            await net.setInternet(true);
+            await net.setGithubToken('ghp_test_token');
+            const ask = async (question) => window.fccAsk(question);
+            const own = await net.handle({ url: `http://${location.host}/phone/js/state.js`, method: 'GET' }, { ask });
+            const push = (path, method) => net.handle({ url: `https://api.github.com/repos/me/app${path}`, method, body: '{}' }, { ask });
+            await push('/git/blobs', 'POST');
+            await push('/git/trees', 'POST');
+            await push('/git/refs/heads/main', 'PATCH');
+            await push('', 'DELETE');
+            const local = [];
+            for (const address of ['http://127.0.0.1:8082/x', 'http://192.168.1.5/', 'http://10.0.0.2/', 'http://100.101.2.3/', 'http://pc.tail1234.ts.net/', 'http://printer.local/', 'http://[::1]/', 'http://intranet/']) {
+                local.push((await net.handle({ url: address, method: 'GET' }, { ask })).status);
+            }
+            const bounced = await net.handle({ url: 'http://bounce.example.org/go', method: 'POST', body: 'x' }, { ask });
+            const bouncedRead = await net.handle({ url: 'http://bounce.example.org/read', method: 'GET' }, { ask });
+            // A listed host (PyPI) is followed, and where it ends is checked:
+            // ending somewhere local, nothing comes back.
+            const realFetch = window.fetch;
+            let followMode = '';
+            window.fetch = async (address, options) => {
+                followMode = options.redirect;
+                const answer = new Response('local secrets', { status: 200 });
+                Object.defineProperty(answer, 'url', { value: 'http://192.168.1.5/admin' });
+                return answer;
+            };
+            let followed;
+            try {
+                followed = await net.handle({ url: 'http://pypi.org/simple/x/', method: 'GET' }, { ask });
+            } finally {
+                window.fetch = realFetch;
+            }
+            return { own: own.status, local, bounced: bounced.status, bouncedRead: bouncedRead.status, followed: followed.status, followMode };
+        }"""
+    )
+    assert result["own"] == 403
+    assert result["local"] == [403] * 8, result["local"]
+    # A change answered with a redirect isn't followed (it could be bounced
+    # into FCC or the home network).
+    assert result["bounced"] == 502
+    # A read is only redirected for package indexes and GitHub.
+    assert result["bouncedRead"] == 502
+    assert result["followMode"] == "follow" and result["followed"] == 403
+    assert len(asked) == 2, asked  # once for the push, once for the deletion
+    assert "push to me/app" in asked[0] and "Allow this one change?" in asked[1]
+
+
+def test_a_phone_file_without_a_sync_record_is_never_overwritten(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: when the record of what FCC wrote into Linux is
+    missing (a kept session whose record was lost), a Linux file that differs
+    from the phone's comes in beside it instead of replacing it."""
+    page.set_default_timeout(WAIT)
+    open_phone(page, admin_base_url, "settings")
+    result = page.evaluate(
+        """async () => {
+            const projects = await import('./js/projects.js');
+            const sync = await import('./js/linuxprojects.js');
+            const project = await projects.createProject('Kept', 'you');
+            await projects.putFile(project, 'index.html', 'phone copy', 'you');
+            sync.forgetSynced();
+            const linuxCopy = btoa('linux copy');
+            const machine = {
+                run: async (command) => {
+                    if (command.includes('find .')) return { code: 0, text: '1' };
+                    if (command.startsWith('sed -n')) return { code: 0, text: `./${project.slug}/index.html` };
+                    if (command.startsWith('base64')) return { code: 0, text: linuxCopy };
+                    return { code: 0, text: '' };
+                },
+            };
+            const back = await sync.syncOut(machine, 'you');
+            return { back, files: project.files };
+        }"""
+    )
+    assert result["files"]["index.html"] == "phone copy"
+    assert result["files"]["index.html.from-linux.txt"] == "linux copy"
+    assert "both changed" in result["back"][0]
+
+
+def test_a_changed_file_that_cannot_be_read_is_tried_again(
+    page: Page, admin_base_url: str
+) -> None:
+    """Found by CodeRabbit: a changed Linux file whose read fails keeps the
+    sync mark where it is (so the next sync tries it again) and is reported."""
+    page.set_default_timeout(WAIT)
+    open_phone(page, admin_base_url, "settings")
+    result = page.evaluate(
+        """async () => {
+            const projects = await import('./js/projects.js');
+            const sync = await import('./js/linuxprojects.js');
+            const project = await projects.createProject('Retry', 'you');
+            await projects.putFile(project, 'index.html', 'phone copy', 'you');
+            sync.forgetSynced();
+            const commands = [];
+            let readable = false;
+            const machine = {
+                run: async (command) => {
+                    commands.push(command);
+                    if (command.includes('find .')) return { code: 0, text: '1' };
+                    if (command.startsWith('sed -n')) return { code: 0, text: `./${project.slug}/index.html` };
+                    if (command.startsWith('base64')) return readable ? { code: 0, text: btoa('linux copy') } : { code: 1, text: 'busy' };
+                    return { code: 0, text: '' };
+                },
+            };
+            const back = await sync.syncOut(machine, 'you');
+            const moved = commands.some((command) => command.startsWith('mv -f'));
+            // While Linux's change is still unread, writing the phone's copy in
+            // leaves that file alone.
+            commands.length = 0;
+            await sync.syncIn(machine);
+            const wroteOver = commands.some((command) => command.includes('index.html'));
+            // The next sync reads it, brings it back and moves the mark.
+            readable = true;
+            commands.length = 0;
+            const again = await sync.syncOut(machine, 'you');
+            return { back, moved, wroteOver, again, movedAfter: commands.some((command) => command.startsWith('mv -f')), files: project.files };
+        }"""
+    )
+    assert result["moved"] is False
+    assert "couldn't read 1 changed file" in result["back"][0]
+    assert result["wroteOver"] is False
+    assert result["movedAfter"] is True
+    assert result["files"]["index.html.from-linux.txt"] == "linux copy"
+    assert result["files"]["index.html"] == "phone copy"

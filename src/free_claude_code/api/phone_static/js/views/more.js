@@ -16,6 +16,7 @@ export const ITEMS = [
   ["library", "▣", "Library", "Approved games, sites, photos and notes the AI makes originals from"],
   ["lab", "⚗", "Lab", "Your 3D crafting box: mix chemicals, build circuits, keep blueprints, build-your-own-x; Jarvis works in it"],
   ["agents/brains", "⚙", "Team brains", "Who thinks with what"],
+  ["practice", "🎓", "Jarvis learns", "He teaches himself to code in FCC Linux; skills wait for your OK"],
   ["settings", "⚙", "Settings", "Free cloud brains, your PC, voice, backups"],
   ["help", "?", "Help", "How FCC Phone works"],
 ];

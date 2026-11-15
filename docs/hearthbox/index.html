@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#14161f" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Hearthbox" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="apple-touch-icon" href="icon-180.png" />
+    <link rel="icon" type="image/png" href="icon-192.png" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Hearthbox</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="world" aria-label="The world map"></canvas>
+      <header id="top">
+        <div class="row">
+          <button id="villageBtn" class="chip" title="Next village"><span id="vflag">🏡</span> <span id="vname">…</span></button>
+          <div id="clock">Day 1 · 06:00</div>
+          <div id="speed" role="group" aria-label="Speed">
+            <button data-speed="0" title="Pause">⏸</button>
+            <button data-speed="1" title="Normal" class="on">▶</button>
+            <button data-speed="4" title="Fast">⏩</button>
+            <button data-speed="12" title="Fastest">⏭</button>
+          </div>
+        </div>
+        <div class="row" id="res"></div>
+      </header>
+      <div id="toasts" aria-live="polite"></div>
+      <div id="toolbar" hidden><span id="toolText"></span><button id="toolDone">Done</button></div>
+      <div id="confirm" hidden><span id="confirmText"></span><button id="confirmYes">✓ Place</button><button id="confirmNo">✕</button></div>
+      <section id="sheet" hidden>
+        <div class="grab" id="grab"><span></span></div>
+        <div id="sheetBody"></div>
+      </section>
+      <nav id="tabs">
+        <button data-tab="build"><b>🏗️</b>Build</button>
+        <button data-tab="powers"><b>⚡</b>Powers</button>
+        <button data-tab="land"><b>🌍</b>Land</button>
+        <button data-tab="people"><b>👥</b>People</button>
+        <button data-tab="talk"><b>💬</b>Talk</button>
+        <button data-tab="stats"><b>📊</b>Stats</button>
+        <button data-tab="menu"><b>☰</b>Menu</button>
+      </nav>
+    </div>
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

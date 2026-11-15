@@ -3,6 +3,7 @@ extends Node2D
 ## '#' ground, '=' floating platform, 'o' coin, '^' spikes, 'e' enemy,
 ## 'P' player start, 'F' finish flag. Art: Kenney's Pixel Platformer (CC0).
 
+const Kit := preload("res://fcc/kit.gd")
 const TILE := 18
 const LEVEL := [
 	"                                                            ",
@@ -25,13 +26,16 @@ var total_coins := 0
 var hud: Label
 var player: CharacterBody2D
 var start := Vector2.ZERO
+var touch: CanvasLayer
 
 
 func _ready() -> void:
+	# FCC's kit: symbols and emoji in every text, textures, particles, life.
+	Kit.use_fonts()
 	Input.set_use_accumulated_input(false)
 	_add_inputs()
 	# Touch controls on a phone (hidden on a computer).
-	var touch: CanvasLayer = preload("res://touch_pad.gd").new()
+	touch = preload("res://touch_pad.gd").new()
 	touch.set("buttons", [["jump", "JUMP", Vector2(-120, -140), 62.0], ["restart", "AGAIN", Vector2(-110, -300), 36.0]])
 	touch.set("vertical", false)
 	add_child(touch)
@@ -69,14 +73,24 @@ func _ready() -> void:
 	camera.limit_bottom = LEVEL.size() * TILE
 	camera.limit_right = LEVEL[0].length() * TILE
 	player.add_child(camera)
+	# Held upright, the level fills the top of the screen and the controls
+	# get the bottom.
+	touch.call("fit", camera, Vector2(LEVEL[0].length() * TILE, LEVEL.size() * TILE))
+	# Leaves drifting past, around wherever the camera is.
+	var leaves := Kit.particles_2d("leaves", Vector2(480, 270))
+	leaves.local_coords = false
+	camera.add_child(leaves)
 	var layer := CanvasLayer.new()
 	hud = Label.new()
+	hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hud.position = Vector2(8, 6)
 	hud.add_theme_font_size_override("font_size", 12)
 	hud.add_theme_color_override("font_outline_color", Color.BLACK)
 	hud.add_theme_constant_override("outline_size", 4)
 	layer.add_child(hud)
 	add_child(layer)
+	get_viewport().size_changed.connect(_fit_text)
+	_fit_text()
 	_update_hud()
 
 
@@ -96,13 +110,23 @@ func collect() -> void:
 
 
 func finish() -> void:
-	hud.text = "You made it! %d / %d coins. Press R to play again." % [coins, total_coins]
+	var again := "Tap AGAIN" if touch.visible else "Press R"
+	hud.text = "★ You made it! %d / %d coins. %s to play again." % [coins, total_coins, again]
 	player.set_physics_process(false)
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("restart"):
 		get_tree().reload_current_scene()
+
+
+## Texts stay readable on any screen: bigger when the game is drawn bigger.
+func _fit_text() -> void:
+	var screen := get_viewport().get_visible_rect().size
+	var grow := maxf(1.0, minf(screen.x, screen.y) / 270.0)
+	hud.add_theme_font_size_override("font_size", int(12 * grow))
+	hud.position = Vector2(8, 6) * grow
+	hud.size.x = screen.x - 16 * grow
 
 
 func _update_hud() -> void:

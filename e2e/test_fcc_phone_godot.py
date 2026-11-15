@@ -480,3 +480,71 @@ def test_a_games_saves_are_kept_on_the_phone_between_plays(
         "true",
         "COUNT 1 true",
     ], counts
+
+
+KIT_GAME = """extends Node
+const Kit := preload("res://fcc/kit.gd")
+
+
+func _ready() -> void:
+\tKit.use_fonts()
+\tvar fonts := ThemeDB.fallback_font.fallbacks.size()
+\tvar styles := Kit.font("pixel") != ThemeDB.fallback_font and Kit.font("fantasy") != ThemeDB.fallback_font
+\tvar label := Label.new()
+\tlabel.text = "★ ♥ ⚔ 😀"
+\tadd_child(label)
+\tvar made := 0
+\tfor kind: String in Kit.SURFACES:
+\t\tif Kit.material(kind, 2.0).albedo_texture != null:
+\t\t\tmade += 1
+\tadd_child(Kit.particles_2d("snow"))
+\tadd_child(Kit.day_night(10.0))
+\tvar walker := Node2D.new()
+\tadd_child(walker)
+\tKit.wander(walker, 1.0, 4.0)
+\t# The wanderer waits up to 2.5 s before its first step.
+\tawait get_tree().create_timer(4.0, true, true).timeout
+\tprint("KIT %d %s %d %s" % [fonts, styles, made, walker.position != Vector2.ZERO])
+"""
+
+
+def test_fccs_kit_gives_phone_games_symbols_textures_and_life(
+    page: Page, admin_base_url: str
+) -> None:
+    """A game that loads res://fcc/ gets FCC's kit in its pack (the fonts
+    fetched once and checked): symbols and emoji fonts as fallbacks, the two
+    styles, every surface, particles, day and night, and a wanderer that
+    moves; the check flags no missing file."""
+    page.set_default_timeout(GODOT_WAIT)
+    errors = watch_errors(page)
+    open_phone(page, admin_base_url)
+    picks = page.evaluate(
+        """async () => {
+            const godot = await import('./js/godot.js');
+            const uses = 'extends Node\\nconst K := preload("res://fcc/kit.gd")\\n';
+            const own = await godot.kitFiles({ 'main.gd': uses, 'fcc/fonts/pixel.ttf': 'mine' });
+            return {
+                plain: godot.usesKit({ 'main.gd': 'extends Node\\n' }),
+                uses: godot.usesKit({ 'main.gd': uses }),
+                carries: godot.usesKit({ 'main.gd': uses, 'fcc/kit.gd': 'extends RefCounted\\n' }),
+                keepsOwn: !('fcc/fonts/pixel.ttf' in own) && 'fcc/kit.gd' in own && own['fcc/fonts/emoji.ttf'].length > 1000000,
+                flagged: godot.godotProblems({ files: { 'project.godot': 'run/main_scene="res://main.gd"', 'main.gd': uses } }).map((p) => p.text),
+            };
+        }"""
+    )
+    assert picks == {
+        "plain": False,
+        "uses": True,
+        "carries": False,
+        "keepsOwn": True,
+        "flagged": [],
+    }, picks
+    result = run_in_box(page, project_files(KIT_GAME), "^KIT")
+    assert any(line == "KIT 3 true 12 true" for line in result["prints"]), result[
+        "report"
+    ]
+    assert not result["errors"], result["report"]
+    assert not [p for p in result["problems"] if "fcc/" in p["text"]], result[
+        "problems"
+    ]
+    assert errors == [], errors

@@ -3386,6 +3386,7 @@ class AgentToolbox:
             files,
             overwrite=call.arguments.get("overwrite") is True,
             replace_starters=True,
+            godot=True,  # FCC's kit fonts come with Godot's import notes
         )
         data.update(
             {

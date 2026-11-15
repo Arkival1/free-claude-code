@@ -259,6 +259,17 @@ func _text() -> void:
 	var symbols := font.has_char(0x2605) and font.has_char(0x2694)
 	_add("Text", "Letters (Latin)", "works" if font.has_char(0x41) else "missing", "The built-in font.")
 	_add("Text", "Symbols and emoji", "works" if symbols else "missing", "The built-in font has them." if symbols else "Symbols like stars and swords (and emoji) show as empty boxes in the built-in font%s. Use words, draw them, or bring a font file into the game." % (", and the web player has no system fonts to fall back on" if _web() else ""))
+	# FCC's kit (res://fcc/, added by FCC to games that use it) brings fonts
+	# with symbols and emoji as fallbacks of the built-in one.
+	if ResourceLoader.exists("res://fcc/kit.gd"):
+		var kit: Script = load("res://fcc/kit.gd")
+		kit.call("use_fonts")
+		var star := false
+		var smile := false
+		for extra: Font in font.fallbacks:
+			star = star or extra.has_char(0x2605)
+			smile = smile or extra.has_char(0x1F600)
+		_add("Text", "Symbols and emoji with FCC's kit", "works" if star and smile else "missing", "Kit.use_fonts() (res://fcc/kit.gd) gives every text symbols and emoji, black and white." if star and smile else "The kit's fonts didn't load.")
 	var system := OS.get_system_fonts()
 	_add("Text", "System fonts", "works" if system.size() > 0 else "missing", "%d found" % system.size() if system.size() > 0 else "None reachable from here.")
 	var server := TextServerManager.get_primary_interface()

@@ -39,6 +39,27 @@ description: How to make real Godot 4 games in FCC (Godot 4.7.2, GDScript) on th
 8. Design before you build: the `game-design` skill (loop, balance, levels,
    story, rewards, art and sound direction, and eight specialist guides).
 
+## FCC's kit (res://fcc/, in every starter)
+Every starter has FCC's kit in `fcc/` (keep that folder):
+`const Kit := preload("res://fcc/kit.gd")`.
+- Text: `Kit.use_fonts()` first in `_ready` gives every label symbols
+  (★ ♥ ⚔ ☀ ♞ → ✓) and emoji (black and white); Godot's own font has
+  letters, digits and punctuation only. `Kit.font("pixel")` (Press Start 2P)
+  or `Kit.font("fantasy")` (MedievalSharp) for titles and signs.
+- Surfaces: `Kit.texture(kind)` (2D) and `Kit.material(kind, tile)` (3D,
+  with bumps): stone, rock, grass, dirt, sand, wood (grain), metal, gold,
+  snow, lava (glows), water, brick. Made from Godot's noise in code.
+- Life: `Kit.particles_3d(kind, area)` / `Kit.particles_2d(kind, area)`:
+  dust, leaves, fireflies, rain, snow, embers. `Kit.day_night(seconds,
+  sun, world_environment)` turns the sun and tints sky and light (2D: no
+  sun, it tints the scene). `Kit.wander(node, radius, speed)` makes an NPC
+  or animal stroll about its home (2D or 3D, CharacterBody or not).
+- Phones: `Kit.fit_screen(get_window(), 560)` with stretch mode
+  `canvas_items` and aspect `expand` keeps texts and buttons a good size
+  held either way. The 2D starters' `touch_pad.gd` gives the controls the
+  bottom of an upright screen (`touch.fit(camera, world_size)`) and scales
+  its buttons; never place buttons at fixed pixel spots.
+
 ## 3. Graphics that look S-tier (the action-3d starter)
 - The look is code, so it needs no licence: `look.gd` draws every surface
   from seamless noise (colour ramp, normal map, roughness) and maps it by
