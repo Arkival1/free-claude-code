@@ -26,12 +26,14 @@ For the owner's laptop (Lenovo Legion Y7000P: i7-9750H, 16 GB, GTX 1660 Ti
 
 ## The advisers (owner)
 
-Smaller local models (1.7B to 4B), each with a speciality the owner gives
-them (game design, art, research...), advise when the owner asks. On the Legion
-laptop, Jarvis (Qwen 9B IQ4_XS) has the graphics card and the advisers run
-on the processor and RAM (GPU offload 0 in LM Studio), so all three stay
-loaded and nobody swaps. If RAM runs short, Local Models Take Turns swaps
-them instead. API advisers stay possible; either way they get the web only.
+"Go all out on Jarvis": one local model loaded at a time, and Jarvis is
+the biggest model the laptop holds (graphics card plus RAM). The advisers
+are smaller local models (1.7B to 4B), each with a speciality and role the
+owner gives them; when the owner asks for advice, Jarvis is unloaded, the
+adviser loaded, then Jarvis reloaded (Local Models Take Turns on; LM
+Studio set to keep only the last model it loaded). Each advice round costs
+the swaps (roughly 30 to 60 s from the NVMe drive). API advisers stay
+possible; either way they get the web only.
 
 ## Built (Phase 1, branch `claude/jarvis-pc-control`)
 
