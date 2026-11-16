@@ -24,6 +24,15 @@ For the owner's laptop (Lenovo Legion Y7000P: i7-9750H, 16 GB, GTX 1660 Ti
   Ctrl+Alt+S) on a Studio page. Stop kills what he's running and survives a
   restart. Letting him carry on works only from the PC.
 
+## The advisers (owner)
+
+Smaller local models (1.7B to 4B), each with a speciality the owner gives
+them (game design, art, research...), advise when he asks. On the Legion
+laptop, Jarvis (Qwen 9B IQ4_XS) has the graphics card and the advisers run
+on the processor and RAM (GPU offload 0 in LM Studio), so all three stay
+loaded and nobody swaps. If RAM runs short, Local Models Take Turns swaps
+them instead. API advisers stay possible; either way they get the web only.
+
 ## Built (Phase 1, branch `claude/jarvis-pc-control`)
 
 - `studio/pc_control.py`: levels, never-list, risky list, folders, Stop,
