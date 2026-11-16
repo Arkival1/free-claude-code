@@ -376,7 +376,7 @@ Notes carried over from the long session that built FCC Studio (LCC).
   AI on a `local/` model, unsealed, gets the PC tools; with PC control on he
   gets no delegation tools, advisers (max 2) get web tools only, API models
   never get the PC. The advisers are meant to be smaller local models,
-  each with a speciality the owner gives them (he sets their role), run on
+  each with a speciality and role the owner gives them, run on
   the processor and RAM while Jarvis (9B) has the graphics card, so nobody
   swaps; API advisers stay possible. Stop works from anywhere and survives a restart;
   resume, level and folders only from the PC. Next: his own browser

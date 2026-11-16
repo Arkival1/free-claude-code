@@ -27,7 +27,7 @@ For the owner's laptop (Lenovo Legion Y7000P: i7-9750H, 16 GB, GTX 1660 Ti
 ## The advisers (owner)
 
 Smaller local models (1.7B to 4B), each with a speciality the owner gives
-them (game design, art, research...), advise when he asks. On the Legion
+them (game design, art, research...), advise when the owner asks. On the Legion
 laptop, Jarvis (Qwen 9B IQ4_XS) has the graphics card and the advisers run
 on the processor and RAM (GPU offload 0 in LM Studio), so all three stay
 loaded and nobody swaps. If RAM runs short, Local Models Take Turns swaps
