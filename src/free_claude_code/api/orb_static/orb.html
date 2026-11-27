@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/orb/assets/__FCC_VERSION__/orb.css">
 </head>
 <body>
+  <canvas id="core" aria-label="JARVIS gold core. Click to talk." hidden></canvas>
   <canvas id="orb" aria-label="JARVIS orb. Click to talk."></canvas>
   <div id="caption" aria-live="polite"></div>
   <div id="you"></div>
@@ -22,6 +23,8 @@
   <div id="panel" hidden>
     <label>Look <select id="look"></select></label>
     <label>Voice <select id="voice"></select></label>
+    <div id="voiceInfo" class="hint"></div>
+    <label class="check"><input id="effect" type="checkbox" checked> AI-in-the-room effect (original Jarvis sound)</label>
     <label>Speed <input id="rate" type="range" min="0.7" max="1.4" step="0.05"></label>
     <label>Model <select id="model"><option value="">(loaded model)</option></select></label>
     <label class="check"><input id="advisorOn" type="checkbox"> Advisor: let an API model give JARVIS advice
@@ -34,6 +37,7 @@
     </div>
     <div id="info"></div>
   </div>
+  <script src="/orb/assets/__FCC_VERSION__/core-orb.js"></script>
   <script src="/orb/assets/__FCC_VERSION__/orb.js"></script>
 </body>
 </html>

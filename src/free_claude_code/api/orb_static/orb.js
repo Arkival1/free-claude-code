@@ -10,6 +10,8 @@
   };
   // Looks the owner can switch between (gear > Look). Gold is the default.
   const THEMES = {
+    core: { name: "Gold core (original)", style: "core", bg: ["#0b1a28", "#02070d"], accent: "#ffc861",
+      colors: { idle: [255, 200, 97], listening: [255, 220, 140], thinking: [255, 170, 60], speaking: [255, 214, 130], error: [255, 93, 108] } },
     gold: { name: "Gold", style: "gold", bg: ["#1a1203", "#050301"], accent: "#f5c24a",
       colors: { idle: [255, 190, 70], listening: [255, 236, 160], thinking: [255, 150, 40], speaking: [255, 214, 110], error: [255, 90, 70] } },
     sun: { name: "Gold sun", style: "rays", bg: ["#170d02", "#040201"], accent: "#ffb43c",
@@ -22,8 +24,13 @@
       colors: { idle: [255, 70, 90], listening: [255, 170, 120], thinking: [255, 190, 70], speaking: [255, 110, 120], error: [255, 255, 255] } },
   };
   const params = new URLSearchParams(location.search);
-  let theme = THEMES[params.get("look")] || THEMES[store.get("look", "gold")] || THEMES.gold;
+  let theme = THEMES[params.get("look")] || THEMES[store.get("look", "core")] || THEMES.core;
+  const coreCanvas = $("core");
+  let coreOrb = null;
   function applyTheme() {
+    const useCore = theme.style === "core" && window.FCCCoreOrb;
+    coreCanvas.hidden = !useCore;
+    if (useCore && !coreOrb) coreOrb = window.FCCCoreOrb.createCoreOrb(coreCanvas);
     const root = document.documentElement.style;
     root.setProperty("--glow", theme.accent);
     root.setProperty("--bg1", theme.bg[0]); root.setProperty("--bg2", theme.bg[1]);
@@ -32,6 +39,7 @@
   const sparks = Array.from({ length: 70 }, () => ({ a: Math.random() * Math.PI * 2, r: 1 + Math.random() * 1.6, s: 0.1 + Math.random() * 0.5, z: Math.random() }));
   let state = "idle", level = 0, target = 0, t = 0, busy = false;
   let voiceOn = store.get("voiceOn", true);
+  let audioLevel = 0;
   let lastSay = 0;
 
   // ---------- orb drawing ----------
@@ -73,7 +81,14 @@
     else if (state === "thinking") target = 0.35 + 0.15 * Math.sin(t * 5);
     else if (state === "listening") target = 0.45 + 0.2 * Math.sin(t * 9);
     else target = 0.12 + 0.06 * Math.sin(t * 1.4);
+    if (state === "speaking" && audioLevel > 0) target = 0.3 + audioLevel;
     level += (target - level) * 0.12;
+    if (theme.style === "core" && coreOrb) {
+      ctx.clearRect(0, 0, innerWidth, innerHeight);
+      coreOrb.setState(state === "error" ? "offline" : state);
+      coreOrb.setLevel(audioLevel);
+      return requestAnimationFrame(draw);
+    }
     const [r, g, b] = theme.colors[state] || theme.colors.idle;
     const w = innerWidth, h = innerHeight, cx = w / 2, cy = h * 0.44;
     const base = Math.min(w, h) * 0.17;
@@ -148,26 +163,54 @@
   requestAnimationFrame(draw);
 
   // ---------- voice ----------
+  // "kokoro:<name>" = Jarvis's own offline voice (served by FCC); "web:<name>" = a Windows voice.
   const synth = window.speechSynthesis;
   const PREFERRED = [/george/i, /ryan/i, /thomas/i, /uk english male/i, /en-gb.*male/i, /oliver/i, /daniel/i];
-  function voices() { return synth ? synth.getVoices() : []; }
-  function pickVoice() {
-    const all = voices(), saved = store.get("voice", "");
+  const KOKORO_NAMES = { jarvis: "Jarvis (original: George + Lewis, offline)", bm_george: "George (British)", bm_lewis: "Lewis (British)",
+    bm_daniel: "Daniel (British)", bm_fable: "Fable (British)", am_michael: "Michael (American)", am_adam: "Adam (American)",
+    bf_emma: "Emma (British)", af_heart: "Heart (American)" };
+  let kokoro = { ready: false, voices: [] };
+  let player = null, stopAll = false;
+  function chosen() { return store.get("voiceChoice", "kokoro:jarvis"); }
+  function webVoices() { return synth ? synth.getVoices() : []; }
+  function pickWebVoice() {
+    const all = webVoices(), saved = chosen().startsWith("web:") ? chosen().slice(4) : "";
     const byName = all.find((v) => v.name === saved);
     if (byName) return byName;
     for (const re of PREFERRED) { const v = all.find((x) => re.test(x.name)); if (v) return v; }
     return all.find((v) => /^en-GB/i.test(v.lang)) || all.find((v) => /^en/i.test(v.lang)) || all[0] || null;
   }
   function fillVoices() {
-    const sel = $("voice"), current = pickVoice();
+    const sel = $("voice"), current = chosen();
     sel.innerHTML = "";
-    for (const v of voices()) {
-      const o = document.createElement("option");
-      o.value = v.name; o.textContent = `${v.name} (${v.lang})`; o.selected = current && v.name === current.name;
-      sel.appendChild(o);
+    const offline = document.createElement("optgroup"); offline.label = kokoro.ready ? "Jarvis's own voice (offline)" : "Jarvis's own voice (downloading...)";
+    for (const name of kokoro.voices.length ? kokoro.voices : ["jarvis"]) {
+      const o = document.createElement("option"); o.value = "kokoro:" + name; o.textContent = KOKORO_NAMES[name] || name;
+      o.selected = o.value === current; offline.appendChild(o);
     }
+    sel.appendChild(offline);
+    const win = document.createElement("optgroup"); win.label = "Windows voices";
+    for (const v of webVoices()) {
+      const o = document.createElement("option"); o.value = "web:" + v.name; o.textContent = `${v.name} (${v.lang})`;
+      o.selected = o.value === current; win.appendChild(o);
+    }
+    sel.appendChild(win);
   }
   if (synth) synth.onvoiceschanged = fillVoices;
+
+  async function refreshVoice(startDownload) {
+    try {
+      kokoro = await api("/orb/api/voice");
+      if (startDownload && !kokoro.ready && !kokoro.downloading && chosen().startsWith("kokoro:")) {
+        kokoro = await api("/orb/api/voice/setup", {});
+      }
+      $("voiceInfo").textContent = kokoro.ready ? "Jarvis's voice runs on this PC, offline."
+        : kokoro.downloading ? `Downloading Jarvis's voice (one time, ${kokoro.download_mb} MB): ${Math.round(kokoro.progress * 100)}%. A Windows voice speaks until then.`
+        : kokoro.error || `Jarvis's voice needs a one-time ${kokoro.download_mb} MB download.`;
+      $("effect").checked = kokoro.effect !== false;
+      if (kokoro.downloading) setTimeout(() => refreshVoice(false), 3000);
+    } catch { kokoro = { ready: false, voices: [] }; }
+  }
 
   function speakable(text) {
     return text.replace(/```[\s\S]*?```/g, " (code shown on screen) ")
@@ -175,24 +218,76 @@
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/https?:\/\/\S+/g, "a link")
       .replace(/[#*_>|~]+/g, " ").replace(/\s+/g, " ").trim();
   }
-  function speak(text) {
+  function sentences(clean) { return (clean.match(/[^.!?]+[.!?]*|.+$/g) || [clean]).map((p) => p.trim()).filter(Boolean); }
+
+  function stopSpeaking() {
+    stopAll = true;
+    if (synth) synth.cancel();
+    if (player) { player.pause(); player = null; }
+    audioLevel = 0; setState("idle");
+  }
+
+  let audioCtx = null;
+  function playWav(blob) {
     return new Promise((resolve) => {
-      const clean = speakable(text);
-      if (!voiceOn || !synth || !clean) { resolve(); return; }
-      synth.cancel();
-      // Chrome/Edge stop long utterances, so speak sentence by sentence.
-      const parts = clean.match(/[^.!?]+[.!?]*|.+$/g) || [clean];
-      const voice = pickVoice(), rate = Number(store.get("rate", 1.0));
+      const audio = new Audio(URL.createObjectURL(blob));
+      player = audio;
+      try {
+        audioCtx = audioCtx || new AudioContext();
+        const src = audioCtx.createMediaElementSource(audio), an = audioCtx.createAnalyser();
+        an.fftSize = 512; src.connect(an); an.connect(audioCtx.destination);
+        const buf = new Uint8Array(an.fftSize);
+        const meter = () => {
+          if (player !== audio) return;
+          an.getByteTimeDomainData(buf);
+          let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+          audioLevel = Math.min(1, peak / 70); requestAnimationFrame(meter);
+        };
+        meter();
+      } catch { /* no Web Audio: the orb pulses on its own */ }
+      audio.onended = audio.onerror = () => { URL.revokeObjectURL(audio.src); resolve(); };
+      audio.play().catch(() => resolve());
+    });
+  }
+  async function fetchSpeech(part) {
+    const res = await fetch("/orb/api/speak", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: part }) });
+    if (!res.ok) throw new Error("voice not ready");
+    return res.blob();
+  }
+  async function speakKokoro(parts) {
+    let next = fetchSpeech(parts[0]);
+    for (let i = 0; i < parts.length && !stopAll; i++) {
+      const blob = await next;
+      if (i + 1 < parts.length) next = fetchSpeech(parts[i + 1]);   // make the next sentence while this one plays
+      await playWav(blob);
+    }
+  }
+  function speakWeb(parts) {
+    return new Promise((resolve) => {
+      if (!synth) { resolve(); return; }
+      const voice = pickWebVoice(), rate = Number(store.get("rate", 1.0));
       let left = parts.length;
-      setState("speaking");
       for (const part of parts) {
-        const u = new SpeechSynthesisUtterance(part.trim());
+        const u = new SpeechSynthesisUtterance(part);
         if (voice) u.voice = voice;
         u.rate = rate; u.pitch = 0.92;
-        u.onend = u.onerror = () => { if (--left <= 0) { setState("idle"); resolve(); } };
+        u.onend = u.onerror = () => { if (--left <= 0) resolve(); };
         synth.speak(u);
       }
     });
+  }
+  async function speak(text) {
+    const clean = speakable(text);
+    if (!voiceOn || !clean) return;
+    stopSpeaking(); stopAll = false;
+    const parts = sentences(clean);
+    setState("speaking");
+    try {
+      if (chosen().startsWith("kokoro:") && kokoro.ready) await speakKokoro(parts);
+      else await speakWeb(parts);
+    } catch { if (!stopAll) await speakWeb(parts); }    // offline voice failed: a Windows voice says it
+    audioLevel = 0; player = null;
+    if (state === "speaking") setState("idle");
   }
 
   // ---------- typing then speaking ----------
@@ -242,8 +337,8 @@
   // ---------- microphone ----------
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null;
-  canvas.addEventListener("click", () => {
-    if (state === "speaking") { synth && synth.cancel(); setState("idle"); return; }
+  function orbClick() {
+    if (state === "speaking") { stopSpeaking(); return; }
     if (!Recognition) { input.focus(); caption.textContent = "This browser has no speech input. Type instead."; return; }
     if (rec) { rec.stop(); return; }
     rec = new Recognition(); rec.lang = store.get("lang", "en-GB"); rec.interimResults = true;
@@ -253,8 +348,10 @@
     rec.onerror = () => { setState("idle"); };
     rec.onend = () => { rec = null; if (state === "listening") setState("idle"); if (heard.trim()) ask(heard.trim()); };
     rec.start();
-  });
-  addEventListener("keydown", (e) => { if (e.key === "Escape" && synth) { synth.cancel(); setState("idle"); } });
+  }
+  canvas.addEventListener("click", orbClick);
+  coreCanvas.addEventListener("click", orbClick);
+  addEventListener("keydown", (e) => { if (e.key === "Escape") stopSpeaking(); });
 
   // ---------- JARVIS speaking from LM Studio (fcc_say) ----------
   async function pollInbox() {
@@ -282,10 +379,10 @@
 
   // ---------- settings panel ----------
   function paintVoiceToggle() { const b = $("voiceToggle"); b.textContent = voiceOn ? "Voice on" : "Voice off"; b.classList.toggle("off", !voiceOn); }
-  $("voiceToggle").onclick = () => { voiceOn = !voiceOn; store.set("voiceOn", voiceOn); if (!voiceOn && synth) synth.cancel(); paintVoiceToggle(); };
+  $("voiceToggle").onclick = () => { voiceOn = !voiceOn; store.set("voiceOn", voiceOn); if (!voiceOn) stopSpeaking(); paintVoiceToggle(); };
   $("gear").onclick = async () => {
     const p = $("panel"); p.hidden = !p.hidden; if (p.hidden) return;
-    fillVoices(); $("rate").value = store.get("rate", 1.0); refreshStatus();
+    await refreshVoice(false); fillVoices(); $("rate").value = store.get("rate", 1.0); refreshStatus();
     try {
       const m = await api("/orb/api/models"), sel = $("model");
       sel.innerHTML = '<option value="">(loaded model)</option>';
@@ -297,8 +394,13 @@
     const o = document.createElement("option"); o.value = key; o.textContent = th.name; o.selected = th === theme; lookSel.appendChild(o);
   }
   lookSel.onchange = (e) => { theme = THEMES[e.target.value] || THEMES.gold; store.set("look", e.target.value); applyTheme(); };
-  $("voice").onchange = (e) => store.set("voice", e.target.value);
+  $("voice").onchange = (e) => {
+    const value = e.target.value; store.set("voiceChoice", value);
+    if (value.startsWith("kokoro:")) api("/orb/api/voice/settings", { voice: value.slice(7) }).then(() => refreshVoice(true)).catch(() => {});
+  };
+  $("effect").onchange = (e) => api("/orb/api/voice/settings", { effect: e.target.checked }).catch(() => {});
   $("rate").oninput = (e) => store.set("rate", Number(e.target.value));
+  $("rate").onchange = (e) => api("/orb/api/voice/settings", { speed: Number(e.target.value) }).catch(() => {});
   $("model").onchange = (e) => api("/orb/api/model", { model: e.target.value || null }).catch((err) => { $("info").textContent = err.message; });
   $("testVoice").onclick = () => speak("Good evening, sir. All systems are online.");
   $("newChat").onclick = async () => {
@@ -319,6 +421,10 @@
   $("advisorModel").onchange = (e) => { store.set("advisorModel", e.target.value.trim()); sendAdvisor(); };
   sendAdvisor();
 
+  refreshVoice(true).then(() => {
+    const kv = chosen().startsWith("kokoro:") ? chosen().slice(7) : null;
+    if (kv) api("/orb/api/voice/settings", { voice: kv, speed: Number(store.get("rate", 1.0)) }).catch(() => {});
+  });
   paintVoiceToggle(); refreshStatus(); setInterval(refreshStatus, 15000); pollInbox();
   caption.textContent = "Click the orb and speak, or type below.";
 })();

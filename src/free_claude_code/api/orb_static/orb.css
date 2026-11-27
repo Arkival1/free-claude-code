@@ -1,7 +1,11 @@
-:root { color-scheme: dark; --glow: #f5c24a; --bg1: #1a1203; --bg2: #050301; }
+:root { color-scheme: dark; --glow: #ffc861; --bg1: #0b1a28; --bg2: #02070d; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: radial-gradient(circle at 50% 45%, var(--bg1) 0%, var(--bg2) 70%); overflow: hidden;
   font-family: "Segoe UI", system-ui, sans-serif; color: #cfefff; }
+#core { position: fixed; left: 0; top: 0; width: 100%; height: 76vh; cursor: pointer; z-index: 1; }
+#core[hidden] { display: none; }
+#caption, #you, #ask, #corner, #panel { z-index: 2; }
+.hint { color: #9fb6c6; font-size: 12px; }
 #orb { position: fixed; inset: 0; width: 100%; height: 100%; cursor: pointer; }
 #caption { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); width: min(760px, 90vw);
   text-align: center; font-size: 18px; line-height: 1.45; text-shadow: 0 0 12px color-mix(in srgb, var(--glow) 40%, transparent);

@@ -11,6 +11,7 @@ from typing import Any
 from .advisor import Advisor, Sender, ToolCatalog
 from .brain import OrbBrain, OrbReply
 from .toolbox import McpToolbox
+from .voice import JarvisVoice
 
 SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 SAY_LIMIT = 4000
@@ -61,6 +62,7 @@ class OrbStudio:
         toolbox_factory: Callable[[], Any] = McpToolbox.from_lmstudio,
         brain_factory: Callable[..., OrbBrain] = OrbBrain,
         advisor_sender: Callable[[], Sender] | None = None,
+        voice: JarvisVoice | None = None,
     ) -> None:
         self._base_url_provider = base_url_provider
         self._toolbox_factory = toolbox_factory
@@ -71,6 +73,7 @@ class OrbStudio:
         self._toolbox: Any = None
         self._lock = threading.Lock()
         self.inbox = SpeechInbox()
+        self.voice = voice
         self.state = "idle"
         self.last_error = ""
 

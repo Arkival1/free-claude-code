@@ -483,8 +483,11 @@ This fork adds a voice orb for a local JARVIS running in LM Studio.
 
 - Double-click **JARVIS Orb** on the desktop (or run `fcc-orb`). FCC starts quietly in
   the background and the orb opens in its own small window.
-- Click the orb and speak, or type. Each reply types out, then JARVIS reads it aloud
-  with a Windows voice (choose it with the gear button).
+- The orb is the original gold core (other looks are under the gear button > Look).
+- Click the orb and speak, or type. Each reply types out, then JARVIS reads it aloud in
+  his own offline voice: Kokoro, the original "Jarvis" blend of two British voices
+  (George 60%, Lewis 40%) with the AI-in-the-room effect. The voice files (about 120 MB)
+  download once the first time the orb opens; a Windows voice speaks until then.
 - The orb uses the model loaded in LM Studio and the tool servers in LM Studio's
   `mcp.json`, such as `jarvis-clean-v3`.
 - Long talks never run out of room: older turns are summarised into the Obsidian vault

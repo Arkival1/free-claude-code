@@ -4,11 +4,13 @@ import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from free_claude_code.application.orb import OrbStudio
 from free_claude_code.application.orb.advisor import fcc_messages_sender
+from free_claude_code.application.orb.voice import JarvisVoice, VoiceError
+from free_claude_code.config.paths import config_dir_path
 from free_claude_code.config.server_urls import local_proxy_root_url
 from free_claude_code.core.version import package_version
 
@@ -20,7 +22,7 @@ router = APIRouter()
 ORB_STATIC_DIR = Path(__file__).resolve().parent / "orb_static"
 APP_ICON = Path(__file__).resolve().parent.parent / "assets" / "app-icon.svg"
 _VERSION_PLACEHOLDER = "__FCC_VERSION__"
-_ORB_ASSETS = frozenset({"orb.css", "orb.js"})
+_ORB_ASSETS = frozenset({"orb.css", "orb.js", "core-orb.js"})
 
 
 class OrbChatPayload(BaseModel):
@@ -44,6 +46,16 @@ class OrbAdvisePayload(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
 
 
+class OrbVoicePayload(BaseModel):
+    voice: str | None = Field(default=None, max_length=40)
+    speed: float | None = Field(default=None, ge=0.6, le=1.5)
+    effect: bool | None = None
+
+
+class OrbSpeakPayload(BaseModel):
+    text: str = Field(min_length=1, max_length=1500)
+
+
 class OrbResumePayload(BaseModel):
     topic: str = Field(default="", max_length=500)
 
@@ -63,7 +75,11 @@ def orb_studio(request: Request) -> OrbStudio:
                 local_proxy_root_url(settings), settings.proxy_auth_token
             )
 
-        studio = OrbStudio(base_url, advisor_sender=advisor_sender)
+        studio = OrbStudio(
+            base_url,
+            advisor_sender=advisor_sender,
+            voice=JarvisVoice(config_dir_path() / "orb_voice"),
+        )
         request.app.state.orb_studio = studio
     return studio
 
@@ -188,3 +204,48 @@ async def orb_advise(payload: OrbAdvisePayload, request: Request) -> dict[str, o
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"advice": advice, "advisor_model": studio.advisor_model}
+
+
+def _voice(request: Request) -> JarvisVoice:
+    voice = orb_studio(request).voice
+    if voice is None:
+        raise HTTPException(status_code=404, detail="This orb has no offline voice.")
+    return voice
+
+
+@router.get("/orb/api/voice")
+def orb_voice_status(request: Request) -> dict[str, object]:
+    require_loopback_admin(request)
+    return _voice(request).status()
+
+
+@router.post("/orb/api/voice/setup")
+def orb_voice_setup(request: Request) -> dict[str, object]:
+    """Download Jarvis's voice once (about 120 MB); it then works offline."""
+    require_loopback_admin(request)
+    voice = _voice(request)
+    voice.start_download()
+    return voice.status()
+
+
+@router.post("/orb/api/voice/settings")
+def orb_voice_settings(payload: OrbVoicePayload, request: Request) -> dict[str, object]:
+    require_loopback_admin(request)
+    voice = _voice(request)
+    try:
+        voice.configure(voice=payload.voice, speed=payload.speed, effect=payload.effect)
+    except VoiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return voice.status()
+
+
+@router.post("/orb/api/speak")
+async def orb_speak(payload: OrbSpeakPayload, request: Request) -> Response:
+    """Speak one sentence with Jarvis's offline voice; returns WAV audio."""
+    require_loopback_admin(request)
+    voice = _voice(request)
+    try:
+        audio = await asyncio.to_thread(voice.synthesize, payload.text)
+    except VoiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return Response(content=audio, media_type="audio/wav")

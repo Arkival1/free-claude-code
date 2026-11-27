@@ -1,3 +1,6 @@
+import tempfile
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from free_claude_code.application.orb import OrbBrain, OrbReply
@@ -152,3 +155,51 @@ def test_advisor_switch_and_advise_endpoint():
     evil = local_client(app, origin="https://evil.example")
     assert evil.post("/orb/api/advisor", json={"model": "x"}).status_code == 403
     assert evil.post("/orb/api/advise", json={"question": "x"}).status_code == 403
+
+
+def test_offline_voice_endpoints():
+    import numpy as np
+
+    from free_claude_code.application.orb import OrbStudio
+    from free_claude_code.application.orb.voice import JarvisVoice
+
+    class Speaker:
+        def get_voice_style(self, name):
+            return np.ones(4, dtype=np.float32)
+
+        def create(self, text, *, voice, speed, lang):
+            return np.zeros(240, dtype=np.float32), 24000
+
+    app = create_test_app()
+    voice = JarvisVoice(Path(tempfile.mkdtemp()), kokoro_factory=lambda m, v: Speaker())
+    app.state.orb_studio = OrbStudio(lambda: "http://127.0.0.1:1234/v1", voice=voice)
+    client = local_client(app)
+    status = client.get("/orb/api/voice").json()
+    assert (
+        status["ready"] is False
+        and status["voice"] == "jarvis"
+        and status["download_mb"] == 121
+    )
+    assert client.post("/orb/api/speak", json={"text": "hello"}).status_code == 503
+    voice_dir = voice.root
+    voice_dir.mkdir(parents=True, exist_ok=True)
+    from free_claude_code.application.orb import voice as voice_mod
+
+    for name, size in (voice_mod.MODEL_FILE, voice_mod.VOICES_FILE):
+        with (voice_dir / name).open("wb") as handle:
+            handle.truncate(size)  # sparse placeholder of the right size
+    spoken = client.post("/orb/api/speak", json={"text": "Good evening, sir."})
+    assert spoken.status_code == 200 and spoken.headers["content-type"] == "audio/wav"
+    assert spoken.content[:4] == b"RIFF"
+    ok = client.post(
+        "/orb/api/voice/settings",
+        json={"voice": "bm_george", "speed": 1.2, "effect": False},
+    )
+    assert ok.json()["voice"] == "bm_george" and ok.json()["effect"] is False
+    assert (
+        client.post("/orb/api/voice/settings", json={"voice": "nope"}).status_code
+        == 400
+    )
+    evil = local_client(app, origin="https://evil.example")
+    assert evil.post("/orb/api/speak", json={"text": "x"}).status_code == 403
+    assert client.get(f"/orb/assets/{package_version()}/core-orb.js").status_code == 200
