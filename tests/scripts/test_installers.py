@@ -4867,3 +4867,20 @@ if ($resolved -ne {str(fallback)!r}) {{
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_install_ps1_orb_only_mode_and_fork_only_source() -> None:
+    powershell = (_repo_root() / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    assert "[switch] $OrbOnly," in powershell
+    assert '[string] $Source = "",' in powershell
+    assert (
+        "'^https://github\\.com/Arkival1/free-claude-code/archive/refs/heads/"
+        "[A-Za-z0-9._/-]+\\.zip$'"
+    ) in powershell
+    assert 'Join-Path $env:USERPROFILE ".fcc\\orb-only"' in powershell
+    orb_block = powershell.split("if ($OrbOnly) {", 1)[1].split("elseif", 1)[0]
+    assert '"InstallClaudeCode"' in orb_block and '"InstallAider"' in orb_block
+    assert (
+        "if (-not $OrbOnly) {\n    Ensure-SelectedCodingAgents"
+        in powershell.replace("\r\n", "\n")
+    )

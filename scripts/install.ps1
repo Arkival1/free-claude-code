@@ -4,6 +4,8 @@ param(
     [switch] $VoiceAll,
     [string] $TorchBackend = "",
     [switch] $Rtk,
+    [switch] $OrbOnly,
+    [string] $Source = "",
     [switch] $DryRun,
     [switch] $Help,
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -15,6 +17,13 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $RepoArchiveUrl = "https://github.com/Arkival1/free-claude-code/archive/refs/heads/main.zip"
+if (-not [string]::IsNullOrWhiteSpace($Source)) {
+    # Only branch archives of this fork, so a one-click package cannot point elsewhere.
+    if ($Source -notmatch '^https://github\.com/Arkival1/free-claude-code/archive/refs/heads/[A-Za-z0-9._/-]+\.zip$') {
+        throw "-Source must be an Arkival1/free-claude-code branch archive URL."
+    }
+    $RepoArchiveUrl = $Source
+}
 # Windows on ARM emulates x64, whose Python package ecosystem has broader wheel support.
 $PythonRequest = "cpython-3.14.0-windows-x86_64-none"
 $MinUvVersion = "0.12.13"
@@ -77,6 +86,8 @@ Options:
   -VoiceAll              Install all voice transcription backends.
   -TorchBackend VALUE    Use a uv PyTorch backend, such as cu130. Requires local voice.
   -Rtk                   Install and configure RTK for the selected coding agents.
+  -OrbOnly               Install only FCC and the JARVIS Orb, no coding agents.
+  -Source URL            Install from an Arkival1/free-claude-code branch archive.
   -DryRun                Print commands without running them.
   -Help                  Show this help text.
 "@
@@ -1676,7 +1687,23 @@ if (-not (Test-InteractiveInstaller)) {
     $script:InstallDsh = $hasDsh -or $hasDryRunToolchain -or (Test-DshToolchain)
 }
 
-if (Test-InteractiveInstaller) {
+$OrbOnlyMarker = Join-Path $env:USERPROFILE ".fcc\orb-only"
+if ((-not $OrbOnly) -and (Test-Path -LiteralPath $OrbOnlyMarker)) {
+    # An orb-only install stays orb-only on updates (fcc-update).
+    $OrbOnly = [switch]::Present
+}
+if ($OrbOnly -and (-not $DryRun)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OrbOnlyMarker) | Out-Null
+    Set-Content -LiteralPath $OrbOnlyMarker -Value "JARVIS Orb only: updates skip coding agents. Delete this file to choose agents again." -Encoding UTF8
+}
+if ($OrbOnly) {
+    # JARVIS Orb only: no coding agents are installed or checked.
+    foreach ($name in @("InstallClaudeCode", "InstallCodex", "InstallPi", "InstallOpenCode", "InstallCline", "InstallHermes", "InstallDsh", "InstallGrok", "InstallMuse", "InstallAider", "PiAvailable", "MuseAvailable", "EnableRtk")) {
+        Set-Variable -Scope Script -Name $name -Value $false
+    }
+    Write-Host "Installing the JARVIS Orb only (no coding agents)."
+}
+elseif (Test-InteractiveInstaller) {
     Write-Step "Choosing coding agents"
     Select-CodingAgents
 }
@@ -1684,8 +1711,10 @@ if (Test-InteractiveInstaller) {
 Write-Step "Ensuring uv $MinUvVersion or newer is installed"
 Ensure-Uv
 
-Ensure-SelectedCodingAgents
-Configure-RtkForSelectedAgents
+if (-not $OrbOnly) {
+    Ensure-SelectedCodingAgents
+    Configure-RtkForSelectedAgents
+}
 
 Write-Step "Installing or updating Free Claude Code"
 Install-FreeClaudeCode
@@ -1696,6 +1725,9 @@ Configure-AndConfirmFreeClaudeCode
 Write-Host ""
 if ($DryRun) {
     Write-Host "Dry run complete. No changes were made."
+}
+elseif ($OrbOnly) {
+    Write-Host "The JARVIS Orb is installed. Open LM Studio, load your model, then double-click JARVIS Orb on your desktop."
 }
 else {
     Write-Host "Free Claude Code is installed and verified. Open the Free Claude Code desktop shortcut to run it in the background."
