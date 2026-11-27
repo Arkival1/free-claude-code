@@ -37,7 +37,7 @@ possible; either way they get the web only.
 
 ## The Orb edition (owner: "only the orb, no plugins, no GitHub, no other models")
 
-Its own small download, `FCC-Orb-<version>.zip` (about 36 MB), marked orb:
+Its own small download, `FCC-Orb-<version>.zip` (about 5 MB), marked orb:
 the page is only the gold core, the talk with Jarvis, his two advisers (⚙:
 name, speciality, model), his approvals and the Stop / PC panel. Jarvis's
 tools are an allow-list (files, web, research, videos, Godot, game art,

@@ -390,7 +390,9 @@ Notes carried over from the long session that built FCC Studio (LCC).
   `/studio/api/orb*`, the page `orb.html/js/css` (gold core in the shared
   `core-orb.js`); PC control always on there, no starter repos, Jarvis's
   turns skip orders/lab/farm/services. Download: `scripts/release_orb_zip.py`
-  (about 36 MB; leaves out the phone app, Linux, demo art, layouts, repos).
+  (about 5 MB; owner: no bundled game data, Godot starters or Godot kit,
+  no phone app, Linux, demo art, layouts, repos or libraries; the godot
+  tool stays, without starters).
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

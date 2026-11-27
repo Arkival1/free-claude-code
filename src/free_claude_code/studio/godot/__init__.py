@@ -228,7 +228,8 @@ def demo_project(demo_id: object) -> dict[str, bytes]:
 
 
 def starter_names() -> tuple[str, ...]:
-    return tuple(STARTER_ART)
+    """The starters this FCC has (the Orb download has none)."""
+    return tuple(name for name in STARTER_ART if (STARTERS / name).is_dir())
 
 
 def starter_files(name: str, title: str = "") -> dict[str, bytes]:
@@ -238,6 +239,11 @@ def starter_files(name: str, title: str = "") -> dict[str, bytes]:
             f"No starter called {name!r}. Starters: {', '.join(STARTER_ART)}."
         )
     folder = STARTERS / name
+    if not folder.is_dir():
+        raise GodotLibraryError(
+            "This FCC has no Godot starters: make the project yourself "
+            "(project.godot, scenes and scripts), then check it with the godot tool."
+        )
     files: dict[str, bytes] = {}
     for path in sorted(folder.rglob("*")):
         if path.is_file():
@@ -275,7 +281,7 @@ _NAME_LINE = re.compile(rb'^config/name=".*"$', re.MULTILINE)
 @cache
 def _starter_prints() -> frozenset[tuple[str, bytes]]:
     prints: set[tuple[str, bytes]] = set()
-    for name in STARTER_ART:
+    for name in starter_names():
         try:
             files = starter_files(name)
         except game_library.GameLibraryError:

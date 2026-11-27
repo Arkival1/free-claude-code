@@ -41,7 +41,6 @@ ORB_TOOLS = frozenset(
         "try_page",
         "test_code",
         "godot",
-        "game_assets",
         "skill",
         "remember",
         "recall",

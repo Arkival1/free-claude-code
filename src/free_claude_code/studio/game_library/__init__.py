@@ -75,6 +75,9 @@ def kind_of(path: str) -> str:
 
 @cache
 def packs() -> tuple[Pack, ...]:
+    if not CATALOGUE.is_file():
+        # The Orb download comes without the Kenney library.
+        return ()
     rows = json.loads(gzip.decompress(CATALOGUE.read_bytes()))
     return tuple(
         Pack(

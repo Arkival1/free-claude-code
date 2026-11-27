@@ -35,8 +35,10 @@ LEFT_OUT = (
     "src/free_claude_code/studio/ui_kit/tabler.zip",
     "src/free_claude_code/studio/godot/demos.json.gz",
     "src/free_claude_code/studio/game_library/phaser-examples.json.gz",
-    # Colour emoji for Godot text (2 MB): the kit falls back to its symbols.
-    "src/free_claude_code/studio/godot/kit/fonts/emoji.ttf",
+    # Owner: no bundled game data, Godot starters or Godot kit in the Orb.
+    "src/free_claude_code/studio/godot/kit/",
+    "src/free_claude_code/studio/godot/starters/",
+    "src/free_claude_code/studio/game_library/kenney-",
     "assets/",
     "vendor/repos/",
     "vendor/cua/",
