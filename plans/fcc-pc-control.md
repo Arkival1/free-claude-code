@@ -35,6 +35,16 @@ Studio set to keep only the last model it loaded). Each advice round costs
 the swaps (roughly 30 to 60 s from the NVMe drive). API advisers stay
 possible; either way they get the web only.
 
+## The Orb edition (owner: "only the orb, no plugins, no GitHub, no other models")
+
+Its own small download, `FCC-Orb-<version>.zip` (about 36 MB), marked orb:
+the page is only the gold core, the talk with Jarvis, his two advisers (⚙:
+name, speciality, model), his approvals and the Stop / PC panel. Jarvis's
+tools are an allow-list (files, web, research, videos, Godot, game art,
+memory, skills; PC tools on the local model); no plugins, GitHub,
+connectors, MCP, starter repos or other agents. "Ask my advisers" runs a
+Playground job: they advise before and check after.
+
 ## Built (Phase 1, branch `claude/jarvis-pc-control`)
 
 - `studio/pc_control.py`: levels, never-list, risky list, folders, Stop,

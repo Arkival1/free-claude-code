@@ -1388,6 +1388,23 @@ _STUDIO_FIELDS: tuple[ConfigFieldSpec, ...] = (
         ),
     ),
     ConfigFieldSpec(
+        "STUDIO_EDITION",
+        "Edition",
+        "studio",
+        "select",
+        settings_attr="studio_edition",
+        options=(
+            ConfigOptionSpec("full", "Full Studio"),
+            ConfigOptionSpec("orb", "Orb only: Jarvis and two advisers"),
+        ),
+        description=(
+            "full: all of Studio. orb: only the orb, where Jarvis (on this "
+            "PC's model, with his hands on the PC) works with two advisers; "
+            "no plugins, GitHub, connectors or other agents. The Orb download "
+            "starts as orb."
+        ),
+    ),
+    ConfigFieldSpec(
         "STUDIO_LOCAL_MODEL_TURNS",
         "Local Models Take Turns",
         "studio",

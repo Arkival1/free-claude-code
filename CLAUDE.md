@@ -382,6 +382,15 @@ Notes carried over from the long session that built FCC Studio (LCC).
   LM Studio keeps only the last model); API advisers stay possible. Stop works from anywhere and survives a restart;
   resume, level and folders only from the PC. Next: his own browser
   (YouTube, Reddit, websites; logins and posting ask), apps and games.
+- The Orb edition (owner: "only has the orb, no plugins, no GitHub, no
+  other models"; own small download, keeps the 2 advisers):
+  `STUDIO_EDITION=orb` or the zip's `config/EDITION` mark
+  (`config/edition.py`); `studio/orb.py` (`ORB_TOOLS` allow-list, enforced
+  in `AgentToolbox.run` and `_pc_view`), `orb_*` in `service.py`,
+  `/studio/api/orb*`, the page `orb.html/js/css` (gold core in the shared
+  `core-orb.js`); PC control always on there, no starter repos, Jarvis's
+  turns skip orders/lab/farm/services. Download: `scripts/release_orb_zip.py`
+  (about 36 MB; leaves out the phone app, Linux, demo art, layouts, repos).
 - No Freebuff / Codebuff (owner's call): its free tier has no headless
   mode and its privacy policy allows training on and selling data. Don't
   add it or suggest it again. Aider (installed by the owner) is the helper

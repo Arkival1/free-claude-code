@@ -2286,8 +2286,11 @@ class AgentToolbox:
         game_vault: GameVault | None = None,
         godot: GodotEngine | None = None,
         pc_control: PcControl | None = None,
+        only_tools: frozenset[str] | None = None,
     ) -> None:
         self._pc_control = pc_control
+        self._only_tools = only_tools
+        """The Orb edition's allow-list (None: every tool)."""
         self._godot_engine = godot
         """Godot on this PC (downloaded once into the Repo vault)."""
         self._game_vault = game_vault
@@ -2360,6 +2363,11 @@ class AgentToolbox:
         return self._pc_control
 
     @property
+    def only_tools(self) -> frozenset[str] | None:
+        """The only tools agents get in the Orb edition (None: no limit)."""
+        return self._only_tools
+
+    @property
     def every_tool_allowed(self) -> bool:
         """The Every Tool setting: off, agents keep to their own tools."""
         return self._all_tools
@@ -2421,6 +2429,17 @@ class AgentToolbox:
 
     async def run(self, call: ToolCall, context: ToolContext) -> ToolOutcome:
         """Execute one tool call, converting every failure into tool output."""
+        if (
+            self._only_tools is not None
+            and call.name not in self._only_tools
+            and call.name not in PC_TOOLS
+        ):
+            # Checked again here, not only when tools are handed out.
+            return ToolOutcome(
+                text=f"Not done: {call.name} isn't part of the Orb edition.",
+                data={"tool": call.name},
+                failed=True,
+            )
         screened = await self._screen(call, context) if self._screen else None
         if screened is not None:
             return screened

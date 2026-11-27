@@ -948,7 +948,11 @@ class AgentRunner:
                 }
             )
         pc = self._toolbox.pc_control
-        if pc is not None or any(tool in PC_TOOLS for tool in agent.tools):
+        if (
+            pc is not None
+            or self._toolbox.only_tools is not None
+            or any(tool in PC_TOOLS for tool in agent.tools)
+        ):
             agent = self._pc_view(agent, lead=lead, sealed=sealed)
         if not lead:
             # An adviser looks and thinks; it never directs anyone.
@@ -980,7 +984,12 @@ class AgentRunner:
         on. Advisers keep only the web and the tool list (to suggest tools);
         nobody else is handed work."""
         pc = self._toolbox.pc_control
-        tools = tuple(tool for tool in agent.tools if tool not in PC_TOOLS)
+        only = self._toolbox.only_tools
+        tools = tuple(
+            tool
+            for tool in agent.tools
+            if tool not in PC_TOOLS and (only is None or tool in only)
+        )
         if pc is not None:
             model = agent.model or self._default_model
             if (

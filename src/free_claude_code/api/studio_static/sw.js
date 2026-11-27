@@ -6,6 +6,7 @@ const SHELL = [
   "/studio",
   `/studio/assets/${VERSION}/studio.css`,
   `/studio/assets/${VERSION}/studio.js`,
+  `/studio/assets/${VERSION}/core-orb.js`,
   `/studio/assets/${VERSION}/lab.css`,
   `/studio/assets/${VERSION}/lab.js`,
   `/studio/assets/${VERSION}/farm.css`,

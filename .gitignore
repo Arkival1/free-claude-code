@@ -28,3 +28,6 @@ graphify-out/
 
 # FCC Linux build downloads (scripts/linux/build_fcc_linux.py)
 /.cache/
+
+# The Orb download marks itself orb (scripts/release_orb_zip.py); never in git.
+src/free_claude_code/config/EDITION

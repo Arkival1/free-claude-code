@@ -367,6 +367,20 @@ chats, memory, tuning, and classes; `models/` for downloaded model files; and
 `sites/` for websites agents build.
 
 <details>
+<summary><strong>The Orb edition: Jarvis alone on your PC</strong></summary>
+
+A small download (`FCC-Orb-<version>.zip`, built by
+`python scripts/release_orb_zip.py OUT_DIR`) with only the orb: Jarvis on
+this PC's model with his hands on the PC (the PC panel and the red Stop
+button), and two advisers you name and give a speciality and model (⚙). Tick
+**Ask my advisers** for a job they advise on before and check after; they
+search the web and suggest tools, and never touch the PC. No plugins,
+GitHub, connectors, starter repos or other agents. Any FCC becomes the Orb
+with `STUDIO_EDITION=orb`, and back with `full`.
+
+</details>
+
+<details>
 <summary><strong>Studio as a desktop app on Windows</strong></summary>
 
 1. Download this branch as a zip and extract it, for example to `C:\fcc`.

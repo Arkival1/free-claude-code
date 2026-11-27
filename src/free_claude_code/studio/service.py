@@ -30,6 +30,7 @@ from free_claude_code.application.web_tools.ports import (
     WebToolsPort,
     web_fetch_allowed_scheme_set,
 )
+from free_claude_code.config.edition import ORB
 from free_claude_code.config.model_refs import parse_provider_type
 from free_claude_code.config.provider_catalog import PROVIDER_CATALOG
 from free_claude_code.config.settings import Settings
@@ -239,6 +240,7 @@ from .models import (
     now_ms,
 )
 from .obsidian import ObsidianVault, VaultStatus
+from .orb import ADVISER_ROLE, DEFAULT_ADVISERS, ORB_ADVISERS, ORB_TOOLS
 from .orders import (
     Order,
     build_request,
@@ -265,6 +267,7 @@ from .page_try import (
     try_page,
     try_url,
 )
+from .pc_control import ADVISER_TOOLS as WEB_ONLY_TOOLS
 from .pc_control import PcControl
 from .phone_link import (
     MAX_MEMORY_CHARS,
@@ -646,6 +649,9 @@ OWN_MEMORY_FLAG = "extension_agent_memory_v1"
 OWN_MEMORY_TOOLS = ("remember", "recall")
 """A repo agent's own memory (its own area while it thinks on a server)."""
 TOOLSHED_FLAG = "extension_agent_toolshed_v1"
+ORB_FLAG = "orb_advisers"
+"""The Orb's two advisers (agent ids)."""
+ORB_CHAT_FLAG = "orb_chat"
 SUBAGENT_TOOLSHED_FLAG = "subagent_toolshed_v1"
 """Subagents made before 6.98 get the toolshed once."""
 CHANGER_AIDER_FLAG = "changer_aider_v1"
@@ -966,6 +972,17 @@ def _on_this_pc(model: str) -> bool:
     return descriptor is not None and descriptor.local
 
 
+def _adviser_prompt(name: str, speciality: str) -> str:
+    """An Orb adviser's own words: its speciality, and that it only advises."""
+    return (
+        f"You are {name}, one of Jarvis's two advisers. Your speciality: "
+        f"{speciality or 'general advice'}. You give Jarvis and the owner "
+        "ideas, references and checks from your speciality; you can search "
+        "and read the web and suggest tools, but you never do the work or "
+        "touch the PC yourself."
+    )
+
+
 def _default_tools() -> tuple[str, ...]:
     return DEFAULT_TOOL_NAMES
 
@@ -1223,6 +1240,16 @@ class StudioService:
     @property
     def settings(self) -> Settings:
         return self._settings_provider()
+
+    @property
+    def orb(self) -> bool:
+        """The Orb edition: only Jarvis and his two advisers."""
+        return self.settings.studio_edition == ORB
+
+    @property
+    def pc_enabled(self) -> bool:
+        """Jarvis has hands on this PC (always, in the Orb edition)."""
+        return self.settings.studio_pc_control or self.orb
 
     @property
     def store(self) -> StudioStore:
@@ -1904,7 +1931,8 @@ class StudioService:
             new_project=self._new_chat_project,
             game_vault=self.game_vault,
             godot=self.godot,
-            pc_control=self.pc_control if settings.studio_pc_control else None,
+            pc_control=self.pc_control if self.pc_enabled else None,
+            only_tools=ORB_TOOLS if self.orb else None,
         )
 
     async def _new_chat_project(self, context: ToolContext, title: str) -> str:
@@ -6729,6 +6757,12 @@ class StudioService:
 
     async def _prepare_main_turn(self, main: Agent, chat: Chat, text: str) -> str:
         """The clock, plus any orders handed out, for the main AI's reply."""
+        if self.orb:
+            # Jarvis works alone: no orders, lab, farm or services to hand out.
+            self._service_turns.pop(chat.id, None)
+            self._turn_said[chat.id] = text
+            playbook = await self._playbook_guide(text, rules_only=True, tool="")
+            return "\n".join(p for p in (now_line(datetime.now()), playbook) if p)
         switched = await self._carry_out_model_change(main, chat, text)
         if switched:
             return "\n".join((now_line(datetime.now()), switched))
@@ -8433,7 +8467,8 @@ class StudioService:
         is kept in the vault; if GitHub can't be reached it is tried again on
         the next load."""
         await self._builtin_skills()
-        if self._starter_folder is None or self._starters_checked:
+        if self._starter_folder is None or self._starters_checked or self.orb:
+            # The Orb edition comes with no outside repos.
             return []
         async with self._starters_lock:
             if self._starters_checked:
@@ -11075,6 +11110,100 @@ class StudioService:
         }
 
     # ------------------------------------------------------------- main agent
+
+    async def orb_team(self) -> tuple[Agent, tuple[Agent, ...]]:
+        """The Orb: Jarvis and his two advisers (made on first use, on
+        Jarvis's model until the owner gives each its own)."""
+        jarvis = await self.main_agent()
+        flag = await self._store.get(StudioFlag, ORB_FLAG)
+        advisers: list[Agent] = []
+        for agent_id in flag.value.split(",") if flag else ():
+            agent = await self._store.get(Agent, agent_id) if agent_id else None
+            if agent is not None and not agent.archived:
+                advisers.append(agent)
+        made = False
+        while len(advisers) < ORB_ADVISERS:
+            name, speciality = DEFAULT_ADVISERS[len(advisers)]
+            advisers.append(
+                await self.create_agent(
+                    name=name,
+                    role=ADVISER_ROLE,
+                    model=jarvis.model,
+                    system_prompt=_adviser_prompt(name, speciality),
+                    description=speciality,
+                    tools=sorted(WEB_ONLY_TOOLS),
+                    all_tools=False,
+                )
+            )
+            made = True
+        if made or flag is None:
+            await self._store.put(
+                StudioFlag(id=ORB_FLAG, value=",".join(a.id for a in advisers))
+            )
+        return jarvis, tuple(advisers[:ORB_ADVISERS])
+
+    async def orb_state(self) -> JsonObject:
+        jarvis, advisers = await self.orb_team()
+        return {
+            "edition": self.settings.studio_edition,
+            "jarvis": {"id": jarvis.id, "name": jarvis.name, "model": jarvis.model},
+            "advisers": [
+                {
+                    "id": agent.id,
+                    "name": agent.name,
+                    "speciality": agent.description,
+                    "model": agent.model,
+                }
+                for agent in advisers
+            ],
+            "chat_id": (await self.orb_chat()).id,
+        }
+
+    async def orb_chat(self) -> Chat:
+        """The one chat the Orb talks to Jarvis in."""
+        jarvis = await self.main_agent()
+        flag = await self._store.get(StudioFlag, ORB_CHAT_FLAG)
+        chat = await self._store.get(Chat, flag.value) if flag else None
+        if chat is None or chat.archived or chat.agent_id != jarvis.id:
+            chat = await self.create_chat(agent_id=jarvis.id, title="Orb")
+            await self._store.put(StudioFlag(id=ORB_CHAT_FLAG, value=chat.id))
+        return chat
+
+    async def orb_set_jarvis(self, model: str) -> JsonObject:
+        jarvis = await self.main_agent()
+        if not model.strip():
+            raise StudioError("Pick a model for Jarvis.")
+        await self.update_agent(jarvis.id, {"model": model.strip()})
+        return await self.orb_state()
+
+    async def orb_set_adviser(
+        self, slot: int, *, name: str, speciality: str, model: str
+    ) -> JsonObject:
+        """Give one adviser its name, speciality and model."""
+        _, advisers = await self.orb_team()
+        if not 0 <= slot < len(advisers):
+            raise StudioError("There are two advisers: pick 1 or 2.")
+        name, speciality = name.strip()[:60], speciality.strip()[:600]
+        if not name:
+            raise StudioError("An adviser needs a name.")
+        adviser = advisers[slot]
+        updates: JsonObject = {
+            "name": name,
+            "description": speciality,
+            "system_prompt": _adviser_prompt(name, speciality),
+        }
+        if model.strip():
+            updates["model"] = model.strip()
+        await self.update_agent(adviser.id, updates)
+        return await self.orb_state()
+
+    async def orb_ask_advisers(self, goal: str) -> PlaygroundJob:
+        """A job Jarvis does with his own hands, his two advisers advising
+        before and checking after."""
+        jarvis, advisers = await self.orb_team()
+        return await self.start_playground(
+            goal, hands_id=jarvis.id, advisers=[a.id for a in advisers]
+        )
 
     async def main_agent(self) -> Agent:
         """Return the main AI, creating the starter team on first use."""

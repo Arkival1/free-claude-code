@@ -104,6 +104,9 @@ _ASSET_FILENAMES = frozenset(
     {
         "studio.css",
         "studio.js",
+        "core-orb.js",
+        "orb.js",
+        "orb.css",
         "lab.css",
         "lab.js",
         "farm.css",
@@ -414,9 +417,12 @@ def _asset_path(filename: str) -> Path:
 
 
 @router.get("/studio", include_in_schema=False)
-def studio_page(_: None = Access) -> HTMLResponse:
-    """Serve the installable Studio app shell."""
-    template = _asset_path("index.html").read_text(encoding="utf-8")
+def studio_page(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> HTMLResponse:
+    """Serve the installable Studio app shell (the Orb page in the Orb edition)."""
+    page = "orb.html" if studio.orb else "index.html"
+    template = _asset_path(page).read_text(encoding="utf-8")
     return HTMLResponse(template.replace(_ASSET_VERSION_PLACEHOLDER, package_version()))
 
 
@@ -1213,7 +1219,7 @@ class PcRootsBody(BaseModel):
 def _pc_state(studio: StudioService) -> JsonObject:
     pc = studio.pc_control
     return {
-        "enabled": studio.settings.studio_pc_control,
+        "enabled": studio.pc_enabled,
         **pc.state(),
         "log": pc.recent(80),
     }
@@ -1276,6 +1282,77 @@ async def pc_control_roots(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return _pc_state(studio)
+
+
+class OrbJarvisBody(BaseModel):
+    model: str
+
+
+class OrbAdviserBody(BaseModel):
+    name: str
+    speciality: str = ""
+    model: str = ""
+
+
+class OrbSayBody(BaseModel):
+    text: str
+    advisers: bool = False
+
+
+@router.get("/studio/api/orb")
+async def orb_state(
+    studio: StudioService = Depends(get_studio), _: None = Access
+) -> JsonObject:
+    """The Orb: Jarvis, his two advisers, his chat and his PC switches."""
+    return {**await studio.orb_state(), "pc": _pc_state(studio)}
+
+
+@router.post("/studio/api/orb/jarvis")
+async def orb_set_jarvis(
+    body: OrbJarvisBody,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    try:
+        return await studio.orb_set_jarvis(body.model)
+    except StudioError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/studio/api/orb/advisers/{slot}")
+async def orb_set_adviser(
+    slot: int,
+    body: OrbAdviserBody,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Name an adviser, give it its speciality and its model (1 or 2)."""
+    try:
+        return await studio.orb_set_adviser(
+            slot - 1, name=body.name, speciality=body.speciality, model=body.model
+        )
+    except StudioError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/studio/api/orb/say")
+async def orb_say(
+    body: OrbSayBody,
+    studio: StudioService = Depends(get_studio),
+    _: None = Access,
+) -> JsonObject:
+    """Talk to Jarvis; with advisers, a job he does while they advise."""
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="Say something first.")
+    try:
+        if body.advisers:
+            job = await studio.orb_ask_advisers(body.text)
+            return {"job": studio.playground_view(job)}
+        chat = await studio.orb_chat()
+        result = await studio.send(chat.id, body.text)
+    except StudioError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"reply": result.text, "failed": result.failed}
 
 
 @router.get("/studio/api/rooms")

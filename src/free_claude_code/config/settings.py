@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from .constants import DEFAULT_MODEL, HTTP_CONNECT_TIMEOUT_DEFAULT
+from .edition import EDITIONS, packaged_edition
 from .model_refs import parse_model_fallbacks
 from .nim import NimSettings
 from .provider_catalog import (
@@ -898,6 +899,11 @@ class Settings(BaseModel):
     # (levels Off/Look/Ask/Full and a Stop button, studio/pc_control.py) with
     # at most two web-only advisers. Off unless the owner switches it on.
     studio_pc_control: bool = Field(default=False, validation_alias="STUDIO_PC_CONTROL")
+    # "orb": only the orb, Jarvis and two advisers (no plugins, GitHub or
+    # other agents); "full": all of Studio. The Orb download is marked orb.
+    studio_edition: NonEmptyString = Field(
+        default_factory=packaged_edition, validation_alias="STUDIO_EDITION"
+    )
     studio_all_tools: bool = Field(default=True, validation_alias="STUDIO_ALL_TOOLS")
     studio_mcp_server: bool = Field(default=True, validation_alias="STUDIO_MCP_SERVER")
     studio_local_control: bool = Field(
@@ -1088,6 +1094,14 @@ class Settings(BaseModel):
             raise ValueError(
                 f"STUDIO_AGENT_COMMANDS must be 'off', 'ask', or 'auto', got {value!r}"
             )
+        return value
+
+    @field_validator("studio_edition")
+    @classmethod
+    def validate_studio_edition(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in EDITIONS:
+            raise ValueError(f"STUDIO_EDITION must be 'full' or 'orb', got {value!r}")
         return value
 
     @field_validator("studio_voice_engine")
