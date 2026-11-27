@@ -491,6 +491,9 @@ This fork adds a voice orb for a local JARVIS running in LM Studio.
   (`memory_offload`) and reloaded at the start of the next talk (`memory_resume`).
 - JARVIS can speak from LM Studio itself by posting to `http://127.0.0.1:8082/orb/api/say`
   (the `fcc_say` tool in JARVIS 3.5).
+- **Advisor (off by default):** in the orb settings you can let an API model from your FCC
+  providers give JARVIS advice. It can only search and read JARVIS's tool list. It cannot
+  run tools and never sees your chat, memory, notes or files. JARVIS still decides and acts.
 - Install and `fcc-update` use this fork (`Arkival1/free-claude-code`, branch `main`).
 
 ## Manage Your Installation

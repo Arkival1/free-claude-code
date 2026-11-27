@@ -15,6 +15,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from .advisor import ADVISOR_TOOL_NAME, ASK_ADVISOR_TOOL
 from .toolbox import openai_tool, select_tools
 
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
@@ -92,6 +93,8 @@ class OrbBrain:
         self.history: list[dict[str, Any]] = []
         self.memory_note = ""
         self.resumed = False
+        # Set by the studio when the owner turns the read-only API advisor on.
+        self.advise_fn: Callable[[str], str] | None = None
         self._http = http or httpx.Client(timeout=httpx.Timeout(600.0, connect=5.0))
         self._clock = clock
         self._lock = threading.Lock()
@@ -147,6 +150,8 @@ class OrbBrain:
                 openai_tool(t)
                 for t in select_tools(self.toolbox.tools(), text, limit=self.tool_limit)
             ]
+            if self.advise_fn is not None:
+                offered.append(ASK_ADVISOR_TOOL)
             for _ in range(MAX_TOOL_ROUNDS):
                 message = self._complete(self._messages(), offered)
                 calls = message.get("tool_calls") or []
@@ -238,7 +243,10 @@ class OrbBrain:
             arguments = json.loads(raw) if isinstance(raw, str) else dict(raw)
             if not isinstance(arguments, dict):
                 raise ValueError("arguments must be an object")
-            result = self.toolbox.call(name, arguments)
+            if name == ADVISOR_TOOL_NAME:
+                result = self._ask_advisor(arguments)
+            else:
+                result = self.toolbox.call(name, arguments)
         except ValueError as exc:
             result = f"ERROR: the arguments for {name} were not valid JSON ({exc})."
         reply.tools_used.append(name)
@@ -249,6 +257,15 @@ class OrbBrain:
             "tool_call_id": str(call.get("id") or name),
             "content": result,
         }
+
+    def _ask_advisor(self, arguments: Mapping[str, Any]) -> str:
+        advise = self.advise_fn
+        if advise is None:
+            return "ERROR: the advisor is off. The owner can turn it on in the orb settings."
+        try:
+            return advise(str(arguments.get("question", "")))
+        except RuntimeError as exc:
+            return f"ERROR: {exc}"
 
     def _budget(self) -> int:
         return int(self.context_tokens * 0.55)

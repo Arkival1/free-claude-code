@@ -135,3 +135,20 @@ def test_jarvis_can_speak_through_the_orb_inbox():
     client.post("/orb/api/say", json={"text": "Notes saved.", "source": "lmstudio"})
     items = client.get(f"/orb/api/inbox?after={first}").json()["items"]
     assert [(i["text"], i["source"]) for i in items] == [("Notes saved.", "lmstudio")]
+
+
+def test_advisor_switch_and_advise_endpoint():
+    app, _ = app_with_fake_brain()
+    client = local_client(app)
+    off = client.post("/orb/api/advise", json={"question": "which tool?"}).json()
+    assert off["advice"].startswith("ERROR: the advisor is off")
+    assert client.post("/orb/api/advisor", json={"model": "claude-sonnet"}).json() == {
+        "advisor_model": "claude-sonnet"
+    }
+    assert client.get("/orb/api/status").json()["advisor_model"] == "claude-sonnet"
+    assert client.post("/orb/api/advisor", json={"model": None}).json() == {
+        "advisor_model": None
+    }
+    evil = local_client(app, origin="https://evil.example")
+    assert evil.post("/orb/api/advisor", json={"model": "x"}).status_code == 403
+    assert evil.post("/orb/api/advise", json={"question": "x"}).status_code == 403

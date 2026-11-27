@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .advisor import Advisor, Sender, ToolCatalog
 from .brain import OrbBrain, OrbReply
 from .toolbox import McpToolbox
 
@@ -59,10 +60,13 @@ class OrbStudio:
         *,
         toolbox_factory: Callable[[], Any] = McpToolbox.from_lmstudio,
         brain_factory: Callable[..., OrbBrain] = OrbBrain,
+        advisor_sender: Callable[[], Sender] | None = None,
     ) -> None:
         self._base_url_provider = base_url_provider
         self._toolbox_factory = toolbox_factory
         self._brain_factory = brain_factory
+        self._advisor_sender = advisor_sender
+        self.advisor_model: str | None = None  # None = advisor off (the default)
         self._brain: OrbBrain | None = None
         self._toolbox: Any = None
         self._lock = threading.Lock()
@@ -79,6 +83,7 @@ class OrbStudio:
                     toolbox=self._toolbox,
                     skills=bundled_skills(),
                 )
+                self._wire_advisor()
             return self._brain
 
     def ask(self, text: str) -> OrbReply:
@@ -92,6 +97,24 @@ class OrbStudio:
             raise
         finally:
             self.state = "idle"
+
+    def set_advisor(self, model: str | None) -> None:
+        """Turn the read-only API advisor on (with a model name) or off (None)."""
+        self.advisor_model = (model or "").strip() or None
+        with self._lock:
+            self._wire_advisor()
+
+    def advise(self, question: str) -> str:
+        """Ask the advisor. It only ever sees the question and the tool catalogue."""
+        if self.advisor_model is None or self._advisor_sender is None:
+            return "ERROR: the advisor is off. The owner can turn it on in the orb settings."
+        catalog = ToolCatalog(self.brain().toolbox.tools())
+        advisor = Advisor(self._advisor_sender(), model=self.advisor_model)
+        return advisor.advise(question, catalog)
+
+    def _wire_advisor(self) -> None:
+        if self._brain is not None:
+            self._brain.advise_fn = self.advise if self.advisor_model else None
 
     def set_model(self, model: str | None) -> None:
         self.brain().model = model or None
@@ -118,6 +141,7 @@ class OrbStudio:
             "has_memory": bool(brain and brain.memory_note),
             "last_error": self.last_error,
             "last_say_id": self.inbox.last_id,
+            "advisor_model": self.advisor_model,
         }
 
     def close(self) -> None:

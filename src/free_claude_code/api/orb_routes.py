@@ -8,6 +8,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from free_claude_code.application.orb import OrbStudio
+from free_claude_code.application.orb.advisor import fcc_messages_sender
+from free_claude_code.config.server_urls import local_proxy_root_url
 from free_claude_code.core.version import package_version
 
 from .admin_security import require_loopback_admin
@@ -34,6 +36,14 @@ class OrbModelPayload(BaseModel):
     model: str | None = Field(default=None, max_length=300)
 
 
+class OrbAdvisorPayload(BaseModel):
+    model: str | None = Field(default=None, max_length=300)
+
+
+class OrbAdvisePayload(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+
+
 class OrbResumePayload(BaseModel):
     topic: str = Field(default="", max_length=500)
 
@@ -47,7 +57,13 @@ def orb_studio(request: Request) -> OrbStudio:
         def base_url() -> str:
             return services.requests.current_settings().lm_studio_base_url
 
-        studio = OrbStudio(base_url)
+        def advisor_sender():
+            settings = services.requests.current_settings()
+            return fcc_messages_sender(
+                local_proxy_root_url(settings), settings.proxy_auth_token
+            )
+
+        studio = OrbStudio(base_url, advisor_sender=advisor_sender)
         request.app.state.orb_studio = studio
     return studio
 
@@ -151,3 +167,24 @@ def orb_inbox(request: Request, after: int = 0) -> dict[str, object]:
     require_loopback_admin(request)
     studio = orb_studio(request)
     return {"items": studio.inbox.after(after), "state": studio.state}
+
+
+@router.post("/orb/api/advisor")
+def orb_set_advisor(payload: OrbAdvisorPayload, request: Request) -> dict[str, object]:
+    """Turn the read-only API advisor on (model name) or off (null)."""
+    require_loopback_admin(request)
+    studio = orb_studio(request)
+    studio.set_advisor(payload.model)
+    return {"advisor_model": studio.advisor_model}
+
+
+@router.post("/orb/api/advise")
+async def orb_advise(payload: OrbAdvisePayload, request: Request) -> dict[str, object]:
+    """JARVIS (in LM Studio) asks the advisor; it can only read the tool list."""
+    require_loopback_admin(request)
+    studio = orb_studio(request)
+    try:
+        advice = await asyncio.to_thread(studio.advise, payload.question)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"advice": advice, "advisor_model": studio.advisor_model}

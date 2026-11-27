@@ -24,6 +24,9 @@ html, body { margin: 0; height: 100%; background: radial-gradient(circle at 50% 
 #panel { position: fixed; right: 16px; top: 52px; width: 340px; padding: 14px; border-radius: 14px;
   background: rgba(3,14,26,.96); border: 1px solid rgba(63,208,255,.25); display: grid; gap: 10px; font-size: 13px; }
 #panel[hidden] { display: none; }
+#panel label.check { display: block; }
+#panel label.check input { width: auto; margin-right: 6px; }
+#panel small { display: block; color: #7fb6cc; margin-top: 3px; }
 #panel label { display: grid; gap: 4px; }
 #panel select, #panel input { width: 100%; background: #04121f; color: #e6f8ff; border: 1px solid #1d4660; border-radius: 8px; padding: 5px; }
 #panel .row { display: flex; flex-wrap: wrap; gap: 6px; }

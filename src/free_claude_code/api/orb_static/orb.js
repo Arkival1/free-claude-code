@@ -189,6 +189,7 @@
       if (!lastSay) lastSay = s.last_say_id || 0;
       $("info").textContent = `FCC ${s.version} | model: ${s.model || "(loaded model)"} | tool servers: ${(s.servers || []).join(", ") || "none"}`
         + (s.tool_problems && s.tool_problems.length ? `\n${s.tool_problems.join("\n")}` : "")
+        + `\nAdvisor: ${s.advisor_model ? s.advisor_model + " (read-only)" : "off"}`
         + (s.last_error ? `\nLast error: ${s.last_error}` : "");
     } catch { $("dot").className = "bad"; }
   }
@@ -215,6 +216,17 @@
     catch (err) { $("info").textContent = err.message; }
   };
   $("reloadTools").onclick = async () => { $("info").textContent = "Restarting tool servers..."; try { await api("/orb/api/tools/reload", {}); } catch (err) { $("info").textContent = err.message; } refreshStatus(); };
+
+  // ---------- read-only advisor (off unless the owner turns it on) ----------
+  function sendAdvisor() {
+    const on = store.get("advisorOn", false), model = store.get("advisorModel", "claude-sonnet");
+    return api("/orb/api/advisor", { model: on && model ? model : null }).catch((err) => { $("info").textContent = err.message; });
+  }
+  $("advisorOn").checked = store.get("advisorOn", false);
+  $("advisorModel").value = store.get("advisorModel", "claude-sonnet");
+  $("advisorOn").onchange = (e) => { store.set("advisorOn", e.target.checked); sendAdvisor(); };
+  $("advisorModel").onchange = (e) => { store.set("advisorModel", e.target.value.trim()); sendAdvisor(); };
+  sendAdvisor();
 
   paintVoiceToggle(); refreshStatus(); setInterval(refreshStatus, 15000); pollInbox();
   caption.textContent = "Click the orb and speak, or type below.";
