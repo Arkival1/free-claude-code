@@ -276,3 +276,15 @@ def test_studio_status_before_and_after_first_use(toolbox):
         status["started"] and status["turns"] == 1 and status["servers"] == ["jarvis"]
     )
     assert status["has_memory"] is True
+
+
+def test_tool_text_unwraps_jarvis_results():
+    from free_claude_code.application.orb.brain import tool_text
+
+    assert tool_text('{"ok": true, "result": "Owner likes tea"}') == "Owner likes tea"
+    assert tool_text('{"ok": false, "error": "Permission files disabled"}') == (
+        "ERROR: Permission files disabled"
+    )
+    assert tool_text('{"ok": true, "result": {"saved": "x.md"}}') == '{"saved": "x.md"}'
+    assert tool_text("plain words") == "plain words"
+    assert tool_text('["not", "jarvis"]') == '["not", "jarvis"]'

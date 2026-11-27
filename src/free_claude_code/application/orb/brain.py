@@ -46,6 +46,22 @@ def clean_reply(text: str) -> str:
     return text.strip()
 
 
+def tool_text(raw: str) -> str:
+    """Plain text from a tool result, unwrapping JARVIS's {"ok", "result"} JSON."""
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return raw
+    if not isinstance(data, dict) or "ok" not in data:
+        return raw
+    if not data.get("ok"):
+        return f"ERROR: {data.get('error', 'the tool failed')}"
+    value = data.get("result")
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
 def estimate_tokens(messages: Sequence[Mapping[str, Any]]) -> int:
     return sum(len(json.dumps(m, ensure_ascii=False)) for m in messages) // 3 + 1
 
@@ -289,7 +305,7 @@ class OrbBrain:
         if not tool:
             return ""
         stamp = self._clock().strftime("%Y-%m-%d %H:%M")
-        return self.toolbox.call(
+        raw = self.toolbox.call(
             tool,
             {
                 "title": f"Orb conversation {stamp}",
@@ -298,6 +314,7 @@ class OrbBrain:
                 "tags": ["orb", "conversation"],
             },
         )
+        return tool_text(raw)
 
     def _remember(self, summary: str) -> None:
         note = (self.memory_note + "\n\n" + summary).strip()
@@ -307,7 +324,7 @@ class OrbBrain:
         tool = self.toolbox.has("memory_resume")
         if not tool:
             return ""
-        result = self.toolbox.call(tool, {"query": topic, "max_chars": 3000})
+        result = tool_text(self.toolbox.call(tool, {"query": topic, "max_chars": 3000}))
         if result and not result.startswith("ERROR"):
             self.memory_note = result[-MEMORY_NOTE_CHARS:]
         return result
