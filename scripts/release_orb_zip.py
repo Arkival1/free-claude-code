@@ -29,6 +29,15 @@ LEFT_OUT = (
     "src/free_claude_code/api/phone_static/",
     "src/free_claude_code/studio/godot/art/",
     "src/free_claude_code/studio/site_layouts/layouts.zip",
+    # Libraries for tools the Orb doesn't have, and the README's pictures.
+    "src/free_claude_code/studio/ui_library/uiverse.json.gz",
+    "src/free_claude_code/studio/bug_library/bugs.json.gz",
+    "src/free_claude_code/studio/ui_kit/tabler.zip",
+    "src/free_claude_code/studio/godot/demos.json.gz",
+    "src/free_claude_code/studio/game_library/phaser-examples.json.gz",
+    # Colour emoji for Godot text (2 MB): the kit falls back to its symbols.
+    "src/free_claude_code/studio/godot/kit/fonts/emoji.ttf",
+    "assets/",
     "vendor/repos/",
     "vendor/cua/",
     "vendor/stable-diffusion-cpp/",

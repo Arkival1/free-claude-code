@@ -254,6 +254,9 @@ def project_path(item: Pack, path: str) -> str:
 
 @cache
 def examples() -> tuple[Example, ...]:
+    if not EXAMPLES.is_file():
+        # The Orb download leaves the Phaser examples out.
+        return ()
     rows = json.loads(gzip.decompress(EXAMPLES.read_bytes()))
     return tuple(Example(**row) for row in rows)
 

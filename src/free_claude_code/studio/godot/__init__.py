@@ -94,6 +94,9 @@ class Demo:
 
 @cache
 def _demos() -> tuple[str, tuple[Demo, ...]]:
+    if not DEMOS.is_file():
+        # The Orb download leaves the demo library out.
+        return "", ()
     payload = json.loads(gzip.decompress(DEMOS.read_bytes()))
     demos = tuple(
         Demo(
