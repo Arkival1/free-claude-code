@@ -52,6 +52,7 @@ def test_cli_scripts_are_registered() -> None:
     }
     assert pyproject["project"]["gui-scripts"] == {
         "fcc-desktop": "free_claude_code.cli.desktop_entrypoint:launch",
+        "fcc-orb": "free_claude_code.cli.orb:launch",
     }
 
 

@@ -8,6 +8,9 @@ from pystray import Icon, Menu, MenuItem
 
 from free_claude_code.cli.desktop import DesktopController, launch_desktop
 from free_claude_code.cli.desktop_assets import app_icon_bytes
+from free_claude_code.cli.orb import open_orb_window, orb_url
+from free_claude_code.config.loader import get_settings
+from free_claude_code.config.server_urls import local_proxy_root_url
 
 
 class PystrayDesktopTray:
@@ -21,6 +24,7 @@ class PystrayDesktopTray:
             "Free Claude Code",
             Menu(
                 MenuItem("Open Admin", self._open_admin, default=True),
+                MenuItem("Open JARVIS Orb", self._open_orb),
                 MenuItem("Check Server Status", self._check_status),
                 MenuItem("Restart Server", self._restart_server),
                 Menu.SEPARATOR,
@@ -40,6 +44,9 @@ class PystrayDesktopTray:
 
     def _open_admin(self, _icon: Icon, _item: MenuItem) -> None:
         self._controller.open_admin()
+
+    def _open_orb(self, _icon: Icon, _item: MenuItem) -> None:
+        open_orb_window(orb_url(local_proxy_root_url(get_settings())))
 
     def _check_status(self, _icon: Icon, _item: MenuItem) -> None:
         self._icon.notify(

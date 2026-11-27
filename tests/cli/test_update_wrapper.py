@@ -13,7 +13,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-INSTALL_URL = "https://raw.githubusercontent.com/Alishahryar1/free-claude-code/main/scripts/install"
+INSTALL_URL = (
+    "https://raw.githubusercontent.com/Arkival1/free-claude-code/main/scripts/install"
+)
 SCRIPTS = ("fcc-update", "fcc-update.cmd")
 
 

@@ -14,7 +14,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-$RepoArchiveUrl = "https://github.com/Alishahryar1/free-claude-code/archive/refs/heads/main.zip"
+$RepoArchiveUrl = "https://github.com/Arkival1/free-claude-code/archive/refs/heads/main.zip"
 # Windows on ARM emulates x64, whose Python package ecosystem has broader wheel support.
 $PythonRequest = "cpython-3.14.0-windows-x86_64-none"
 $MinUvVersion = "0.12.13"
@@ -48,6 +48,7 @@ $script:EnableRtk = $Rtk.IsPresent
 $FccCommands = @(
     # Include retired entry points so updates reject older FCC processes before replacement.
     "fcc-desktop",
+    "fcc-orb",
     "fcc-server",
     "fcc-claude",
     "fcc-codex",
@@ -1485,13 +1486,16 @@ function Configure-AndConfirmFreeClaudeCode {
     if ($DryRun) {
         Write-Host "+ uv tool update-shell"
         Write-Host "+ uv tool dir --bin"
-        Write-Host "+ verify fcc-desktop, fcc-server, fcc-claude, fcc-codex, fcc-pi, fcc-opencode, fcc-cline, fcc-hermes, fcc-dsh, fcc-grok, fcc-muse, and fcc-aider in the uv tool bin directory"
+        Write-Host "+ verify fcc-desktop, fcc-orb, fcc-server, fcc-claude, fcc-codex, fcc-pi, fcc-opencode, fcc-cline, fcc-hermes, fcc-dsh, fcc-grok, fcc-muse, and fcc-aider in the uv tool bin directory"
         Write-Host "+ fcc-server --version"
         Export-FccDesktopIcon `
             -DesktopCommand "<uv-tool-bin>\fcc-desktop.exe" `
             -IconPath $iconPath
         Install-FccDesktopShortcuts `
             -DesktopCommand "<uv-tool-bin>\fcc-desktop.exe" `
+            -IconPath $iconPath
+        Install-JarvisOrbShortcuts `
+            -OrbCommand "<uv-tool-bin>\fcc-orb.exe" `
             -IconPath $iconPath
         return
     }
@@ -1507,7 +1511,7 @@ function Configure-AndConfirmFreeClaudeCode {
         [IO.Path]::AltDirectorySeparatorChar
     )
     $installedCommands = @{}
-    foreach ($commandName in @("fcc-desktop", "fcc-server", "fcc-claude", "fcc-codex", "fcc-pi", "fcc-opencode", "fcc-cline", "fcc-hermes", "fcc-dsh", "fcc-grok", "fcc-muse", "fcc-aider", "fcc-update.cmd")) {
+    foreach ($commandName in @("fcc-desktop", "fcc-orb", "fcc-server", "fcc-claude", "fcc-codex", "fcc-pi", "fcc-opencode", "fcc-cline", "fcc-hermes", "fcc-dsh", "fcc-grok", "fcc-muse", "fcc-aider", "fcc-update.cmd")) {
         $command = Get-ApplicationCommand $commandName
         if (-not $command) {
             throw "Free Claude Code installation did not create '$commandName'."
@@ -1529,6 +1533,9 @@ function Configure-AndConfirmFreeClaudeCode {
     Install-FccDesktopShortcuts `
         -DesktopCommand $installedCommands["fcc-desktop"] `
         -IconPath $iconPath
+    Install-JarvisOrbShortcuts `
+        -OrbCommand $installedCommands["fcc-orb"] `
+        -IconPath $iconPath
 }
 
 function Test-EquivalentPath {
@@ -1549,6 +1556,49 @@ function Test-EquivalentPath {
     }
     catch {
         return $false
+    }
+}
+
+function Install-JarvisOrbShortcuts {
+    param(
+        [string] $OrbCommand,
+        [string] $IconPath
+    )
+
+    $shortcutPaths = @(
+        (Join-Path $env:USERPROFILE "Desktop\JARVIS Orb.lnk"),
+        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\JARVIS Orb.lnk")
+    )
+    foreach ($shortcutPath in $shortcutPaths) {
+        Write-Host "+ create shortcut $(Format-Argument $shortcutPath) -> $(Format-Argument $OrbCommand)"
+    }
+    if ($DryRun) {
+        return
+    }
+
+    $shell = New-Object -ComObject WScript.Shell
+    foreach ($shortcutPath in $shortcutPaths) {
+        if (Test-Path -LiteralPath $shortcutPath) {
+            try {
+                $existingShortcut = $shell.CreateShortcut($shortcutPath)
+                $isOrbShortcut = Test-EquivalentPath -Left $existingShortcut.TargetPath -Right $OrbCommand
+            }
+            catch {
+                $isOrbShortcut = $false
+            }
+            if (-not $isOrbShortcut) {
+                Write-Host "A shortcut not managed by Free Claude Code already exists at $shortcutPath; leaving it unchanged."
+                continue
+            }
+        }
+        $parent = Split-Path -Parent $shortcutPath
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $OrbCommand
+        $shortcut.WorkingDirectory = $env:USERPROFILE
+        $shortcut.IconLocation = "$IconPath,0"
+        $shortcut.Description = "Talk to JARVIS through the voice orb"
+        $shortcut.Save()
     }
 }
 

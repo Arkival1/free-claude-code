@@ -477,6 +477,22 @@ Restart `fcc-server`. In **Admin UI → Messaging → Voice**, enable voice note
 
 </details>
 
+## JARVIS Orb (voice)
+
+This fork adds a voice orb for a local JARVIS running in LM Studio.
+
+- Double-click **JARVIS Orb** on the desktop (or run `fcc-orb`). FCC starts quietly in
+  the background and the orb opens in its own small window.
+- Click the orb and speak, or type. Each reply types out, then JARVIS reads it aloud
+  with a Windows voice (choose it with the gear button).
+- The orb uses the model loaded in LM Studio and the tool servers in LM Studio's
+  `mcp.json`, such as `jarvis-clean-v3`.
+- Long talks never run out of room: older turns are summarised into the Obsidian vault
+  (`memory_offload`) and reloaded at the start of the next talk (`memory_resume`).
+- JARVIS can speak from LM Studio itself by posting to `http://127.0.0.1:8082/orb/api/say`
+  (the `fcc_say` tool in JARVIS 3.5).
+- Install and `fcc-update` use this fork (`Arkival1/free-claude-code`, branch `main`).
+
 ## Manage Your Installation
 
 Run `fcc-server --version` to check the installed version without starting FCC.

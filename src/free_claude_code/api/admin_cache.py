@@ -42,7 +42,9 @@ def attach_admin_no_store(response: Response, *, path: str) -> None:
 
 
 def _is_admin_path(path: str) -> bool:
-    return path == "/admin" or path.startswith("/admin/")
+    return any(
+        path == root or path.startswith(root + "/") for root in ("/admin", "/orb")
+    )
 
 
 def _set_no_store(headers: MutableHeaders) -> None:

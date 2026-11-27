@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JARVIS</title>
+  <link rel="icon" href="/orb/assets/__FCC_VERSION__/app-icon.svg">
+  <link rel="stylesheet" href="/orb/assets/__FCC_VERSION__/orb.css">
+</head>
+<body>
+  <canvas id="orb" aria-label="JARVIS orb. Click to talk."></canvas>
+  <div id="caption" aria-live="polite"></div>
+  <div id="you"></div>
+  <form id="ask" autocomplete="off">
+    <input id="text" type="text" placeholder="Talk to JARVIS... (or click the orb)" maxlength="20000">
+  </form>
+  <div id="corner">
+    <span id="dot" title="LM Studio connection"></span>
+    <button id="voiceToggle" type="button" title="Voice on/off">Voice on</button>
+    <button id="gear" type="button" title="Settings">&#9881;</button>
+  </div>
+  <div id="panel" hidden>
+    <label>Voice <select id="voice"></select></label>
+    <label>Speed <input id="rate" type="range" min="0.7" max="1.4" step="0.05"></label>
+    <label>Model <select id="model"><option value="">(loaded model)</option></select></label>
+    <div class="row">
+      <button id="testVoice" type="button">Test voice</button>
+      <button id="newChat" type="button" title="Save this conversation to Obsidian and start fresh">New chat (save to memory)</button>
+      <button id="reloadTools" type="button">Reload tools</button>
+    </div>
+    <div id="info"></div>
+  </div>
+  <script src="/orb/assets/__FCC_VERSION__/orb.js"></script>
+</body>
+</html>
