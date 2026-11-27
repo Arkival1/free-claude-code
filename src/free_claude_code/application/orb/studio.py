@@ -10,8 +10,17 @@ from typing import Any
 
 from .advisor import Advisor, Sender, ToolCatalog
 from .brain import OrbBrain, OrbReply
+from .ears import LocalEars
 from .toolbox import McpToolbox
 from .voice import JarvisVoice
+
+LOCAL_MODEL_PREFIXES = ("lmstudio/", "llamacpp/", "ollama/")
+
+
+def is_local_model(model: str) -> bool:
+    """Models FCC serves from this PC (LM Studio, llama.cpp, Ollama)."""
+    return model.strip().lower().startswith(LOCAL_MODEL_PREFIXES)
+
 
 SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 SAY_LIMIT = 4000
@@ -63,6 +72,7 @@ class OrbStudio:
         brain_factory: Callable[..., OrbBrain] = OrbBrain,
         advisor_sender: Callable[[], Sender] | None = None,
         voice: JarvisVoice | None = None,
+        ears: LocalEars | None = None,
     ) -> None:
         self._base_url_provider = base_url_provider
         self._toolbox_factory = toolbox_factory
@@ -74,6 +84,9 @@ class OrbStudio:
         self._lock = threading.Lock()
         self.inbox = SpeechInbox()
         self.voice = voice
+        self.ears = ears
+        # Local only (default): nothing the orb does leaves this PC.
+        self.local_only = True
         self.state = "idle"
         self.last_error = ""
 
@@ -102,10 +115,34 @@ class OrbStudio:
             self.state = "idle"
 
     def set_advisor(self, model: str | None) -> None:
-        """Turn the read-only API advisor on (with a model name) or off (None)."""
-        self.advisor_model = (model or "").strip() or None
+        """Turn the read-only advisor on (with a model name) or off (None)."""
+        model = (model or "").strip() or None
+        if model and self.local_only and not is_local_model(model):
+            raise ValueError(
+                "Local only is on: the advisor must be a model on this PC, "
+                "such as lmstudio/<model name>. Turn Local only off to use an API model."
+            )
+        self.advisor_model = model
         with self._lock:
             self._wire_advisor()
+
+    def set_local_only(self, on: bool) -> None:
+        self.local_only = bool(on)
+        if (
+            self.local_only
+            and self.advisor_model
+            and not is_local_model(self.advisor_model)
+        ):
+            self.set_advisor(None)
+
+    def prepare(self) -> None:
+        """Download the offline voice and ears now (used by fcc-orb --prepare)."""
+        for part in (self.voice, self.ears):
+            if part is not None:
+                part.start_download()
+        for part in (self.voice, self.ears):
+            if part is not None:
+                part.wait()
 
     def advise(self, question: str) -> str:
         """Ask the advisor. It only ever sees the question and the tool catalogue."""
@@ -145,6 +182,7 @@ class OrbStudio:
             "last_error": self.last_error,
             "last_say_id": self.inbox.last_id,
             "advisor_model": self.advisor_model,
+            "local_only": self.local_only,
         }
 
     def close(self) -> None:

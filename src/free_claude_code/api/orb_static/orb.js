@@ -334,20 +334,66 @@
 
   $("ask").addEventListener("submit", (e) => { e.preventDefault(); const v = input.value.trim(); input.value = ""; ask(v); });
 
-  // ---------- microphone ----------
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null;
-  function orbClick() {
+  // ---------- microphone: recorded here, understood by Whisper on this PC ----------
+  let ears = { ready: false };
+  let recorder = null;
+  async function refreshEars(startDownload) {
+    try {
+      ears = await api("/orb/api/ears");
+      if (startDownload && !ears.ready && !ears.downloading) ears = await api("/orb/api/ears/setup", {});
+      $("earsInfo").textContent = ears.ready ? "Ears: Whisper on this PC, offline."
+        : ears.downloading ? `Ears downloading (one time, about ${ears.download_mb} MB). Type until then.`
+        : ears.error || "Ears not set up yet.";
+      if (ears.downloading) setTimeout(() => refreshEars(false), 4000);
+    } catch { ears = { ready: false }; }
+  }
+  async function orbClick() {
     if (state === "speaking") { stopSpeaking(); return; }
-    if (!Recognition) { input.focus(); caption.textContent = "This browser has no speech input. Type instead."; return; }
-    if (rec) { rec.stop(); return; }
-    rec = new Recognition(); rec.lang = store.get("lang", "en-GB"); rec.interimResults = true;
-    setState("listening");
-    let heard = "";
-    rec.onresult = (e) => { heard = Array.from(e.results).map((r) => r[0].transcript).join(" "); you.textContent = heard; };
-    rec.onerror = () => { setState("idle"); };
-    rec.onend = () => { rec = null; if (state === "listening") setState("idle"); if (heard.trim()) ask(heard.trim()); };
-    rec.start();
+    if (recorder) { recorder.stop(); return; }
+    if (busy) return;
+    if (!ears.ready) {
+      caption.textContent = ears.downloading ? "My ears are still downloading, sir. Type for now." : "My ears are not set up yet. Type for now.";
+      input.focus(); return;
+    }
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+    catch { caption.textContent = "I can't use the microphone. Allow it for this window, or type."; return; }
+    const chunks = [], started = performance.now();
+    const rec = new MediaRecorder(stream);
+    recorder = rec;
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    // Stop by itself after you finish speaking (1.4 s of quiet) or after 30 s.
+    let heard = false, quietSince = 0;
+    try {
+      const ctxA = new AudioContext(), an = ctxA.createAnalyser(), buf = new Uint8Array(512);
+      an.fftSize = 512; ctxA.createMediaStreamSource(stream).connect(an);
+      const watch = () => {
+        if (recorder !== rec) { ctxA.close(); return; }
+        an.getByteTimeDomainData(buf);
+        let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+        audioLevel = Math.min(1, peak / 60);
+        const now = performance.now();
+        if (peak > 12) { heard = true; quietSince = now; }
+        if ((heard && now - quietSince > 1400) || now - started > 30000) { rec.stop(); return; }
+        requestAnimationFrame(watch);
+      };
+      watch();
+    } catch { /* no level meter: click the orb to stop */ }
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      recorder = null; audioLevel = 0;
+      if (!heard && !chunks.length) { setState("idle"); you.textContent = ""; return; }
+      setState("thinking"); you.textContent = "...";
+      try {
+        const res = await fetch("/orb/api/listen", { method: "POST", headers: { "Content-Type": rec.mimeType || "audio/webm" }, body: new Blob(chunks, { type: rec.mimeType || "audio/webm" }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        setState("idle");
+        if (data.text) ask(data.text); else { you.textContent = ""; caption.textContent = "I didn't catch that, sir."; }
+      } catch (err) { setState("idle"); you.textContent = ""; caption.textContent = "Problem: " + err.message; }
+    };
+    rec.start(250);
+    setState("listening"); you.textContent = "Listening... (click the orb when you're done)";
   }
   canvas.addEventListener("click", orbClick);
   coreCanvas.addEventListener("click", orbClick);
@@ -373,6 +419,7 @@
       $("info").textContent = `FCC ${s.version} | model: ${s.model || "(loaded model)"} | tool servers: ${(s.servers || []).join(", ") || "none"}`
         + (s.tool_problems && s.tool_problems.length ? `\n${s.tool_problems.join("\n")}` : "")
         + `\nAdvisor: ${s.advisor_model ? s.advisor_model + " (read-only)" : "off"}`
+        + `\n${s.local_only === false ? "Local only: OFF (an API advisor may be used)" : "Local only: everything stays on this PC"}`
         + (s.last_error ? `\nLast error: ${s.last_error}` : "");
     } catch { $("dot").className = "bad"; }
   }
@@ -382,7 +429,7 @@
   $("voiceToggle").onclick = () => { voiceOn = !voiceOn; store.set("voiceOn", voiceOn); if (!voiceOn) stopSpeaking(); paintVoiceToggle(); };
   $("gear").onclick = async () => {
     const p = $("panel"); p.hidden = !p.hidden; if (p.hidden) return;
-    await refreshVoice(false); fillVoices(); $("rate").value = store.get("rate", 1.0); refreshStatus();
+    await refreshVoice(false); await refreshEars(false); fillVoices(); $("rate").value = store.get("rate", 1.0); refreshStatus();
     try {
       const m = await api("/orb/api/models"), sel = $("model");
       sel.innerHTML = '<option value="">(loaded model)</option>';
@@ -412,14 +459,23 @@
 
   // ---------- read-only advisor (off unless the owner turns it on) ----------
   function sendAdvisor() {
-    const on = store.get("advisorOn", false), model = store.get("advisorModel", "claude-sonnet");
-    return api("/orb/api/advisor", { model: on && model ? model : null }).catch((err) => { $("info").textContent = err.message; });
+    const on = store.get("advisorOn", false), model = store.get("advisorModel", "");
+    return api("/orb/api/advisor", { model: on && model ? model : null }).catch((err) => {
+      $("info").textContent = err.message; store.set("advisorOn", false); $("advisorOn").checked = false;
+    });
   }
+  async function sendPrivacy() {
+    try { await api("/orb/api/privacy", { local_only: store.get("localOnly", true) }); } catch { /* older FCC */ }
+    $("advisorModel").placeholder = store.get("localOnly", true) ? "lmstudio/<model name>" : "lmstudio/<model> or an API model";
+  }
+  $("localOnly").checked = store.get("localOnly", true);
+  $("localOnly").onchange = async (e) => { store.set("localOnly", e.target.checked); await sendPrivacy(); sendAdvisor(); };
   $("advisorOn").checked = store.get("advisorOn", false);
-  $("advisorModel").value = store.get("advisorModel", "claude-sonnet");
+  $("advisorModel").value = store.get("advisorModel", "");
   $("advisorOn").onchange = (e) => { store.set("advisorOn", e.target.checked); sendAdvisor(); };
   $("advisorModel").onchange = (e) => { store.set("advisorModel", e.target.value.trim()); sendAdvisor(); };
-  sendAdvisor();
+  sendPrivacy().then(sendAdvisor);
+  refreshEars(true);
 
   refreshVoice(true).then(() => {
     const kv = chosen().startsWith("kokoro:") ? chosen().slice(7) : null;

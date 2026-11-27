@@ -13,7 +13,7 @@
   <div id="caption" aria-live="polite"></div>
   <div id="you"></div>
   <form id="ask" autocomplete="off">
-    <input id="text" type="text" placeholder="Talk to JARVIS... (or click the orb)" maxlength="20000">
+    <input id="text" type="text" placeholder="Talk to JARVIS... (or click the orb to speak)" maxlength="20000">
   </form>
   <div id="corner">
     <span id="dot" title="LM Studio connection"></span>
@@ -27,9 +27,12 @@
     <label class="check"><input id="effect" type="checkbox" checked> AI-in-the-room effect (original Jarvis sound)</label>
     <label>Speed <input id="rate" type="range" min="0.7" max="1.4" step="0.05"></label>
     <label>Model <select id="model"><option value="">(loaded model)</option></select></label>
-    <label class="check"><input id="advisorOn" type="checkbox"> Advisor: let an API model give JARVIS advice
+    <label class="check"><input id="localOnly" type="checkbox" checked> Local only: nothing leaves this PC
+      <small>Voice, ears, model and advisor all run here. Turn off only to let an API advisor help.</small></label>
+    <div id="earsInfo" class="hint"></div>
+    <label class="check"><input id="advisorOn" type="checkbox"> Advisor: let a second model give JARVIS advice
       <small>It can only search and read JARVIS's tool list. It cannot run tools or see your notes, memory or files.</small></label>
-    <label>Advisor model (from your FCC providers) <input id="advisorModel" type="text" placeholder="claude-sonnet"></label>
+    <label>Advisor model <input id="advisorModel" type="text" placeholder="lmstudio/&lt;model name&gt;"></label>
     <div class="row">
       <button id="testVoice" type="button">Test voice</button>
       <button id="newChat" type="button" title="Save this conversation to Obsidian and start fresh">New chat (save to memory)</button>

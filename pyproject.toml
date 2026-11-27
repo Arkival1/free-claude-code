@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.4.0"
+version = "6.5.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -34,6 +34,8 @@ dependencies = [
     "simplejson>=4.1.2",
     # JARVIS Orb's offline voice (Kokoro, the original Jarvis blend).
     "kokoro-onnx>=0.4.9",
+    # JARVIS Orb's offline ears (Whisper on this PC; nothing goes to the cloud).
+    "faster-whisper>=1.1.0",
 ]
 
 [project.scripts]

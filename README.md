@@ -488,14 +488,19 @@ This fork adds a voice orb for a local JARVIS running in LM Studio.
   his own offline voice: Kokoro, the original "Jarvis" blend of two British voices
   (George 60%, Lewis 40%) with the AI-in-the-room effect. The voice files (about 120 MB)
   download once the first time the orb opens; a Windows voice speaks until then.
+- Click the orb to talk: your voice is understood by Whisper running on your PC
+  (faster-whisper, about 145 MB, downloaded once). Nothing is sent to an online service.
+- **Local only** is on by default: the model, voice, ears and memory all run on this PC, and
+  the advisor can only be a local model (`lmstudio/<model>`). `fcc-orb --prepare`
+  downloads the voice and ears ahead of time.
 - The orb uses the model loaded in LM Studio and the tool servers in LM Studio's
   `mcp.json`, such as `jarvis-clean-v3`.
 - Long talks never run out of room: older turns are summarised into the Obsidian vault
   (`memory_offload`) and reloaded at the start of the next talk (`memory_resume`).
 - JARVIS can speak from LM Studio itself by posting to `http://127.0.0.1:8082/orb/api/say`
   (the `fcc_say` tool in JARVIS 3.5).
-- **Advisor (off by default):** in the orb settings you can let an API model from your FCC
-  providers give JARVIS advice. It can only search and read JARVIS's tool list. It cannot
+- **Advisor (off by default):** in the orb settings you can let a second model give JARVIS
+  advice (only a local one while Local only is on). It can only search and read JARVIS's tool list. It cannot
   run tools and never sees your chat, memory, notes or files. JARVIS still decides and acts.
 - Install and `fcc-update` use this fork (`Arkival1/free-claude-code`, branch `main`).
 

@@ -1,6 +1,6 @@
 # The advisor (only when the ask_advisor tool is offered)
 
-The advisor is a bigger online model. It can only read your tool list and give advice; it
+The advisor is another model (on this PC when Local only is on). It can only read your tool list and give advice; it
 cannot act, and it sees nothing except your question.
 - Use it when you are unsure which tools to use or in what order, or after a tool failed twice.
 - Ask in general terms ("Which tools turn a YouTube link into Obsidian notes?"). Never put

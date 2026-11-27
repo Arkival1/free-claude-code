@@ -145,10 +145,10 @@ def test_advisor_switch_and_advise_endpoint():
     client = local_client(app)
     off = client.post("/orb/api/advise", json={"question": "which tool?"}).json()
     assert off["advice"].startswith("ERROR: the advisor is off")
-    assert client.post("/orb/api/advisor", json={"model": "claude-sonnet"}).json() == {
-        "advisor_model": "claude-sonnet"
+    assert client.post("/orb/api/advisor", json={"model": "lmstudio/qwen"}).json() == {
+        "advisor_model": "lmstudio/qwen"
     }
-    assert client.get("/orb/api/status").json()["advisor_model"] == "claude-sonnet"
+    assert client.get("/orb/api/status").json()["advisor_model"] == "lmstudio/qwen"
     assert client.post("/orb/api/advisor", json={"model": None}).json() == {
         "advisor_model": None
     }
@@ -203,3 +203,42 @@ def test_offline_voice_endpoints():
     evil = local_client(app, origin="https://evil.example")
     assert evil.post("/orb/api/speak", json={"text": "x"}).status_code == 403
     assert client.get(f"/orb/assets/{package_version()}/core-orb.js").status_code == 200
+
+
+def test_listen_privacy_and_local_advisor_routes():
+    from free_claude_code.application.orb import OrbStudio
+    from free_claude_code.application.orb.ears import LocalEars
+
+    class Whisper:
+        def transcribe(self, audio, **kw):
+            from types import SimpleNamespace
+
+            return iter([SimpleNamespace(text=" hello jarvis ")]), None
+
+    root = Path(tempfile.mkdtemp())
+    ears = LocalEars(
+        root, model_factory=lambda p: Whisper(), decoder=lambda a: [0.0] * 16000
+    )
+    app = create_test_app()
+    app.state.orb_studio = OrbStudio(lambda: "http://127.0.0.1:1234/v1", ears=ears)
+    client = local_client(app)
+    assert client.get("/orb/api/ears").json()["ready"] is False
+    assert client.post("/orb/api/listen", content=b"audio").status_code == 503
+    (root / "base.en").mkdir()
+    (root / "base.en" / "model.bin").write_bytes(b"x")
+    heard = client.post(
+        "/orb/api/listen", content=b"audio", headers={"content-type": "audio/webm"}
+    )
+    assert heard.json() == {"text": "hello jarvis"}
+    assert (
+        client.post("/orb/api/advisor", json={"model": "claude-sonnet"}).status_code
+        == 400
+    )
+    assert client.post("/orb/api/advisor", json={"model": "lmstudio/qwen"}).json() == {
+        "advisor_model": "lmstudio/qwen"
+    }
+    off = client.post("/orb/api/privacy", json={"local_only": False}).json()
+    assert off == {"local_only": False, "advisor_model": "lmstudio/qwen"}
+    evil = local_client(app, origin="https://evil.example")
+    assert evil.post("/orb/api/listen", content=b"audio").status_code == 403
+    assert evil.post("/orb/api/privacy", json={"local_only": False}).status_code == 403

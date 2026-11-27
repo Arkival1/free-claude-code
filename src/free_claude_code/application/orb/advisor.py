@@ -54,7 +54,7 @@ ASK_ADVISOR_TOOL: dict[str, Any] = {
     "function": {
         "name": ADVISOR_TOOL_NAME,
         "description": (
-            "Ask the advisor (a bigger online model) for advice on HOW to do a task "
+            "Ask the advisor (another model) for advice on HOW to do a task "
             "with your tools. It can only read your tool list; it cannot act or see "
             "anything. Ask in general terms: never include names, personal details, "
             "passwords, file contents or memories."

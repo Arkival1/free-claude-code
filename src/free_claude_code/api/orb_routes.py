@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from free_claude_code.application.orb import OrbStudio
 from free_claude_code.application.orb.advisor import fcc_messages_sender
+from free_claude_code.application.orb.ears import MAX_AUDIO_BYTES, EarsError, LocalEars
 from free_claude_code.application.orb.voice import JarvisVoice, VoiceError
 from free_claude_code.config.paths import config_dir_path
 from free_claude_code.config.server_urls import local_proxy_root_url
@@ -52,6 +53,10 @@ class OrbVoicePayload(BaseModel):
     effect: bool | None = None
 
 
+class OrbPrivacyPayload(BaseModel):
+    local_only: bool
+
+
 class OrbSpeakPayload(BaseModel):
     text: str = Field(min_length=1, max_length=1500)
 
@@ -79,6 +84,7 @@ def orb_studio(request: Request) -> OrbStudio:
             base_url,
             advisor_sender=advisor_sender,
             voice=JarvisVoice(config_dir_path() / "orb_voice"),
+            ears=LocalEars(config_dir_path() / "orb_ears"),
         )
         request.app.state.orb_studio = studio
     return studio
@@ -190,7 +196,10 @@ def orb_set_advisor(payload: OrbAdvisorPayload, request: Request) -> dict[str, o
     """Turn the read-only API advisor on (model name) or off (null)."""
     require_loopback_admin(request)
     studio = orb_studio(request)
-    studio.set_advisor(payload.model)
+    try:
+        studio.set_advisor(payload.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"advisor_model": studio.advisor_model}
 
 
@@ -249,3 +258,49 @@ async def orb_speak(payload: OrbSpeakPayload, request: Request) -> Response:
     except VoiceError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return Response(content=audio, media_type="audio/wav")
+
+
+@router.post("/orb/api/privacy")
+def orb_privacy(payload: OrbPrivacyPayload, request: Request) -> dict[str, object]:
+    """Local only (default on): the advisor may only use a model on this PC."""
+    require_loopback_admin(request)
+    studio = orb_studio(request)
+    studio.set_local_only(payload.local_only)
+    return {"local_only": studio.local_only, "advisor_model": studio.advisor_model}
+
+
+def _ears(request: Request) -> LocalEars:
+    ears = orb_studio(request).ears
+    if ears is None:
+        raise HTTPException(status_code=404, detail="This orb has no offline ears.")
+    return ears
+
+
+@router.get("/orb/api/ears")
+def orb_ears_status(request: Request) -> dict[str, object]:
+    require_loopback_admin(request)
+    return _ears(request).status()
+
+
+@router.post("/orb/api/ears/setup")
+def orb_ears_setup(request: Request) -> dict[str, object]:
+    """Download Whisper once (about 145 MB); it then works offline."""
+    require_loopback_admin(request)
+    ears = _ears(request)
+    ears.start_download()
+    return ears.status()
+
+
+@router.post("/orb/api/listen")
+async def orb_listen(request: Request) -> dict[str, object]:
+    """Turn a recording from the orb's microphone into text, on this PC."""
+    require_loopback_admin(request)
+    ears = _ears(request)
+    audio = await request.body()
+    if len(audio) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="That recording is too long.")
+    try:
+        text = await asyncio.to_thread(ears.transcribe, audio)
+    except EarsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"text": text}

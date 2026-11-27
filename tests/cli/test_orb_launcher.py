@@ -73,3 +73,30 @@ def test_launch_starts_fcc_when_needed_then_opens_orb(monkeypatch):
     monkeypatch.setattr(orb, "open_orb_window", lambda url: events.append(url))
     orb.launch([])
     assert events[0] == "start" and events[1].endswith("/orb")
+
+
+def test_prepare_downloads_voice_and_ears_and_logs(tmp_path, monkeypatch):
+    started = []
+
+    class Part:
+        def __init__(self, root):
+            self.root = root
+            self.error = ""
+
+        def start_download(self):
+            started.append(self.root.name)
+
+        def wait(self):
+            pass
+
+        def files_ready(self):
+            return True
+
+        def ready(self):
+            return self.root.name == "orb_ears"
+
+    monkeypatch.setattr(orb, "JarvisVoice", Part)
+    monkeypatch.setattr(orb, "LocalEars", Part)
+    assert orb.prepare(tmp_path) is True
+    assert sorted(started) == ["orb_ears", "orb_voice"]
+    assert (tmp_path / "orb_prepare.log").read_text() == "Voice: ready\nEars: ready\n"

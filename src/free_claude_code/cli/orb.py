@@ -12,8 +12,11 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request
 
+from free_claude_code.application.orb.ears import LocalEars
+from free_claude_code.application.orb.voice import JarvisVoice
 from free_claude_code.cli.local_http import open_local_request
 from free_claude_code.config.loader import get_settings
+from free_claude_code.config.paths import config_dir_path
 from free_claude_code.config.server_urls import local_proxy_root_url
 
 _DETACHED = 0x00000008 | 0x00000200 | 0x08000000  # detached, new group, no window
@@ -103,8 +106,30 @@ def open_orb_window(
     return "default browser"
 
 
+def prepare(root: Path | None = None) -> bool:
+    """Download JARVIS's offline voice and ears now, so the orb never needs the
+    internet afterwards. Progress goes to <config>/orb_prepare.log."""
+    base = root or config_dir_path()
+    base.mkdir(parents=True, exist_ok=True)
+    log = base / "orb_prepare.log"
+    voice = JarvisVoice(base / "orb_voice")
+    ears = LocalEars(base / "orb_ears")
+    voice.start_download()
+    ears.start_download()
+    voice.wait()
+    ears.wait()
+    lines = [
+        "Voice: " + ("ready" if voice.files_ready() else voice.error or "not ready"),
+        "Ears: " + ("ready" if ears.ready() else ears.error or "not ready"),
+    ]
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return voice.files_ready() and ears.ready()
+
+
 def launch(argv: Sequence[str] | None = None) -> None:
     args = tuple(sys.argv[1:] if argv is None else argv)
+    if "--prepare" in args:
+        raise SystemExit(0 if prepare() else 1)
     root = local_proxy_root_url(get_settings())
     url = orb_url(root)
     if "--url" in args:

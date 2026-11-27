@@ -202,6 +202,7 @@ def test_brain_offers_advisor_only_when_on_and_never_shares_memory(tmp_path):
     )
     assert studio.advise("anything").startswith("ERROR: the advisor is off")
     studio.brain().memory_note = "SECRET: owner's bank is X"
+    studio.set_local_only(False)
     studio.set_advisor("claude-sonnet")
     reply = studio.ask("Make notes from my video")
     assert reply.text == "Using video_to_notes, sir." and reply.tools_used == [
