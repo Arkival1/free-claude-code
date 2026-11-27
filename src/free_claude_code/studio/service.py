@@ -11150,6 +11150,13 @@ class StudioService:
             await self._store.put(
                 StudioFlag(id=ORB_FLAG, value=",".join(a.id for a in advisers))
             )
+        if self.orb and self._is_local(jarvis.model):
+            # All local: an adviser still on a server model moves to Jarvis's.
+            for index, adviser in enumerate(advisers):
+                if not self._is_local(adviser.model):
+                    advisers[index] = await self.update_agent(
+                        adviser.id, {"model": jarvis.model}
+                    )
         return jarvis, tuple(advisers[:ORB_ADVISERS])
 
     async def _orb_local_model(self) -> str | None:
