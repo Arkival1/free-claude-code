@@ -757,6 +757,9 @@ class Toolshed:
     shelf: tuple[str, ...]
     locked: bool = False
     taken: list[str] = field(default_factory=list)
+    look_only: bool = False
+    """With PC control on, advisers see the shelf to suggest tools to Jarvis
+    but never take any (they keep the web only)."""
 
     def answer(self, call: ToolCall) -> ToolOutcome:
         action = str(call.arguments.get("action") or "list").lower()
@@ -770,6 +773,15 @@ class Toolshed:
                 failed=True,
             )
         here = [name for name in self.shelf if name not in self.taken]
+        if action == "take" and self.look_only:
+            return ToolOutcome(
+                text=(
+                    "Advisers suggest tools to Jarvis; they don't take them. "
+                    "Name the tool in your advice."
+                ),
+                data={"tool": TOOLSHED_TOOL, "look_only": True},
+                failed=True,
+            )
         if action != "take":
             lines = [
                 f"- {name}: {TOOL_SPEC_BY_NAME[name].description.split('. ')[0]}"
@@ -2121,8 +2133,14 @@ class AgentRunner:
             and not (sealed and name in SEALED_TOOLS)
             and not (name == COMMAND_TOOL and not self._toolbox.commands_enabled)
             and not (CHANGER_TOOL in names and name in NEW_PROJECT_TOOLS)
+            # The Orb edition's shelf holds only the Orb's tools.
+            and (self._toolbox.only_tools is None or name in self._toolbox.only_tools)
         ]
-        return Toolshed(shelf=self._toolbox.tool_names(candidates, role=agent.role))
+        return Toolshed(
+            shelf=self._toolbox.tool_names(candidates, role=agent.role),
+            # With PC control on, only Jarvis works; the others only advise.
+            look_only=self._toolbox.pc_control is not None and agent.role != MAIN_ROLE,
+        )
 
     async def _run_calls(
         self,

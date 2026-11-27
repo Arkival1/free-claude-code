@@ -891,6 +891,7 @@ class StudioModelRouter:
         self.swaps: dict[str, str] = {}
         """Models that were missing, and the model used instead."""
         self._turns_on: Callable[[], bool] = lambda: False
+        self._local_only: Callable[[], Awaitable[str | None]] | None = None
         self._prepare_local: Callable[[], Awaitable[None]] | None = None
         self.turns = ModelTurns(loaded=self.loaded_local_models)
 
@@ -902,6 +903,12 @@ class StudioModelRouter:
         """The last reply speed of each local model, when the runtime says."""
         speeds = getattr(self._local, "speeds", None)
         return dict(speeds) if isinstance(speeds, dict) else {}
+
+    def use_local_only(self, pick: Callable[[], Awaitable[str | None]]) -> None:
+        """Keep every call on this PC (the Orb edition): ``pick()`` gives the
+        local model to use for any server model, "" when there is none yet,
+        or None when calls may go to servers."""
+        self._local_only = pick
 
     def use_turns(self, enabled: Callable[[], bool]) -> None:
         """Make local models take turns when ``enabled()`` says so."""
@@ -1038,6 +1045,14 @@ class StudioModelRouter:
         max_tokens: int,
         on_text: Callable[[str], None] | None,
     ) -> LLMReply:
+        if self._local_only is not None and not model.startswith(LOCAL_MODEL_PREFIX):
+            local = await self._local_only()
+            if local is not None:
+                if not local.startswith(LOCAL_MODEL_PREFIX):
+                    raise StudioLLMError(
+                        "The Orb uses only this PC's models: pick one for Jarvis (⚙)."
+                    )
+                model = local
         client, wire_model = self.client_for(model)
         if self._prepare_local is not None and model.startswith(LOCAL_MODEL_PREFIX):
             await self._prepare_local()

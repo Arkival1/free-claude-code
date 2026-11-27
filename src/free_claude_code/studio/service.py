@@ -1043,6 +1043,7 @@ class StudioService:
         # Outside repos that come with FCC (vendor/repos), added on first load.
         self._starter_folder = starter_repos
         self._starters_lock = asyncio.Lock()
+        self._orb_lock = asyncio.Lock()
         self._starters_checked = False
         self._server_models = server_models or (lambda: ())
         self._web_tools = web_tools
@@ -1233,6 +1234,7 @@ class StudioService:
         self._router.use_stand_in(self._stand_in_model)
         self._router.use_fallback(lambda: self.server_model)
         self._router.use_turns(lambda: self.settings.studio_local_model_turns)
+        self._router.use_local_only(self._orb_local_model)
         self._router.before_local(self._engine_before_local)
 
     # ---------------------------------------------------------------- wiring
@@ -1336,7 +1338,8 @@ class StudioService:
     def _server_backup(self, model: str) -> str | None:
         """The server model for a local one while the PC's runtime is off
         (owner, 6.106), when that is switched on and the server has a key."""
-        if not self.settings.studio_local_backup:
+        if not self.settings.studio_local_backup or self.orb:
+            # The Orb is all local: no server model steps in.
             return None
         server = self.server_model
         if not server or self._is_local(server) or not self._has_server_key(server):
@@ -2495,6 +2498,9 @@ class StudioService:
             await self._store.put(main)
             created.append(main)
         for name, role, model, prompt, tools in wanted:
+            if self.orb:
+                # The Orb edition: Jarvis and his two advisers, nobody else.
+                break
             if name in by_name:
                 continue
             if await self._store.get(StudioFlag, f"{REMOVED_DEFAULT_FLAG}{name}"):
@@ -11114,6 +11120,10 @@ class StudioService:
     async def orb_team(self) -> tuple[Agent, tuple[Agent, ...]]:
         """The Orb: Jarvis and his two advisers (made on first use, on
         Jarvis's model until the owner gives each its own)."""
+        async with self._orb_lock:
+            return await self._orb_team()
+
+    async def _orb_team(self) -> tuple[Agent, tuple[Agent, ...]]:
         jarvis = await self.main_agent()
         flag = await self._store.get(StudioFlag, ORB_FLAG)
         advisers: list[Agent] = []
@@ -11142,6 +11152,14 @@ class StudioService:
             )
         return jarvis, tuple(advisers[:ORB_ADVISERS])
 
+    async def _orb_local_model(self) -> str | None:
+        """All local in the Orb: Jarvis's model stands in for any server
+        model ("" until he has one on this PC); None in the full Studio."""
+        if not self.orb:
+            return None
+        jarvis = await self.main_agent()
+        return jarvis.model if self._is_local(jarvis.model) else ""
+
     async def orb_state(self) -> JsonObject:
         jarvis, advisers = await self.orb_team()
         return {
@@ -11162,18 +11180,26 @@ class StudioService:
     async def orb_chat(self) -> Chat:
         """The one chat the Orb talks to Jarvis in."""
         jarvis = await self.main_agent()
-        flag = await self._store.get(StudioFlag, ORB_CHAT_FLAG)
-        chat = await self._store.get(Chat, flag.value) if flag else None
-        if chat is None or chat.archived or chat.agent_id != jarvis.id:
-            chat = await self.create_chat(agent_id=jarvis.id, title="Orb")
-            await self._store.put(StudioFlag(id=ORB_CHAT_FLAG, value=chat.id))
-        return chat
+        async with self._orb_lock:
+            flag = await self._store.get(StudioFlag, ORB_CHAT_FLAG)
+            chat = await self._store.get(Chat, flag.value) if flag else None
+            if chat is None or chat.archived or chat.agent_id != jarvis.id:
+                chat = await self.create_chat(agent_id=jarvis.id, title="Orb")
+                await self._store.put(StudioFlag(id=ORB_CHAT_FLAG, value=chat.id))
+            return chat
 
     async def orb_set_jarvis(self, model: str) -> JsonObject:
         jarvis = await self.main_agent()
-        if not model.strip():
-            raise StudioError("Pick a model for Jarvis.")
+        if not self._is_local(model.strip()):
+            raise StudioError(
+                "Pick a model on this PC for Jarvis: the Orb is all local."
+            )
         await self.update_agent(jarvis.id, {"model": model.strip()})
+        _, advisers = await self.orb_team()
+        for adviser in advisers:
+            if not self._is_local(adviser.model):
+                # Advisers without a model on this PC start on Jarvis's.
+                await self.update_agent(adviser.id, {"model": model.strip()})
         return await self.orb_state()
 
     async def orb_set_adviser(
@@ -11193,14 +11219,31 @@ class StudioService:
             "system_prompt": _adviser_prompt(name, speciality),
         }
         if model.strip():
+            if not self._is_local(model.strip()):
+                raise StudioError(
+                    "Pick a model on this PC for the adviser: the Orb is all local."
+                )
             updates["model"] = model.strip()
         await self.update_agent(adviser.id, updates)
         return await self.orb_state()
+
+    def _orb_needs_local(self, jarvis: Agent) -> None:
+        if self.orb and not self._is_local(jarvis.model):
+            raise StudioError(
+                "Pick Jarvis's model on this PC first (⚙): the Orb is all local."
+            )
+
+    async def orb_say(self, text: str) -> TurnResult:
+        """Talk to Jarvis in the Orb's chat (on this PC's model only)."""
+        self._orb_needs_local(await self.main_agent())
+        chat = await self.orb_chat()
+        return await self.send(chat.id, text)
 
     async def orb_ask_advisers(self, goal: str) -> PlaygroundJob:
         """A job Jarvis does with his own hands, his two advisers advising
         before and checking after."""
         jarvis, advisers = await self.orb_team()
+        self._orb_needs_local(jarvis)
         return await self.start_playground(
             goal, hands_id=jarvis.id, advisers=[a.id for a in advisers]
         )

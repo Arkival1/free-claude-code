@@ -6,7 +6,9 @@ import pytest
 from playwright.sync_api import Page, expect
 
 ORB = pytest.mark.parametrize(
-    "admin_base_url", [{"STUDIO_EDITION": "orb"}], indirect=True
+    "admin_base_url",
+    [{"STUDIO_EDITION": "orb", "STUDIO_MAIN_AGENT_MODEL": "local/e2e-qwen"}],
+    indirect=True,
 )
 
 
@@ -30,6 +32,19 @@ def test_the_orb_page_talks_to_jarvis_and_shows_his_advisers(
     page.locator("#orb-input").press("Enter")
     expect(page.locator(".orb-msg.you")).to_contain_text("hello Jarvis")
     expect(page.locator(".orb-msg.jarvis").first).to_be_visible(timeout=20_000)
+    # All local: the status names the PC's model.
+    expect(page.locator("#orb-status")).to_contain_text("e2e-qwen")
+
+
+@pytest.mark.parametrize("admin_base_url", [{"STUDIO_EDITION": "orb"}], indirect=True)
+def test_the_orb_asks_for_a_model_on_this_pc(page: Page, admin_base_url: str) -> None:
+    page.goto(f"{admin_base_url}/studio")
+    expect(page.locator("#orb-status")).to_have_text(
+        "Pick Jarvis's model on this PC (⚙)"
+    )
+    page.locator("#orb-input").fill("hi")
+    page.locator("#orb-input").press("Enter")
+    expect(page.locator(".orb-msg.failed")).to_contain_text("model on this PC first")
 
 
 @ORB

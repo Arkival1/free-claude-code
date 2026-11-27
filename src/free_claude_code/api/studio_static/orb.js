@@ -119,7 +119,7 @@
         : pc.level === "off"
           ? "PC: off"
           : `PC: ${pc.level}`;
-    statusLine.textContent = `${model}${local ? " (this PC)" : " (API: no PC hands)"} · ${hands}`;
+    statusLine.textContent = local ? `${model} · ${hands}` : "Pick Jarvis's model on this PC (⚙)";
     $("orb-advisers").replaceChildren(
       ...state.advisers.map((adviser) =>
         el("span", { class: "orb-chip", title: adviser.speciality || "" }, [
@@ -193,6 +193,7 @@
   async function followJob(job) {
     const seen = new Set();
     let current = job;
+    let misses = 0;
     for (;;) {
       current.steps.forEach((step, index) => {
         const key = `${index}:${step.status}`;
@@ -206,8 +207,14 @@
       await new Promise((resolve) => setTimeout(resolve, 2000));
       try {
         current = await api(`/studio/api/playground/${current.id}`);
+        misses = 0;
       } catch {
-        // Keep following once FCC answers again.
+        // FCC restarted or the job is gone: stop waiting after about a minute.
+        misses += 1;
+        if (misses >= 30) {
+          addEntry("event", "", "Lost track of that job (FCC may have restarted). Ask Jarvis again.", "failed");
+          return;
+        }
       }
     }
     if (current.summary) addEntry("event", "", current.summary);
@@ -422,17 +429,18 @@
       // The current models still show.
     }
     const local = (models.local && models.local.models) || [];
-    const choices = [
-      ...local.map((id) => [id, `${id.replace(/^local\//, "")} (this PC)`]),
-      ...(models.server || []).map((id) => [id, `${id} (API)`]),
-    ];
+    // All local: only models this PC serves (LM Studio or FCC's engine).
+    const choices = local.map((id) => [id, id.replace(/^local\//, "")]);
     const picker = (current) => {
       const select = el(
         "select",
         {},
         choices.map(([value, label]) => el("option", { value, text: label, selected: value === current })),
       );
-      if (current && !choices.some(([value]) => value === current)) {
+      if (!choices.length && !(current || "").startsWith("local/")) {
+        select.append(el("option", { value: "", text: "Start LM Studio and load a model first" }));
+      }
+      if (current && current.startsWith("local/") && !choices.some(([value]) => value === current)) {
         select.prepend(el("option", { value: current, text: current, selected: true }));
       }
       return select;
@@ -447,7 +455,7 @@
         el("h3", { text: `Adviser ${index + 1}` }),
         el("label", { class: "orb-field" }, [el("span", { text: "Name" }), name]),
         el("label", { class: "orb-field" }, [el("span", { text: "Speciality and role" }), speciality]),
-        el("label", { class: "orb-field" }, [el("span", { text: "Model (a smaller one is fine)" }), model]),
+        el("label", { class: "orb-field" }, [el("span", { text: "Model on this PC (a smaller one is fine)" }), model]),
         el("button", {
           class: "orb-secondary",
           type: "button",
@@ -474,11 +482,11 @@
     openSheet("Jarvis and his advisers", [
       el("p", {
         class: "muted",
-        text: "Jarvis does the work on this PC's model. His two advisers only advise: they search the web and suggest tools, and never touch this PC. With one model loaded at a time, FCC swaps them in when you ask.",
+        text: "All local: Jarvis and his advisers think on this PC's models (LM Studio). Jarvis does the work; his two advisers only advise: they search the web and suggest tools, and never touch this PC. With one model loaded at a time, FCC swaps them in when you ask.",
       }),
       el("div", { class: "orb-card" }, [
         el("h3", { text: "Jarvis" }),
-        el("label", { class: "orb-field" }, [el("span", { text: "Model (pick one on this PC so he has his hands)" }), jarvisModel]),
+        el("label", { class: "orb-field" }, [el("span", { text: "Model on this PC" }), jarvisModel]),
         el("button", {
           class: "orb-secondary",
           type: "button",

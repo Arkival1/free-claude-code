@@ -10,8 +10,6 @@ from .pc_control import ADVISER_TOOLS
 
 ORB_ADVISERS = 2
 ADVISER_ROLE = "assistant"
-ADVISER_TAG = "orb-adviser"
-"""Set in an adviser's description, so the Orb finds its two again."""
 DEFAULT_ADVISERS = (
     ("Idea Adviser", "Game design and fresh ideas: what would make it fun."),
     ("Research Adviser", "Finds references, tutorials and tools on the web."),

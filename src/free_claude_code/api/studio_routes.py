@@ -409,6 +409,18 @@ def get_studio(services: ApiServices = Depends(get_services)) -> StudioService:
 Access = Depends(require_studio_access)
 
 
+def _not_in_orb(studio: StudioService = Depends(get_studio)) -> None:
+    """The Orb edition has no plugins, GitHub, connectors or other agents."""
+    if studio.orb:
+        raise HTTPException(
+            status_code=403,
+            detail="Not in the Orb edition: only Jarvis and his two advisers.",
+        )
+
+
+NotInOrb = Depends(_not_in_orb)
+
+
 def _asset_path(filename: str) -> Path:
     path = STATIC_DIR / filename
     if not path.is_file():
@@ -725,7 +737,7 @@ async def list_agents(
     }
 
 
-@router.post("/studio/api/agents")
+@router.post("/studio/api/agents", dependencies=[NotInOrb])
 async def create_agent(
     payload: AgentPayload,
     studio: StudioService = Depends(get_studio),
@@ -1348,8 +1360,7 @@ async def orb_say(
         if body.advisers:
             job = await studio.orb_ask_advisers(body.text)
             return {"job": studio.playground_view(job)}
-        chat = await studio.orb_chat()
-        result = await studio.send(chat.id, body.text)
+        result = await studio.orb_say(body.text)
     except StudioError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return {"reply": result.text, "failed": result.failed}
@@ -1800,7 +1811,7 @@ async def list_connectors(
     return studio.connectors_view()
 
 
-@router.put("/studio/api/connectors/{connector_id}")
+@router.put("/studio/api/connectors/{connector_id}", dependencies=[NotInOrb])
 async def save_connector(
     connector_id: str,
     payload: ConnectorPayload,
@@ -1826,7 +1837,7 @@ async def remove_connector(
     return studio.connectors_view()
 
 
-@router.post("/studio/api/connectors/{connector_id}/test")
+@router.post("/studio/api/connectors/{connector_id}/test", dependencies=[NotInOrb])
 async def test_connector(
     connector_id: str, studio: StudioService = Depends(get_studio), _: None = Access
 ) -> JsonObject:
@@ -1837,7 +1848,7 @@ async def test_connector(
         return {"ok": False, "message": str(error)}
 
 
-@router.post("/studio/api/connectors/drafts/{draft_id}/send")
+@router.post("/studio/api/connectors/drafts/{draft_id}/send", dependencies=[NotInOrb])
 async def send_draft(
     draft_id: str, studio: StudioService = Depends(get_studio), _: None = Access
 ) -> JsonObject:
@@ -3365,7 +3376,7 @@ async def list_extensions(
     return {"extensions": [_extension(item) for item in await studio.extensions()]}
 
 
-@router.post("/studio/api/extensions")
+@router.post("/studio/api/extensions", dependencies=[NotInOrb])
 async def add_extension(
     payload: ExtensionPayload,
     studio: StudioService = Depends(get_studio),
@@ -3375,7 +3386,7 @@ async def add_extension(
     return _extension(await studio.add_extension(payload.url))
 
 
-@router.post("/studio/api/extensions/upload")
+@router.post("/studio/api/extensions/upload", dependencies=[NotInOrb])
 async def upload_extension(
     request: Request,
     name: str = "repo.zip",
@@ -3404,7 +3415,7 @@ async def list_starters(
     return {"starters": await studio.starters()}
 
 
-@router.post("/studio/api/starters/add")
+@router.post("/studio/api/starters/add", dependencies=[NotInOrb])
 async def add_starter(
     payload: ExtensionPayload,
     studio: StudioService = Depends(get_studio),
@@ -3414,7 +3425,7 @@ async def add_starter(
     return _extension(await studio.add_starter(payload.url))
 
 
-@router.post("/studio/api/extensions/servers")
+@router.post("/studio/api/extensions/servers", dependencies=[NotInOrb])
 async def add_mcp_server(
     payload: ServerPayload,
     studio: StudioService = Depends(get_studio),
@@ -3484,7 +3495,7 @@ async def remove_extension(
     return {"removed": True}
 
 
-@router.post("/studio/api/extensions/{ext_id}/switch")
+@router.post("/studio/api/extensions/{ext_id}/switch", dependencies=[NotInOrb])
 async def switch_extension(
     ext_id: str,
     payload: ServerSwitchPayload,
@@ -3495,7 +3506,7 @@ async def switch_extension(
     return _extension(await studio.switch_extension(ext_id, on=payload.on))
 
 
-@router.post("/studio/api/extensions/{ext_id}/servers/{name}")
+@router.post("/studio/api/extensions/{ext_id}/servers/{name}", dependencies=[NotInOrb])
 async def switch_mcp_server(
     ext_id: str,
     name: str,
@@ -3507,7 +3518,9 @@ async def switch_mcp_server(
     return _extension(await studio.switch_server(ext_id, name, on=payload.on))
 
 
-@router.post("/studio/api/extensions/{ext_id}/servers/{name}/check")
+@router.post(
+    "/studio/api/extensions/{ext_id}/servers/{name}/check", dependencies=[NotInOrb]
+)
 async def check_mcp_server(
     ext_id: str,
     name: str,
@@ -3523,7 +3536,7 @@ async def check_mcp_server(
     }
 
 
-@router.post("/studio/api/extensions/{ext_id}/agents/{name}")
+@router.post("/studio/api/extensions/{ext_id}/agents/{name}", dependencies=[NotInOrb])
 async def add_extension_agent(
     ext_id: str,
     name: str,

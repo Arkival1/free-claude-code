@@ -13,6 +13,7 @@ from free_claude_code.studio.llm import LOCAL_MODEL_PREFIX, ToolCall
 from free_claude_code.studio.orb import ORB_TOOLS
 from free_claude_code.studio.pc_control import ADVISER_TOOLS, PC_TOOLS
 from free_claude_code.studio.playground import ADVISER_PROMPT, REFLECT_PROMPT
+from free_claude_code.studio.service import StudioError
 from free_claude_code.studio.tools import ToolContext
 
 from .conftest import tool_reply
@@ -150,3 +151,86 @@ async def test_the_full_edition_is_unchanged(make_studio) -> None:
     studio, _ = make_studio(respond)
     assert not studio.orb and not studio.pc_enabled
     assert studio._toolbox().only_tools is None
+    assert len(await studio.ensure_defaults()) > 3
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_orb_makes_only_jarvis_and_two_advisers(
+    make_studio, tmp_path: Path
+) -> None:
+    studio, _ = await orb_studio(make_studio, tmp_path)
+    await asyncio.gather(studio.orb_state(), studio.orb_state())
+    names = sorted(agent.name for agent in await studio.agents())
+    assert names == ["Idea Adviser", "Jarvis", "Research Adviser"]
+    chats = await studio.chats()
+    assert len([chat for chat in chats if chat.title == "Orb"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_all_local_server_calls_run_on_jarviss_model(
+    make_studio, tmp_path: Path
+) -> None:
+    studio, fake = await orb_studio(make_studio, tmp_path)
+    from free_claude_code.studio.llm import ChatMessage, StudioLLMError
+
+    await studio._router.complete(
+        [ChatMessage.user("hi")], model="nvidia_nim/some-big-server-model"
+    )
+    assert fake.calls[-1]["model"] == "qwen3.5-9b"
+    # No server model stands in while LM Studio is off.
+    assert studio._server_backup(LOCAL) is None
+    with pytest.raises(StudioError, match="all local"):
+        await studio.orb_set_jarvis("nvidia_nim/some-big-server-model")
+    with pytest.raises(StudioError, match="all local"):
+        await studio.orb_set_adviser(
+            1, name="Researcher", speciality="", model="open_router/x"
+        )
+    # Jarvis on a server model: nothing runs until he has one on this PC.
+    jarvis = await studio.main_agent()
+    await studio.update_agent(jarvis.id, {"model": "nvidia_nim/x"})
+    with pytest.raises(StudioLLMError, match="only this PC's models"):
+        await studio._router.complete([ChatMessage.user("hi")], model="nvidia_nim/x")
+
+
+def test_advisers_only_look_at_the_toolshed() -> None:
+    from free_claude_code.studio.agents import Toolshed
+
+    shed = Toolshed(shelf=("write_file", "godot"), look_only=True)
+    listed = shed.answer(ToolCall(id="1", name="toolshed", arguments={}))
+    assert "write_file" in listed.text
+    took = shed.answer(
+        ToolCall(
+            id="2",
+            name="toolshed",
+            arguments={"action": "take", "tools": ["write_file"]},
+        )
+    )
+    assert took.failed and not shed.taken
+
+
+@pytest.mark.asyncio
+async def test_plugin_github_connector_and_agent_routes_are_refused(
+    make_studio, tmp_path: Path
+) -> None:
+    studio, _ = await orb_studio(make_studio, tmp_path)
+    from fastapi import HTTPException
+
+    from free_claude_code.api import studio_routes
+
+    with pytest.raises(HTTPException) as refused:
+        studio_routes._not_in_orb(studio=studio)
+    assert refused.value.status_code == 403
+    gated = {
+        str(getattr(route, "path", ""))
+        for route in studio_routes.router.routes
+        if any(
+            getattr(dep, "dependency", None) is studio_routes._not_in_orb
+            for dep in getattr(route, "dependencies", ())
+        )
+    }
+    assert {
+        "/studio/api/agents",
+        "/studio/api/extensions",
+        "/studio/api/starters/add",
+        "/studio/api/connectors/{connector_id}",
+    } <= gated
