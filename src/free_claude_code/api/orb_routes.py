@@ -9,8 +9,14 @@ from pydantic import BaseModel, Field
 
 from free_claude_code.application.orb import OrbStudio
 from free_claude_code.application.orb.advisor import fcc_messages_sender
-from free_claude_code.application.orb.ears import MAX_AUDIO_BYTES, EarsError, LocalEars
+from free_claude_code.application.orb.ears import (
+    MAX_AUDIO_BYTES,
+    MAX_FILE_BYTES,
+    EarsError,
+    LocalEars,
+)
 from free_claude_code.application.orb.voice import JarvisVoice, VoiceError
+from free_claude_code.application.orb.youtube import YouTubeAudio, YouTubeError
 from free_claude_code.config.paths import config_dir_path
 from free_claude_code.config.server_urls import local_proxy_root_url
 from free_claude_code.core.version import package_version
@@ -51,6 +57,10 @@ class OrbVoicePayload(BaseModel):
     voice: str | None = Field(default=None, max_length=40)
     speed: float | None = Field(default=None, ge=0.6, le=1.5)
     effect: bool | None = None
+
+
+class OrbYouTubePayload(BaseModel):
+    url: str = Field(min_length=10, max_length=400)
 
 
 class OrbPrivacyPayload(BaseModel):
@@ -304,3 +314,66 @@ async def orb_listen(request: Request) -> dict[str, object]:
     except EarsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"text": text}
+
+
+@router.post("/orb/api/transcribe")
+async def orb_transcribe(request: Request) -> dict[str, object]:
+    """Transcribe a whole audio file on this PC (used by JARVIS's video notes)."""
+    require_loopback_admin(request)
+    ears = _ears(request)
+    length = request.headers.get("content-length")
+    if length and length.isdigit() and int(length) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="That audio file is too big.")
+    audio = await request.body()
+    try:
+        return await asyncio.to_thread(ears.transcribe_file, audio)
+    except EarsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _youtube(request: Request) -> YouTubeAudio:
+    youtube = getattr(request.app.state, "orb_youtube", None)
+    if youtube is None:
+        youtube = YouTubeAudio(config_dir_path() / "orb_downloads")
+        request.app.state.orb_youtube = youtube
+    return youtube
+
+
+@router.post("/orb/api/youtube/audio")
+async def orb_youtube_audio(
+    payload: OrbYouTubePayload, request: Request
+) -> FileResponse:
+    """Download one YouTube video's audio (reused if already here) and return it."""
+    require_loopback_admin(request)
+    try:
+        got = await asyncio.to_thread(_youtube(request).download, payload.url)
+    except YouTubeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return FileResponse(
+        got["path"],
+        media_type="application/octet-stream",
+        filename=f"{got['video_id']}.{got['ext']}",
+        headers={"X-Audio-Ext": got["ext"], "X-Video-Id": got["video_id"]},
+    )
+
+
+@router.post("/orb/api/youtube/transcript")
+async def orb_youtube_transcript(
+    payload: OrbYouTubePayload, request: Request
+) -> dict[str, object]:
+    """Download a YouTube video's audio and transcribe it, all on this PC."""
+    require_loopback_admin(request)
+    ears = _ears(request)
+    try:
+        got = await asyncio.to_thread(_youtube(request).download, payload.url)
+        out = await asyncio.to_thread(ears.transcribe_file, got["path"].read_bytes())
+    except YouTubeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except EarsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "video_id": got["video_id"],
+        "title": got["title"],
+        "audio_file": str(got["path"]),
+        **out,
+    }

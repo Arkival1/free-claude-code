@@ -99,3 +99,35 @@ def test_decode_audio_reads_real_wav_and_rejects_junk():
     assert 0.2 < float(np.max(np.abs(samples))) < 0.3
     with pytest.raises(EarsError, match="could not be read"):
         decode_audio(b"not audio at all")
+
+
+def test_transcribe_file_gives_timestamped_lines(tmp_path):
+    class Segmenter:
+        def transcribe(self, samples, *, language, beam_size, vad_filter):
+            assert beam_size == 5
+            return iter(
+                [
+                    SimpleNamespace(start=3.2, text=" Welcome back. "),
+                    SimpleNamespace(start=3725.9, text="  Thanks   for watching. "),
+                    SimpleNamespace(start=3800, text="   "),
+                ]
+            ), None
+
+    ears = LocalEars(
+        tmp_path,
+        downloader=fake_download,
+        model_factory=lambda p: Segmenter(),
+        decoder=lambda audio: [0.0] * 32000,
+    )
+    with pytest.raises(EarsError, match="fcc-orb --prepare"):
+        ears.transcribe_file(b"opus")
+    ears.start_download()
+    ears.wait(5)
+    out = ears.transcribe_file(b"opus")
+    assert out["lines"] == [
+        "[00:00:03] Welcome back.",
+        "[01:02:05] Thanks for watching.",
+    ]
+    assert out["seconds"] == 2.0 and "FCC" in out["model"]
+    with pytest.raises(EarsError, match="empty"):
+        ears.transcribe_file(b"")

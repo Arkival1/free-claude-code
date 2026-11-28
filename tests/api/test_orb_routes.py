@@ -242,3 +242,76 @@ def test_listen_privacy_and_local_advisor_routes():
     evil = local_client(app, origin="https://evil.example")
     assert evil.post("/orb/api/listen", content=b"audio").status_code == 403
     assert evil.post("/orb/api/privacy", json={"local_only": False}).status_code == 403
+
+
+def test_transcribe_endpoint_for_jarvis_video_notes():
+    from types import SimpleNamespace
+
+    from free_claude_code.application.orb import OrbStudio
+    from free_claude_code.application.orb.ears import LocalEars
+
+    class Whisper:
+        def transcribe(self, samples, **kw):
+            return iter([SimpleNamespace(start=1.0, text="hello")]), None
+
+    root = Path(tempfile.mkdtemp())
+    (root / "base.en").mkdir()
+    (root / "base.en" / "model.bin").write_bytes(b"x")
+    ears = LocalEars(
+        root, model_factory=lambda p: Whisper(), decoder=lambda a: [0.0] * 16000
+    )
+    app = create_test_app()
+    app.state.orb_studio = OrbStudio(lambda: "http://127.0.0.1:1234/v1", ears=ears)
+    out = local_client(app).post("/orb/api/transcribe", content=b"opus-bytes").json()
+    assert out["lines"] == ["[00:00:01] hello"]
+    evil = local_client(app, origin="https://evil.example")
+    assert evil.post("/orb/api/transcribe", content=b"x").status_code == 403
+
+
+def test_youtube_audio_and_transcript_endpoints():
+    from types import SimpleNamespace
+
+    from free_claude_code.application.orb import OrbStudio
+    from free_claude_code.application.orb.ears import LocalEars
+    from free_claude_code.application.orb.youtube import YouTubeAudio
+
+    class Whisper:
+        def transcribe(self, samples, **kw):
+            return iter([SimpleNamespace(start=2.0, text="welcome")]), None
+
+    root = Path(tempfile.mkdtemp())
+    (root / "base.en").mkdir()
+    (root / "base.en" / "model.bin").write_bytes(b"x")
+    downloads = root / "dl"
+    downloads.mkdir()
+    (downloads / "WftF2zJkvHY.m4a").write_bytes(b"m4a-audio")
+    app = create_test_app()
+    app.state.orb_studio = OrbStudio(
+        lambda: "http://127.0.0.1:1234/v1",
+        ears=LocalEars(
+            root, model_factory=lambda p: Whisper(), decoder=lambda a: [0.0] * 16000
+        ),
+    )
+    app.state.orb_youtube = YouTubeAudio(downloads)
+    client = local_client(app)
+    audio = client.post(
+        "/orb/api/youtube/audio", json={"url": "https://youtu.be/WftF2zJkvHY"}
+    )
+    assert audio.status_code == 200 and audio.content == b"m4a-audio"
+    assert audio.headers["x-audio-ext"] == "m4a"
+    out = client.post(
+        "/orb/api/youtube/transcript", json={"url": "https://youtu.be/WftF2zJkvHY"}
+    ).json()
+    assert out["lines"] == ["[00:00:02] welcome"] and out["video_id"] == "WftF2zJkvHY"
+    bad = client.post(
+        "/orb/api/youtube/audio",
+        json={"url": "https://evil.example/watch?v=WftF2zJkvHY"},
+    )
+    assert bad.status_code == 502 and "Only YouTube" in bad.json()["detail"]
+    evil = local_client(app, origin="https://evil.example")
+    assert (
+        evil.post(
+            "/orb/api/youtube/audio", json={"url": "https://youtu.be/WftF2zJkvHY"}
+        ).status_code
+        == 403
+    )

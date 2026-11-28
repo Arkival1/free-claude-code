@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "free-claude-code"
-version = "6.5.0"
+version = "6.6.0"
 description = "Local proxy connecting coding agents to OpenAI-compatible AI providers"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -36,6 +36,9 @@ dependencies = [
     "kokoro-onnx>=0.4.9",
     # JARVIS Orb's offline ears (Whisper on this PC; nothing goes to the cloud).
     "faster-whisper>=1.1.0",
+    # JARVIS Orb downloads YouTube audio for video notes (Deno solves YouTube's JS checks).
+    "yt-dlp[default]>=2026.11.23",
+    "deno>=2.5.0",
 ]
 
 [project.scripts]

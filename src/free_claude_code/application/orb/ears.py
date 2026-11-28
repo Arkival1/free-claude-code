@@ -13,6 +13,7 @@ from typing import Any
 
 WHISPER_SIZE = "base.en"
 MAX_AUDIO_BYTES = 12 * 1024 * 1024
+MAX_FILE_BYTES = 600 * 1024 * 1024  # a long video's audio (JARVIS video notes)
 DOWNLOAD_MB = 145
 
 
@@ -147,3 +148,49 @@ class LocalEars:
         except Exception as exc:
             raise EarsError(f"Could not understand that recording: {exc}") from exc
         return " ".join(text.split())
+
+    def transcribe_file(self, audio: bytes) -> dict[str, Any]:
+        """A whole recording (e.g. a video's audio) to timestamped lines, on this PC."""
+        if not audio:
+            raise EarsError("The audio file is empty.")
+        if len(audio) > MAX_FILE_BYTES:
+            raise EarsError("That audio file is too big (over 600 MB).")
+        model = self._ready_model()
+        samples = self._decode(audio)
+        if len(samples) < 1600:
+            raise EarsError("The audio file has no sound.")
+        try:
+            with self._listen_lock:
+                segments, _info = model.transcribe(
+                    samples, language="en", beam_size=5, vad_filter=True
+                )
+                lines = []
+                for segment in segments:
+                    text = " ".join(segment.text.split())
+                    if text:
+                        lines.append(f"[{_clock(segment.start)}] {text}")
+        except Exception as exc:
+            raise EarsError(f"Could not transcribe that audio: {exc}") from exc
+        return {
+            "lines": lines,
+            "text": "\n".join(lines),
+            "seconds": round(len(samples) / 16_000, 1),
+            "model": f"Whisper {self.size} (FCC, on this PC)",
+        }
+
+    def _ready_model(self) -> Any:
+        if not self.ready():
+            raise EarsError(
+                "Whisper is still downloading."
+                if self.downloading
+                else "Whisper is not downloaded yet. Run fcc-orb --prepare."
+            )
+        with self._lock:
+            if self._model is None:
+                self._model = self._factory(str(self.model_dir))
+            return self._model
+
+
+def _clock(seconds: float) -> str:
+    whole = int(seconds)
+    return f"{whole // 3600:02d}:{whole % 3600 // 60:02d}:{whole % 60:02d}"
