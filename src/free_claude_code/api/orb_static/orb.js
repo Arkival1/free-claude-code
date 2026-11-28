@@ -502,7 +502,12 @@
         const bar = el("div", "bar" + (t.overall == null && t.status === "running" ? " busy" : ""));
         const fill = el("i"); if (t.overall != null) fill.style.width = `${t.overall}%`; bar.append(fill);
         const stepText = (t.steps ? `Step ${Math.min(t.step + 1, t.steps)} of ${t.steps}: ` : "") + (t.step_name || STATUS_WORD[t.status] || "");
-        card.append(head, bar, el("div", "step", `${stepText} · ${took(a.now - t.started)}`));
+        const spent = a.now - t.started;
+        let left = "";
+        if ((t.status === "running") && t.overall != null && t.overall >= 3 && t.overall < 100) {
+          left = ` · about ${took(spent * (100 - t.overall) / t.overall)} left`;
+        }
+        card.append(head, bar, el("div", "step", `${stepText} · ${took(spent)} spent${left}`));
         if (t.detail) card.append(el("div", "detail", t.detail));
         if (t.log && t.log.length) card.append(el("div", "log", t.log.slice(-3).join("\n")));
         actBody.append(card);
