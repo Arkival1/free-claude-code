@@ -523,6 +523,7 @@
   }
   pollActivity();
 
+  $("sitesBtn").onclick = () => window.open("/orb/sites", "_blank");
   paintVoiceToggle(); refreshStatus(); setInterval(refreshStatus, 15000); pollInbox();
   caption.textContent = "Click the orb and speak, or type below.";
 })();

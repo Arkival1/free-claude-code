@@ -29,7 +29,7 @@ router = APIRouter()
 ORB_STATIC_DIR = Path(__file__).resolve().parent / "orb_static"
 APP_ICON = Path(__file__).resolve().parent.parent / "assets" / "app-icon.svg"
 _VERSION_PLACEHOLDER = "__FCC_VERSION__"
-_ORB_ASSETS = frozenset({"orb.css", "orb.js", "core-orb.js"})
+_ORB_ASSETS = frozenset({"orb.css", "orb.js", "core-orb.js", "sites.css", "sites.js"})
 
 
 class OrbChatPayload(BaseModel):

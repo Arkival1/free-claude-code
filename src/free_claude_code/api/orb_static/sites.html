@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Site Studio</title>
+  <link rel="icon" href="/orb/assets/__FCC_VERSION__/app-icon.svg">
+  <link rel="stylesheet" href="/orb/assets/__FCC_VERSION__/sites.css">
+</head>
+<body>
+  <header class="bar">
+    <strong class="logo">Site Studio</strong>
+    <select id="sitePick" aria-label="Site"></select>
+    <button id="newSite" type="button">+ New site</button>
+    <span id="saved" class="muted"></span>
+    <span class="grow"></span>
+    <div class="seg" role="group" aria-label="Preview size">
+      <button data-w="100%" class="on" type="button">Desktop</button><button data-w="820px" type="button">Tablet</button><button data-w="390px" type="button">Phone</button>
+    </div>
+    <button id="openPreview" type="button">Open preview</button>
+    <button id="export" type="button" class="primary">Export</button>
+  </header>
+  <main>
+    <aside>
+      <nav class="tabs"><button data-tab="look" class="on" type="button">Look</button><button data-tab="sections" type="button">Sections</button><button data-tab="library" type="button">Library</button></nav>
+      <section id="tab-look" class="tab">
+        <label>Colour palette <select id="palette"></select></label>
+        <div id="swatches" class="swatches"></div>
+        <details class="box"><summary>Make an original palette</summary>
+          <div class="row"><input id="baseColour" type="color" value="#2d5a3d" aria-label="Base colour">
+            <select id="harmony"><option>complementary</option><option>analogous</option><option>triadic</option><option>split</option><option>mono</option></select>
+            <select id="mode"><option>light</option><option>dark</option></select></div>
+          <button id="makePalette" type="button">Create and use</button>
+          <p class="hint">Built from colour theory, with text contrast that stays readable.</p>
+        </details>
+        <label>Fonts <select id="font"></select></label>
+        <label>Button style <select id="button"></select></label>
+        <div id="buttonDemo" class="demo"></div>
+        <label>Corner roundness <input id="radius" type="range" min="0" max="40" step="1"><output></output></label>
+        <label>Spacing <input id="spacing" type="range" min="0.6" max="1.6" step="0.05"><output></output></label>
+        <label>Text size <input id="scale" type="range" min="0.8" max="1.3" step="0.05"><output></output></label>
+        <label>Shadows <input id="shadow" type="range" min="0" max="3" step="1"><output></output></label>
+        <label>Page width <input id="width" type="range" min="760" max="1440" step="20"><output></output></label>
+      </section>
+      <section id="tab-sections" class="tab" hidden>
+        <ol id="sectionList" class="sections"></ol>
+        <div class="row"><select id="addKind" aria-label="Section to add"></select><button id="addSection" type="button">Add section</button></div>
+      </section>
+      <section id="tab-library" class="tab" hidden>
+        <p class="hint">Your own library: palettes, fonts and layouts JARVIS found online with a free licence (CC0, MIT, OFL...). Copyrighted designs are refused.</p>
+        <div id="libraryList"></div>
+      </section>
+    </aside>
+    <div class="stage"><iframe id="preview" title="Website preview" sandbox="allow-same-origin"></iframe></div>
+  </main>
+  <dialog id="newDialog">
+    <form method="dialog" id="newForm">
+      <h2>New website</h2>
+      <label>Business name <input id="newName" required maxlength="80" placeholder="Rosa's Pizzeria"></label>
+      <label>Type <select id="newKind"></select></label>
+      <label>One line about it <input id="newDesc" maxlength="300" placeholder="Wood-fired pizza in the old town"></label>
+      <div class="row end"><button value="cancel" type="button" id="cancelNew">Cancel</button><button class="primary" id="createNew" type="submit">Create</button></div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" hidden></div>
+  <script src="/orb/assets/__FCC_VERSION__/sites.js"></script>
+</body>
+</html>

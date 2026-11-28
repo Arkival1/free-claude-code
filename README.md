@@ -505,6 +505,12 @@ This fork adds a voice orb for a local JARVIS running in LM Studio.
 - **Activity panel** (top left of the orb): a live progress bar for every JARVIS job, such as
   video notes (step, real download and transcription %, latest log lines), plus a feed of each
   tool JARVIS uses from the orb or from LM Studio chat.
+- **Site Studio** (the orb's **Sites** button, or `/orb/sites`): build small business websites
+  (restaurant/café, portfolio) from an offline UI library of sections, palettes, font pairings and
+  button styles. Sliders for corners, spacing, text size, shadows and width, a live preview at
+  desktop/tablet/phone size, original palettes from a base colour, and one-file export. JARVIS can
+  build and edit the same sites with his `site_` tools; outside designs are accepted only with a free
+  licence (CC0, MIT, OFL, Apache-2.0, public domain).
 - Install and `fcc-update` use this fork (`Arkival1/free-claude-code`, branch `main`).
 
 ## Manage Your Installation

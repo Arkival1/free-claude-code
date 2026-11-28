@@ -39,6 +39,7 @@ from .request_ids import (
 )
 from .request_lifetime import ClientRequestLifetimeMiddleware
 from .routes import router
+from .site_routes import router as site_router
 from .validation_log import summarize_request_validation_body
 
 
@@ -53,6 +54,7 @@ def create_app(services: ApiServices) -> FastAPI:
     app.include_router(admin_router)
     app.include_router(code_router)
     app.include_router(orb_router)
+    app.include_router(site_router)
     app.include_router(router)
 
     @app.exception_handler(CodeError)
