@@ -4884,3 +4884,15 @@ def test_install_ps1_orb_only_mode_and_fork_only_source() -> None:
         "if (-not $OrbOnly) {\n    Ensure-SelectedCodingAgents"
         in powershell.replace("\r\n", "\n")
     )
+
+
+def test_orb_update_package_installs_orb_only_and_prepares_offline_files() -> None:
+    raw = (_repo_root() / "scripts" / "orb" / "UPDATE_ORB.bat").read_bytes()
+    assert b"\r\n" in raw
+    text = raw.decode("ascii")
+    assert "-OrbOnly" in text
+    assert (
+        "-Source 'https://github.com/Arkival1/free-claude-code/archive/refs/heads/"
+    ) in text
+    assert text.index("powershell.exe") < text.index("--prepare")
+    assert "UPDATE_JARVIS" not in text  # JARVIS has its own separate update
