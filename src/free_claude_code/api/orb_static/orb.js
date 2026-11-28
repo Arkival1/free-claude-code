@@ -481,6 +481,43 @@
     const kv = chosen().startsWith("kokoro:") ? chosen().slice(7) : null;
     if (kv) api("/orb/api/voice/settings", { voice: kv, speed: Number(store.get("rate", 1.0)) }).catch(() => {});
   });
+  // ---------- activity: progress bars + live feed of what JARVIS is doing ----------
+  const actBody = $("actBody");
+  actBody.hidden = !store.get("activityOpen", true);
+  $("actToggle").onclick = () => { actBody.hidden = !actBody.hidden; store.set("activityOpen", !actBody.hidden); };
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+  const clockText = (at) => new Date(at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const took = (secs) => secs < 60 ? `${Math.round(secs)}s` : `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`;
+  const STATUS_WORD = { running: "working", waiting: "waiting for you", done: "done", failed: "failed", cancelled: "cancelled", stale: "stopped" };
+  async function pollActivity() {
+    try {
+      const a = await api("/orb/api/activity");
+      const running = a.tasks.filter((t) => t.status === "running" || t.status === "waiting").length;
+      $("actToggle").textContent = running ? `Activity (${running} running)` : "Activity";
+      actBody.replaceChildren();
+      for (const t of a.tasks.slice(0, 4)) {
+        const card = el("div", "task " + t.status);
+        const head = el("div", "head");
+        head.append(el("b", null, t.title), el("span", "pct", t.overall == null ? STATUS_WORD[t.status] || t.status : `${Math.round(t.overall)}%`));
+        const bar = el("div", "bar" + (t.overall == null && t.status === "running" ? " busy" : ""));
+        const fill = el("i"); if (t.overall != null) fill.style.width = `${t.overall}%`; bar.append(fill);
+        const stepText = (t.steps ? `Step ${Math.min(t.step + 1, t.steps)} of ${t.steps}: ` : "") + (t.step_name || STATUS_WORD[t.status] || "");
+        card.append(head, bar, el("div", "step", `${stepText} · ${took(a.now - t.started)}`));
+        if (t.detail) card.append(el("div", "detail", t.detail));
+        if (t.log && t.log.length) card.append(el("div", "log", t.log.slice(-3).join("\n")));
+        actBody.append(card);
+      }
+      if (a.feed.length) {
+        const feed = el("div", "feed");
+        for (const f of a.feed.slice(-5)) { const line = el("span"); line.append(el("em", null, clockText(f.at)), document.createTextNode(f.text)); feed.append(line); }
+        actBody.append(feed);
+      }
+      if (!a.tasks.length && !a.feed.length) actBody.append(el("div", "feed", "Nothing running. Ask JARVIS for something."));
+    } catch { /* FCC restarting */ }
+    setTimeout(pollActivity, 1000);
+  }
+  pollActivity();
+
   paintVoiceToggle(); refreshStatus(); setInterval(refreshStatus, 15000); pollInbox();
   caption.textContent = "Click the orb and speak, or type below.";
 })();

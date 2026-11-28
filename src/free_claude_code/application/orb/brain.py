@@ -95,6 +95,8 @@ class OrbBrain:
         self.resumed = False
         # Set by the studio when the owner turns the read-only API advisor on.
         self.advise_fn: Callable[[str], str] | None = None
+        # Told about every tool call (the orb shows them in its activity feed).
+        self.on_tool: Callable[[str], None] | None = None
         self._http = http or httpx.Client(timeout=httpx.Timeout(600.0, connect=5.0))
         self._clock = clock
         self._lock = threading.Lock()
@@ -250,6 +252,8 @@ class OrbBrain:
         except ValueError as exc:
             result = f"ERROR: the arguments for {name} were not valid JSON ({exc})."
         reply.tools_used.append(name)
+        if self.on_tool is not None:
+            self.on_tool(name)
         if len(result) > TOOL_RESULT_CHARS:
             result = result[:TOOL_RESULT_CHARS] + "\n...(cut; ask for less)"
         return {

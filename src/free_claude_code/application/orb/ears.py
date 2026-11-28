@@ -149,7 +149,9 @@ class LocalEars:
             raise EarsError(f"Could not understand that recording: {exc}") from exc
         return " ".join(text.split())
 
-    def transcribe_file(self, audio: bytes) -> dict[str, Any]:
+    def transcribe_file(
+        self, audio: bytes, progress: Callable[[float], None] | None = None
+    ) -> dict[str, Any]:
         """A whole recording (e.g. a video's audio) to timestamped lines, on this PC."""
         if not audio:
             raise EarsError("The audio file is empty.")
@@ -165,7 +167,11 @@ class LocalEars:
                     samples, language="en", beam_size=5, vad_filter=True
                 )
                 lines = []
+                length = len(samples) / 16_000 or 1.0
                 for segment in segments:
+                    if progress is not None:
+                        reached = getattr(segment, "end", None) or segment.start
+                        progress(min(99.0, float(reached) * 100.0 / length))
                     text = " ".join(segment.text.split())
                     if text:
                         lines.append(f"[{_clock(segment.start)}] {text}")

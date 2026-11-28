@@ -35,3 +35,27 @@ html, body { margin: 0; height: 100%; background: radial-gradient(circle at 50% 
 #panel select, #panel input { width: 100%; background: #04121f; color: #e6f8ff; border: 1px solid #1d4660; border-radius: 8px; padding: 5px; }
 #panel .row { display: flex; flex-wrap: wrap; gap: 6px; }
 #info { color: #7fb6cc; font-size: 12px; white-space: pre-wrap; }
+
+#activity { position: fixed; left: 14px; top: 14px; width: min(330px, 62vw); z-index: 3; font-size: 12.5px; }
+#actToggle { background: rgba(4,20,34,.9); color: var(--glow); border: 1px solid color-mix(in srgb, var(--glow) 40%, transparent);
+  border-radius: 14px; padding: 5px 11px; cursor: pointer; font-size: 13px; }
+#actBody { margin-top: 6px; display: grid; gap: 8px; }
+#actBody[hidden] { display: none; }
+.task { background: rgba(3,14,26,.92); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 9px 10px; display: grid; gap: 5px; }
+.task .head { display: flex; justify-content: space-between; gap: 8px; color: #e6f8ff; }
+.task .head b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task .pct { color: var(--glow); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bar { height: 7px; background: rgba(255,255,255,.08); border-radius: 6px; overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: var(--glow); border-radius: 6px; transition: width .6s ease; box-shadow: 0 0 10px var(--glow); }
+.bar.busy > i { width: 35%; animation: slide 1.4s ease-in-out infinite; }
+@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .bar.busy > i { animation: none; width: 100%; opacity: .4; } }
+.task .step { color: #b9d3e2; }
+.task .detail, .task .log { color: #8fb0c2; overflow-wrap: anywhere; }
+.task .log { font-family: ui-monospace, Consolas, monospace; font-size: 11px; white-space: pre-wrap; max-height: 70px; overflow: hidden; }
+.task.waiting { border-color: rgba(255,200,97,.6); }
+.task.failed { border-color: rgba(255,93,108,.6); }
+.task.failed .pct { color: #ff5d6c; }
+.feed { background: rgba(3,14,26,.85); border-radius: 12px; padding: 7px 10px; color: #9fb6c6; display: grid; gap: 2px; }
+.feed span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed em { font-style: normal; color: #5f7f92; margin-right: 6px; font-variant-numeric: tabular-nums; }

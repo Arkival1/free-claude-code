@@ -63,6 +63,21 @@ class OrbYouTubePayload(BaseModel):
     url: str = Field(min_length=10, max_length=400)
 
 
+class OrbActivityPayload(BaseModel):
+    id: str | None = Field(default=None, max_length=64)
+    title: str | None = Field(default=None, max_length=200)
+    source: str | None = Field(default=None, max_length=20)
+    status: str | None = Field(default=None, max_length=20)
+    step: int | None = Field(default=None, ge=0, le=50)
+    steps: int | None = Field(default=None, ge=1, le=50)
+    step_name: str | None = Field(default=None, max_length=200)
+    detail: str | None = Field(default=None, max_length=400)
+    percent: float | None = Field(default=None, ge=0, le=100)
+    reset_percent: bool = False
+    log: list[str] | None = Field(default=None, max_length=20)
+    note: str | None = Field(default=None, max_length=300)
+
+
 class OrbPrivacyPayload(BaseModel):
     local_only: bool
 
@@ -325,10 +340,16 @@ async def orb_transcribe(request: Request) -> dict[str, object]:
     if length and length.isdigit() and int(length) > MAX_FILE_BYTES:
         raise HTTPException(status_code=413, detail="That audio file is too big.")
     audio = await request.body()
+    task_id, report = _progress(
+        request, "FCC Whisper transcribing", "Transcribing audio"
+    )
     try:
-        return await asyncio.to_thread(ears.transcribe_file, audio)
+        out = await asyncio.to_thread(ears.transcribe_file, audio, report)
     except EarsError as exc:
+        orb_studio(request).activity.update(task_id, detail=str(exc))
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    report(100.0)
+    return out
 
 
 def _youtube(request: Request) -> YouTubeAudio:
@@ -345,10 +366,16 @@ async def orb_youtube_audio(
 ) -> FileResponse:
     """Download one YouTube video's audio (reused if already here) and return it."""
     require_loopback_admin(request)
+    task_id, report = _progress(
+        request, "FCC downloading the audio", "Downloading YouTube audio"
+    )
+    board = orb_studio(request).activity
     try:
-        got = await asyncio.to_thread(_youtube(request).download, payload.url)
+        got = await asyncio.to_thread(_youtube(request).download, payload.url, report)
     except YouTubeError as exc:
+        board.update(task_id, detail=str(exc))
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    report(100.0)
     return FileResponse(
         got["path"],
         media_type="application/octet-stream",
@@ -364,9 +391,13 @@ async def orb_youtube_transcript(
     """Download a YouTube video's audio and transcribe it, all on this PC."""
     require_loopback_admin(request)
     ears = _ears(request)
+    _, fetched = _progress(request, "FCC downloading the audio", "YouTube transcript")
     try:
-        got = await asyncio.to_thread(_youtube(request).download, payload.url)
-        out = await asyncio.to_thread(ears.transcribe_file, got["path"].read_bytes())
+        got = await asyncio.to_thread(_youtube(request).download, payload.url, fetched)
+        _, heard = _progress(request, "FCC Whisper transcribing", "YouTube transcript")
+        out = await asyncio.to_thread(
+            ears.transcribe_file, got["path"].read_bytes(), heard
+        )
     except YouTubeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except EarsError as exc:
@@ -377,3 +408,47 @@ async def orb_youtube_transcript(
         "audio_file": str(got["path"]),
         **out,
     }
+
+
+@router.get("/orb/api/activity")
+def orb_activity(request: Request) -> dict[str, object]:
+    """Progress bars and the live feed of what JARVIS is doing."""
+    require_loopback_admin(request)
+    return orb_studio(request).activity.snapshot()
+
+
+@router.post("/orb/api/activity")
+def orb_report_activity(
+    payload: OrbActivityPayload, request: Request
+) -> dict[str, object]:
+    """JARVIS reports a job step or a tool call (from LM Studio or the orb)."""
+    require_loopback_admin(request)
+    board = orb_studio(request).activity
+    if payload.note:
+        board.note(payload.note, payload.source or "jarvis")
+    fields = payload.model_dump(
+        exclude={"id", "note", "reset_percent"}, exclude_none=True
+    )
+    if payload.reset_percent:
+        fields["percent"] = None
+    task_id = None
+    if payload.id or payload.title:
+        task_id = board.update(payload.id, **fields)
+    return {"id": task_id}
+
+
+def _progress(request: Request, label: str, default_title: str):
+    """Report FCC's own download/transcribe % on the JARVIS job that asked for it."""
+    board = orb_studio(request).activity
+    job = request.headers.get("x-jarvis-job") or None
+    task_id = board.update(
+        job,
+        detail=label,
+        percent=0.0,
+        **({} if job else {"title": default_title, "source": "fcc"}),
+    )
+
+    def report(percent: float) -> None:
+        board.update(task_id, percent=percent, detail=f"{label} {percent:.0f}%")
+
+    return task_id, report

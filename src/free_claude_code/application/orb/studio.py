@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .activity import ActivityBoard
 from .advisor import Advisor, Sender, ToolCatalog
 from .brain import OrbBrain, OrbReply
 from .ears import LocalEars
@@ -83,6 +84,7 @@ class OrbStudio:
         self._toolbox: Any = None
         self._lock = threading.Lock()
         self.inbox = SpeechInbox()
+        self.activity = ActivityBoard()
         self.voice = voice
         self.ears = ears
         # Local only (default): nothing the orb does leaves this PC.
@@ -100,10 +102,14 @@ class OrbStudio:
                     skills=bundled_skills(),
                 )
                 self._wire_advisor()
+                self._brain.on_tool = lambda name: self.activity.note(
+                    f"Used {name}", "orb"
+                )
             return self._brain
 
     def ask(self, text: str) -> OrbReply:
         self.state = "thinking"
+        self.activity.note("Thinking about: " + text[:80], "orb")
         try:
             reply = self.brain().ask(text)
             self.last_error = ""

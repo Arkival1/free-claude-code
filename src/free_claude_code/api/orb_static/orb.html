@@ -15,6 +15,10 @@
   <form id="ask" autocomplete="off">
     <input id="text" type="text" placeholder="Talk to JARVIS... (or click the orb to speak)" maxlength="20000">
   </form>
+  <section id="activity" aria-label="What JARVIS is doing">
+    <button id="actToggle" type="button">Activity</button>
+    <div id="actBody" aria-live="polite"></div>
+  </section>
   <div id="corner">
     <span id="dot" title="LM Studio connection"></span>
     <button id="voiceToggle" type="button" title="Voice on/off">Voice on</button>

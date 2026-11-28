@@ -315,3 +315,30 @@ def test_youtube_audio_and_transcript_endpoints():
         ).status_code
         == 403
     )
+
+
+def test_activity_feed_and_jarvis_job_progress():
+    app, _ = app_with_fake_brain()
+    client = local_client(app)
+    client.post(
+        "/orb/api/activity", json={"note": "Used job_status", "source": "lmstudio"}
+    )
+    client.post(
+        "/orb/api/activity",
+        json={
+            "id": "job-7",
+            "title": "Video notes",
+            "step": 3,
+            "steps": 6,
+            "step_name": "Transcribing",
+            "log": ["a", "b"],
+        },
+    )
+    snap = client.get("/orb/api/activity").json()
+    assert snap["feed"][-1]["text"] == "Used job_status"
+    task = snap["tasks"][0]
+    assert (
+        task["id"] == "job-7" and task["overall"] == 50.0 and task["log"] == ["a", "b"]
+    )
+    evil = local_client(app, origin="https://evil.example")
+    assert evil.post("/orb/api/activity", json={"note": "x"}).status_code == 403

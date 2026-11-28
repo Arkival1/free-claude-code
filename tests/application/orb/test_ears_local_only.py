@@ -131,3 +131,26 @@ def test_transcribe_file_gives_timestamped_lines(tmp_path):
     assert out["seconds"] == 2.0 and "FCC" in out["model"]
     with pytest.raises(EarsError, match="empty"):
         ears.transcribe_file(b"")
+
+
+def test_transcribe_file_reports_progress(tmp_path):
+    class Segmenter:
+        def transcribe(self, samples, **kw):
+            return iter(
+                [
+                    SimpleNamespace(start=0.0, end=1.0, text="a"),
+                    SimpleNamespace(start=1.0, end=2.0, text="b"),
+                ]
+            ), None
+
+    ears = LocalEars(
+        tmp_path,
+        downloader=fake_download,
+        model_factory=lambda p: Segmenter(),
+        decoder=lambda a: [0.0] * 32000,
+    )
+    ears.start_download()
+    ears.wait(5)
+    seen = []
+    ears.transcribe_file(b"x", seen.append)
+    assert seen == [50.0, 99.0]

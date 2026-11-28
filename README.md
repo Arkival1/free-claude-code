@@ -502,6 +502,9 @@ This fork adds a voice orb for a local JARVIS running in LM Studio.
 - **Advisor (off by default):** in the orb settings you can let a second model give JARVIS
   advice (only a local one while Local only is on). It can only search and read JARVIS's tool list. It cannot
   run tools and never sees your chat, memory, notes or files. JARVIS still decides and acts.
+- **Activity panel** (top left of the orb): a live progress bar for every JARVIS job, such as
+  video notes (step, real download and transcription %, latest log lines), plus a feed of each
+  tool JARVIS uses from the orb or from LM Studio chat.
 - Install and `fcc-update` use this fork (`Arkival1/free-claude-code`, branch `main`).
 
 ## Manage Your Installation

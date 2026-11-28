@@ -98,7 +98,9 @@ class YouTubeAudio:
                 return path
         return None
 
-    def download(self, url: str) -> dict[str, Any]:
+    def download(
+        self, url: str, progress: Callable[[float], None] | None = None
+    ) -> dict[str, Any]:
         vid = video_id(url)
         canonical = f"https://www.youtube.com/watch?v={vid}"
         with self._lock:  # one download at a time keeps YouTube happy
@@ -116,6 +118,17 @@ class YouTubeAudio:
                     "max_filesize": MAX_BYTES,
                     "postprocessors": [],
                 }
+                if progress is not None:
+
+                    def hook(event: dict[str, Any]) -> None:
+                        total = event.get("total_bytes") or event.get(
+                            "total_bytes_estimate"
+                        )
+                        done = event.get("downloaded_bytes") or 0
+                        if total:
+                            progress(min(100.0, done * 100.0 / total))
+
+                    options["progress_hooks"] = [hook]
                 deno_bin = _deno_path()
                 if deno_bin:
                     options["js_runtimes"] = {"deno": {"path": deno_bin}}
