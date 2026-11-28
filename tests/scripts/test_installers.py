@@ -4896,3 +4896,12 @@ def test_orb_update_package_installs_orb_only_and_prepares_offline_files() -> No
     ) in text
     assert text.index("powershell.exe") < text.index("--prepare")
     assert "UPDATE_JARVIS" not in text  # JARVIS has its own separate update
+
+
+def test_orb_update_stops_running_fcc_before_installing() -> None:
+    text = (_repo_root() / "scripts" / "orb" / "UPDATE_ORB.bat").read_text(
+        encoding="ascii"
+    )
+    for exe in ("fcc-desktop.exe", "fcc-server.exe", "fcc-orb.exe"):
+        assert f"taskkill /F /IM {exe}" in text
+    assert text.index("taskkill") < text.index("powershell.exe")

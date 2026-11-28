@@ -3,9 +3,14 @@ setlocal
 title FCC + JARVIS Orb update
 echo ============================================================
 echo  FCC VOICE ORB UPDATE  (your JARVIS folder is not touched)
-echo  Close the JARVIS Orb window and quit Free Claude Code in the
-echo  system tray first. Do not run this as administrator.
+echo  FCC is stopped automatically. Do not run this as administrator.
 echo ============================================================
+echo.
+echo Stopping FCC if it is running (JARVIS may have started it in the background)...
+taskkill /F /IM fcc-desktop.exe >nul 2>nul
+taskkill /F /IM fcc-server.exe >nul 2>nul
+taskkill /F /IM fcc-orb.exe >nul 2>nul
+timeout /t 2 /nobreak >nul
 echo.
 echo STEP 1 of 2: Install or update FCC and the JARVIS Orb (no coding agents)
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; & ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubusercontent.com/Arkival1/free-claude-code/refs/heads/claude/funny-ramanujan-w4p3v6/scripts/install.ps1'))) -OrbOnly -Source 'https://github.com/Arkival1/free-claude-code/archive/refs/heads/claude/funny-ramanujan-w4p3v6.zip'"
